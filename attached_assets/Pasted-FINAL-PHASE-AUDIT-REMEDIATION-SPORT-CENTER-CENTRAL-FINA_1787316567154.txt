@@ -1,0 +1,598 @@
+FINAL PHASE — AUDIT & REMEDIATION SPORT CENTER ↔ CENTRAL FINANCE
+
+JANGAN BERTANYA KONFIRMASI.
+LANGSUNG KERJAKAN END-TO-END:
+AUDIT → IDENTIFY ROOT CAUSE → FIX → TEST → VERIFY → LANJUT SAMPAI FIXED.
+
+PRINSIP UTAMA:
+Central Finance adalah source of truth untuk accounting/ledger/reconciliation.
+Sport Center tidak boleh membuat accounting system kedua yang bertabrakan dengan Central Finance.
+
+==================================================
+1. MAP SELURUH INTEGRASI
+==================================================
+
+Audit seluruh repository dan database untuk menemukan hubungan Sport Center dengan Central Finance.
+
+Cari:
+
+- accounting_journals
+- accounting_journal_lines
+- payments
+- payment accounting
+- revenue
+- expenses
+- expense accounting
+- AR/AP
+- tax
+- bank mutations
+- settlement
+- reconciliation
+- accounting outbox
+- accounting workers
+- journal posting
+- manual posting
+- sync/backfill
+- triggers
+- webhooks
+- scheduled jobs
+
+Buat dependency map internal:
+
+SPORT CENTER
+→ source transaction
+→ accounting integration
+→ CENTRAL FINANCE
+→ journal
+→ ledger
+→ bank/reconciliation
+
+Jangan membuat object accounting baru jika Central Finance sudah memiliki canonical object.
+
+==================================================
+2. IDENTIFY SOURCE OF TRUTH
+==================================================
+
+Untuk masing-masing:
+
+- revenue
+- payment
+- expense
+- refund
+- PPN
+- MDR
+- bank settlement
+- journal
+- reconciliation
+
+tentukan:
+
+SOURCE OF TRUTH:
+Sport Center atau Central Finance?
+
+Jangan mengubah apa pun berdasarkan asumsi.
+
+Gunakan evidence dari:
+- schema
+- foreign key
+- service
+- API
+- worker
+- existing integration
+- migration
+- production flow
+
+Jika ditemukan dua source of truth:
+→ anggap sebagai potential conflict
+→ trace seluruh consumer
+→ tentukan canonical source berdasarkan architecture existing.
+
+==================================================
+3. PAYMENT DUPLICATION AUDIT
+==================================================
+
+Ambil seluruh jalur:
+
+Booking
+→ Payment
+→ Accounting
+
+Cari apakah satu payment dapat menghasilkan:
+
+- 2 payment records
+- 2 journals
+- 2 revenue postings
+- 2 reconciliation entries
+
+Audit:
+
+- payment approval
+- QRIS
+- transfer
+- DP
+- final payment
+- group payment
+- corporate payment
+- refund
+- retry
+- webhook
+- manual approval
+
+Gunakan identity/source transaction yang canonical.
+
+Expected:
+
+ONE PAYMENT
+→ ONE CANONICAL ACCOUNTING POSTING
+
+Retry:
+→ idempotent
+→ tidak membuat posting kedua.
+
+Jika ditemukan duplicate risk:
+→ perbaiki source logic
+→ tambahkan regression test.
+
+==================================================
+4. EXPENSE ACCOUNTING AUDIT
+==================================================
+
+Audit:
+
+Sport Expense
+→ Approved
+→ Paid
+→ Central Finance
+
+Pastikan Sport Center tidak membuat journal kedua jika Central Finance sudah memposting.
+
+Expected:
+
+ONE EXPENSE
+→ ONE CANONICAL JOURNAL
+
+Journal:
+
+Debit = Expense/COA
+Credit = Cash/Bank
+
+Pastikan:
+
+DEBIT = CREDIT
+
+Jangan membuat journal manual untuk menutup selisih.
+
+Jika expense accounting saat ini bypass Central Finance:
+→ trace architecture
+→ gunakan integration layer canonical yang sudah tersedia jika memang contract existing mengharuskannya.
+
+==================================================
+5. REVENUE AUDIT
+==================================================
+
+Audit:
+
+Personal booking
+Corporate booking
+Event booking
+Group booking
+DP
+Final payment
+
+Pastikan revenue tidak dihitung dua kali karena:
+
+- booking
+- payment
+- invoice
+- settlement
+
+Contoh:
+
+Booking Rp100.000
+Payment Rp100.000
+
+Tidak boleh menjadi:
+
+Revenue Rp100.000
++
+Revenue Rp100.000
+
+Pastikan payment dan revenue memiliki source/reference yang jelas.
+
+==================================================
+6. CORPORATE BILLING
+==================================================
+
+Audit:
+
+Corporate Booking
+→ Unbilled
+→ Company Invoice
+→ Billed
+→ Invoice Paid
+→ Central Finance
+
+Invoice payment:
+
+billing_status = paid
+
+TIDAK BOLEH:
+booking future = completed
+
+Dan jangan membuat accounting journal kedua jika Central Finance sudah memiliki posting untuk invoice/payment tersebut.
+
+Audit duplicate:
+
+company + billing period + invoice identity.
+
+==================================================
+7. QRIS / SETTLEMENT / RECONCILIATION
+==================================================
+
+Audit:
+
+Booking
+→ Payment
+→ QRIS
+→ Settlement
+→ Bank Mutation
+→ Reconciliation
+→ Central Finance
+
+Periksa:
+
+- gross amount
+- MDR
+- tax/fee
+- net settlement
+- settlement date
+- bank mutation
+- matching
+- approval
+- posting
+
+Pastikan Sport Center tidak membuat reconciliation kedua jika Central Finance memiliki reconciliation canonical.
+
+Jangan mengubah saldo untuk memaksa balance.
+
+Jika mismatch:
+→ cari source mismatch
+→ perbaiki mapping/calculation
+→ test.
+
+==================================================
+8. DOUBLE-ENTRY AUDIT
+==================================================
+
+Audit seluruh journal Sport Center yang berhubungan dengan Central Finance.
+
+Cari:
+
+- debit tanpa credit
+- credit tanpa debit
+- journal orphan
+- journal duplicate
+- source transaction duplicate
+- amount mismatch
+- wrong company
+- wrong tenant
+- wrong account
+- journal tanpa source reference
+
+Expected:
+
+TOTAL DEBIT = TOTAL CREDIT
+
+dan:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL POSTING
+
+==================================================
+9. TENANT / COMPANY ISOLATION
+==================================================
+
+Pastikan transaksi Sport Center tidak masuk ke perusahaan/tenant yang salah.
+
+Audit:
+
+- company_id
+- tenant_id
+- account ownership
+- COA/company mapping
+- journal company
+- bank account
+- payment account
+
+Khusus Sport Center:
+
+semua fasilitas Sport Center harus menggunakan company context yang benar sesuai architecture existing.
+
+Jangan mengubah company ownership berdasarkan asumsi.
+
+==================================================
+10. TAX AUDIT
+==================================================
+
+Audit invoice/payment:
+
+- harga include PPN
+- DPP
+- DPP Nilai Lain
+- PPN
+- total
+- PPN Masukan untuk expense
+
+Pastikan tax calculation hanya memiliki satu source of truth.
+
+Untuk invoice Sport Center:
+
+DPP
+→ DPP Nilai Lain
+→ PPN
+→ Total
+
+Pastikan tidak terjadi:
+
+tax dihitung di frontend
++
+tax dihitung ulang berbeda di backend
++
+tax dihitung lagi oleh Central Finance
+
+Jika ada multiple calculation:
+→ tentukan canonical calculation layer
+→ semua layer lainnya menggunakan hasil/reference canonical.
+
+Jangan mengubah tax contract tanpa evidence.
+
+==================================================
+11. REFUND / CANCELLATION
+==================================================
+
+Audit:
+
+Payment
+→ Refund
+→ Accounting
+
+Pastikan refund tidak membuat revenue tambahan.
+
+Expected:
+
+Original revenue
+→ reversal/refund accounting sesuai Central Finance contract.
+
+Tidak boleh:
+
+original revenue
++
+refund sebagai expense/revenue yang salah klasifikasi.
+
+Audit idempotency refund.
+
+==================================================
+12. OUTBOX / WORKER / TRIGGER
+==================================================
+
+Cari semua:
+
+- triggers
+- accounting outbox
+- workers
+- startup backfill
+- scheduled sync
+- manual sync
+- webhook
+
+Cari risiko:
+
+payment → posting
+dan
+payment → outbox → posting
+
+sehingga menjadi duplicate.
+
+Pastikan hanya satu canonical posting path.
+
+Jika ada stale/legacy posting path yang masih aktif:
+→ jangan langsung hapus.
+→ trace consumer terlebih dahulu.
+→ disable/fix hanya jika evidence menunjukkan path tersebut memang obsolete dan aman.
+
+==================================================
+13. PRODUCTION DATA ANOMALY
+==================================================
+
+Gunakan read-only audit terlebih dahulu.
+
+Cari:
+
+- payment tanpa booking
+- booking tanpa payment
+- journal tanpa source
+- source tanpa journal jika memang seharusnya posted
+- duplicate journal
+- duplicate payment
+- invoice duplicate
+- reconciliation duplicate
+- company mismatch
+- debit/credit mismatch
+- tax mismatch
+
+Untuk setiap anomaly:
+
+CLASSIFY:
+
+LEGITIMATE
+HISTORICAL
+TEST DATA
+EXPECTED UNPOSTED
+REAL BUG
+REAL DATA CORRUPTION
+
+Jangan menganggap NULL = error.
+
+Jangan melakukan bulk repair tanpa evidence.
+
+Jika real production corruption ditemukan:
+→ perbaiki secara targeted
+→ transactional
+→ idempotent
+→ audit logged.
+
+==================================================
+14. FIX RULE
+==================================================
+
+Jika menemukan bug:
+
+JANGAN hanya membuat laporan.
+
+Langsung:
+
+ROOT CAUSE
+→ FIX SOURCE
+→ ADD/UPDATE TEST
+→ RUN TEST
+→ VERIFY
+
+Jika aman memperbaiki data:
+→ lakukan targeted remediation.
+
+Jika tidak aman:
+→ jangan corrupt data
+→ fix source logic
+→ beri status BLOCKED hanya untuk data repair yang benar-benar membutuhkan keputusan owner.
+
+==================================================
+15. CENTRAL FINANCE PROTECTION
+==================================================
+
+WAJIB:
+
+Jangan:
+
+- membuat ledger kedua
+- membuat duplicate journal
+- membuat duplicate revenue
+- membuat duplicate reconciliation
+- memaksa saldo balance
+- mengubah historical journal
+- menghapus accounting history
+- membuat fallback journal lokal
+- memindahkan transaction ownership tanpa evidence
+
+Jika Central Finance unavailable:
+
+Sport Center harus:
+→ fail safely
+→ simpan pending/outbox sesuai architecture existing
+→ retry idempotently
+
+Jangan membuat journal alternatif.
+
+==================================================
+16. TEST MATRIX
+==================================================
+
+Wajib test:
+
+1. Personal payment
+2. Personal DP + final payment
+3. Corporate monthly billing
+4. Corporate invoice payment
+5. Group payment
+6. QRIS payment
+7. QRIS settlement
+8. Expense payment
+9. Expense PPN Masukan
+10. Refund
+11. Cancellation
+12. Event booking
+13. Duplicate payment
+14. Duplicate journal
+15. Duplicate invoice
+16. Duplicate reconciliation
+17. Retry webhook
+18. Retry accounting worker
+19. Company isolation
+20. Debit = credit
+
+==================================================
+17. FINAL VERIFICATION
+==================================================
+
+Jalankan:
+
+- full tests
+- typecheck
+- build
+- API workflow
+- web workflow
+- git diff --check
+
+Pastikan accounting fixture:
+
+`settlementDate`
+
+sudah diperbaiki secara benar.
+
+Target:
+
+ALL TESTS PASS
+
+==================================================
+18. FINAL BALANCE CHECK
+==================================================
+
+Verifikasi:
+
+Sport Center operational transactions
+=
+Central Finance source transactions
+
+Central Finance:
+TOTAL DEBIT
+=
+TOTAL CREDIT
+
+Tidak ada duplicate posting.
+
+Tidak ada orphan transaction.
+
+Tidak ada accounting conflict.
+
+==================================================
+19. FINAL VERDICT
+==================================================
+
+Jangan berhenti dengan PARTIAL jika masalah masih dapat diperbaiki.
+
+Jika temuan valid:
+→ FIX.
+
+Jika temuan audit ternyata false positive:
+→ buktikan dan dokumentasikan.
+
+Jika test failure:
+→ fix sampai PASS.
+
+Jika ada production anomaly yang aman diperbaiki:
+→ perbaiki.
+
+FINAL:
+
+FIXED
+
+hanya jika seluruh critical path telah diverifikasi.
+
+BLOCKED hanya jika benar-benar membutuhkan:
+- keputusan owner,
+- akses eksternal,
+- credential/service eksternal,
+- atau blocker nyata yang tidak dapat diselesaikan dari repository.
+
+JANGAN MEMINTA KONFIRMASI UNTUK LANGKAH TEKNIS YANG SUDAH JELAS.
+
+LANJUTKAN SAMPAI FIXED.

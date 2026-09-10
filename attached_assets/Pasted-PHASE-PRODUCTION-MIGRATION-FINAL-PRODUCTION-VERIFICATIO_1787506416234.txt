@@ -1,0 +1,690 @@
+PHASE — PRODUCTION MIGRATION + FINAL PRODUCTION VERIFICATION
+SPORT CENTER CORPORATE / EVENT / RESCHEDULE
+FINAL CLOSURE
+
+CONTINUE FROM CURRENT WORKING TREE.
+
+Development implementation is complete.
+
+DO NOT redesign the feature.
+DO NOT create replacement-occurrence schema.
+DO NOT restart the previous audit.
+
+Current implementation:
+
+- Corporate subscription
+- Weekly occurrence
+- Stop subscription
+- Corporate billing
+- Event admin
+- Event creation
+- Event detail
+- Event check-in
+- Mandatory usage proof
+- Supabase Storage proof
+- Existing canonical reschedule_requests
+- Reschedule conflict protection
+- Existing booking lifecycle
+- Existing accounting
+- Central Finance isolation
+
+Development verification already PASS:
+
+- Scripts typecheck
+- API typecheck
+- Frontend typecheck
+- 18 suites / 116 API tests
+- API build
+- Frontend build/prerender
+- git diff --check
+- Secret Manager bootstrap
+- Development startup migration
+- API workflow
+- Web workflow
+- Protected endpoints return 401 without credentials
+
+Production has NOT been migrated or modified.
+
+============================================================
+OBJECTIVE
+============================================================
+
+Complete the final Production phase:
+
+1. Inspect migration readiness
+2. Verify DEV schema/migration
+3. Verify Production schema read-only
+4. Apply ONLY required additive migration
+5. Deploy current implementation
+6. Verify production runtime
+7. Run production read-only integrity audit
+8. Verify Accounting
+9. Verify Central Finance unchanged
+10. Verify Event / Corporate / Reschedule implementation
+11. Produce final closure report
+
+Do not declare FINALIZED unless every required gate passes.
+
+============================================================
+1. FREEZE CURRENT WORKING TREE
+============================================================
+
+Before changes:
+
+- git status
+- git diff
+- identify current commit
+- identify all migration files added by this implementation
+
+Do not discard existing work.
+
+Confirm only intended files are changed.
+
+Run:
+
+git diff --check
+
+============================================================
+2. MIGRATION REVIEW
+============================================================
+
+Inspect all new migrations.
+
+For every statement classify:
+
+SAFE ADDITIVE
+REVIEW
+DESTRUCTIVE
+
+Allowed Production changes:
+
+- CREATE TABLE
+- ADD COLUMN
+- ADD INDEX
+- ADD CONSTRAINT
+
+Only if required by current implementation.
+
+NOT allowed:
+
+- DROP TABLE
+- DROP COLUMN
+- DELETE historical data
+- UPDATE historical financial records
+- rewrite payment
+- rewrite invoice
+- rewrite tax
+- rewrite journal
+- rewrite reconciliation
+
+If a migration contains destructive or historical rewrite:
+
+STOP that migration and report it.
+
+============================================================
+3. DEV MIGRATION VERIFICATION
+============================================================
+
+Verify DEV schema contains all required objects.
+
+Minimum:
+
+corporate subscription
+corporate occurrence
+usage_proofs
+Event-related fields
+reschedule fields
+required indexes
+required constraints
+
+Verify:
+
+- unique subscription/date constraint
+- required foreign keys
+- indexes used by occurrence generation
+- indexes used by conflict checking
+- indexes used by usage proof
+
+Run existing tests again after migration.
+
+============================================================
+4. PRODUCTION SCHEMA READ-ONLY CHECK
+============================================================
+
+Use the existing dedicated Production auditor:
+
+role:
+
+sport_center_production_auditor
+
+DO NOT use:
+
+SUPABASE_DATABASE_URL
+SUPABASE_DATABASE_URL_DEV
+DATABASE_URL
+application pool
+
+Start:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Must return:
+
+on
+
+Verify:
+
+current_user = sport_center_production_auditor
+
+Inspect only.
+
+Do NOT mutate Production during this phase.
+
+============================================================
+5. PRODUCTION MIGRATION DECISION
+============================================================
+
+Compare:
+
+DEV schema
+vs
+Production schema
+
+Identify exactly which objects are missing in Production.
+
+Only migrate objects required by the current implementation.
+
+Before migration confirm:
+
+- no conflicting existing object
+- no destructive operation
+- no historical financial rewrite
+- no data deletion
+- backward compatibility
+
+If migration is unnecessary:
+
+do not run migration.
+
+If migration is required and safe:
+
+run ONLY the additive migration using the project's official Production
+migration/deployment mechanism.
+
+Do not use ad-hoc SQL UPDATE/DELETE.
+
+============================================================
+6. PRODUCTION MIGRATION SAFETY
+============================================================
+
+Production migration must NOT:
+
+- modify existing booking rows
+- modify existing payment rows
+- modify invoice rows
+- modify tax transactions
+- modify journals
+- modify journal lines
+- modify reconciliation
+- modify settlement
+- modify Central Finance
+
+New tables/columns/indexes only.
+
+After migration verify:
+
+before/after row counts for financial tables remain identical.
+
+============================================================
+7. DEPLOY CURRENT APPLICATION
+============================================================
+
+Deploy the current verified implementation using the existing Production
+deployment mechanism.
+
+Do NOT change:
+
+- domain
+- Secret Manager architecture
+- Supabase architecture
+- Central Finance architecture
+- payment provider configuration
+- Fonnte configuration
+
+Production domain:
+
+https://sc.travelintrips.co.id
+
+Verify deployment is actually active.
+
+Do not rely only on deployment metadata.
+
+Verify runtime through HTTPS.
+
+============================================================
+8. PRODUCTION SMOKE TEST
+============================================================
+
+Test:
+
+GET /
+
+GET health endpoint
+
+GET facilities
+
+GET promos
+
+GET settings
+
+API health
+
+Verify HTTP responses.
+
+Protected endpoints returning:
+
+401
+
+without credentials is expected.
+
+Do NOT weaken authentication.
+
+============================================================
+9. CORPORATE PRODUCTION VERIFICATION
+============================================================
+
+Read-only verify schema and routes.
+
+Confirm:
+
+subscription table exists
+
+occurrence table/fields exist
+
+stop status exists
+
+required constraints exist
+
+billing linkage exists
+
+Do NOT create Production subscription.
+
+Do NOT create Production booking.
+
+============================================================
+10. EVENT PRODUCTION VERIFICATION
+============================================================
+
+Verify:
+
+Event endpoint exists
+Event schema exists
+usage_proofs exists
+Storage configuration exists
+completion guard exists
+
+Do not create real Event.
+
+Do not upload real proof.
+
+Do not create Production payment.
+
+============================================================
+11. RESCHEDULE PRODUCTION VERIFICATION
+============================================================
+
+Verify existing reschedule model remains intact.
+
+Confirm:
+
+- request
+- approval
+- conflict checking
+- facility lock
+- booking history
+- authorization
+
+Do not perform real Production reschedule.
+
+Use read-only inspection only.
+
+============================================================
+12. PRODUCTION INTEGRITY AUDIT
+============================================================
+
+Use:
+
+sport_center_production_auditor
+
+Start:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Verify:
+
+on
+
+Audit:
+
+sport_bookings
+sport_payments
+booking_history
+company_invoices
+company_invoice_items
+payment_accounting_outbox
+accounting_journals
+accounting_journal_lines
+tax_transactions
+bank_mutations
+bank_reconciliation_matches
+usage_proofs
+corporate subscription tables
+occurrence tables
+
+Check:
+
+- orphan payments
+- duplicate payment identity
+- confirmed payment on terminal booking
+- duplicate invoice number
+- orphan invoice items
+- invoice total mismatch
+- unbalanced journals
+- orphan journal lines
+- duplicate tax references
+- reconciliation anomalies
+- outbox anomalies
+- occurrence duplicates
+- orphan usage proofs
+- invalid usage proof booking
+- stopped subscription generating occurrences
+- duplicate occurrence
+
+Do NOT fix anything.
+
+Finish:
+
+ROLLBACK;
+
+============================================================
+13. BEFORE / AFTER FINANCIAL COUNTS
+============================================================
+
+Capture:
+
+sport_bookings
+sport_payments
+company_invoices
+company_invoice_items
+accounting_journals
+accounting_journal_lines
+tax_transactions
+payment_accounting_outbox
+bank_reconciliation_matches
+
+Production migration must not change historical financial row counts.
+
+If counts differ:
+
+CLASSIFY.
+
+Do not assume the cause.
+
+============================================================
+14. ACCOUNTING
+============================================================
+
+Verify:
+
+SUM debit
+=
+SUM credit
+
+Check:
+
+- no orphan journal lines
+- no unbalanced journals
+- no duplicate journal generated by deployment
+- no unauthorized posting
+
+Do not create journal entries.
+
+============================================================
+15. CENTRAL FINANCE
+============================================================
+
+Verify:
+
+central_finance_processing
+
+and any existing Sport Center → Central Finance boundary.
+
+Expected:
+
+NO UNAUTHORIZED MUTATION
+
+NO NEW BACKFILL
+
+NO NEW POSTING
+
+NO MODE CHANGE
+
+Central Finance must remain unchanged.
+
+============================================================
+16. PAYMENT SAFETY
+============================================================
+
+Verify business rule:
+
+PERSONAL:
+
+booking
+→ direct payment
+
+CORPORATE:
+
+booking
+→ company invoice
+→ invoice payment
+
+Corporate booking without direct sport_payment must NOT automatically be
+classified as payment missing.
+
+Do not create payments.
+
+============================================================
+17. TAX SAFETY
+============================================================
+
+Do not rewrite tax history.
+
+Verify existing Sport Center tax contract remains intact.
+
+Do not create tax transaction manually.
+
+============================================================
+18. STORAGE SAFETY
+============================================================
+
+Verify production usage proof storage uses:
+
+Supabase Storage
+
+Do not use Replit Object Storage as production fallback.
+
+Do not upload test images to Production.
+
+============================================================
+19. SECURITY
+============================================================
+
+Verify:
+
+- protected Event endpoints
+- subscription endpoints
+- proof upload endpoints
+- reschedule approval
+- stop subscription
+
+Unauthorized requests must remain:
+
+401/403
+
+Do not weaken authentication or RBAC.
+
+============================================================
+20. FULL TEST SUITE
+============================================================
+
+Run:
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run build
+
+pnpm --filter @workspace/scripts run typecheck
+
+git diff --check
+
+All must PASS.
+
+============================================================
+21. PRODUCTION MUTATION PROOF
+============================================================
+
+Explicitly record:
+
+Production data mutation = NONE
+
+unless the only Production change was the approved additive schema
+migration.
+
+Differentiate:
+
+SCHEMA MIGRATION
+
+from:
+
+DATA MUTATION.
+
+No financial data mutation is permitted.
+
+============================================================
+22. FINAL REPORT
+============================================================
+
+Create/update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+Include:
+
+1. Development implementation
+2. Migration review
+3. Production migration
+4. Deployment
+5. Runtime verification
+6. Corporate verification
+7. Event verification
+8. Check-in verification
+9. Usage proof verification
+10. Reschedule verification
+11. Payment integrity
+12. Invoice integrity
+13. Tax integrity
+14. Accounting integrity
+15. Reconciliation status
+16. Central Finance status
+17. Security
+18. Tests
+19. Typecheck
+20. Build
+21. Production mutation
+22. Remaining review items
+
+============================================================
+FINAL VERDICT
+============================================================
+
+Use exactly:
+
+PROJECT STATUS = FINALIZED
+
+ONLY if:
+
+Production runtime = PASS
+
+Production schema = PASS
+
+Production migration = PASS / NOT REQUIRED
+
+Production smoke = PASS
+
+Production read-only audit = PASS
+
+transaction_read_only = on
+
+auditor role verified = PASS
+
+ROLLBACK = PASS
+
+mutation queries = 0
+
+Accounting = PASS
+
+Central Finance = UNCHANGED
+
+Payment = PASS
+
+Corporate = PASS
+
+Event = PASS
+
+Check-in = PASS
+
+Usage proof = PASS
+
+Reschedule = PASS
+
+Security = PASS
+
+Tests = PASS
+
+Typecheck = PASS
+
+Build = PASS
+
+git diff --check = PASS
+
+If ANY required gate fails:
+
+PROJECT STATUS = NOT FINALIZED
+
+and provide the exact blocker.
+
+DO NOT fabricate PASS.
+
+DO NOT silently ignore migration failure.
+
+DO NOT modify historical financial data.
+
+DO NOT create Production test bookings/payments/events.
+
+DO NOT send WhatsApp.
+
+DO NOT weaken authentication.
+
+DO NOT modify Central Finance.
+
+Continue through all safe verification steps automatically.

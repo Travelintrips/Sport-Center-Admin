@@ -1,0 +1,81 @@
+CF-SC-4 — DATABASE-ONLY SETTLEMENT FUNCTION OWNERSHIP RECONCILIATION
+
+Current central payment path is complete:
+
+- Central Finance writes canonical public.bank_mutations
+- canonical_key = sport_center:payment:<paymentId>
+- mutation_key = SC-PAY-<paymentId>
+- legacy/shadow unchanged
+- central mode creates no sport_center.bank_mutations from payment accounting
+- PROD unchanged
+
+Problem:
+
+Supabase still contains settlement/bank functions such as:
+
+- sport_center.find_settlement_bank_candidates
+- sport_center.project_public_bank_mutation_to_canonical
+- sport_center.recover_posted_settlement_from_bank_mutation
+- create_payment_settlement_batch
+- create_payment_settlement_batch_legacy
+- create_settlement_journal_draft
+- finalize_payment_settlement_legacy
+- guard_settlement_items
+- mark_settlement_payments_settled
+
+Repository search did not find direct application callers for several of them.
+
+OBJECTIVE:
+
+Reconcile database-only settlement ownership with the new Central Finance path.
+
+Do NOT delete or modify PROD.
+
+Use:
+- repository source graph
+- migration history
+- Supabase read-only function definitions/dependencies supplied from audit
+
+For each function classify:
+
+LIVE_DB_TRIGGERED
+LIVE_RPC/API
+MIGRATION_ONLY
+LEGACY_COMPATIBILITY
+HISTORICAL_ONLY
+DEAD
+UNKNOWN
+
+Then determine:
+
+1. Which functions are still required by legacy/shadow mode.
+2. Which are not required by central mode.
+3. Which functions still create/project sport_center.bank_mutations.
+4. Which settlement objects can consume public.bank_mutations directly.
+5. Which FK/schema changes would be required to eliminate the SC mutation projection.
+6. Which objects are SAFE_TO_RETIRE_LATER only after cutover.
+
+Do not remove UNKNOWN objects.
+
+Add source-level guards/tests proving central mode never calls:
+project_public_bank_mutation_to_canonical()
+
+and never creates:
+sport_center.bank_mutations
+
+Final report:
+
+CENTRAL PAYMENT PATH =
+CENTRAL BANK MUTATION OWNER =
+DB-ONLY SETTLEMENT FUNCTIONS =
+LIVE FUNCTIONS =
+LEGACY-ONLY FUNCTIONS =
+UNKNOWN FUNCTIONS =
+CENTRAL DEPENDENCY ON SC BANK MUTATIONS =
+SCHEMA/FK REWIRE REQUIRED =
+SAFE_TO_RETIRE_LATER =
+BLOCKERS =
+READY FOR CENTRAL SETTLEMENT RUNTIME PROOF = YES/NO
+
+NO PROD WRITES.
+STOP.

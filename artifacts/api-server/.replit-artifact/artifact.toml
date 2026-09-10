@@ -22,11 +22,13 @@ NODE_ENV = "production"
 
 [services.production.run]
 # we don't run through pnpm to make startup faster in production
-args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
+args = ["node", "--enable-source-maps", "artifacts/api-server/dist/bootstrap.mjs"]
 
 [services.production.run.env]
 PORT = "8080"
 NODE_ENV = "production"
+GCP_PROJECT_ID = "sport-center-506306"
+GCP_SECRET_ID = "sport-center"
 
 [services.production.health.startup]
 path = "/api/healthz"

@@ -1,0 +1,40 @@
+Penyebab error pada screenshot adalah kombinasi dua bug:
+
+Backend masih langsung melakukan INSERT
+
+Proses “Tutup rule lama & buat baru” mendeteksi overlap di UI.
+Namun handler backend tetap mencoba membuat row baru tanpa menutup atau mengganti row lama secara atomik.
+Rule baru memakai tanggal mulai yang sama dengan Rule #4
+
+Rule #4 sudah mulai pada 2026-01-01.
+Rule baru juga memakai effective_from = 2026-01-01.
+Database memiliki unique constraint untuk kombinasi:
+company_id + provider_code + bank_account_id + effective_from
+
+Akibatnya insert ditolak sebagai data duplikat.
+
+Selain itu, menutup Rule #4 dengan tanggal 2025-12-31 juga tidak valid karena Rule #4 sendiri mulai 2026-01-01. Periode tersebut akan menjadi terbalik.
+
+Perilaku yang benar seharusnya:
+
+Jika tanggal mulai baru sama dengan rule lama: update/revisi row lama, bukan insert duplikat.
+Jika tanggal mulai baru setelah rule lama: ubah effective_until rule lama menjadi satu hari sebelum rule baru.
+Jika rule lama mulai setelah atau sama dengan rule baru: tandai sebagai superseded/nonaktif tanpa membuat periode tanggal invalid.
+Seluruh proses harus dilakukan dalam satu transaksi dengan row lock dan audit log.
+Saya juga menemukan bahwa layar pada screenshot berasal dari modul legacy payment-settlement-configs, sedangkan source utama BizPortal saat ini tidak lagi memiliki halaman dan route tersebut. Jadi error ini bukan berasal dari perubahan filter QRIS H-1 yang sebelumnya dikerjakan, melainkan dari modul konfigurasi settlement lama yang masih berjalan di environment tertentu.
+
+
+
+Worked for 4 minutes
+perbaiki
+
+Free
+1 minute ago
+Saya akan memperbaiki alur di endpoint konfigurasi settlement yang memunculkan error: penutupan/supersede rule lama dan pembuatan rule baru akan dibuat atomik, termasuk kasus tanggal mulai yang sama seperti Rule #4. Saya juga akan memastikan source modul legacy yang menjadi asal layar ini tersedia dan terhubung dengan API yang sedang dipakai.
+
+
+
+4 actions
+
+Worked for 12 seconds
+You've reached your monthly free quota limit. It will reset on September 21, 2026.

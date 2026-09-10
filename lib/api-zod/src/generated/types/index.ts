@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './additionalCharge';
 export * from './apMember';
 export * from './apMemberInput';
 export * from './apMemberUpdate';
@@ -112,6 +113,7 @@ export * from './listCustomersParams';
 export * from './listDocumentTemplatesParams';
 export * from './listExpensesParams';
 export * from './listFacilitiesParams';
+export * from './listFacilityCompanyMappingsParams';
 export * from './listMembershipsParams';
 export * from './listMembershipsStatus';
 export * from './listPaymentsParams';
@@ -120,18 +122,26 @@ export * from './loginInput';
 export * from './membershipLookupInput';
 export * from './membershipLookupResult';
 export * from './membershipLookupResultStatus';
+export * from './membershipPayment';
 export * from './membershipPaymentProofInput';
 export * from './membershipPaymentProofInputPaymentMethod';
+export * from './membershipPaymentStatus';
 export * from './monthRevenue';
 export * from './myBookingItem';
 export * from './okResult';
 export * from './payment';
 export * from './paymentInput';
+export * from './paymentInputOcrScan';
 export * from './paymentInputPaymentMethod';
+export * from './paymentInputPaymentProvider';
 export * from './paymentInputPaymentType';
+export * from './paymentMetadataUpdate';
+export * from './paymentMetadataUpdatePaymentProvider';
+export * from './paymentPaymentProvider';
 export * from './paymentPaymentType';
 export * from './paymentStatus';
 export * from './paymentUpdate';
+export * from './paymentUpdatePaymentProvider';
 export * from './paymentUpdateStatus';
 export * from './promo';
 export * from './promoInput';

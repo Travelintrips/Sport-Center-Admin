@@ -1,0 +1,248 @@
+PHASE PAYLABS FINALIZATION — SPORT_PAYMENTS INSERT ROOT CAUSE
+
+Kondisi sudah terbukti:
+
+merchantTradeNo:
+SC-0025-1787234992292
+
+provider status:
+02
+
+signatureValid:
+true
+
+rawBodyAvailable:
+true
+
+sameKey:
+false
+
+Jadi masalah Paylabs signature sudah selesai.
+
+FOKUS HANYA pada kegagalan finalizePayment() saat INSERT ke:
+
+sport_center.sport_payments
+
+Jangan mengubah:
+- Paylabs signature
+- public/private key
+- callback verifier
+- canonicalization
+- ACK signing
+- frontend
+- booking creation flow
+- accounting di luar yang langsung dibutuhkan
+- production
+
+==================================================
+1. CAPTURE EXACT DATABASE ERROR
+==================================================
+
+Gunakan callback genuine SC-0025 yang sudah ada.
+
+Cari log/error dari finalizePayment() saat insert sport_payments.
+
+Laporkan exact:
+
+- PostgreSQL error code
+- constraint name
+- column name
+- table name
+- SQLSTATE
+- sanitized message
+- detail
+- hint
+
+Jangan berhenti pada:
+"sport_payments insert failed"
+
+Saya ingin exact database root cause.
+
+==================================================
+2. AUDIT INSERT PAYLOAD
+==================================================
+
+Tampilkan payload yang akan diinsert ke sport_center.sport_payments
+untuk transaksi SC-0025.
+
+Boleh tampilkan data non-secret berikut:
+
+booking_id
+amount
+proof_url
+payment_method
+payment_provider
+provider_name
+provider_reference
+provider_id
+provider_order_id
+merchant_trade_no
+provider_trade_no
+company_id
+bank_account_id
+mdr_rate
+mdr_amount
+settlement_status
+expected_settlement_date
+gross_tax_inclusive
+payment_type
+status
+confirmed_at
+paid_at
+notes
+
+Jangan tampilkan secret atau credential.
+
+==================================================
+3. COMPARE WITH ACTUAL TABLE SCHEMA
+==================================================
+
+Read-only query:
+
+information_schema.columns
+pg_constraint
+pg_indexes
+
+untuk:
+
+sport_center.sport_payments
+
+Bandingkan setiap field payload dengan:
+- data type
+- nullable
+- default
+- FK
+- unique constraint
+- check constraint
+
+Temukan mismatch exact.
+
+==================================================
+4. CHECK COMMON FAILURES
+==================================================
+
+Secara eksplisit audit:
+
+A. provider_id
+Apakah wajib NOT NULL?
+Apakah FK ke provider table?
+Apakah value yang dipakai benar-benar ada?
+
+B. bank_account_id
+Apakah FK wajib?
+Apakah resolver menghasilkan ID yang valid?
+
+C. payment_method
+Apakah value Paylabs seperti QRIS/Virtual Account cocok dengan enum/check constraint?
+
+D. payment_provider
+Apakah "paylabs" diperbolehkan?
+
+E. payment_type
+Apakah "full_payment" diperbolehkan?
+
+F. settlement_status
+Apakah "unsettled" diperbolehkan?
+
+G. amount
+Apakah numeric precision/type cocok?
+
+H. merchant_trade_no/provider_trade_no
+Apakah ada unique collision?
+
+I. company_id
+Apakah FK valid/nullability benar?
+
+J. expected_settlement_date
+Apakah tipe date/timestamp sesuai?
+
+==================================================
+5. CHECK DEV SCHEMA PARITY
+==================================================
+
+Karena transaksi ini berjalan di DEV:
+
+pastikan schema sport_center.sport_payments DEV
+sesuai dengan schema yang diharapkan source code.
+
+Jangan bandingkan hanya berdasarkan migration file.
+Query actual DEV database.
+
+Jika ada kolom missing / constraint drift / enum drift,
+laporkan exact drift.
+
+==================================================
+6. FIX ONLY PROVEN ROOT CAUSE
+==================================================
+
+Setelah root cause terbukti:
+
+perbaiki hanya bagian yang menyebabkan insert gagal.
+
+Boleh berupa:
+- payload mapping
+- resolver
+- missing valid FK
+- schema/migration parity
+- default/null handling
+- enum/check value
+
+Jangan membuat workaround dengan:
+- disable constraint
+- drop FK
+- insert NULL paksa
+- skip sport_payments
+- bypass finalizePayment
+
+==================================================
+7. RETEST EXISTING SC-0025 SAFELY
+==================================================
+
+Setelah fix:
+
+gunakan jalur recovery existing:
+
+GET /api/paylabs/status/:tradeNo
+atau admin reconcile existing jika memang itu jalur canonical.
+
+Jangan membuat payment Sandbox baru dulu.
+
+Gunakan merchantTradeNo existing:
+SC-0025-1787234992292
+
+Expected:
+
+paylabs_transactions.status = SUCCESS
+sport_bookings.status = confirmed
+sport_bookings.paid_at IS NOT NULL
+sport_payments = exactly 1 row
+sport_payments.status = confirmed
+booking_history pending_payment → confirmed
+
+Lalu pastikan ACK / subsequent callback retry dapat menghasilkan HTTP 200.
+
+==================================================
+8. FINAL REPORT
+==================================================
+
+Laporkan:
+
+- exact DB error
+- exact failing field/constraint
+- root cause
+- file/schema yang diubah
+- retry/recovery result
+- paylabs_transactions status
+- booking status
+- sport_payments count/status
+- booking_history transition
+- duplicate payment count
+
+Verdict hanya:
+
+SPORT_PAYMENTS_INSERT_FIXED
+PAYMENT_FINALIZATION_PASS
+BLOCKED: <exact root cause>
+
+Jangan commit.
+Jangan push.

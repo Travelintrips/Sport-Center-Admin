@@ -1,0 +1,264 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang audit atau implementasi dari awal.
+
+Prioritas sekarang adalah **VALIDASI AKHIR dan MENYELESAIKAN sisa patch**, bukan menambah scope baru.
+
+Berdasarkan pekerjaan sebelumnya, implementasi utama sudah mencakup:
+
+* canonical payment provider;
+* Paylabs provider mapping;
+* QRIS manual provider validation;
+* canonical paid timestamp;
+* terminal-status guard Paylabs;
+* OpenAPI/codegen;
+* CST mirror fields;
+* historical backfill dry-run / --apply;
+* build API sudah berhasil.
+
+JANGAN reset/revert perubahan existing kecuali terbukti salah.
+
+## 1. CEK WORKTREE
+
+Tampilkan ringkas:
+
+* files changed;
+* migration files;
+* generated API files;
+* test files;
+* backfill script.
+
+Pastikan tidak ada perubahan tidak terkait scope.
+
+## 2. VALIDASI PAYLABS
+
+Verifikasi final behavior:
+
+### Success baru
+
+Harus menghasilkan:
+
+`payment_method = QRIS`
+
+`payment_provider = paylabs`
+
+`merchant_trade_no`
+
+`provider_trade_no / paylabs_trade_no`
+
+`provider_reference`
+
+`paid_at`
+
+### Duplicate webhook
+
+Harus:
+
+* tidak membuat duplicate payment;
+* tidak mengubah `paid_at`;
+* tetap idempotent.
+
+### Booking terminal
+
+Jika booking sudah:
+
+`cancelled`
+
+`expired`
+
+`rejected`
+
+`refunded`
+
+webhook success tidak boleh diam-diam mengubah menjadi `confirmed`.
+
+Harus menghasilkan behavior manual-review/safe handling yang sudah dirancang.
+
+Tambahkan/fix test jika belum ada.
+
+## 3. VALIDASI QRIS MANUAL
+
+Pastikan transaksi QRIS manual baru:
+
+* wajib mempunyai `payment_provider`;
+* hanya menerima provider allowed;
+* tidak otomatis dianggap Mandiri jika caller tidak mengirim provider;
+* non-QRIS tetap backward-compatible.
+
+Jika UI tertentu memang eksklusif QRIS Mandiri Direct, caller boleh mengirim:
+
+`payment_provider = mandiri_direct`
+
+secara explicit.
+
+Jangan infer provider dari:
+
+* payment method QRIS;
+* screenshot;
+* amount.
+
+## 4. CST MIRROR
+
+Verifikasi field benar-benar termirror:
+
+`payment_provider`
+
+`provider_reference`
+
+`merchant_trade_no`
+
+`provider_trade_no`
+
+`paid_at`
+
+Pastikan:
+
+* schema source dan destination kompatibel;
+* trigger/upsert tidak menghapus nilai existing dengan NULL;
+* legacy rows tetap valid.
+
+Jika runtime CST schema tidak tersedia dalam environment ini, laporkan sebagai unverified runtime dependency dan jangan mengklaim migration production sudah aktif.
+
+## 5. BACKFILL
+
+Jalankan backfill dalam **DRY RUN** terlebih dahulu.
+
+Laporkan count:
+
+* Paylabs confidently identified;
+* Mandiri Direct confidently identified;
+* QRIS unknown;
+* ambiguous;
+* skipped/already populated.
+
+Pastikan Paylabs hanya dibackfill berdasarkan evidence kuat seperti:
+
+* `paylabs_transactions`;
+* `booking_id`;
+* `merchant_trade_no`;
+* `paylabs_trade_no`;
+* `proof_url = paylabs:<trade_no>` jika diperlukan.
+
+JANGAN mass-update semua QRIS menjadi Mandiri.
+
+Jangan jalankan `--apply` terhadap production tanpa persetujuan eksplisit.
+
+## 6. TEST
+
+Jalankan test yang benar sesuai framework/workspace.
+
+Minimal harus mencakup:
+
+1. Paylabs success provider mapping.
+2. Duplicate Paylabs webhook.
+3. `paid_at` immutable pada replay.
+4. Terminal booking guard.
+5. Manual QRIS provider required.
+6. Invalid provider rejected.
+7. Non-QRIS backward compatibility.
+8. Gross QRIS Paylabs tetap tax-inclusive.
+9. Backfill Paylabs.
+10. Ambiguous QRIS tetap unknown.
+
+Jika ada test lama yang gagal karena issue pre-existing, pisahkan:
+
+* failure caused by this patch;
+* pre-existing failure.
+
+Jangan menyatakan test suite sukses jika masih ada failure dari patch ini.
+
+## 7. BUILD / TYPECHECK
+
+Jalankan:
+
+* API build;
+* API typecheck;
+* relevant workspace/client build;
+* generated client verification.
+
+Jika error `reports.ts` masih merupakan pre-existing issue, dokumentasikan dengan file/error exact dan buktikan perubahan ini tidak menambah error baru.
+
+## 8. MIGRATION SAFETY
+
+Review migration final:
+
+Pastikan:
+
+* additive/backward-compatible;
+* tidak ada destructive DROP;
+* historical rows tidak invalid;
+* column baru nullable/default aman;
+* enum/check constraints sesuai;
+* index relevan tersedia.
+
+Jangan menjalankan migration production.
+
+## 9. JANGAN SENTUH
+
+Jangan implementasikan dalam task ini:
+
+* MDR calculation;
+* settlement reconciliation;
+* business calendar CST;
+* accounting PPN redesign;
+* bank mutation logic;
+* final reconciliation engine.
+
+Scope Sport Center berhenti pada canonical payment event/provider data.
+
+## 10. FINAL REPORT
+
+Setelah selesai, berikan laporan final:
+
+### A. Implemented
+
+Apa yang benar-benar selesai.
+
+### B. Files changed
+
+Path + tujuan perubahan.
+
+### C. Schema changes
+
+Column/constraint/index final.
+
+### D. Paylabs behavior
+
+Termasuk replay dan terminal state.
+
+### E. Mandiri Direct/manual QRIS
+
+Kontrak provider final.
+
+### F. CST mirror
+
+Field yang tersedia.
+
+### G. Backfill
+
+Dry-run counts dan aturan klasifikasi.
+
+### H. Tests
+
+Command + pass/fail.
+
+### I. Build/typecheck
+
+Command + hasil.
+
+### J. Remaining issues
+
+Pisahkan:
+
+* blocking;
+* non-blocking;
+* pre-existing.
+
+### K. Production readiness
+
+Jawab eksplisit:
+
+1. Apakah code siap merge?
+2. Apakah migration siap dijalankan?
+3. Apakah backfill aman untuk apply?
+4. Apa yang masih harus dilakukan sebelum CST reconciliation implementation dimulai?
+
+Jangan melakukan commit/push/deploy tanpa instruksi eksplisit.

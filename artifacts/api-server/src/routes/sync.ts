@@ -1,17 +1,31 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
+import {
+  db,
+  bookingsTable,
+  facilitiesTable,
+  paymentsTable,
+  usersTable,
+  gymMembershipsTable,
+  facilityCompanyMappingsTable,
+  publicCompaniesTable,
+} from "@workspace/db";
 
-import { desc, gte, and, lte, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { desc, gte, and, lte, eq, inArray, isNotNull, sql, asc } from "drizzle-orm";
 import { extractBookingDpp } from "../lib/accounting";
-import { adminMiddleware, financeMiddleware } from "../lib/auth";
+import { adminMiddleware, financeMiddleware, superAdminMiddleware } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
 import {
   syncBookingToBizportal,
   syncMembershipToBizportal,
   bizportalSyncConfigured,
   bulkPushPaymentsToBizportal,
+  countPendingPaymentMirrors,
   auditLegacySportCenterPayments,
   reconcileLegacySportCenterPaymentLinks,
+  auditSportCenterPayment,
+  dryRunConfirmedPaymentAccounting,
+  dryRunSpecificSportCenterPayments,
+  dryRunHistoricalOwnership,
   type BulkPaymentPushResult,
 } from "../lib/bizportalSync";
 
@@ -197,8 +211,12 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
               method: payment.paymentMethod,
               status: payment.status,
               proofUrl: payment.proofUrl,
-              paidAt: payment.confirmedAt,
+              paidAt: payment.paidAt ?? payment.confirmedAt,
               confirmedAt: payment.confirmedAt,
+              paymentProvider: payment.paymentProvider,
+              providerReference: payment.providerReference,
+              merchantTradeNo: payment.merchantTradeNo,
+              providerTradeNo: payment.providerTradeNo,
             }
           : null,
       };
@@ -636,20 +654,8 @@ router.get("/admin/sync-bizportal-payments/pending", adminMiddleware, async (_re
       return;
     }
 
-    const { rows } = await pool.query(`
-      SELECT COUNT(*) AS pending
-      FROM sport_center.sport_payments sp
-      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
-      LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
-      WHERE sp.status = 'confirmed'
-        AND pb.id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM public.sport_payments bpay
-          WHERE bpay.payment_number = 'SCPAY-SC-' || sp.id::text
-        )
-    `);
-
-    res.json({ pending: parseInt(rows[0]?.pending ?? "0", 10), configured: true });
+    const pending = await countPendingPaymentMirrors(pool);
+    res.json({ pending, configured: true });
   } catch (err: any) {
     res.json({ pending: 0, configured: true, error: err.message });
   }
@@ -666,7 +672,7 @@ router.get("/admin/audit-bizportal-payment-links", financeMiddleware, async (_re
     res.json({
       success: true,
       mode: "dry_run",
-      policy: "Only unique ref+amount links are eligible; no rows are deleted or voided.",
+      policy: "Only unique, balanced, posted, tax-matched legacy links are eligible; no financial row is created, deleted, voided, or repriced.",
       ...audit,
     });
   } catch (err: any) {
@@ -676,14 +682,14 @@ router.get("/admin/audit-bizportal-payment-links", financeMiddleware, async (_re
 
 /**
  * POST /api/admin/reconcile-bizportal-payment-links
- * Dry-run secara default. Kirim { "apply": true } untuk mengisi hanya
- * public.sport_payments.accounting_payment_id pada pasangan deterministik.
+ * Dry-run secara default. Kirim { "apply": true } untuk mengisi link legacy
+ * yang deterministik dan memulihkan entry/tax pointer yang terbukti yatim.
  */
 router.post("/admin/reconcile-bizportal-payment-links", financeMiddleware, async (req, res) => {
   const apply = req.body?.apply === true;
   try {
     const result = await reconcileLegacySportCenterPaymentLinks({ apply });
-    if (apply && result.linkedRows > 0) {
+    if (apply && (result.linkedRows > 0 || result.repairedEntryRows > 0)) {
       await logAudit({
         action: "RECONCILE_LEGACY_SPORT_CENTER_PAYMENT_LINKS",
         entity: "sport_payments",
@@ -691,19 +697,230 @@ router.post("/admin/reconcile-bizportal-payment-links", financeMiddleware, async
           linkedRows: result.linkedRows,
           appliedCandidateCount: result.appliedCandidateCount,
           appliedCandidateAmount: result.appliedCandidateAmount,
+          repairedEntryRows: result.repairedEntryRows,
+          repairedTaxRows: result.repairedTaxRows,
+          repairedEntryLinks: result.staleEntryRepairCandidates,
           appliedAt: new Date().toISOString(),
-          policy: "No payment, accounting entry, or audit row deleted/voided.",
+          policy: "Only validated foreign-key links were restored; no financial row was created, deleted, voided, or repriced.",
         },
       });
     }
     res.json({
       success: true,
       mode: result.applied ? "apply_safe_links" : "dry_run",
-      policy: "Only unique ref+amount links are eligible; no rows are deleted or voided.",
+      policy: "Only unique, balanced, posted, tax-matched legacy links are eligible; no financial row is created, deleted, voided, or repriced.",
       ...result,
     });
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Legacy payment reconciliation failed" });
+  }
+});
+
+/**
+ * GET /api/admin/audit-sport-center-payment/:sourcePaymentId
+ * Read-only validator for source payment → mirror → accounting → GL → tax.
+ */
+router.get("/admin/audit-sport-center-payment/:sourcePaymentId", financeMiddleware, async (req, res) => {
+  const sourcePaymentId = Number(req.params.sourcePaymentId);
+  if (!Number.isSafeInteger(sourcePaymentId) || sourcePaymentId <= 0) {
+    res.status(400).json({ error: "sourcePaymentId harus berupa integer positif" });
+    return;
+  }
+  try {
+    res.json(await auditSportCenterPayment(sourcePaymentId));
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Sport Center payment audit failed" });
+  }
+});
+
+/**
+ * GET /api/admin/facility-company-mappings
+ * Admin-only ownership configuration surface. This is never public.
+ */
+router.get("/admin/facility-company-mappings", financeMiddleware, async (req, res) => {
+  try {
+    const facilityId = req.query.facilityId == null ? null : Number(req.query.facilityId);
+    const mappings = await db
+      .select({
+        id: facilityCompanyMappingsTable.id,
+        facilityId: facilityCompanyMappingsTable.facilityId,
+        facilityName: facilitiesTable.name,
+        companyId: facilityCompanyMappingsTable.companyId,
+        companyCode: publicCompaniesTable.code,
+        companyName: publicCompaniesTable.name,
+        companyUserName: sql`NULL::text`,
+        effectiveFrom: facilityCompanyMappingsTable.effectiveFrom,
+        effectiveUntil: facilityCompanyMappingsTable.effectiveUntil,
+        isActive: facilityCompanyMappingsTable.isActive,
+        source: facilityCompanyMappingsTable.source,
+        notes: facilityCompanyMappingsTable.notes,
+        createdBy: facilityCompanyMappingsTable.createdBy,
+        updatedBy: facilityCompanyMappingsTable.updatedBy,
+        createdAt: facilityCompanyMappingsTable.createdAt,
+        updatedAt: facilityCompanyMappingsTable.updatedAt,
+      })
+      .from(facilityCompanyMappingsTable)
+      .innerJoin(facilitiesTable, eq(facilityCompanyMappingsTable.facilityId, facilitiesTable.id))
+      .innerJoin(publicCompaniesTable, eq(facilityCompanyMappingsTable.companyId, publicCompaniesTable.id))
+      .where(facilityId != null ? eq(facilityCompanyMappingsTable.facilityId, facilityId) : undefined)
+      .orderBy(asc(facilityCompanyMappingsTable.facilityId), desc(facilityCompanyMappingsTable.effectiveFrom));
+    res.json({ readOnly: true, data: mappings });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Ownership mappings failed" });
+  }
+});
+
+/**
+ * POST /api/admin/facility-company-mappings
+ * Create one effective-dated mapping. Database FK/trigger/exclusion rules
+ * reject unknown companies and overlapping active ownership.
+ */
+router.post("/admin/facility-company-mappings", superAdminMiddleware, async (req, res) => {
+  const body = req.body ?? {};
+  const facilityId = Number(body.facilityId);
+  const companyId = Number(body.companyId);
+  const effectiveFrom = String(body.effectiveFrom ?? "");
+  const effectiveUntil = body.effectiveUntil == null || body.effectiveUntil === ""
+    ? null
+    : String(body.effectiveUntil);
+  if (
+    !Number.isSafeInteger(facilityId) || facilityId <= 0 ||
+    !Number.isSafeInteger(companyId) || companyId <= 0 ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom) ||
+    (effectiveUntil != null && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveUntil))
+  ) {
+    res.status(400).json({ error: "facilityId, companyId, effectiveFrom, effectiveUntil tidak valid" });
+    return;
+  }
+  try {
+    const user = (req as any).user ?? {};
+    const [mapping] = await db.insert(facilityCompanyMappingsTable).values({
+      facilityId,
+      companyId,
+      effectiveFrom,
+      effectiveUntil,
+      isActive: body.isActive !== false,
+      source: typeof body.source === "string" && body.source.trim() ? body.source.trim() : "admin_config",
+      notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
+      createdBy: Number.isSafeInteger(user.userId) ? user.userId : null,
+      updatedBy: Number.isSafeInteger(user.userId) ? user.userId : null,
+    }).returning();
+    await logAudit({
+      userId: user.userId,
+      userRole: user.role,
+      action: "FACILITY_COMPANY_MAPPING_CREATED",
+      entity: "facility_company_mapping",
+      entityId: mapping?.id ?? null,
+      after: mapping,
+    });
+    res.status(201).json(mapping);
+  } catch (err: any) {
+    const status = err?.code === "23P01" || err?.code === "23514" || err?.code === "23503" ? 409 : 500;
+    res.status(status).json({
+      error: err?.code === "23P01"
+        ? "OWNERSHIP_MAPPING_OVERLAP"
+        : err?.message ?? "Ownership mapping create failed",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/facility-company-mappings/:id
+ * Deactivate or supersede a mapping. Ownership history is retained.
+ */
+router.patch("/admin/facility-company-mappings/:id", superAdminMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "mapping id tidak valid" });
+    return;
+  }
+  const body = req.body ?? {};
+  const updates: Record<string, unknown> = {};
+  if (body.isActive !== undefined) updates.isActive = body.isActive === true;
+  if (body.effectiveUntil !== undefined) {
+    updates.effectiveUntil = body.effectiveUntil == null || body.effectiveUntil === "" ? null : String(body.effectiveUntil);
+  }
+  if (body.notes !== undefined) updates.notes = typeof body.notes === "string" ? body.notes.trim() || null : null;
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "Tidak ada perubahan mapping" });
+    return;
+  }
+  try {
+    const [before] = await db.select().from(facilityCompanyMappingsTable)
+      .where(eq(facilityCompanyMappingsTable.id, id)).limit(1);
+    if (!before) {
+      res.status(404).json({ error: "Mapping tidak ditemukan" });
+      return;
+    }
+    const user = (req as any).user ?? {};
+    const [after] = await db.update(facilityCompanyMappingsTable)
+      .set({
+        ...updates,
+        updatedBy: Number.isSafeInteger(user.userId) ? user.userId : null,
+        updatedAt: new Date(),
+      } as any)
+      .where(eq(facilityCompanyMappingsTable.id, id))
+      .returning();
+    await logAudit({
+      userId: user.userId,
+      userRole: user.role,
+      action: "FACILITY_COMPANY_MAPPING_UPDATED",
+      entity: "facility_company_mapping",
+      entityId: id,
+      before,
+      after,
+    });
+    res.json(after);
+  } catch (err: any) {
+    res.status(err?.code === "23P01" || err?.code === "23514" ? 409 : 500).json({
+      error: err?.code === "23P01" ? "OWNERSHIP_MAPPING_OVERLAP" : err?.message ?? "Ownership mapping update failed",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/audit-sport-center-payments/dry-run
+ * Read-only historical gap scan for all confirmed Sport Center payments.
+ */
+router.get("/admin/audit-sport-center-payments/dry-run", financeMiddleware, async (_req, res) => {
+  try {
+    res.json({
+      success: true,
+      mode: "dry_run",
+      policy: "No historical payment, mirror, accounting entry, GL line, or tax row is mutated.",
+      ...(await dryRunConfirmedPaymentAccounting()),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Sport Center payment dry-run failed" });
+  }
+});
+
+/**
+ * GET /api/admin/audit-sport-center-payments/13-14-dry-run
+ * Explicit read-only repair readiness report for the two historical payments.
+ */
+router.get("/admin/audit-sport-center-payments/13-14-dry-run", financeMiddleware, async (_req, res) => {
+  try {
+    res.json({
+      success: true,
+      mode: "dry_run",
+      policy: "No UPDATE/INSERT/DELETE is executed.",
+      ...(await dryRunSpecificSportCenterPayments([13, 14])),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Specific payment dry-run failed" });
+  }
+});
+
+/**
+ * GET /api/admin/audit-sport-center-ownership/dry-run
+ * Read-only classifier for confirmed payments without source company.
+ */
+router.get("/admin/audit-sport-center-ownership/dry-run", financeMiddleware, async (_req, res) => {
+  try {
+    res.json(await dryRunHistoricalOwnership());
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Historical ownership dry-run failed" });
   }
 });
 
@@ -796,6 +1013,15 @@ router.get("/sync/payment-groups", apiKeyMiddleware, async (req, res) => {
           status: payment.status,
           proofUrl: payment.proofUrl,
           confirmedAt: payment.confirmedAt,
+           paidAt: payment.paidAt ?? payment.confirmedAt,
+           paymentProvider: payment.paymentProvider,
+           providerName: payment.providerName,
+           providerId: payment.providerId,
+           providerOrderId: payment.providerOrderId,
+           bankAccountId: payment.bankAccountId,
+           providerReference: payment.providerReference,
+           merchantTradeNo: payment.merchantTradeNo,
+           providerTradeNo: payment.providerTradeNo,
         } : null,
       };
     });
@@ -827,6 +1053,15 @@ router.get("/sync/payment-groups", apiKeyMiddleware, async (req, res) => {
           status: payment.status,
           proofUrl: payment.proofUrl,
           confirmedAt: payment.confirmedAt,
+           paidAt: payment.paidAt ?? payment.confirmedAt,
+           paymentProvider: payment.paymentProvider,
+           providerName: payment.providerName,
+           providerId: payment.providerId,
+           providerOrderId: payment.providerOrderId,
+           bankAccountId: payment.bankAccountId,
+           providerReference: payment.providerReference,
+           merchantTradeNo: payment.merchantTradeNo,
+           providerTradeNo: payment.providerTradeNo,
         } : null,
       };
     });

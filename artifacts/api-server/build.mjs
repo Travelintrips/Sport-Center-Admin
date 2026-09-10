@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -15,12 +15,16 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: [path.resolve(artifactDir, "src/bootstrap.ts")],
     platform: "node",
     bundle: true,
     format: "esm",
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
+    // Database migrations stored as SQL files are bundled as strings so the
+    // deployed API can apply them at startup; runtime file paths are not
+    // reliable in the artifact deployment bundle.
+    loader: { ".sql": "text" },
     logLevel: "info",
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
@@ -100,6 +104,12 @@ async function buildAll() {
       "xlsx",
       "googleapis",
       "openai",
+      // tesseract.js creates a Node worker by resolving sibling files at
+      // runtime. Bundling moves its worker-script path beside dist/ and makes
+      // every image proof upload crash the API with MODULE_NOT_FOUND.
+      // Keep it external so Node executes it from node_modules, where the
+      // worker assets remain available.
+      "tesseract.js",
       // "@replit/object-storage" intentionally removed from external list.
       // gae-deploy/package.json excludes this Replit-only package, so it must
       // be bundled inline. The code that calls it is guarded by IS_PRODUCTION,
@@ -127,6 +137,13 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // Artifact service metadata launches dist/index.mjs, while the application
+  // entry point must be bootstrap.mjs so Secret Manager runs before modules
+  // read production configuration. Keep a tiny compatibility launcher for
+  // the registered artifact command and the explicit bootstrap artifact used
+  // by the workspace deployment configuration.
+  await writeFile(path.join(distDir, "index.mjs"), 'import "./bootstrap.mjs";\n');
 }
 
 buildAll().catch((err) => {

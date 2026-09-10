@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, notificationTemplatesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 
 const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
@@ -56,6 +57,17 @@ router.patch("/notification-templates/:id", adminMiddleware, async (req, res) =>
 router.post("/notification-templates/send", adminMiddleware, async (req, res) => {
   try {
     const { phone, message, target } = req.body;
+    if (!allowWhatsAppProviderSend()) {
+      const requestedPhones = target === "admins"
+        ? ADMIN_WA_PHONES.split(",").map((p) => p.trim()).filter(Boolean)
+        : phone ? [String(phone)] : [];
+      res.json({
+        success: true,
+        simulated: true,
+        results: requestedPhones.map((targetPhone) => ({ phone: targetPhone, status: "dry-run" })),
+      });
+      return;
+    }
     if (!FONNTE_TOKEN) {
       res.status(503).json({ error: "Fonnte token tidak dikonfigurasi" });
       return;
@@ -77,7 +89,6 @@ router.post("/notification-templates/send", adminMiddleware, async (req, res) =>
       res.status(400).json({ error: "Pesan tidak boleh kosong" });
       return;
     }
-
     const results: { phone: string; status: string; id?: number }[] = [];
     for (const p of phones) {
       try {

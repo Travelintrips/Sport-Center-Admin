@@ -8,6 +8,7 @@ import { resolveInvoiceData, resolveGroupInvoiceData } from "../lib/invoiceResol
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { getInternalPdfToken } from "../lib/internalPdfToken";
 import { logger } from "../lib/logger";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 // ─── Internal PDF middleware ───────────────────────────────────────────────────
 // Digunakan oleh endpoint yang di-akses puppeteer saat generate PDF.
@@ -20,6 +21,29 @@ function internalPdfMiddleware(req: any, res: any, next: any) {
 }
 
 const router = Router();
+
+function redirectToStoredInvoice(res: any, rawUrl: string): void {
+  const value = String(rawUrl).trim();
+  if (value.startsWith("/") && !value.startsWith("//")) {
+    res.redirect(302, value);
+    return;
+  }
+
+  try {
+    const parsed = new URL(value);
+    const appHost = process.env.APP_URL ? new URL(process.env.APP_URL).hostname : null;
+    const isSupabaseStorage = parsed.protocol === "https:" && parsed.hostname.endsWith(".supabase.co");
+    const isConfiguredAppHost = appHost !== null && parsed.protocol === "https:" && parsed.hostname === appHost;
+    if (isSupabaseStorage || isConfiguredAppHost) {
+      res.redirect(302, parsed.toString());
+      return;
+    }
+  } catch {
+    // Fall through to the safe client error below.
+  }
+
+  res.status(400).json({ error: "URL invoice tidak valid" });
+}
 
 // ─── GET /invoices/internal/:orderNumber/html — puppeteer endpoint (no admin auth) ──
 // Di-akses puppeteer dari localhost saat generate PDF.
@@ -197,12 +221,7 @@ router.get("/public/invoices/:orderNumber/pdf", async (req, res) => {
 
     if (booking.invoicePdfUrl) {
       // Jika URL sudah ada di storage: redirect ke URL tersebut
-      if (booking.invoicePdfUrl.startsWith("http")) {
-        res.redirect(302, booking.invoicePdfUrl);
-        return;
-      }
-      // URL lokal (path relatif dari /api/uploads/...)
-      res.redirect(302, booking.invoicePdfUrl);
+      redirectToStoredInvoice(res, booking.invoicePdfUrl);
       return;
     }
 
@@ -215,11 +234,7 @@ router.get("/public/invoices/:orderNumber/pdf", async (req, res) => {
     logger.info({ orderNumber }, "[InvoiceDelivery] PDF belum ada, generate on-demand");
     const result = await sendInvoiceToCustomer(orderNumber, { userName: "system-on-demand" });
 
-    if (result.pdfUrl.startsWith("http")) {
-      res.redirect(302, result.pdfUrl);
-    } else {
-      res.redirect(302, result.pdfUrl);
-    }
+    redirectToStoredInvoice(res, result.pdfUrl);
   } catch (err) {
     logger.error({ err }, "Public invoice PDF error");
     res.status(500).json({ error: "Gagal mengambil invoice PDF" });
@@ -244,7 +259,7 @@ router.get("/public/invoices/group/:groupRef/pdf", async (req, res) => {
     if (!booking) { res.status(404).json({ error: "Grup booking tidak ditemukan" }); return; }
 
     if (booking.invoicePdfUrl) {
-      res.redirect(302, booking.invoicePdfUrl);
+      redirectToStoredInvoice(res, booking.invoicePdfUrl);
       return;
     }
 
@@ -256,7 +271,7 @@ router.get("/public/invoices/group/:groupRef/pdf", async (req, res) => {
 
     logger.info({ groupRef }, "[InvoiceDelivery] PDF grup belum ada, generate on-demand");
     const result = await sendGroupInvoiceToCustomer(groupRef, { userName: "system-on-demand" });
-    res.redirect(302, result.pdfUrl);
+    redirectToStoredInvoice(res, result.pdfUrl);
   } catch (err) {
     logger.error({ err }, "Public group invoice PDF error");
     res.status(500).json({ error: "Gagal mengambil invoice PDF gabungan" });
@@ -361,6 +376,11 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
           `📄 *Download Invoice PDF:*\n${pdfLink}\n\n` +
           `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`
       );
+
+    if (!allowWhatsAppProviderSend()) {
+      res.json({ success: true, simulated: true, message: "WhatsApp dispatch blocked outside production" });
+      return;
+    }
 
     const token =
       req.body?.fonnteToken ??

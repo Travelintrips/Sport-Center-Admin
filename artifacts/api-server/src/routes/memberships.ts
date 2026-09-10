@@ -1,17 +1,214 @@
-import { Router } from "express";
-import { db, gymMembershipsTable, publicMembershipsTable, gymCheckinsTable } from "@workspace/db";
-import { eq, and, ilike } from "drizzle-orm";
+import { Router, type Response } from "express";
+import {
+  db,
+  gymMembershipsTable,
+  membershipPaymentsTable,
+  publicMembershipsTable,
+  gymCheckinsTable,
+  bookingsTable,
+  bookingHistoryTable,
+  facilitiesTable,
+} from "@workspace/db";
+import { eq, and, ilike, desc, inArray, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
+import {
+  syncMembershipToBizportal,
+  syncBookingToBizportal,
+  pushMembershipPaymentAsBankMutation,
+} from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
+import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 
 const router = Router();
 
 const PRICE_PER_MONTH = 300000;
+
+type DbExecutor = Pick<typeof db, "select" | "insert" | "update">;
+
+function addHours(time: string, hours: number): string {
+  const [hour, minute] = time.split(":").map(Number);
+  const totalMinutes = hour * 60 + (minute || 0) + hours * 60;
+  const endHour = Math.floor(totalMinutes / 60) % 24;
+  const endMinute = totalMinutes % 60;
+  return `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`;
+}
+
+function membershipBookingStatus(
+  paymentStatus: string,
+): "pending_payment" | "waiting_confirmation" | "confirmed" | "cancelled" {
+  if (paymentStatus === "waiting_confirmation") return "waiting_confirmation";
+  if (paymentStatus === "confirmed") return "confirmed";
+  if (paymentStatus === "cancelled") return "cancelled";
+  return "pending_payment";
+}
+
+function membershipTaxBreakdown(amount: number) {
+  const dpp = Math.round(amount / 1.11);
+  return { dpp, ppnAmount: amount - dpp };
+}
+
+async function getGymFacility(executor: DbExecutor = db) {
+  const [gymFacility] = await executor.select().from(facilitiesTable)
+    .where(or(
+      eq(facilitiesTable.bookingMode, "walk_in"),
+      ilike(facilitiesTable.name, "%gym%"),
+      ilike(facilitiesTable.name, "%fitness%"),
+      ilike(facilitiesTable.category, "%gym%"),
+      ilike(facilitiesTable.category, "%fitness%"),
+    ))
+    .limit(1);
+  return gymFacility;
+}
+
+async function syncBookingRecordToBizportal(booking: typeof bookingsTable.$inferSelect) {
+  const [facility] = await db
+    .select({ name: facilitiesTable.name, category: facilitiesTable.category })
+    .from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId))
+    .limit(1);
+  if (!facility) return;
+  await syncBookingToBizportal({
+    booking,
+    facilityName: facility.name,
+    facilityCategory: facility.category,
+  });
+}
+
+/**
+ * Membership payment and gym usage are deliberately two different booking
+ * sources:
+ * - gym_membership_payment: one financial booking per registration/renewal
+ * - gym_membership: one zero-value booking per daily check-in
+ *
+ * The payment booking is the order candidate used by Bizportal
+ * reconciliation. It never creates a second membership payment.
+ */
+async function ensureMembershipPaymentBooking(
+  membership: typeof gymMembershipsTable.$inferSelect,
+  payment: typeof membershipPaymentsTable.$inferSelect,
+  executor: DbExecutor = db,
+  allocatedOrderNumber?: string,
+) {
+  const [existing] = await executor
+    .select()
+    .from(bookingsTable)
+    .where(eq(bookingsTable.membershipPaymentId, payment.id))
+    .limit(1);
+
+  const gymFacility = existing ? undefined : await getGymFacility(executor);
+  if (!existing && !gymFacility) {
+    throw new Error("Fasilitas Gym belum tersedia");
+  }
+
+  const amount = Math.round(Number(payment.amount));
+  const { dpp, ppnAmount } = membershipTaxBreakdown(amount);
+  const status = membershipBookingStatus(payment.status);
+  const isConfirmed = status === "confirmed";
+  const values = {
+    customerName: membership.name,
+    customerEmail: membership.email,
+    customerPhone: membership.phone,
+    bookingDate: payment.periodStart,
+    startTime: gymFacility?.openTime ?? "00:00",
+    endTime: gymFacility ? addHours(gymFacility.openTime, 1) : "01:00",
+    durationHours: 1,
+    totalPrice: String(amount),
+    basePrice: String(amount),
+    discountAmount: "0",
+    apDiscountAmount: "0",
+    grandTotal: String(amount),
+    dpp: String(dpp),
+    ppnRate: "11",
+    ppnAmount: String(ppnAmount),
+    status,
+    paymentRequiredNow: !isConfirmed,
+    billingStatus: isConfirmed ? "paid" as const : "unbilled" as const,
+    paymentDeadline: null,
+    paymentReminderSentAt: null,
+    source: "gym_membership_payment",
+    membershipId: membership.id,
+    membershipPaymentId: payment.id,
+    notes: `Pembayaran membership gym #${membership.id} | Payment #${payment.id} | Periode ${payment.periodStart} s/d ${payment.periodEnd}`,
+    updatedAt: new Date(),
+  };
+
+  if (existing) {
+    const [updated] = await executor
+      .update(bookingsTable)
+      .set(values)
+      .where(eq(bookingsTable.id, existing.id))
+      .returning();
+    return updated ?? existing;
+  }
+
+  const orderNumber = allocatedOrderNumber ?? await generateBookingOrderNumber();
+  const [created] = await executor
+    .insert(bookingsTable)
+    .values({
+      orderNumber,
+      customerId: null,
+      customerName: values.customerName,
+      customerEmail: values.customerEmail,
+      customerPhone: values.customerPhone,
+      facilityId: gymFacility!.id,
+      bookingDate: values.bookingDate,
+      startTime: values.startTime,
+      endTime: values.endTime,
+      durationHours: values.durationHours,
+      totalPrice: values.totalPrice,
+      discountAmount: values.discountAmount,
+      customerType: "umum",
+      verificationStatus: "not_required",
+      basePrice: values.basePrice,
+      apDiscountAmount: values.apDiscountAmount,
+      bookingType: "regular",
+      membershipId: values.membershipId,
+      membershipPaymentId: values.membershipPaymentId,
+      status: values.status,
+      source: values.source,
+      numberOfPeople: 1,
+      notes: values.notes,
+      paymentRequiredNow: values.paymentRequiredNow,
+      payerType: "personal",
+      billingStatus: values.billingStatus,
+      dpp: values.dpp,
+      ppnRate: values.ppnRate,
+      ppnAmount: values.ppnAmount,
+      grandTotal: values.grandTotal,
+      paidAt: isConfirmed ? payment.confirmedAt ?? new Date() : null,
+    })
+    .returning();
+
+  if (!created) throw new Error("Gagal membuat booking pembayaran membership");
+
+  await executor.insert(bookingHistoryTable).values({
+    bookingId: created.id,
+    fromStatus: null,
+    toStatus: status,
+    changedByName: membership.name,
+    note: `Booking pembayaran membership dibuat dari payment #${payment.id}`,
+  });
+  return created;
+}
+
+async function syncMembershipPaymentBookings(membership: typeof gymMembershipsTable.$inferSelect) {
+  const payments = await db
+    .select()
+    .from(membershipPaymentsTable)
+    .where(eq(membershipPaymentsTable.membershipId, membership.id));
+
+  for (const payment of payments) {
+    const booking = await ensureMembershipPaymentBooking(membership, payment);
+    syncBookingRecordToBizportal(booking).catch((err) =>
+      console.error("[membership] Gagal sync booking payment ke Bizportal:", err),
+    );
+  }
+}
 
 async function syncToPublic(m: typeof gymMembershipsTable.$inferSelect) {
   try {
@@ -63,6 +260,75 @@ async function deleteFromPublic(sourceId: number) {
     console.warn("[sync-public-memberships] Non-fatal delete error:", err);
   }
 }
+
+async function sendMembershipProof(
+  paymentProofUrl: string | null,
+  res: Response,
+) {
+  if (!paymentProofUrl) {
+    res.status(404).json({ error: "Bukti pembayaran tidak ditemukan" });
+    return;
+  }
+
+  const file = await downloadFromStorageUrl(paymentProofUrl);
+  res.setHeader("Content-Type", file.contentType);
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.send(file.buffer);
+}
+
+router.get("/memberships/:id/payment-proof-file", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "ID member tidak valid" });
+      return;
+    }
+    const [membership] = await db
+      .select({ paymentProofUrl: gymMembershipsTable.paymentProofUrl })
+      .from(gymMembershipsTable)
+      .where(eq(gymMembershipsTable.id, id))
+      .limit(1);
+    if (!membership) {
+      res.status(404).json({ error: "Membership tidak ditemukan" });
+      return;
+    }
+    await sendMembershipProof(membership.paymentProofUrl, res);
+  } catch (err) {
+    req.log.error({ err, membershipId: req.params.id }, "Read membership payment proof error");
+    res.status(404).json({ error: "File bukti pembayaran tidak tersedia di Storage" });
+  }
+});
+
+router.get("/memberships/:id/payments/:paymentId/proof-file", adminMiddleware, async (req, res) => {
+  try {
+    const membershipId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(membershipId) || !Number.isInteger(paymentId)) {
+      res.status(400).json({ error: "ID pembayaran tidak valid" });
+      return;
+    }
+    const [payment] = await db
+      .select({ paymentProofUrl: membershipPaymentsTable.paymentProofUrl })
+      .from(membershipPaymentsTable)
+      .where(and(
+        eq(membershipPaymentsTable.id, paymentId),
+        eq(membershipPaymentsTable.membershipId, membershipId),
+      ))
+      .limit(1);
+    if (!payment) {
+      res.status(404).json({ error: "Pembayaran membership tidak ditemukan" });
+      return;
+    }
+    await sendMembershipProof(payment.paymentProofUrl, res);
+  } catch (err) {
+    req.log.error(
+      { err, membershipId: req.params.id, paymentId: req.params.paymentId },
+      "Read membership payment history proof error",
+    );
+    res.status(404).json({ error: "File bukti pembayaran tidak tersedia di Storage" });
+  }
+});
 
 // ─── Gym Check-in Endpoints ───────────────────────────────────────────────────
 
@@ -168,8 +434,74 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
       .limit(1);
     if (existing) { res.status(409).json({ error: "Sudah check-in pada tanggal ini", checkin: existing }); return; }
 
-    const [checkin] = await db.insert(gymCheckinsTable).values({ membershipId: id, checkinDate, notes }).returning();
-    res.status(201).json(checkin);
+    // Every member visit is also a booking record so it appears in the
+    // central booking list. It is prepaid by the membership and must never
+    // enter the regular payment queue.
+    const gymFacility = await getGymFacility();
+    if (!gymFacility) {
+      res.status(409).json({ error: "Fasilitas Gym belum tersedia" });
+      return;
+    }
+
+    const orderNumber = await generateBookingOrderNumber();
+    const checkedInAt = new Date();
+    const bookingNote = [
+      `Pemakaian member gym #${member.id}`,
+      notes ? `Catatan check-in: ${String(notes).trim()}` : "",
+    ].filter(Boolean).join(" — ");
+
+    const result = await db.transaction(async (tx) => {
+      const [newCheckin] = await tx.insert(gymCheckinsTable)
+        .values({ membershipId: id, checkinDate, notes })
+        .returning();
+
+      const [newBooking] = await tx.insert(bookingsTable).values({
+        orderNumber,
+        customerId: null,
+        customerName: member.name,
+        customerEmail: member.email,
+        customerPhone: member.phone,
+        facilityId: gymFacility.id,
+        bookingDate: checkinDate,
+        startTime: gymFacility.openTime,
+        endTime: addHours(gymFacility.openTime, 1),
+        durationHours: 1,
+        totalPrice: "0",
+        discountAmount: "0",
+        customerType: "umum",
+        verificationStatus: "not_required",
+        basePrice: "0",
+        apDiscountAmount: "0",
+        bookingType: "regular",
+        membershipId: member.id,
+        status: "confirmed",
+        source: "gym_membership",
+        numberOfPeople: 1,
+        notes: bookingNote,
+        paymentRequiredNow: false,
+        payerType: "personal",
+        billingStatus: "paid",
+        dpp: "0",
+        grandTotal: "0",
+        checkedInAt,
+      }).returning();
+
+      await tx.insert(bookingHistoryTable).values({
+        bookingId: newBooking.id,
+        fromStatus: null,
+        toStatus: "confirmed",
+        changedByName: member.name,
+        note: `Pemakaian member gym dicatat dari check-in membership #${member.id}`,
+      });
+
+      return { checkin: newCheckin, booking: newBooking };
+    });
+
+    res.status(201).json(result);
+
+    syncBookingRecordToBizportal(result.booking).catch((err) =>
+      req.log.error({ err }, "[checkin] Gagal sync booking membership ke Bizportal")
+    );
 
     // Fire-and-forget: kirim rekap WA hari ini ke grup admin
     sendRekapPemakaianToAdmin(checkinDate).catch((err) =>
@@ -189,6 +521,27 @@ router.delete("/memberships/checkins/:checkinId", adminMiddleware, async (req, r
     // Ambil tanggal dulu sebelum dihapus, untuk rekap
     const [existing] = await db.select().from(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId)).limit(1);
     await db.delete(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId));
+    if (existing) {
+      // Keep the booking for audit purposes, but make the cancelled check-in
+      // disappear from active booking totals.
+      const [cancelledBooking] = await db.update(bookingsTable)
+        .set({
+          status: "cancelled",
+          notes: "Pemakaian member gym dibatalkan bersama check-in.",
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(bookingsTable.membershipId, existing.membershipId),
+          eq(bookingsTable.bookingDate, existing.checkinDate),
+          eq(bookingsTable.source, "gym_membership"),
+        ))
+        .returning();
+      if (cancelledBooking) {
+        syncBookingRecordToBizportal(cancelledBooking).catch((err) =>
+          req.log.error({ err }, "[checkin] Gagal sync pembatalan booking membership ke Bizportal")
+        );
+      }
+    }
     res.status(204).send();
 
     // Fire-and-forget: kirim rekap WA hari ini ke grup admin
@@ -261,6 +614,27 @@ router.get("/memberships/export", adminMiddleware, async (req, res) => {
   }
 });
 
+router.get("/memberships/:id/payments", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "ID membership tidak valid" });
+      return;
+    }
+
+    const payments = await db
+      .select()
+      .from(membershipPaymentsTable)
+      .where(eq(membershipPaymentsTable.membershipId, id))
+      .orderBy(desc(membershipPaymentsTable.id));
+
+    res.json(payments.map((payment) => ({ ...payment, amount: Number(payment.amount) })));
+  } catch (err) {
+    req.log.error({ err }, "List membership payments error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
@@ -275,19 +649,39 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 
 router.post("/memberships", async (req, res) => {
   try {
-    const { name, email, phone, startDate, months, notes } = req.body;
-    if (!name || !email || !phone || !startDate) {
+    const { name, email, phone, startDate, months, notes } = req.body ?? {};
+    const nameNorm = String(name ?? "").trim();
+    const emailNorm = String(email ?? "").trim();
+    const phoneNorm = String(phone ?? "").trim();
+    const startDateNorm = String(startDate ?? "").trim();
+
+    if (!nameNorm || !emailNorm || !phoneNorm || !startDateNorm) {
       res.status(400).json({ error: "name, email, phone, dan startDate wajib diisi" });
       return;
     }
 
+    const isDateOnly = (value: string) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    };
+    if (!isDateOnly(startDateNorm)) {
+      res.status(400).json({ error: "Tanggal mulai harus berformat YYYY-MM-DD yang valid" });
+      return;
+    }
+
+    const monthsNum = Number(months ?? 1);
+    if (!Number.isInteger(monthsNum) || monthsNum < 1 || monthsNum > 12) {
+      res.status(400).json({ error: "Durasi membership harus berupa bilangan bulat 1 sampai 12 bulan" });
+      return;
+    }
+
     // ── Cegah duplikat: tolak jika phone sudah punya membership aktif/pending ──
-    const phoneNorm = String(phone).trim().toUpperCase();
     const BLOCK_STATUSES = ["active", "pending_payment", "waiting_confirmation"];
     const existingAll = await db
       .select()
       .from(gymMembershipsTable)
-      .where(eq(gymMembershipsTable.phone, String(phone).trim()));
+      .where(eq(gymMembershipsTable.phone, phoneNorm));
 
     const conflict = existingAll.find((m) => BLOCK_STATUSES.includes(m.status));
     if (conflict) {
@@ -299,32 +693,67 @@ router.post("/memberships", async (req, res) => {
       return;
     }
 
-    const monthsNum = Number(months) || 1;
     const totalPrice = PRICE_PER_MONTH * monthsNum;
 
-    const start = new Date(startDate);
+    const start = new Date(`${startDateNorm}T00:00:00Z`);
     const end = new Date(start);
-    end.setMonth(end.getMonth() + monthsNum);
+    end.setUTCMonth(end.getUTCMonth() + monthsNum);
     const endDate = end.toISOString().split("T")[0];
 
-    const [membership] = await db
-      .insert(gymMembershipsTable)
-      .values({
-        name,
-        email,
-        phone: String(phone).trim(),
-        startDate,
-        endDate,
-        months: monthsNum,
-        totalPrice: String(totalPrice),
-        notes,
-        status: "pending_payment",
-      })
-      .returning();
+    // Allocate the order number before the transaction because the sequence
+    // helper owns its transaction. A sequence gap is harmless; partial member
+    // records are not, so the member/payment/booking writes stay atomic below.
+    const orderNumber = await generateBookingOrderNumber();
+    const { membership, payment, paymentBooking } = await db.transaction(async (tx) => {
+      const [createdMembership] = await tx
+        .insert(gymMembershipsTable)
+        .values({
+          name: nameNorm,
+          email: emailNorm,
+          phone: phoneNorm,
+          startDate: startDateNorm,
+          endDate,
+          months: monthsNum,
+          totalPrice: String(totalPrice),
+          notes: notes ? String(notes).trim() : null,
+          status: "pending_payment",
+        })
+        .returning();
 
-    syncMembershipToBizportal(membership).catch(() => {});
-    await syncToPublic(membership!);
-    res.status(201).json({ ...membership, totalPrice: Number(membership!.totalPrice) });
+      if (!createdMembership) throw new Error("Gagal membuat data membership");
+
+      const [createdPayment] = await tx.insert(membershipPaymentsTable).values({
+        membershipId: createdMembership.id,
+        periodStart: createdMembership.startDate,
+        periodEnd: createdMembership.endDate,
+        months: createdMembership.months,
+        amount: createdMembership.totalPrice,
+        status: "pending_payment",
+      }).returning();
+
+      if (!createdPayment) throw new Error("Gagal membuat data pembayaran membership");
+
+      const createdPaymentBooking = await ensureMembershipPaymentBooking(
+        createdMembership,
+        createdPayment,
+        tx,
+        orderNumber,
+      );
+      return {
+        membership: createdMembership,
+        payment: createdPayment,
+        paymentBooking: createdPaymentBooking,
+      };
+    });
+
+    syncMembershipToBizportal(membership).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync membership ke Bizportal"),
+    );
+    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync booking pembayaran ke Bizportal")
+    );
+    await syncToPublic(membership);
+    res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Create membership error");
     res.status(500).json({ error: "Internal server error" });
@@ -373,6 +802,19 @@ router.post("/memberships/:id/renew", async (req, res) => {
       .where(eq(gymMembershipsTable.id, id))
       .returning();
 
+    const [payment] = await db.insert(membershipPaymentsTable).values({
+      membershipId: updated!.id,
+      periodStart: updated!.startDate,
+      periodEnd: updated!.endDate,
+      months: updated!.months,
+      amount: updated!.totalPrice,
+      status: "pending_payment",
+    }).returning();
+
+    const paymentBooking = await ensureMembershipPaymentBooking(updated!, payment!);
+    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync booking renewal ke Bizportal")
+    );
     await syncToPublic(updated!);
     res.json({ ...updated, totalPrice: Number(updated!.totalPrice) });
   } catch (err) {
@@ -398,12 +840,60 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
       return;
     }
 
+    let [pendingPayment] = await db
+      .select()
+      .from(membershipPaymentsTable)
+      .where(
+        and(
+          eq(membershipPaymentsTable.membershipId, id),
+          eq(membershipPaymentsTable.status, "pending_payment"),
+        ),
+      )
+      .orderBy(desc(membershipPaymentsTable.id))
+      .limit(1);
+
+    if (!pendingPayment) {
+      [pendingPayment] = await db
+        .insert(membershipPaymentsTable)
+        .values({
+          membershipId: existing.id,
+          periodStart: existing.startDate,
+          periodEnd: existing.endDate,
+          months: existing.months,
+          amount: existing.totalPrice,
+          status: "pending_payment",
+        })
+        .returning();
+    }
+
     await db.update(gymMembershipsTable)
       .set({ paymentMethod, paymentProofUrl, status: "waiting_confirmation" })
       .where(eq(gymMembershipsTable.id, id));
 
+    await db
+      .update(membershipPaymentsTable)
+      .set({
+        paymentMethod,
+        paymentProofUrl,
+        status: "waiting_confirmation",
+        submittedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(membershipPaymentsTable.id, pendingPayment.id));
+
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    const paymentBooking = await ensureMembershipPaymentBooking(membership!, {
+      ...pendingPayment,
+      paymentMethod,
+      paymentProofUrl,
+      status: "waiting_confirmation",
+      submittedAt: new Date(),
+      updatedAt: new Date(),
+    });
     syncMembershipToBizportal(membership).catch(() => {});
+    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync booking payment proof ke Bizportal")
+    );
     await syncToPublic(membership!);
 
     const appUrl = await getBaseUrl();
@@ -428,20 +918,138 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-    const data = { ...req.body };
-    if (data.totalPrice !== undefined) data.totalPrice = String(data.totalPrice);
+
+    const { status, notes, startDate, endDate } = req.body ?? {};
+    const data: {
+      status?: typeof existing.status;
+      notes?: string | null;
+      startDate?: string;
+      endDate?: string;
+      updatedAt: Date;
+    } = { updatedAt: new Date() };
+
+    if (status !== undefined) data.status = status;
+    if (notes !== undefined) data.notes = notes;
+    if (startDate !== undefined || endDate !== undefined) {
+      const nextStartDate = String(startDate ?? existing.startDate);
+      const nextEndDate = String(endDate ?? existing.endDate);
+      const isDateOnly = (value: string) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        const parsed = new Date(`${value}T00:00:00Z`);
+        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      };
+
+      if (!isDateOnly(nextStartDate) || !isDateOnly(nextEndDate)) {
+        res.status(400).json({ error: "Tanggal mulai dan berakhir harus berformat YYYY-MM-DD yang valid" });
+        return;
+      }
+      if (nextStartDate > nextEndDate) {
+        res.status(400).json({ error: "Tanggal mulai tidak boleh setelah tanggal berakhir" });
+        return;
+      }
+
+      data.startDate = nextStartDate;
+      data.endDate = nextEndDate;
+    }
+
+    if (Object.keys(data).length === 1) {
+      res.status(400).json({ error: "Tidak ada data yang diperbarui" });
+      return;
+    }
+
     await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (data.startDate !== undefined || data.endDate !== undefined) {
+      await db
+        .update(membershipPaymentsTable)
+        .set({
+          periodStart: membership.startDate,
+          periodEnd: membership.endDate,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(membershipPaymentsTable.membershipId, membership.id),
+            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
+          ),
+        );
+    }
+
+    if (membership.status === "cancelled" && existing.status !== "cancelled") {
+      await db
+        .update(membershipPaymentsTable)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(
+          and(
+            eq(membershipPaymentsTable.membershipId, membership.id),
+            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
+          ),
+        );
+    }
+
     syncMembershipToBizportal(membership).catch(() => {});
     if (membership.status === "active" && existing.status !== "active") {
-      const refNumber = `MB-${membership.id}`;
+      let [payment] = await db
+        .select()
+        .from(membershipPaymentsTable)
+        .where(
+          and(
+            eq(membershipPaymentsTable.membershipId, membership.id),
+            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
+          ),
+        )
+        .orderBy(desc(membershipPaymentsTable.id))
+        .limit(1);
+
+      if (!payment) {
+        [payment] = await db
+          .insert(membershipPaymentsTable)
+          .values({
+            membershipId: membership.id,
+            periodStart: membership.startDate,
+            periodEnd: membership.endDate,
+            months: membership.months,
+            amount: membership.totalPrice,
+            status: "pending_payment",
+            paymentMethod: membership.paymentMethod,
+            paymentProofUrl: membership.paymentProofUrl,
+          })
+          .returning();
+      }
+
+      const confirmedAt = new Date();
+      const refNumber = `MB-${membership.id}-P${payment.id}`;
+      const mutationKey = `SC-MBP-${payment.id}`;
+      await db
+        .update(membershipPaymentsTable)
+        .set({
+          status: "confirmed",
+          paymentMethod: membership.paymentMethod,
+          paymentProofUrl: membership.paymentProofUrl,
+          confirmedAt,
+          mutationKey,
+          accountingRef: refNumber,
+          updatedAt: confirmedAt,
+        })
+        .where(eq(membershipPaymentsTable.id, payment.id));
+
+      const [confirmedPayment] = await db
+        .select()
+        .from(membershipPaymentsTable)
+        .where(eq(membershipPaymentsTable.id, payment.id))
+        .limit(1);
+      const paymentBooking = await ensureMembershipPaymentBooking(membership, confirmedPayment!);
+      syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+        req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
+      );
       const today = new Date().toISOString().split("T")[0]!;
       // totalPrice sudah inklusif PPN — hitung DPP dan PPN agar tidak double-count
       const totalPrice = Number(membership.totalPrice);
       const membershipDpp = Math.round(totalPrice / 1.11);
       const membershipPpn = totalPrice - membershipDpp;
-      pushMembershipPaymentAsBankMutation(membership, new Date()).catch(() => {});
+      pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
       createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
         logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
@@ -449,6 +1057,10 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
     }
+    // Also repair/sync payment bookings when an admin changes the membership
+    // dates or cancels it. This keeps the order mirror consistent with the
+    // immutable membership payment events.
+    await syncMembershipPaymentBookings(membership);
     await syncToPublic(membership);
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {

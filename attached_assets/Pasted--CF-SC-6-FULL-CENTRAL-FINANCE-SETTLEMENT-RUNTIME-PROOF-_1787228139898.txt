@@ -1,0 +1,457 @@
+# CF-SC-6 — FULL CENTRAL FINANCE SETTLEMENT RUNTIME PROOF
+## DEVELOPMENT + PROD READ-ONLY SHADOW PREP
+## NO PROD CUTOVER
+
+CURRENT VERIFIED STATE:
+
+CF-SC-5 additive settlement rewire completed in DEV.
+
+Verified:
+
+- public.bank_mutations is canonical bank mutation owner
+- sport_center.payment_settlement_batches has:
+  canonical_bank_mutation_id
+  → public.bank_mutations(id)
+
+- legacy:
+  bank_mutation_id
+  → sport_center.bank_mutations(id)
+  remains intact
+
+Projection guard:
+source_app='sport_center'
+AND source_module='central_finance'
+→ no projection into sport_center.bank_mutations
+
+Runtime proof:
+- public mutation = 1
+- SC mutation = 0
+- settlement batch = 1
+- canonical FK populated
+- legacy FK NULL
+- retry returns same settlement batch
+- fixture rolled back
+
+Production:
+- unchanged
+- SPORT_CENTER_FINANCE_MODE remains legacy
+- no PROD writes/cutover
+
+OBJECTIVE:
+
+Prove the COMPLETE Sport Center Central Finance downstream path
+in DEVELOPMENT before any PROD shadow/cutover.
+
+Target:
+
+payment confirmed
+→ finance event
+→ central_finance_processing
+→ mirror
+→ accounting
+→ tax
+→ public.bank_mutations
+→ settlement
+→ reconciliation-ready state
+
+No Sport Center downstream finance ownership.
+
+============================================================
+PHASE 1 — ENVIRONMENT GATE
+============================================================
+
+Verify explicitly:
+
+APP_ENV = development
+database = Supabase DEV
+NODE_ENV != production
+SPORT_CENTER_FINANCE_MODE = central
+
+No PROD DB writes.
+
+============================================================
+PHASE 2 — REPRESENTATIVE PAYMENT MATRIX
+============================================================
+
+Run controlled DEV fixtures for:
+
+1. Transfer Bank full payment
+2. QRIS full payment
+3. Paylabs payment
+4. DP
+5. pelunasan
+6. group payment
+7. provider unknown legacy-shaped payment
+8. already-posted/adopted payment
+
+For every case verify:
+
+finance event = exactly 1
+central processing identity = exactly 1
+public mirror = exactly 1
+accounting payment = at most 1 canonical row
+accounting entry = exactly 1 financial effect
+balanced lines
+tax effect correct
+public.bank_mutations = exactly 1
+sport_center.bank_mutations created = 0
+settlement batch = at most 1
+canonical_bank_mutation_id populated
+legacy bank_mutation_id NULL for new central settlement
+
+============================================================
+PHASE 3 — CONFIGURATION RESOLUTION PROOF
+============================================================
+
+For each representative case report:
+
+company
+payment method
+provider
+receiving bank account
+tax rule
+tax rate
+tax inclusive/exclusive
+revenue COA
+PPN COA
+clearing/MDR COA if applicable
+settlement rule
+effective date
+
+Do not hide fallback behavior.
+
+Classify config source:
+
+CANONICAL_CONFIG
+LEGACY_FALLBACK
+MISSING
+AMBIGUOUS
+
+Central Finance must fail closed on MISSING/AMBIGUOUS.
+
+============================================================
+PHASE 4 — TAX PROOF
+============================================================
+
+Verify Central Finance uses effective configuration rather than Sport Center
+hardcoded tax posting.
+
+For tax-inclusive fixture prove:
+
+gross
+= revenue net
++ PPN
+
+Accounting totals balanced.
+
+Record exact tax rule/config identity used.
+
+Do not rewrite historical posted entries.
+
+============================================================
+PHASE 5 — SETTLEMENT PROOF
+============================================================
+
+For each relevant method:
+
+Transfer Bank
+QRIS
+Paylabs
+
+verify:
+
+public bank mutation identity
+→ settlement configuration
+→ settlement batch
+→ expected settlement amount/date
+
+For QRIS/provider fee:
+
+gross
+- MDR/provider deduction
+= expected net settlement
+
+according to existing config.
+
+Do not hardcode provider fee/rate.
+
+============================================================
+PHASE 6 — RECONCILIATION READINESS
+============================================================
+
+Do not create a second reconciliation engine.
+
+Verify central output contains sufficient canonical identity for:
+
+public.bank_mutations
+→ public.bank_reconciliation_matches
+
+Central flow must NOT create:
+
+sport_center.bank_reconciliation_matches
+
+Report:
+new SC reconciliation matches = 0
+
+============================================================
+PHASE 7 — IDEMPOTENCY MATRIX
+============================================================
+
+For each representative payment:
+
+retry finance event
+retry accounting
+retry public mutation creation
+retry settlement
+restart worker
+
+Required:
+no duplicate mirror
+no duplicate accounting
+no duplicate public mutation
+no duplicate settlement
+no SC mutation projection
+
+============================================================
+PHASE 8 — CONCURRENCY
+============================================================
+
+Controlled DEV concurrency test:
+
+two workers attempt same event/settlement.
+
+Verify:
+FOR UPDATE SKIP LOCKED / unique identity protection works.
+
+Financial effect remains exactly once.
+
+============================================================
+PHASE 9 — MANUAL REVIEW / FAILURE STATES
+============================================================
+
+Controlled cases:
+
+missing company
+missing bank config
+missing tax config
+missing COA
+unsupported provider
+ambiguous settlement config
+
+Required:
+
+manual_review
+zero partial financial writes
+
+Transient error:
+
+retryable
+backoff applied
+event can recover later
+
+============================================================
+PHASE 10 — LEGACY/SHADOW PRESERVATION
+============================================================
+
+Verify source/runtime behavior:
+
+legacy:
+existing downstream path preserved
+
+shadow:
+legacy downstream preserved
+central calculation/evidence may run without ownership
+
+central:
+only Central Finance owns downstream finance
+
+Do not alter PROD mode.
+
+============================================================
+PHASE 11 — HISTORICAL 351 EVENT CLASSIFICATION
+============================================================
+
+PROD READ ONLY ONLY.
+
+Using existing evidence:
+
+351 total outbox events
+307 posted
+44 non-posted
+
+Known non-posted:
+15 already have valid posted accounting
+29 have no accounting
+
+Re-run classification using Central Finance rules.
+
+Classify every historical event as:
+
+ALREADY_POSTED_ADOPT
+RECOVERABLE
+MANUAL_REVIEW_CONFIG
+STALE_LOCK
+LEGACY_EXCEPTION
+BLOCKED
+
+No write.
+
+Required:
+sum classifications = total eligible historical events.
+
+============================================================
+PHASE 12 — 29 HISTORICAL PAYMENT CONFIG READINESS
+============================================================
+
+For the 29 confirmed payments without accounting:
+
+resolve read-only:
+
+company
+payment method
+provider
+bank config
+tax rule
+COA
+settlement config
+
+Do not post them.
+
+Classify:
+
+READY_TO_RECOVER
+CONFIG_MISSING
+IDENTITY_AMBIGUOUS
+PROVIDER_REVIEW
+OTHER
+
+============================================================
+PHASE 13 — PROD SHADOW READINESS
+============================================================
+
+Define future shadow mode behavior:
+
+Central Finance reads/calculates expected output
+but creates ZERO PROD financial writes.
+
+Compare legacy result vs central expected result for a representative PROD sample.
+
+Classify:
+
+MATCH
+MISMATCH_CONFIG
+MISMATCH_TAX
+MISMATCH_COA
+MISMATCH_PROVIDER
+LEGACY_EXCEPTION
+
+Do not activate production processor yet.
+
+============================================================
+PHASE 14 — TESTS / BUILD
+============================================================
+
+Run:
+
+- Central Finance tests
+- canonical mutation tests
+- settlement tests
+- reconciliation tests
+- accounting integration
+- Sport Center boundary tests
+- Paylabs tests
+
+Then:
+
+scripts typecheck
+API typecheck delta
+API build
+migration verification
+git diff --check
+API readiness
+
+Do not require unrelated baseline type errors to be fixed.
+
+Required:
+CF-SC-6 related type errors = 0
+
+============================================================
+PHASE 15 — LEGACY RETIREMENT RECLASSIFICATION
+============================================================
+
+After runtime proof classify:
+
+sport_center.bank_mutations
+sport_center.bank_reconciliation_matches
+sport_center.bank_reconciliation_account_rules
+sport_center.bank_reconciliation_closing
+sport_center.bank_journal_entries
+legacy bank settlement functions
+
+as:
+
+KEEP_FOR_LEGACY
+HISTORICAL_ONLY
+SAFE_TO_RETIRE_AFTER_CUTOVER
+BLOCKED
+
+Do NOT delete/drop anything.
+
+============================================================
+FINAL REPORT ONLY
+============================================================
+
+DEV CENTRAL PATH =
+PAYMENT MATRIX RESULT =
+
+TRANSFER BANK =
+QRIS =
+PAYLABS =
+DP =
+PELUNASAN =
+GROUP =
+LEGACY-SHAPED =
+ADOPTION =
+
+CONFIG RESOLUTION =
+TAX RESULT =
+SETTLEMENT RESULT =
+RECONCILIATION READINESS =
+
+PUBLIC MUTATION DUPLICATES =
+SC MUTATIONS CREATED =
+SC RECONCILIATION MATCHES CREATED =
+SETTLEMENT DUPLICATES =
+
+IDEMPOTENCY =
+CONCURRENCY =
+MANUAL REVIEW =
+TRANSIENT RETRY =
+
+HISTORICAL 351 CLASSIFICATION =
+29 PAYMENT RECOVERY READINESS =
+
+PROD SHADOW READINESS =
+LEGACY VS CENTRAL MATCH =
+
+TESTS =
+ACCOUNTING INTEGRATION =
+TYPECHECK DELTA =
+BUILD =
+MIGRATION VALIDATION =
+GIT DIFF CHECK =
+API READY =
+
+PROD MODE = legacy
+PROD WRITES = 0
+PROD CUTOVER = NO
+
+SC LEGACY OBJECT CLASSIFICATION =
+
+READY FOR PROD SHADOW MODE = YES/NO
+READY FOR CONTROLLED CUTOVER = YES/NO
+READY FOR LEGACY CLEANUP = YES/NO
+
+BLOCKERS =
+
+STOP.

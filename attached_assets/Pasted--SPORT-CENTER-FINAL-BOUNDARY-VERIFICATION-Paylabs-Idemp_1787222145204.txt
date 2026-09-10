@@ -1,0 +1,268 @@
+# SPORT CENTER — FINAL BOUNDARY VERIFICATION
+## Paylabs Idempotency + No Live Booking-Based Accounting Producer
+
+PROJECT:
+Sport Center
+
+CURRENT STATE:
+
+SC-FINANCE-BOUNDARY implemented.
+
+Modes:
+- legacy
+- shadow
+- central
+
+Production remains:
+SPORT_CENTER_FINANCE_MODE=legacy
+
+Group payment live route has been fixed:
+- createPublicAccountingEntryForGroup() removed from live route
+- /payments/backfill-group-accounting returns 410
+- active group payment confirmation uses postConfirmedPaymentAccounting(paymentId)
+
+DO NOT:
+- cut over production to central
+- modify BizPortal
+- build Central Finance yet
+- mutate PROD financial data
+- send real WA
+- create real Paylabs charge
+
+OBJECTIVE:
+
+Complete the final Sport Center boundary proof before starting Central Finance SQL.
+
+============================================================
+PHASE 1 — PAYLABS CONFIRMATION IDEMPOTENCY
+============================================================
+
+Trace the complete Paylabs flow:
+
+payment/order creation
+→ callback/webhook
+→ callback verification
+→ canonical sport_center.sport_payments update
+→ status confirmed
+→ finance outbox event
+
+Identify all paths that can confirm the same Paylabs payment:
+
+- webhook
+- reconciliation callback
+- manual/admin confirmation
+- retry
+- duplicate provider callback
+- concurrent callback requests
+- startup/recovery job
+
+Prove the canonical identity used for Paylabs confirmation.
+
+Required invariant:
+
+ONE canonical payment ID
+→ maximum ONE payment_confirmed finance event.
+
+============================================================
+PHASE 2 — DATABASE IDEMPOTENCY
+============================================================
+
+Verify the finance outbox database uniqueness is sufficient.
+
+Required:
+- deterministic correlation:
+  sc_payment_<payment_id>
+- unique event identity at database level
+- duplicate callback cannot create second event
+- concurrent callbacks cannot create second event
+
+Do not rely only on application-level SELECT-before-INSERT.
+
+If current constraint is insufficient:
+make the smallest additive safe fix.
+
+============================================================
+PHASE 3 — PAYLABS REGRESSION TESTS
+============================================================
+
+Add focused tests:
+
+1. First valid callback:
+   payment becomes confirmed
+   exactly one finance event exists.
+
+2. Exact callback retry:
+   no second event.
+
+3. Concurrent callbacks:
+   exactly one event.
+
+4. Callback + admin confirmation race:
+   exactly one event.
+
+5. Already-confirmed payment callback:
+   idempotent.
+
+6. Invalid Paylabs signature/status:
+   no confirmation
+   no finance event.
+
+7. Provider references remain preserved.
+
+8. No accounting entry is required for callback success in central mode.
+
+No external Paylabs charge.
+
+============================================================
+PHASE 4 — LIVE PRODUCER GRAPH
+============================================================
+
+Search entire repository for every callable path to:
+
+createPublicAccountingEntry()
+createPublicAccountingEntryForGroup()
+source = sport_center_booking
+postSportCenterBookingPayment()
+postConfirmedPaymentAccounting()
+
+Classify each occurrence:
+
+LIVE_PAYMENT_PATH
+HISTORICAL_MIGRATION_ONLY
+DEAD_CODE
+TEST_ONLY
+OTHER_MODULE
+
+Critical requirement:
+
+No LIVE Sport Center booking/payment route may create:
+
+public.accounting_entries
+source = sport_center_booking
+
+Historical migration helper may remain only if unreachable from live routes.
+
+============================================================
+PHASE 5 — ROUTE / JOB / WORKER CHECK
+============================================================
+
+Audit:
+
+- payment routes
+- group payment routes
+- WA confirmation
+- Paylabs callbacks
+- schedulers
+- startup jobs
+- cron
+- backfill endpoints
+- manual accounting endpoints
+
+Prove none can create new booking-based accounting in normal runtime.
+
+If a legacy live endpoint still exists:
+retire it fail-closed (410 or equivalent) unless required by current production
+business flow.
+
+Do not remove unrelated accounting functionality.
+
+============================================================
+PHASE 6 — CENTRAL MODE BEHAVIOR
+============================================================
+
+Verify source-level behavior:
+
+SPORT_CENTER_FINANCE_MODE=central
+
+must mean:
+
+payment confirmed
+→ durable finance event exists
+→ Sport Center does NOT:
+   - claim/process downstream accounting outbox
+   - create public mirror
+   - create public accounting payment
+   - create public accounting entry
+   - create journal/lines
+   - push settlement accounting
+   - push bank reconciliation accounting
+
+Paylabs callback and payment status must still work.
+
+Do not enable central mode in production.
+
+============================================================
+PHASE 7 — LEGACY MODE REGRESSION
+============================================================
+
+Verify:
+
+SPORT_CENTER_FINANCE_MODE=legacy
+
+still preserves existing production behavior until Central Finance is ready.
+
+This is temporary transition behavior only.
+
+============================================================
+PHASE 8 — TEST / BUILD
+============================================================
+
+Run:
+
+- financeBoundary tests
+- new Paylabs idempotency tests
+- relevant payment tests
+- API build
+- API typecheck if workspace permits
+- git diff --check
+
+If full typecheck remains blocked only by known unrelated generated-schema
+issues, report exact blocker separately.
+
+Restart API and confirm readiness.
+
+============================================================
+FINAL REPORT
+============================================================
+
+PAYLABS CANONICAL PAYMENT IDENTITY =
+
+PAYLABS CALLBACK OWNER =
+
+PAYLABS RETRY IDEMPOTENT = YES/NO
+
+PAYLABS CONCURRENT CALLBACK SAFE = YES/NO
+
+CALLBACK + ADMIN RACE SAFE = YES/NO
+
+FINANCE EVENT UNIQUE CONSTRAINT =
+
+FINANCE EVENT COUNT PER PAYMENT =
+
+LIVE sport_center_booking PRODUCER COUNT =
+
+LIVE PRODUCERS REMAINING =
+
+HISTORICAL HELPERS RETAINED =
+
+CENTRAL MODE DOWNSTREAM SPORT CENTER WRITES =
+
+LEGACY MODE STATUS =
+
+PAYLABS CHANGED = YES/NO
+
+REAL PAYLABS CHARGE = NO
+
+PRODUCTION CUTOVER = NO
+
+TESTS =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+API READY =
+
+READY FOR CENTRAL FINANCE SQL PHASE = YES/NO
+
+BLOCKERS =
+
+STOP.

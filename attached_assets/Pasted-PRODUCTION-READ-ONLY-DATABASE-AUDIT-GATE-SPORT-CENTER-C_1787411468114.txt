@@ -1,0 +1,544 @@
+PRODUCTION READ-ONLY DATABASE AUDIT GATE
+SPORT CENTER — CONTINUE AUTOMATICALLY
+
+STATUS YANG SUDAH TERBUKTI:
+
+Production domain:
+sc.travelintrips.co.id
+
+Actual runtime:
+Replit Autoscale
+
+Production:
+NODE_ENV=production
+PORT=8080
+
+Production database resolver:
+SUPABASE_DATABASE_URL
+
+Production storage:
+Supabase Storage production
+
+Production secret source:
+GCP_SECRET_MANAGER_BOOTSTRAP_JSON
+
+GAE:
+LEGACY / UNUSED untuk runtime Production saat ini
+
+JANGAN kembali mengaudit/mengubah App Engine.
+
+JANGAN mengganti GCP project.
+
+JANGAN mengganti secret.
+
+JANGAN mengubah deployment.
+
+JANGAN menggunakan DEV sebagai PROD.
+
+JANGAN menyentuh Central Finance data.
+
+==================================================
+OBJECTIVE
+==================================================
+
+Selesaikan blocker:
+
+PRODUCTION READ-ONLY DATABASE = BLOCKED
+
+menjadi:
+
+PRODUCTION READ-ONLY DATABASE = PASS
+
+jika aman dan dapat dilakukan dari environment yang tersedia.
+
+Setelah PASS, langsung jalankan Production Transaction Integrity Audit.
+
+==================================================
+PHASE 1 — IDENTIFY PRODUCTION DATABASE SAFELY
+==================================================
+
+Gunakan official production resolver.
+
+Production source MUST be:
+
+SUPABASE_DATABASE_URL
+
+atau loader resmi yang menghasilkan connection tersebut.
+
+JANGAN print:
+
+- password
+- username credential lengkap
+- connection string
+- token
+- secret payload
+
+Redact seluruh credential.
+
+Pastikan target database benar-benar Production.
+
+Jangan menggunakan:
+
+SUPABASE_DATABASE_URL_DEV
+DATABASE_URL fallback
+DEV database
+test database
+
+==================================================
+PHASE 2 — READ-ONLY ENFORCEMENT
+==================================================
+
+Buat jalur audit database terpisah.
+
+Prioritas:
+
+1. PostgreSQL transaction:
+
+BEGIN READ ONLY;
+
+2. SET TRANSACTION READ ONLY;
+
+3. Jalankan seluruh audit dalam transaction read-only.
+
+Tambahkan defense-in-depth jika driver mendukung:
+
+SET default_transaction_read_only = on
+
+atau session-level equivalent.
+
+Jangan mengubah persistent database configuration.
+
+Jangan ALTER ROLE.
+
+Jangan ALTER DATABASE.
+
+Jangan membuat perubahan permanent.
+
+==================================================
+PHASE 3 — WRITE PROTECTION
+==================================================
+
+Sebelum audit:
+
+verifikasi transaction memang READ ONLY.
+
+Gunakan harmless verification seperti:
+
+SHOW transaction_read_only;
+
+Expected:
+
+on
+
+Jika hasil:
+
+off
+
+STOP.
+
+Jangan menjalankan audit.
+
+==================================================
+PHASE 4 — CONNECTION IDENTITY
+==================================================
+
+Read-only metadata saja:
+
+SELECT current_database();
+SELECT current_user;
+SHOW transaction_read_only;
+
+Jika tersedia secara aman:
+
+SELECT inet_server_addr();
+
+Jangan print password/credential.
+
+Simpan hanya safe identity evidence.
+
+==================================================
+PHASE 5 — PRODUCTION IDENTITY CHECK
+==================================================
+
+Pastikan database bukan DEV.
+
+Gunakan safe database metadata dan application configuration.
+
+Jika tidak dapat membuktikan Production:
+
+STOP.
+
+Verdict:
+
+PRODUCTION DATABASE IDENTITY = UNVERIFIED
+
+Jangan mengganti dengan DEV.
+
+==================================================
+PHASE 6 — AUDIT TRANSACTION INTEGRITY
+==================================================
+
+HANYA jika:
+
+PRODUCTION DATABASE = CONFIRMED
+READ-ONLY = ON
+
+jalankan audit.
+
+Audit seluruh area:
+
+--------------------------------------------------
+A. BOOKING LIFECYCLE
+--------------------------------------------------
+
+Periksa:
+
+- invalid completed booking
+- completed tanpa check-in
+- completed sebelum endTime
+- booking future yang completed
+- terminal status inconsistency
+- pending reschedule
+- check-in consistency
+- booking history consistency
+
+Expected contract:
+
+completed hanya melalui:
+
+bookingLifecycle.completeBooking()
+
+dan membutuhkan:
+
+status = confirmed
+check-in = completed
+session end time = passed
+no pending reschedule
+
+--------------------------------------------------
+B. PAYMENT
+--------------------------------------------------
+
+Audit:
+
+- payment ↔ booking
+- duplicate payment
+- payment amount mismatch
+- paid booking mismatch
+- DP/final payment identity
+- orphan payment
+- payment status inconsistency
+
+--------------------------------------------------
+C. CORPORATE BILLING
+--------------------------------------------------
+
+Audit:
+
+- booking ↔ invoice
+- unbilled/billed/paid
+- future booking incorrectly completed by invoice payment
+- duplicate invoice
+- invoice total mismatch
+- invoice booking duplication
+
+Payment invoice MUST NOT itself imply booking completion.
+
+--------------------------------------------------
+D. GROUP
+--------------------------------------------------
+
+Audit:
+
+- group ↔ booking
+- orphan group references
+- duplicate booking in group
+- missing group membership
+- invalid group size
+- historical group preservation
+
+--------------------------------------------------
+E. EVENT
+--------------------------------------------------
+
+Audit:
+
+- event booking
+- discount calculation
+- expected 21.4%
+- total after discount
+- event vs regular booking consistency
+
+Expected:
+
+214 / 1000
+
+NOT:
+
+3 / 14
+
+--------------------------------------------------
+F. RECURRING
+--------------------------------------------------
+
+Audit:
+
+- past dates
+- invalid operating hours
+- duplicate dates
+- conflicts
+- blocked schedule
+- corporate approval requirement
+- incorrect confirmed status
+
+--------------------------------------------------
+G. RESCHEDULE
+--------------------------------------------------
+
+Audit:
+
+- pending requests
+- booking/request mismatch
+- old schedule preservation
+- new schedule validity
+- duplicate reschedule
+- completed booking reschedule
+- history consistency
+
+--------------------------------------------------
+H. CHECK-IN
+--------------------------------------------------
+
+Audit:
+
+- check-in without valid booking
+- duplicate check-in
+- missing check-in history
+- completed without check-in
+
+--------------------------------------------------
+I. REFUND
+--------------------------------------------------
+
+Audit:
+
+- refund ↔ payment
+- refund ↔ booking
+- duplicate refund
+- status inconsistency
+- accounting linkage
+
+--------------------------------------------------
+J. EXPENSE
+--------------------------------------------------
+
+Audit:
+
+- draft/pending/approved/paid/rejected/cancelled
+- duplicate expense number
+- paid expense without expected journal
+- journal mismatch
+
+DO NOT modify anything.
+
+--------------------------------------------------
+K. INVOICE / TAX
+--------------------------------------------------
+
+Audit:
+
+- DPP
+- DPP Nilai Lain
+- PPN
+- total
+- duration
+- invoice totals
+- corporate invoice aggregation
+
+Do not repair.
+
+--------------------------------------------------
+L. QRIS
+--------------------------------------------------
+
+Audit:
+
+- QRIS payment
+- settlement
+- MDR
+- expected settlement
+- bank mutation matching
+- duplicate settlement
+- active payment exclusion
+
+--------------------------------------------------
+M. RECONCILIATION
+--------------------------------------------------
+
+Audit:
+
+- booking → payment
+- payment → bank mutation
+- QRIS settlement
+- candidate identity
+- duplicate match
+- source collision
+- approved/unmatched state
+
+IMPORTANT:
+
+Pay special attention to the known issue:
+
+public.bank_reconciliation_matches
+versus
+sport_center.bank_reconciliation_matches
+
+and candidate_source.
+
+DO NOT change schema.
+
+DO NOT resolve collision by mutation.
+
+Only report evidence.
+
+--------------------------------------------------
+N. CENTRAL FINANCE
+--------------------------------------------------
+
+Audit:
+
+- Sport Center payment accounting
+- journal
+- journal lines
+- duplicate journal
+- correlation ID
+- payment_id uniqueness
+- debit/credit balance
+- outbox
+- settlement linkage
+
+Verify that:
+
+debit total = credit total
+
+and no duplicate accounting entry exists.
+
+DO NOT post.
+DO NOT repair.
+DO NOT backfill.
+
+--------------------------------------------------
+PHASE 7 — CROSS-ENTITY INTEGRITY
+--------------------------------------------------
+
+Run cross-checks:
+
+booking
+→ payment
+→ invoice
+→ settlement
+→ reconciliation
+→ accounting
+
+Identify:
+
+ORPHAN
+DUPLICATE
+MISMATCH
+MISSING
+INVALID STATE
+
+No mutation.
+
+==================================================
+PHASE 8 — AUTOMATIC SAFE FIX?
+==================================================
+
+IMPORTANT:
+
+This audit is READ ONLY.
+
+DO NOT modify Production data during this task.
+
+Even if anomalies are found:
+
+report them precisely.
+
+Do NOT:
+
+INSERT
+UPDATE
+DELETE
+ALTER
+TRUNCATE
+migration
+backfill
+repair
+
+The next remediation can be created separately based on verified evidence.
+
+==================================================
+PHASE 9 — FINAL VERDICT
+==================================================
+
+Report:
+
+PRODUCTION RUNTIME = PASS
+
+PRODUCTION DATABASE IDENTITY = PASS/FAIL
+
+READ-ONLY DATABASE = PASS/FAIL
+
+BOOKING LIFECYCLE = PASS/ANOMALY
+
+PAYMENT = PASS/ANOMALY
+
+CORPORATE BILLING = PASS/ANOMALY
+
+GROUP = PASS/ANOMALY
+
+EVENT = PASS/ANOMALY
+
+RECURRING = PASS/ANOMALY
+
+RESCHEDULE = PASS/ANOMALY
+
+CHECK-IN = PASS/ANOMALY
+
+REFUND = PASS/ANOMALY
+
+EXPENSE = PASS/ANOMALY
+
+INVOICE/TAX = PASS/ANOMALY
+
+QRIS = PASS/ANOMALY
+
+SETTLEMENT = PASS/ANOMALY
+
+RECONCILIATION = PASS/ANOMALY
+
+CENTRAL FINANCE = PASS/ANOMALY
+
+DEBIT/CREDIT BALANCE = PASS/ANOMALY
+
+CROSS-ENTITY INTEGRITY = PASS/ANOMALY
+
+NO PRODUCTION DATA MUTATED = MUST BE PASS
+
+==================================================
+FAIL-CLOSED
+==================================================
+
+If read-only cannot be proven:
+
+STOP.
+
+Do not query using write-capable pool.
+
+Do not use DEV.
+
+Do not mutate Production.
+
+Report exact blocker and continue any non-database read-only verification that is still safe.
+
+Do not ask for confirmation.

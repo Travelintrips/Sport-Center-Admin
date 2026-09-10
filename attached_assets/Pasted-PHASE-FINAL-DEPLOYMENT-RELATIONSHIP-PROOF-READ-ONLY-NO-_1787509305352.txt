@@ -1,0 +1,395 @@
+PHASE — FINAL DEPLOYMENT RELATIONSHIP PROOF
+READ-ONLY — NO APPLICATION/DATABASE CHANGES
+
+CURRENT STATUS
+
+Everything else is already PASS:
+
+- Production schema = PASS
+- Production migration = PASS
+- Production auditor = PASS
+- SELECT grants = PASS
+- current_user = sport_center_production_auditor
+- transaction_read_only = on
+- mutation_queries = 0
+- skipped_queries = 0
+- ROLLBACK = PASS
+- Production integrity audit = PASS
+- HTTPS = PASS
+- API tests = PASS
+- Typecheck = PASS
+- Build = PASS
+- git diff --check = PASS
+- WhatsApp DEV fail-closed = PASS
+- Accounting = PASS
+- Central Finance = UNCHANGED
+
+ONLY REMAINING BLOCKER:
+
+DEPLOYMENT_RELATIONSHIP = UNVERIFIED
+
+Production domain:
+
+https://sc.travelintrips.co.id
+
+The domain currently responds successfully:
+
+/
+→ 200
+
+/health
+→ 200
+
+/api/health
+→ 200
+
+/api/facilities
+→ 200
+
+/api/promos
+→ 200
+
+/api/settings
+→ 200
+
+/api/auth/me
+→ 401 expected
+
+However deployment metadata reports:
+
+isDeployed = false
+hasSuccessfulBuild = false
+primaryUrl = ""
+
+OBJECTIVE
+
+Prove, using READ-ONLY evidence, whether:
+
+https://sc.travelintrips.co.id
+
+is currently serving the CURRENT intended Sport Center Production deployment.
+
+DO NOT modify anything.
+
+============================================================
+1. DO NOT CHANGE
+============================================================
+
+DO NOT:
+
+- deploy
+- redeploy
+- publish
+- create deployment
+- delete deployment
+- change DNS
+- change custom domain
+- change secrets
+- change Replit configuration
+- change environment variables
+- change database
+- change schema
+- modify Production data
+- modify Central Finance
+
+This phase is READ-ONLY.
+
+============================================================
+2. INSPECT CURRENT REPLIT DEPLOYMENT
+============================================================
+
+Use only existing read-only deployment metadata/tools.
+
+Determine:
+
+- active deployment ID if available
+- deployment type
+- deployment status
+- build status
+- deployment revision
+- deployment timestamp
+- deployment URL
+- custom domain association
+- domain routing
+- deployment target
+
+Do not expose secrets.
+
+Do not expose private credentials.
+
+============================================================
+3. INSPECT CUSTOM DOMAIN
+============================================================
+
+Determine how:
+
+sc.travelintrips.co.id
+
+currently resolves.
+
+Inspect:
+
+- DNS target
+- CNAME/ALIAS if applicable
+- Replit custom-domain mapping
+- HTTPS certificate association
+- routing target
+- deployment/domain association
+
+Do not change DNS.
+
+Do not change the domain.
+
+============================================================
+4. PROVE RUNTIME IDENTITY
+============================================================
+
+The most important requirement is to prove that the live HTTPS runtime is the
+CURRENT intended deployment.
+
+Use safe runtime evidence such as:
+
+- response headers
+- deployment/revision headers if exposed
+- application version endpoint if already existing
+- build/revision identifier if already exposed
+- deployment metadata
+- existing runtime health information
+
+Do NOT add a new endpoint merely for this verification.
+
+Do NOT modify application code.
+
+Do NOT expose secrets.
+
+============================================================
+5. COMPARE LIVE DOMAIN AGAINST REPLIT TARGET
+============================================================
+
+Compare:
+
+A. https://sc.travelintrips.co.id
+
+against
+
+B. the currently identified Replit deployment/runtime URL.
+
+Verify:
+
+- HTTP status
+- redirect behavior
+- response headers
+- runtime identity
+- build/revision identity if available
+
+The objective is:
+
+CUSTOM DOMAIN
+      ↓
+REPLIT ROUTING
+      ↓
+CURRENT PRODUCTION DEPLOYMENT
+      ↓
+CURRENT SPORT CENTER BUILD
+
+============================================================
+6. DO NOT ASSUME HTTP 200 IS ENOUGH
+============================================================
+
+HTTP 200 alone does NOT prove deployment relationship.
+
+If the domain responds 200 but the current deployment/revision cannot be
+matched, classify:
+
+DEPLOYMENT_RELATIONSHIP = UNVERIFIED
+
+Do not claim PASS.
+
+============================================================
+7. HANDLE isDeployed=false CORRECTLY
+============================================================
+
+Investigate why metadata says:
+
+isDeployed=false
+hasSuccessfulBuild=false
+primaryUrl=""
+
+Possible explanations:
+
+- stale deployment metadata
+- metadata refers to a different deployment object
+- custom domain points to an existing runtime not represented by the queried
+  deployment
+- current runtime was published through another mechanism
+- deployment metadata API is incomplete/stale
+
+Determine which explanation is supported by evidence.
+
+Do not guess.
+
+============================================================
+8. CHECK CURRENT SOURCE/BUILD IDENTITY
+============================================================
+
+Determine the current Git/source revision used by the Production application
+IF this can be verified without changing code or deployment.
+
+Compare with:
+
+- current working tree commit
+- deployed build/revision
+- deployment timestamp
+
+If no reliable revision is exposed:
+
+classify:
+
+SOURCE_REVISION = UNVERIFIED
+
+Do not fabricate a match.
+
+============================================================
+9. CHECK CUSTOM DOMAIN CERTIFICATE
+============================================================
+
+Verify:
+
+https://sc.travelintrips.co.id
+
+has a valid HTTPS certificate and is served by the expected platform.
+
+Do not modify certificate configuration.
+
+============================================================
+10. FINAL SMOKE TEST
+============================================================
+
+Repeat:
+
+GET https://sc.travelintrips.co.id/
+GET https://sc.travelintrips.co.id/health
+GET https://sc.travelintrips.co.id/api/health
+GET https://sc.travelintrips.co.id/api/facilities
+GET https://sc.travelintrips.co.id/api/promos
+GET https://sc.travelintrips.co.id/api/settings
+
+Verify:
+
+HTTP 200 where expected.
+
+Verify:
+
+/api/auth/me
+
+returns:
+
+401
+
+without credentials.
+
+This is expected and must NOT be weakened.
+
+============================================================
+11. FINAL CLASSIFICATION
+============================================================
+
+Use exactly one:
+
+DEPLOYMENT_RELATIONSHIP = PROVEN
+
+or
+
+DEPLOYMENT_RELATIONSHIP = UNVERIFIED
+
+or
+
+DEPLOYMENT_RELATIONSHIP = MISMATCH
+
+Definitions:
+
+PROVEN:
+The custom domain can be conclusively matched to the current intended
+Production deployment/runtime.
+
+UNVERIFIED:
+The domain works but the current deployment identity cannot be proven.
+
+MISMATCH:
+The domain is conclusively serving a different/old/incorrect deployment.
+
+============================================================
+12. IMPORTANT
+============================================================
+
+If:
+
+isDeployed=false
+hasSuccessfulBuild=false
+primaryUrl=""
+
+but independent runtime evidence conclusively proves:
+
+sc.travelintrips.co.id
+→ current intended Sport Center Production runtime
+
+then mark:
+
+DEPLOYMENT_RELATIONSHIP = PROVEN
+
+and document that deployment metadata is inconsistent/stale.
+
+Do NOT force a redeploy just to make metadata look green.
+
+============================================================
+13. FINAL REPORT
+============================================================
+
+Update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+Include:
+
+- domain
+- DNS evidence
+- HTTPS evidence
+- Replit routing evidence
+- deployment metadata
+- runtime identity
+- build/revision identity
+- comparison result
+- explanation of metadata discrepancy if applicable
+
+============================================================
+14. FINAL VERDICT
+============================================================
+
+If:
+
+DEPLOYMENT_RELATIONSHIP = PROVEN
+
+and all previously verified gates remain PASS:
+
+declare:
+
+PROJECT STATUS = FINALIZED
+
+Otherwise:
+
+PROJECT STATUS = NOT FINALIZED
+
+with exactly the remaining blocker.
+
+DO NOT:
+
+- redeploy blindly
+- change DNS
+- modify application
+- modify database
+- modify financial data
+- modify Central Finance
+- weaken authentication
+- fabricate deployment evidence
+
+This is the FINAL READ-ONLY CLOSURE CHECK.

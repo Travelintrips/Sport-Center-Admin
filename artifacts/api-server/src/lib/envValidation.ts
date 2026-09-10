@@ -128,12 +128,12 @@ export function validateEnv(): EnvValidationResult {
       }
     }
 
-    // Dangerous override flags should not be active in production
+    // Dangerous override flags should never be active in production.
     if (process.env.ALLOW_DEV_ON_PROD_DB === "true") {
-      warnings.push(`"ALLOW_DEV_ON_PROD_DB=true" is set in production — harmless (DB module ignores it), but remove when possible`);
+      fatal.push(`"ALLOW_DEV_ON_PROD_DB=true" is forbidden in production`);
     }
     if (process.env.ALLOW_DEV_ON_PROD_STORAGE === "true") {
-      warnings.push(`"ALLOW_DEV_ON_PROD_STORAGE=true" is set in production — harmless (storage module ignores it), but remove when possible`);
+      fatal.push(`"ALLOW_DEV_ON_PROD_STORAGE=true" is forbidden in production`);
     }
 
     // Production should have APP_URL set (hard to generate correct invoice links otherwise)

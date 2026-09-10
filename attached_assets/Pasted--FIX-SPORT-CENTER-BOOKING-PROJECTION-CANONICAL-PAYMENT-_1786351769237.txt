@@ -1,0 +1,501 @@
+# FIX SPORT CENTER BOOKING PROJECTION + CANONICAL PAYMENT ACCOUNTING PIPELINE
+
+## SC-0007 / SC-0008 Root Cause Closure
+
+Lanjutkan dari state workspace saat ini.
+
+Root cause yang sudah ditemukan:
+
+1. Payment confirmation commit terjadi lebih dulu.
+2. Mirror/accounting diproses async/outbox.
+3. `ensureSportCenterPaymentMirror()` membutuhkan row:
+   `public.sport_bookings`
+4. Tetapi flow Sport Center saat ini hanya menulis/sync ke:
+   `sport_center.sport_bookings_sync`
+5. Tidak ditemukan caller repository yang membuat/proyeksikan row:
+   `public.sport_bookings`
+6. Akibatnya SC-0007 / SC-0008:
+
+   * source booking/payment confirmed;
+   * public booking mirror tidak ada;
+   * payment mirror gagal;
+   * canonical accounting chain tidak lengkap.
+7. Beberapa route masih dapat memicu legacy journal/accounting path secara terpisah.
+
+Historical entry 14 JANGAN dimodifikasi pada task ini.
+
+---
+
+# 1. SAFETY
+
+Development only.
+
+Jangan:
+
+* modify historical GL amounts;
+* delete entry 14;
+* repair SC-0007/8 historical data yet;
+* production deploy;
+* mass backfill;
+* final reconciliation;
+* settlement/MDR posting.
+
+Task ini fokus:
+**fix pipeline untuk transaksi baru + dry-run historical repair eligibility.**
+
+---
+
+# 2. VERIFY BOOKING PROJECTION CONTRACT
+
+Audit schema:
+
+`sport_center.sport_bookings`
+
+`sport_center.sport_bookings_sync`
+
+`public.sport_bookings`
+
+Determine intended architecture:
+
+A.
+`sport_center.sport_bookings`
+→ `sport_center.sport_bookings_sync`
+→ `public.sport_bookings`
+
+or
+
+B.
+`sport_center.sport_bookings`
+→ directly `public.sport_bookings`
+
+or another existing intended path.
+
+Do not invent a new duplicate mirror layer if project already has intended projection semantics.
+
+Document exact source of truth and projection responsibility.
+
+---
+
+# 3. COMPARE WORKING BOOKINGS SC-0002–SC-0006
+
+For working historical bookings:
+
+SC-0002
+SC-0003
+SC-0004
+SC-0005
+SC-0006
+
+Read-only compare:
+
+* sport_center booking ID
+* `sport_bookings_sync` row
+* `public.sport_bookings` row
+* mapping IDs
+* creation timestamps
+* source fields
+* payment mirrors
+* accounting linkage.
+
+Find how `public.sport_bookings` rows 2–9 were originally created.
+
+If by:
+
+* old migration;
+* worker;
+* trigger;
+* external BizPortal process;
+* manual seed;
+
+document exact mechanism.
+
+---
+
+# 4. DEFINE CANONICAL BOOKING PROJECTION
+
+For NEW Sport Center bookings, canonical projection must ensure:
+
+source booking
+→ public.sport_bookings
+
+before payment mirror requires it.
+
+Minimum mapping should preserve:
+
+* source Sport Center booking ID
+* order number
+* facility
+* customer/payer info needed by public module
+* company
+* booking dates
+* tax context if needed
+* source marker
+
+Use stable key such as:
+
+`source_system = sport_center`
+
+`source_booking_id = <sport_center booking id>`
+
+Do not rely on same numeric ID across schemas.
+
+---
+
+# 5. IDEMPOTENT BOOKING MIRROR
+
+Create/reuse helper:
+
+`ensureSportCenterBookingMirror(...)`
+
+Behavior:
+
+* lookup by source booking identity;
+* create if missing;
+* update safe metadata if existing;
+* never duplicate;
+* return public booking ID.
+
+Do not use arbitrary same-ID assumptions.
+
+Use DB-level uniqueness for source booking identity if possible.
+
+---
+
+# 6. PAYMENT MIRROR MUST DEPEND ON CANONICAL BOOKING MIRROR
+
+Refactor:
+
+`ensureSportCenterPaymentMirror()`
+
+so it does not simply fail because `public.sport_bookings` is absent.
+
+Preferred flow:
+
+`ensureSportCenterBookingMirror(sourceBooking)`
+→ returns public booking ID
+→ `ensureSportCenterPaymentMirror(payment, publicBookingId)`
+
+This should be idempotent.
+
+If booking projection cannot be resolved deterministically:
+payment mirror must fail safely with explicit reason.
+
+---
+
+# 7. OUTBOX ORDERING
+
+Audit current outbox/event sequence.
+
+Target:
+
+payment confirmed
+→ durable outbox event
+→ ensure booking mirror
+→ ensure payment mirror
+→ post canonical payment accounting
+→ tax
+→ mark posting status
+
+Do not post public accounting before canonical booking/payment linkage exists.
+
+If project already has a durable workflow, reuse it.
+
+Avoid synchronous race conditions if existing outbox is intentional.
+
+---
+
+# 8. LEGACY ACCOUNTING PATH GUARD
+
+Find all callers that can create Sport Center public accounting outside canonical payment pipeline.
+
+Especially audit:
+
+* bank reconciliation approval
+* admin status override
+* manual booking confirmation
+* legacy booking journal helper
+
+For NEW Sport Center payment confirmations:
+
+do not allow separate legacy public accounting entry creation.
+
+Guard by:
+
+* payment correlation
+* source payment identity
+* canonical pipeline flag
+* route-level deprecation guard
+
+Non-payment bank journal behavior may remain for true bank transactions, but must not create sales/payment recognition a second time.
+
+---
+
+# 9. ENTRY 14 — READ ONLY
+
+Audit:
+
+entry 14
+ref = SC-0007
+source_id = 94
+
+Find what ID 94 represents.
+
+Do not modify.
+
+Classify one of:
+
+`LEGACY_UNLINKED_ENTRY`
+
+`LEGACY_BOOKING_ENTRY`
+
+`OTHER_VALID_ENTITY`
+
+If it cannot be deterministically tied to payment 18:
+do not reuse automatically later.
+
+---
+
+# 10. INTERNAL JOURNAL PIPELINE
+
+Fix new confirmed payment path so internal journal creation is also deterministic.
+
+Expected:
+
+confirmed payment
+→ exactly one internal journal keyed by payment ID
+
+Do not rely only on booking ID.
+
+If internal journal fails:
+surface failure; do not silently continue as accounting-complete.
+
+---
+
+# 11. PERSONAL BOOKING COMPANY RESOLUTION
+
+SC-0007/8 are personal bookings.
+
+Payer type must not decide accounting company.
+
+Use approved facility ownership:
+
+facility
+→ public.companies
+
+For new payments:
+company resolver should work before mirror/accounting.
+
+If ownership missing:
+posting should fail visibly.
+
+---
+
+# 12. NEW PIPELINE INVARIANT
+
+A confirmed Sport Center payment is accounting-complete only if:
+
+* source payment exists
+* company resolved
+* public booking mirror exists
+* public payment mirror exists
+* source_payment_id linked
+* accounting correlation payment-level
+* accounting entry linked
+* GL balanced
+* tax complete if taxable
+* internal journal exists
+
+Otherwise:
+posting status must not be `posted`.
+
+---
+
+# 13. SC-0007 DRY-RUN REPAIR ELIGIBILITY
+
+After pipeline fix, read-only assess historical SC-0007.
+
+Determine:
+
+* source booking 10
+* source payment 18
+* company resolution
+* can booking mirror be created deterministically?
+* can payment mirror be created deterministically?
+* can entry 14 be safely reused?
+
+If entry 14 linkage to payment 18 is not deterministic:
+status:
+
+`ACCOUNTING_ENTRY_LINKAGE_AMBIGUOUS`
+
+Do not repair.
+
+---
+
+# 14. SC-0008 DRY-RUN REPAIR ELIGIBILITY
+
+Assess:
+
+* source booking 11
+* source payment 19
+* company resolution
+* missing booking mirror
+* missing payment mirror
+* no public accounting entry
+
+If all source data deterministic:
+prepare dry-run canonical creation plan.
+
+Do not apply.
+
+---
+
+# 15. TESTS
+
+Add tests:
+
+### Booking mirror missing
+
+confirmed payment automatically ensures canonical booking projection.
+
+### Booking mirror retry
+
+no duplicate public booking.
+
+### Payment mirror
+
+uses returned public booking ID.
+
+### Outbox retry
+
+no duplicate booking/payment/accounting/tax.
+
+### Legacy accounting path
+
+cannot create duplicate sales accounting for new confirmed payment.
+
+### Internal journal
+
+exactly one per payment.
+
+### Same booking multiple payments
+
+distinct payment-level accounting identities.
+
+### Personal booking
+
+company resolves via facility ownership.
+
+### Mirror failure
+
+accounting remains failed/not-complete.
+
+---
+
+# 16. DB CONSTRAINTS
+
+Where safe, enforce:
+
+public booking source identity unique.
+
+public payment source_payment_id unique.
+
+accounting correlation unique.
+
+Do not add destructive constraints without auditing existing duplicates first.
+
+---
+
+# 17. MIGRATION SAFETY
+
+Any schema changes:
+
+* additive;
+* idempotent;
+* backward-compatible.
+
+No mass historical booking creation in migration.
+
+Historical repair is a separate controlled task.
+
+---
+
+# 18. VALIDATION
+
+Run:
+
+* typecheck libs
+* scripts typecheck
+* API typecheck
+* API build
+* booking mirror tests
+* payment mirror tests
+* accounting tests
+* tax tests
+* idempotency tests
+* non-QRIS regression
+* git diff --check
+
+Runtime:
+
+* /health 200
+* /readiness 200
+* /api/health 200
+
+---
+
+# 19. FINAL REPORT
+
+Return:
+
+## A. Intended booking projection architecture
+
+## B. Why public.sport_bookings stopped at ID 9
+
+## C. SC-0007 root cause
+
+## D. SC-0008 root cause
+
+## E. Meaning of source_id 94
+
+## F. Booking mirror fix
+
+## G. Payment mirror fix
+
+## H. Outbox ordering fix
+
+## I. Legacy accounting guard
+
+## J. Internal journal fix
+
+## K. SC-0007 repair eligibility
+
+## L. SC-0008 repair eligibility
+
+## M. Tests/build/runtime
+
+## N. Remaining risks
+
+## O. Final status
+
+Use one:
+
+`PIPELINE_FIXED_READY_FOR_CONTROLLED_REPAIR`
+
+`ACCOUNTING_ENTRY_LINKAGE_AMBIGUOUS`
+
+`MIRROR_MAPPING_REQUIRED`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# HARD SAFETY
+
+Do not:
+
+* modify historical entry 14
+* modify SC-0007/8 data
+* rewrite GL
+* mass backfill
+* production deploy
+* final reconciliation
+* settlement/MDR posting

@@ -1,0 +1,527 @@
+# PREPARE UAT DATASET — QRIS RECONCILIATION
+
+## Development/Staging Only — Mandiri Direct + Paylabs
+
+Tujuan task ini adalah menyiapkan **dataset UAT representatif** untuk QRIS reconciliation.
+
+JANGAN mengubah reconciliation engine kecuali ditemukan bug yang benar-benar menghalangi data preparation.
+
+Environment yang boleh digunakan:
+
+`development`
+
+atau:
+
+`staging`
+
+JANGAN menggunakan production.
+
+---
+
+# KONTEKS UAT SEBELUMNYA
+
+UAT read-only berhasil berjalan tetapi menghasilkan:
+
+`INSUFFICIENT_REAL_DATA`
+
+Karena development hanya memiliki:
+
+* 1 QRIS payment;
+* provider payment NULL;
+* 0 Mandiri Direct sample;
+* 0 Paylabs sample;
+* 30 incoming mutations tetapi seluruh `credit_amount = 0`;
+* seluruh mutation `bank_account_id = NULL`;
+* 0 QRIS settlement;
+* 0 provider settlement rule;
+* 0 holiday calendar;
+* provenance bank mutation tidak lengkap.
+
+Engine tidak menghasilkan false positive.
+
+JANGAN mengubah fail-closed behavior tersebut.
+
+---
+
+# 1. SAFETY
+
+Task ini boleh membuat **data UAT khusus di development/staging** hanya setelah memastikan environment bukan production.
+
+Sebelum write apa pun, tampilkan:
+
+* environment;
+* database host/project identifier yang disanitasi;
+* company target;
+* bank account target.
+
+Jika ada kemungkinan environment adalah production:
+
+STOP.
+
+JANGAN:
+
+* menggunakan customer production;
+* menggunakan rekening production asli tanpa masking;
+* memodifikasi transaksi historical real;
+* mengubah journal;
+* melakukan accounting posting;
+* final reconciliation;
+* deploy production.
+
+Gunakan dedicated UAT records.
+
+---
+
+# 2. UAT COMPANY / BANK ACCOUNT
+
+Pastikan terdapat company UAT yang valid.
+
+Pastikan terdapat minimal satu:
+
+`bank_account_id`
+
+yang dapat digunakan sebagai rekening settlement QRIS UAT.
+
+Jika existing test bank account tersedia, gunakan itu.
+
+Jika harus membuat baru, buat hanya di development/staging dengan naming eksplisit:
+
+`UAT QRIS Settlement Account`
+
+Jangan gunakan nomor rekening sensitif asli.
+
+---
+
+# 3. PROVIDER RULES
+
+Siapkan provider settlement rules development/staging untuk:
+
+`mandiri_direct`
+
+dan:
+
+`paylabs`
+
+Minimal:
+
+* company_id
+* bank_account_id
+* provider_code
+* settlement_delay_business_days
+* match_window_business_days
+* effective_from
+* effective_until / active
+* rule_version
+
+Gunakan:
+
+`1 business day`
+
+sebagai initial UAT settlement delay jika belum ada rule resmi.
+
+Tandai konfigurasi sebagai:
+
+`UAT / provisional`
+
+JANGAN menyatakan ini sebagai rate/rule production resmi.
+
+---
+
+# 4. EXPECTED MDR CONFIGURATION
+
+Existing schema belum memiliki expected MDR rate formal.
+
+Tambahkan configuration secara backward-compatible agar UAT dapat membandingkan:
+
+`observed rate`
+
+vs:
+
+`expected provider rate`.
+
+Minimum semantic:
+
+* company_id
+* bank_account_id
+* provider_code
+* expected_mdr_rate
+* rate_tolerance
+* effective_from
+* effective_until
+* rule_version
+* notes/source
+
+Jangan hardcode rate di candidate engine.
+
+Untuk UAT fixture boleh gunakan **contoh rate test** yang eksplisit diberi label:
+
+`UAT_ONLY`
+
+Contoh jika diperlukan untuk test:
+
+`mandiri_direct = 0.003`
+
+`paylabs = 0.007`
+
+Tetapi jangan menganggap angka tersebut kontrak production.
+
+Jika tidak ingin menambah schema rate sekarang, buat dedicated UAT configuration mechanism yang tidak mengubah business rule production.
+
+---
+
+# 5. BUSINESS CALENDAR
+
+Isi business calendar development/staging dengan sample yang cukup untuk UAT.
+
+Minimal mencakup periode tanggal UAT.
+
+Weekend harus dianggap non-business day.
+
+Tambahkan minimal satu holiday UAT sehingga scenario:
+
+Friday
+→ Monday holiday
+→ Tuesday
+
+dapat diuji.
+
+Jika menggunakan hari libur sungguhan, beri sumber/reference.
+
+Jika menggunakan fixture:
+
+tandai jelas:
+
+`UAT_TEST_HOLIDAY`
+
+Jangan mencampurkan fixture holiday dengan production calendar.
+
+---
+
+# 6. CREATE REPRESENTATIVE QRIS PAYMENTS
+
+Siapkan dedicated UAT payments.
+
+Gunakan gross tax-inclusive.
+
+Setiap payment harus memiliki:
+
+* company_id
+* booking/source ID UAT
+* payment_method = QRIS
+* payment_provider/provider_code
+* bank_account_id
+* amount
+* paid_at
+* provider_reference
+* settlement status = unsettled
+* expected settlement date
+* settlement rule version
+
+Buat minimal scenario berikut.
+
+## A — Mandiri Direct normal
+
+Contoh:
+
+3–5 payments
+
+Total gross contoh:
+
+`Rp10.000.000`
+
+Provider:
+
+`mandiri_direct`
+
+Paid Monday
+
+Expected settlement Tuesday.
+
+## B — Paylabs normal
+
+3–5 payments.
+
+Total gross contoh:
+
+`Rp5.000.000`
+
+Provider:
+
+`paylabs`
+
+Paid Monday
+
+Expected settlement Tuesday.
+
+## C — Friday/weekend
+
+Buat payment Friday / Saturday / Sunday.
+
+Expected settlement:
+
+next business day.
+
+## D — Holiday
+
+Payment dengan expected settlement yang terkena UAT holiday.
+
+Expected bergeser ke business day berikutnya.
+
+## E — Unknown provider
+
+Satu payment:
+
+`provider = unknown`
+
+Harus tetap menghasilkan REVIEW.
+
+## F — Amount anomaly
+
+Satu batch dengan mutation credit yang tidak sesuai tolerance.
+
+Harus REVIEW/UNMATCHED.
+
+## G — Different bank account
+
+Same provider/date/company tetapi bank account berbeda.
+
+Tidak boleh tercampur.
+
+## H — Multiple settlement same provider/date
+
+Buat dua batch provider/account/date yang sama.
+
+### H1
+
+Dengan deterministic settlement reference.
+
+Harus dapat dipisahkan.
+
+### H2
+
+Tanpa reference pembeda.
+
+Harus REVIEW:
+
+`AMBIGUOUS_PAYMENT_PARTITION`.
+
+---
+
+# 7. CREATE ACTUAL-LIKE BANK MUTATIONS
+
+Buat dedicated **UAT bank statement mutations** melalui jalur import/staging yang paling menyerupai actual bank import.
+
+Jangan langsung membuat synthetic Sport Center mutation.
+
+Mutation UAT harus memiliki:
+
+* company_id
+* bank_account_id
+* transaction_date
+* credit_amount > 0
+* direction incoming
+* bank/reference identifier
+* description
+* source
+* source_classification = actual_bank_mutation
+* import/provenance metadata
+* reconciliation status unmatched.
+
+PENTING:
+
+Mutation harus dapat dibuktikan berasal dari:
+
+`UAT bank statement import`
+
+bukan hanya diberi label actual secara manual.
+
+Jika sistem memiliki CSV/MT940/CAMT import flow, lebih baik gunakan fixture statement melalui flow tersebut.
+
+---
+
+# 8. PROVENANCE
+
+Lengkapi metadata agar UAT dapat menunjukkan:
+
+* source_app
+* source_module
+* source_table/import
+* source_id
+* import batch ID
+* raw payload / sanitized provenance jika applicable.
+
+Jangan menyimpan secret atau PII sensitif.
+
+Targetnya adalah agar engine/UAT dapat menjawab:
+
+“Kenapa mutation ini dipercaya sebagai actual bank evidence?”
+
+---
+
+# 9. SETTLEMENT VALUES
+
+Buat bank credit UAT sesuai formula expected.
+
+Contoh Mandiri fixture:
+
+Gross:
+`10.000.000`
+
+UAT expected deduction:
+`30.000`
+
+Bank credit:
+`9.970.000`
+
+Contoh Paylabs fixture:
+
+Gross:
+`5.000.000`
+
+UAT expected deduction:
+`35.000`
+
+Bank credit:
+`4.965.000`
+
+Angka tersebut hanya **UAT fixtures**, bukan production assumptions.
+
+Untuk rounding test, buat batch transaksi dengan nominal yang menghasilkan variance pembulatan beberapa rupiah.
+
+---
+
+# 10. TAX
+
+Semua gross payment tetap tax-inclusive.
+
+Jika payment mempunyai tax breakdown:
+
+`gross = DPP + PPN`
+
+Mutation settlement tidak boleh menggunakan:
+
+`gross - PPN`.
+
+UAT expected settlement tetap:
+
+`gross - provider deduction`.
+
+---
+
+# 11. DO NOT RECONCILE
+
+Setelah fixture/data siap:
+
+JANGAN menjalankan final reconcile.
+
+Semua mutation tetap:
+
+`unmatched`
+
+dan semua payment tetap:
+
+`unsettled`
+
+sampai UAT dry-run berikutnya.
+
+---
+
+# 12. DATA LABELING
+
+Semua row UAT harus dapat diidentifikasi dan dibersihkan dengan aman.
+
+Gunakan marker seperti:
+
+`UAT_QRIS_202608`
+
+atau equivalent.
+
+Jangan bergantung hanya pada amount untuk mengenali fixture.
+
+---
+
+# 13. OUTPUT PREPARATION REPORT
+
+Setelah dataset dibuat, tampilkan:
+
+## Environment
+
+## UAT company
+
+## UAT bank accounts
+
+## Provider rules
+
+## MDR test configuration
+
+## Holiday/calendar entries
+
+## Payments created
+
+Ringkas per provider:
+
+* count
+* gross
+* paid date
+* expected settlement
+* bank account
+
+## Mutations created/imported
+
+* count
+* credit amount
+* date
+* provider evidence
+* provenance
+
+## Scenario coverage
+
+Tabel:
+
+| Scenario                          | Prepared |
+| --------------------------------- | -------- |
+| Mandiri normal                    |          |
+| Paylabs normal                    |          |
+| Friday/weekend                    |          |
+| Holiday                           |          |
+| Unknown provider                  |          |
+| Amount mismatch                   |          |
+| Different bank account            |          |
+| Multiple settlement deterministic |          |
+| Multiple settlement ambiguous     |          |
+| Rounding                          |          |
+
+---
+
+# 14. VALIDATION BEFORE NEXT UAT
+
+Sebelum selesai, jalankan SELECT/read-only validation dan pastikan minimal:
+
+* Mandiri QRIS sample > 0
+* Paylabs QRIS sample > 0
+* positive incoming bank credit > 0
+* bank_account_id populated
+* provider rules > 0
+* business calendar entries > 0
+* mutation provenance populated
+* settlement status belum final.
+
+Jangan menjalankan candidate persistence.
+
+---
+
+# 15. FINAL STATUS
+
+Berikan:
+
+`UAT_DATASET_READY`
+
+atau:
+
+`UAT_DATASET_NOT_READY`
+
+Jika READY, sertakan exact UAT marker/date range agar dry-run berikutnya hanya membaca fixture tersebut.
+
+Jangan melakukan final reconciliation.
+Jangan posting accounting.
+Jangan deploy production.

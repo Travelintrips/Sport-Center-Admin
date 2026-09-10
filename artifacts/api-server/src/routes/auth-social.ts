@@ -2,9 +2,10 @@ import { Router } from "express";
 import { db, usersTable } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
-import { createToken, authMiddleware, hashPassword, verifyToken } from "../lib/auth";
+import { createToken, authMiddleware, hashPassword, isValidPasswordHash, verifyPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
 import { logger } from "../lib/logger";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 const router = Router();
 
@@ -121,7 +122,7 @@ router.post("/auth/send-otp", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     otpStore.set(cleaned, { otp, expires });
 
-    if (FONNTE_TOKEN) {
+    if (FONNTE_TOKEN && allowWhatsAppProviderSend()) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
@@ -241,7 +242,7 @@ router.post("/auth/forgot-password", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     resetOtpStore.set(cleaned, { otp, expires, email });
 
-    if (FONNTE_TOKEN) {
+    if (FONNTE_TOKEN && allowWhatsAppProviderSend()) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
@@ -301,8 +302,27 @@ router.post("/auth/reset-password", async (req, res) => {
       return;
     }
 
+    const passwordHash = await hashPassword(newPassword);
+    if (!isValidPasswordHash(passwordHash)) {
+      throw new Error("Generated password hash failed validation");
+    }
+
+    const [updatedUser] = await db
+      .update(usersTable)
+      .set({ passwordHash })
+      .where(eq(usersTable.id, user.id))
+      .returning({ id: usersTable.id, passwordHash: usersTable.passwordHash });
+
+    if (!updatedUser || updatedUser.id !== user.id || !isValidPasswordHash(updatedUser.passwordHash)) {
+      throw new Error("Password hash update was not persisted");
+    }
+
+    const verification = await verifyPassword(newPassword, updatedUser.passwordHash);
+    if (!verification.valid) {
+      throw new Error("Persisted password hash did not verify");
+    }
+
     resetOtpStore.delete(cleaned);
-    await db.update(usersTable).set({ passwordHash: hashPassword(newPassword) }).where(eq(usersTable.id, user.id));
 
     res.json({ success: true, message: "Password berhasil diubah. Silakan login dengan password baru." });
   } catch (err) {
@@ -334,7 +354,8 @@ router.put("/auth/profile", authMiddleware, async (req, res) => {
       if (newPassword.length < 6) { res.status(400).json({ error: "Password baru minimal 6 karakter" }); return; }
       if (user.passwordHash) {
         if (!currentPassword) { res.status(400).json({ error: "Password saat ini wajib diisi" }); return; }
-        if (hashPassword(currentPassword) !== user.passwordHash) {
+        const passwordCheck = await verifyPassword(currentPassword, user.passwordHash);
+        if (!passwordCheck.valid) {
           res.status(400).json({ error: "Password saat ini salah" }); return;
         }
       }

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, facilitiesTable, bookingsTable, blockedSchedulesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { verifyToken } from "../lib/auth";
+import { closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
 
 const router = Router();
 
@@ -28,7 +29,11 @@ function getCurrentMinutesWIB(): number {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
-router.get("/availability", async (req, res) => {
+// The generated client uses /api/availability. Keep the older
+// /api/bookings/availability path as an alias so already-open browser tabs
+// and cached bundles do not turn an available day into a misleading empty
+// state while they transition to the current contract.
+router.get(["/availability", "/bookings/availability"], async (req, res) => {
   try {
     const facilityId = parseInt(req.query.facilityId as string);
     const date = req.query.date as string;
@@ -64,9 +69,16 @@ router.get("/availability", async (req, res) => {
       return;
     }
 
-    const bookings = await db.select().from(bookingsTable).where(
-      and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date))
-    );
+    const bookings = await db
+      .select({
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        status: bookingsTable.status,
+      })
+      .from(bookingsTable)
+      .where(
+        and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date))
+      );
     const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
     const activeBookings = bookings.filter((b) => !INACTIVE_STATUSES.includes(b.status));
 
@@ -75,7 +87,7 @@ router.get("/availability", async (req, res) => {
     );
 
     const openMinutes = timeToMinutes(facility.openTime);
-    const closeMinutes = timeToMinutes(facility.closeTime);
+    const closeMinutes = closeTimeToMinutes(getEffectiveCloseTime(facility));
     const slots: { time: string; available: boolean; reason: string | null }[] = [];
 
     const isToday = date === getTodayWIB();

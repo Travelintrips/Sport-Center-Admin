@@ -45,7 +45,7 @@ async function checkDatabase(): Promise<ConnectionResult> {
   const start = Date.now();
   const env = IS_DEV ? "development" : "production";
   const connUrl = IS_DEV
-    ? process.env.SUPABASE_DATABASE_URL_DEV || process.env.DATABASE_URL || ""
+    ? process.env.SUPABASE_DATABASE_URL_DEV || ""
     : process.env.SUPABASE_DATABASE_URL || "";
   const projectRef = getProjectRefFromUrl(connUrl);
 
@@ -88,11 +88,7 @@ async function checkDatabase(): Promise<ConnectionResult> {
       : `Connected to PRODUCTION database (${projectRef})`;
     let riskNote: string | null = null;
 
-    if (isDevUsingProdDb) {
-      status = "warning";
-      message = "DEV terhubung ke database PRODUCTION (ALLOW_DEV_ON_PROD_DB=true)";
-      riskNote = "⚠️ Setiap write dari dev AKAN mempengaruhi data produksi!";
-    } else if (missingTables.length > 0) {
+    if (missingTables.length > 0) {
       status = "warning";
       message = `Tabel tidak ditemukan: ${missingTables.join(", ")}`;
       riskNote = "Tabel schema mungkin belum dimigrasikan.";

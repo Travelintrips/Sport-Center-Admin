@@ -1,0 +1,932 @@
+# STAGING ROLLOUT + QRIS SMOKE TEST
+
+## Mandiri Direct + Paylabs + CST Mirror + Bank Mutation Reconciliation
+
+Lanjutkan dari state workspace saat ini.
+
+Status sebelumnya sudah VALID:
+
+* enrichment pipeline READY;
+* strict QRIS UAT 14/14 PASS;
+* matcher parity 14/14 PASS;
+* payment/provider regression 9/9 PASS;
+* historical classifier 7/7 PASS;
+* environment diagnostic 2/2 PASS;
+* API typecheck PASS;
+* API build PASS;
+* CST mirror enrichment PASS;
+* manual QRIS enrichment PASS;
+* Paylabs enrichment PASS;
+* Google Sheet source mapping tersedia;
+* strict matcher tidak dilonggarkan.
+
+Task sekarang:
+
+**STAGING ROLLOUT + REALISTIC QRIS SMOKE TEST**
+
+Tujuan utama adalah membuktikan transaksi baru setelah enrichment mempunyai dimensi reconciliation lengkap dari source sampai CST dan bank mutation.
+
+JANGAN langsung mengaktifkan final reconciliation atau accounting posting.
+
+---
+
+# 1. SAFETY GATE
+
+Sebelum melakukan perubahan apa pun, identifikasi environment.
+
+WAJIB pastikan:
+
+`environment = staging`
+
+atau environment non-production yang memang ditujukan untuk staging test.
+
+Tampilkan sanitized:
+
+* APP_ENV;
+* database/project fingerprint;
+* database host/project reference;
+* schema;
+* deployment target;
+* source mapping target.
+
+JANGAN tampilkan credential.
+
+Jika environment ternyata production:
+
+**STOP**
+
+Laporkan:
+
+`PRODUCTION_ENVIRONMENT_DETECTED`
+
+Jangan melakukan migration, test transaction, import, reconciliation, atau write apa pun.
+
+---
+
+# 2. PRODUCTION PROHIBITION
+
+Pada task ini JANGAN:
+
+* deploy production;
+* menggunakan production database;
+* menggunakan rekening production untuk test transaction jika dapat dihindari;
+* historical backfill apply;
+* auto-reconcile;
+* final reconcile;
+* accounting posting;
+* membuat journal;
+* mengubah transaksi historical production;
+* mengubah MDR production;
+* mengubah strict matcher agar smoke test lulus.
+
+---
+
+# 3. PRE-DEPLOY VALIDATION
+
+Sebelum staging rollout, jalankan kembali:
+
+`pnpm run typecheck:libs`
+
+scripts typecheck
+
+API typecheck
+
+API build
+
+relevant payment/provider tests
+
+historical classifier tests
+
+environment diagnostic tests
+
+strict QRIS UAT harness.
+
+Expected:
+
+* strict scenario 14/14 PASS;
+* matcher parity 14/14 PASS;
+* no persistence;
+* no accounting posting.
+
+Jika regression muncul:
+
+STOP.
+
+Jangan deploy staging sebelum regression diselesaikan.
+
+---
+
+# 4. REVIEW STAGING MIGRATION
+
+Audit migration yang akan dijalankan di staging.
+
+Pastikan additive/backward-compatible.
+
+Expected canonical payment dimensions:
+
+* `company_id`
+* `bank_account_id`
+* `payment_provider`
+* `provider_reference`
+* `merchant_trade_no`
+* `provider_trade_no`
+* `paid_at`
+* `expected_settlement_date`
+
+Pastikan Google Sheet/source mapping schema juga tersedia jika diperlukan.
+
+Tidak boleh ada destructive:
+
+* DROP TABLE;
+* DROP COLUMN;
+* destructive rewrite;
+* forced provider classification.
+
+Berikan migration safety report sebelum menjalankan migration.
+
+---
+
+# 5. STAGING CONFIG PRE-FLIGHT
+
+Ini WAJIB sebelum smoke test.
+
+Pastikan staging mempunyai:
+
+## Company configuration
+
+Company test/staging yang valid.
+
+## Settlement bank account mapping
+
+Minimal mapping:
+
+`company + mandiri_direct → settlement account`
+
+dan:
+
+`company + paylabs → settlement account`
+
+Rekening boleh sama jika memang konfigurasi bisnis demikian.
+
+Jangan berasumsi Paylabs harus memakai rekening berbeda.
+
+## Provider settlement rules
+
+Pastikan rule tersedia untuk:
+
+`mandiri_direct`
+
+dan:
+
+`paylabs`.
+
+## Business calendar
+
+Pastikan:
+
+* weekend handling;
+* holiday calendar;
+* timezone `Asia/Jakarta`.
+
+## Google Sheet source mapping
+
+Pastikan source staging mempunyai mapping:
+
+`source`
+→ `company_id`
+→ `bank_account_id`.
+
+Jika salah satu konfigurasi tidak tersedia:
+
+jangan invent config.
+
+Laporkan:
+
+`STAGING_CONFIG_INCOMPLETE`
+
+dan jelaskan field yang kurang.
+
+---
+
+# 6. MDR CONFIG SAFETY
+
+Jangan otomatis menggunakan rate UAT:
+
+Mandiri:
+`0.3%`
+
+Paylabs:
+`0.7%`
+
+sebagai production/staging business truth.
+
+Cari staging/provider configuration yang memang disetujui.
+
+Jika staging sengaja menggunakan UAT rate untuk smoke test, harus ditandai eksplisit:
+
+`TEST_ONLY`
+
+atau equivalent.
+
+Jangan mempromosikan angka UAT menjadi production default.
+
+---
+
+# 7. DEPLOY ENRICHMENT TO STAGING
+
+Jika seluruh pre-flight PASS:
+
+deploy hanya perubahan enrichment yang sudah tervalidasi ke staging menggunakan deployment procedure existing project.
+
+Jangan deploy production.
+
+Setelah deployment:
+
+restart service staging sesuai workflow normal.
+
+Verifikasi:
+
+* API starts;
+* frontend starts jika relevan;
+* DB reachable;
+* `/health` PASS;
+* `/readiness` PASS;
+* `/api/health` PASS.
+
+Pastikan tidak ada migration error.
+
+---
+
+# 8. POST-DEPLOY SCHEMA CHECK
+
+Read-only check staging schema.
+
+Pastikan field canonical benar-benar tersedia.
+
+Periksa:
+
+`sport_center.sport_payments`
+
+dan mirror:
+
+`public.sport_payments`.
+
+Jangan hanya mengandalkan migration log.
+
+Verifikasi schema aktual.
+
+---
+
+# 9. SMOKE TEST A — MANDIRI DIRECT
+
+Buat atau gunakan satu transaksi QRIS staging melalui jalur:
+
+`mandiri_direct`.
+
+Gunakan nominal test yang mudah dikenali dan aman sesuai prosedur staging.
+
+Jangan menggunakan production financial transaction jika staging menyediakan test/sandbox mechanism.
+
+Setelah payment confirmed, periksa source payment.
+
+WAJIB tampilkan:
+
+* payment ID;
+* booking ID;
+* amount;
+* company_id;
+* bank_account_id;
+* payment_provider;
+* provider_reference jika ada;
+* paid_at;
+* expected_settlement_date;
+* status.
+
+Expected:
+
+`payment_provider = mandiri_direct`
+
+`company_id != NULL`
+
+`bank_account_id != NULL` jika config tersedia
+
+`paid_at != NULL`
+
+`expected_settlement_date != NULL` jika settlement rule tersedia.
+
+Jika salah satu dimension hilang:
+
+STOP smoke test reconciliation untuk transaksi tersebut.
+
+Klasifikasikan:
+
+`ENRICHMENT_FAILURE`.
+
+---
+
+# 10. VERIFY MANDIRI CST MIRROR
+
+Cari payment Mandiri yang sama di CST mirror.
+
+Bandingkan source vs mirror:
+
+| Field               | Sport Center | CST | Same? |
+| ------------------- | ------------ | --- | ----- |
+| Payment/source ID   |              |     |       |
+| Amount              |              |     |       |
+| Company             |              |     |       |
+| Bank account        |              |     |       |
+| Provider            |              |     |       |
+| Provider reference  |              |     |       |
+| Paid at             |              |     |       |
+| Expected settlement |              |     |       |
+
+Expected:
+
+seluruh canonical reconciliation dimension preserved.
+
+Jika source lengkap tetapi CST tidak lengkap:
+
+`MIRROR_FAILURE`.
+
+Jangan mengubah matcher.
+
+---
+
+# 11. SMOKE TEST B — PAYLABS
+
+Buat atau gunakan transaksi staging melalui jalur Paylabs resmi.
+
+Jangan menggunakan manual QRIS endpoint untuk Paylabs.
+
+Validasi lifecycle:
+
+payment initiated
+→ merchant trade number
+→ Paylabs response/callback
+→ success/finalization
+→ canonical payment
+→ CST mirror.
+
+Setelah success, periksa:
+
+* payment ID;
+* booking ID;
+* amount;
+* company_id;
+* bank_account_id;
+* payment_provider;
+* provider_reference;
+* merchant_trade_no;
+* provider_trade_no;
+* paid_at;
+* expected_settlement_date;
+* status.
+
+Expected:
+
+`payment_provider = paylabs`
+
+Company/account deterministic.
+
+Timestamp provider dipertahankan.
+
+---
+
+# 12. PAYLABS IDEMPOTENCY
+
+Jika staging tooling memungkinkan callback replay secara aman:
+
+uji duplicate callback/replay.
+
+Pastikan tidak terjadi:
+
+* duplicate payment;
+* duplicate booking confirmation;
+* changed paid_at;
+* changed company;
+* changed bank account;
+* changed expected settlement snapshot.
+
+Laporkan PASS/FAIL.
+
+Jangan melakukan destructive callback simulation pada gateway nyata jika environment tidak mendukungnya.
+
+---
+
+# 13. VERIFY PAYLABS CST MIRROR
+
+Bandingkan Sport Center vs CST seperti Mandiri.
+
+Pastikan:
+
+`payment_provider = paylabs`
+
+dan normalized:
+
+`provider_code = paylabs`.
+
+Jangan sampai:
+
+`payment_provider = paylabs`
+
+tetapi:
+
+`provider_code = unknown`.
+
+---
+
+# 14. MIRROR COMPLETENESS
+
+Jalankan diagnostic read-only untuk seluruh transaksi smoke-test.
+
+Tampilkan:
+
+| Metric             | Sport Center | CST |
+| ------------------ | -----------: | --: |
+| Payment count      |              |     |
+| Gross              |              |     |
+| Mandiri count      |              |     |
+| Mandiri gross      |              |     |
+| Paylabs count      |              |     |
+| Paylabs gross      |              |     |
+| Unknown count      |              |     |
+| Missing mirror IDs |              |     |
+
+Expected:
+
+`missing mirror IDs = 0`
+
+untuk transaksi smoke-test baru.
+
+---
+
+# 15. BANK MUTATION INPUT
+
+Berikutnya validasi jalur bank mutation staging.
+
+Gunakan:
+
+* staging bank statement;
+* sanitized fixture/import;
+* atau Google Sheet staging source yang memang disediakan untuk test.
+
+Jangan menggunakan/memodifikasi production bank mutation.
+
+Untuk mutation test pastikan:
+
+* company_id;
+* bank_account_id;
+* mutation date;
+* credit_amount;
+* source classification;
+* source provenance;
+* provider evidence jika tersedia.
+
+---
+
+# 16. GOOGLE SHEET SOURCE MAPPING
+
+Verifikasi mutation dari configured staging source mendapatkan:
+
+`company_id`
+
+dan:
+
+`bank_account_id`
+
+secara deterministic.
+
+Tampilkan:
+
+source identifier
+→ company
+→ bank account.
+
+Provider tidak boleh ditentukan hanya karena rekeningnya Mandiri.
+
+Jika provider evidence tidak tersedia:
+
+provider tetap unknown.
+
+Expected downstream:
+
+`REVIEW`
+
+bukan false MATCH.
+
+---
+
+# 17. EXPECTED SETTLEMENT DATE
+
+Untuk masing-masing payment smoke-test:
+
+tampilkan:
+
+| Provider | Paid At | Jakarta Business Date | Rule | Expected Settlement |
+| -------- | ------- | --------------------- | ---- | ------------------- |
+
+Validasi:
+
+* timezone Asia/Jakarta;
+* weekend;
+* holiday;
+* provider rule.
+
+Jangan menggunakan generic:
+
+`payment date + 1 calendar day`.
+
+---
+
+# 18. CANDIDATE DRY-RUN
+
+Setelah payment + mirror + mutation tersedia:
+
+jalankan strict QRIS candidate engine:
+
+**READ-ONLY / IN-MEMORY**
+
+Jangan persist candidate.
+
+Untuk setiap mutation test tampilkan:
+
+* company;
+* bank account;
+* provider;
+* provider detection source;
+* expected settlement date;
+* mutation date;
+* candidate payment IDs;
+* payment count;
+* gross;
+* credit;
+* observed deduction;
+* effective deduction rate;
+* configured test/staging MDR;
+* status;
+* reason.
+
+---
+
+# 19. EXPECTED RESULTS
+
+Jika mutation dibuat dengan deterministic evidence dan nominal settlement benar:
+
+Expected:
+
+`MATCHED`
+
+Jika provider tidak diketahui:
+
+Expected:
+
+`REVIEW`
+
+Jika account berbeda:
+
+Expected:
+
+tidak match.
+
+Jika company berbeda:
+
+Expected:
+
+tidak match.
+
+Jika deduction tidak valid:
+
+Expected:
+
+`REVIEW`.
+
+Jangan mengubah matcher agar smoke test menghasilkan MATCHED.
+
+---
+
+# 20. MANUAL APPROVAL GATE
+
+Walaupun candidate menghasilkan:
+
+`MATCHED`
+
+JANGAN final reconcile.
+
+Candidate MATCHED pada tahap ini hanya berarti:
+
+`ELIGIBLE_FOR_MANUAL_REVIEW`
+
+Bukan final settlement.
+
+Tidak boleh otomatis:
+
+* mengubah payment menjadi reconciled;
+* mengubah mutation menjadi reconciled;
+* membuat journal;
+* posting MDR;
+* posting tax;
+* posting accounting.
+
+---
+
+# 21. VERIFY NO-PERSISTENCE
+
+Ambil snapshot sebelum dan sesudah candidate dry-run.
+
+Bandingkan:
+
+* reconciliation candidate persisted rows;
+* bank reconciliation matches;
+* qris settlements;
+* qris settlement items;
+* payment settlement status;
+* mutation reconciliation status;
+* accounting entries.
+
+Expected:
+
+tidak berubah.
+
+---
+
+# 22. NEGATIVE TEST — WRONG ACCOUNT
+
+Jika aman menggunakan synthetic staging mutation:
+
+buat/read-only evaluate mutation dengan:
+
+correct amount
++
+correct provider
++
+wrong bank account.
+
+Expected:
+
+`NOT MATCHED`.
+
+Jangan final persist mutation jika test harness dapat menjalankan synthetic input in-memory.
+
+---
+
+# 23. NEGATIVE TEST — WRONG PROVIDER
+
+Evaluate:
+
+correct amount
++
+correct account
++
+wrong provider.
+
+Expected:
+
+`NOT MATCHED`.
+
+---
+
+# 24. NEGATIVE TEST — UNKNOWN PROVIDER
+
+Evaluate:
+
+correct amount
++
+correct account
++
+provider unknown.
+
+Expected:
+
+`REVIEW`.
+
+---
+
+# 25. NEGATIVE TEST — AMOUNT
+
+Evaluate mutation dengan:
+
+`credit > gross`
+
+Expected:
+
+`REVIEW`
+
+Reason:
+
+`NEGATIVE_OBSERVED_DEDUCTION`
+
+atau equivalent.
+
+---
+
+# 26. IDEMPOTENCY
+
+Jalankan candidate dry-run dua kali.
+
+Pastikan:
+
+* candidate payment IDs sama;
+* status sama;
+* reason sama;
+* gross sama;
+* deduction sama;
+* rate sama.
+
+Expected:
+
+`PASS`.
+
+---
+
+# 27. DO NOT BACKFILL HISTORICAL DATA YET
+
+Historical classifier boleh dijalankan:
+
+`DRY-RUN ONLY`.
+
+Jangan:
+
+`--apply`
+
+atau equivalent.
+
+Laporkan classification counts saja:
+
+* SAFE_COMPANY_BACKFILL;
+* SAFE_BANK_ACCOUNT_BACKFILL;
+* SAFE_PROVIDER_BACKFILL;
+* SAFE_EXPECTED_DATE_BACKFILL;
+* AMBIGUOUS;
+* NO_EVIDENCE.
+
+Historical backfill approval adalah task terpisah.
+
+---
+
+# 28. ACCOUNTING SAFETY
+
+Pastikan smoke test tidak membuat:
+
+* revenue journal;
+* bank journal;
+* MDR expense;
+* tax journal;
+* reconciliation posting.
+
+Ingat:
+
+harga Sport Center dapat tax-inclusive.
+
+Tetapi task ini BUKAN pengujian accounting/tax posting.
+
+Jangan mengubah calculation tax.
+
+---
+
+# 29. FINAL SMOKE TEST MATRIX
+
+Buat:
+
+| Test                         | Expected      | Actual | PASS/FAIL |
+| ---------------------------- | ------------- | ------ | --------- |
+| Mandiri enrichment           | complete      |        |           |
+| Mandiri CST mirror           | complete      |        |           |
+| Paylabs enrichment           | complete      |        |           |
+| Paylabs CST mirror           | complete      |        |           |
+| Paylabs replay               | idempotent    |        |           |
+| Google Sheet company mapping | correct       |        |           |
+| Google Sheet account mapping | correct       |        |           |
+| Expected settlement          | correct       |        |           |
+| Strict candidate Mandiri     | deterministic |        |           |
+| Strict candidate Paylabs     | deterministic |        |           |
+| Wrong account                | no match      |        |           |
+| Wrong provider               | no match      |        |           |
+| Unknown provider             | REVIEW        |        |           |
+| Negative deduction           | REVIEW        |        |           |
+| Candidate idempotency        | PASS          |        |           |
+| No persistence               | PASS          |        |           |
+| No accounting posting        | PASS          |        |           |
+
+---
+
+# 30. OBSERVABILITY
+
+Pastikan staging mempunyai log/audit yang cukup untuk menelusuri:
+
+payment
+→ company resolution
+→ account resolution
+→ provider
+→ expected settlement
+→ mirror
+→ mutation
+→ candidate decision.
+
+Jangan log:
+
+* secret;
+* credential;
+* full sensitive bank data;
+* provider secret key.
+
+---
+
+# 31. FINAL REPORT
+
+Berikan laporan:
+
+## A. Environment
+
+Buktikan staging/non-production.
+
+## B. Deployment
+
+Apa yang dideploy/migrated.
+
+## C. Staging configuration
+
+* company
+* account mapping
+* provider rules
+* calendar
+* Sheet source mapping.
+
+## D. Mandiri smoke test
+
+## E. Paylabs smoke test
+
+## F. CST mirror comparison
+
+## G. Bank mutation enrichment
+
+## H. Expected settlement dates
+
+## I. Candidate dry-run results
+
+## J. Negative tests
+
+## K. Idempotency/no-persistence
+
+## L. Accounting safety
+
+## M. Historical classifier dry-run
+
+## N. Runtime health
+
+## O. Remaining risks
+
+## P. Final decision
+
+Gunakan salah satu:
+
+`READY_FOR_STAGING_MANUAL_RECONCILIATION`
+
+atau:
+
+`NEEDS_FIX_BEFORE_STAGING_RECONCILIATION`
+
+---
+
+# 32. READINESS CRITERIA
+
+`READY_FOR_STAGING_MANUAL_RECONCILIATION`
+
+hanya jika:
+
+1. Mandiri payment enrichment lengkap.
+2. Paylabs payment enrichment lengkap.
+3. CST mirror completeness PASS.
+4. company/account source mapping PASS.
+5. expected settlement date benar.
+6. strict candidate bekerja.
+7. provider/account boundaries tetap strict.
+8. unknown provider REVIEW.
+9. idempotency PASS.
+10. no persistence PASS.
+11. no accounting posting PASS.
+12. health/readiness staging PASS.
+
+---
+
+# 33. IMPORTANT
+
+Status READY pada task ini hanya berarti:
+
+**siap melakukan reconciliation staging dengan manual approval.**
+
+Bukan berarti:
+
+* production ready;
+* auto-reconcile ready;
+* accounting auto-post ready;
+* MDR production sudah tervalidasi;
+* tax posting sudah tervalidasi.
+
+Jangan commit/push/deploy production tanpa instruksi eksplisit.
+
+Jangan historical backfill apply.
+
+Jangan final reconcile.
+
+Jangan accounting post.

@@ -18,7 +18,7 @@ router.post("/tenant/register", async (req, res) => {
       res.status(409).json({ error: "Email sudah terdaftar" });
       return;
     }
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
     const [user] = await db.insert(usersTable).values({
       name, email, passwordHash, phone: phone || null, role: "tenant",
     }).returning();
@@ -377,7 +377,7 @@ router.post("/admin/tenants", adminMiddleware, async (req, res) => {
     const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (existing) { res.status(409).json({ error: "Email already registered" }); return; }
 
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
     const [user] = await db.insert(usersTable).values({
       name, email, passwordHash, phone: phone ?? null, role: "tenant",
     }).returning();

@@ -1,0 +1,583 @@
+# FINAL CONTROLLED REPAIR
+
+## Approve Source Account Mapping + Repair Payment 13/14
+
+Business approval sudah diberikan:
+
+`Sport Center source account reference 1640006707220`
+→
+`public.company_bank_accounts.id = 2`
+
+Canonical company:
+
+`public.companies.id = 1`
+`code = CST`
+`PT Cahaya Sejati Teknologi`
+
+Approved facility ownership:
+
+* Facility 1 → CST / company 1
+* Facility 7 → CST / company 1
+
+Task ini boleh melakukan controlled repair di DEVELOPMENT hanya untuk payment 13/14 dan record terkait.
+
+---
+
+# 1. SAFETY GATE
+
+Sebelum write, verifikasi:
+
+* environment = development
+* `SUPABASE_DATABASE_URL_DEV`
+* `isDevUsingProdDb = false`
+* `ALLOW_DEV_ON_PROD_DB = false`
+
+Verify:
+
+`public.companies.id = 1`
+= CST
+
+Verify:
+
+`public.company_bank_accounts.id = 2`
+= active Bank Mandiri CST
+= company 1
+
+Verify facility mappings:
+
+* facility 1 → company 1
+* facility 7 → company 1
+
+Jika salah satu gagal:
+STOP.
+
+---
+
+# 2. APPROVED BANK ACCOUNT MAPPING
+
+Create/reuse explicit additive mapping:
+
+source system:
+
+`sport_center`
+
+source account ref:
+
+`1640006707220`
+
+company:
+
+`1`
+
+provider:
+
+`mandiri_direct`
+
+canonical bank account:
+
+`public.company_bank_accounts.id = 2`
+
+evidence source:
+
+`manual_business_approval`
+
+evidence reference:
+
+`Business owner approved Sport Center account 1640006707220 → CST canonical bank account ID 2`
+
+Effective date must cover:
+
+`2026-08-09`
+
+Preferred:
+
+`effective_from = 2026-08-09`
+
+unless existing approved config gives an earlier authoritative date.
+
+---
+
+# 3. DO NOT CHANGE SOURCE REFERENCE
+
+Preserve:
+
+`sport_center.sport_payments.bank_account_id = 1640006707220`
+
+if that column is currently source/reference semantic.
+
+Do NOT replace it with integer `2` unless schema has explicitly been migrated to canonical FK semantics.
+
+Use resolver/mapping to produce:
+
+`canonical_bank_account_id = 2`
+
+for mirror/accounting.
+
+---
+
+# 4. BANK ACCOUNT RESOLVER
+
+Verify:
+
+Payment 13:
+
+* source_account_ref = 1640006707220
+* provider = mandiri_direct
+* company = 1
+* canonical bank account = 2
+* deterministic = true
+
+Payment 14:
+same.
+
+If resolver does not return 2:
+STOP.
+
+---
+
+# 5. CONTROLLED REPAIR PAYMENT 13
+
+Use one DB transaction.
+
+## Source
+
+If:
+
+`company_id IS NULL`
+
+set:
+
+`company_id = 1`
+
+Do not overwrite conflicting company.
+
+Keep source account reference unchanged.
+
+## Mirror
+
+Reuse:
+
+`public.sport_payments.id = 8`
+
+`payment_number = SCPAY-SC-13`
+
+Repair:
+
+* source_payment_id = 13
+* company_id = 1
+* bank_account_id = 2
+* method = QRIS
+* payment_type = full_payment
+* payment_provider = mandiri_direct
+* provider_code = mandiri_direct
+* provider_reference from source if available
+* provider_order_id from source if available
+* merchant_trade_no from source if available
+* provider_trade_no from source if available
+* paid_at = source paid_at
+* expected_settlement_date if deterministic
+* entry_id = 9
+
+Use null-preserving semantics.
+
+Do not create a new mirror.
+
+## Accounting entry
+
+Reuse:
+
+`entry_id = 9`
+
+Correlation:
+
+`sc_payment_13`
+
+Do not create a new accounting entry.
+
+Canonical metadata:
+
+* company_id = 1
+* source = sport_center_payment
+* source payment identity = 13
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* payment_type = full_payment
+* canonical bank_account_id = 2
+
+Preserve booking reference if stored separately.
+
+## GL
+
+Do not alter.
+
+Expected:
+
+debit = 100000
+
+credit = 100000
+
+If GL changes:
+ROLLBACK.
+
+## Tax
+
+Internal tax:
+
+`9910`
+
+If canonical public payment-specific tax line is missing:
+
+insert exactly one line using existing entry 9.
+
+Use idempotency guard.
+
+Do not duplicate existing booking tax rows.
+
+## Posting status
+
+Only set mirror:
+
+`posting_status = posted`
+
+if all invariants pass.
+
+---
+
+# 6. CONTROLLED REPAIR PAYMENT 14
+
+Separate transaction.
+
+Source payment:
+
+`id = 14`
+
+Company:
+
+`NULL → 1`
+
+Source account ref unchanged.
+
+Mirror:
+
+`id = 9`
+
+Repair:
+
+* source_payment_id = 14
+* company_id = 1
+* bank_account_id = 2
+* QRIS
+* full_payment
+* mandiri_direct
+* canonical provider metadata
+* paid_at
+* expected settlement if deterministic
+* entry_id = 10
+
+Accounting:
+
+reuse entry 10
+
+correlation:
+
+`sc_payment_14`
+
+Canonical bank account:
+
+`2`
+
+GL:
+
+debit = credit = 50000
+
+Tax:
+
+internal PPN = 4955
+
+Insert exactly one missing canonical public tax line if absent.
+
+---
+
+# 7. DUPLICATE PROTECTION
+
+Verify:
+
+### Mirrors
+
+Exactly one:
+
+`SCPAY-SC-13`
+
+Exactly one:
+
+`SCPAY-SC-14`
+
+### Accounting
+
+Exactly one:
+
+`sc_payment_13`
+
+Exactly one:
+
+`sc_payment_14`
+
+### Tax
+
+Exactly one canonical payment-specific PPN line per payment.
+
+### Bank mapping
+
+Exactly one active non-conflicting mapping for:
+
+company 1
+
+* sport_center
+* source ref 1640006707220
+* mandiri_direct
+* effective date.
+
+---
+
+# 8. POST-REPAIR CANONICAL CHAIN
+
+Expected Payment 13:
+
+`sport_center.sport_payments.id = 13`
+
+→ company 1
+
+→ source account ref 1640006707220
+
+→ canonical bank mapping ID 2
+
+→ `public.sport_payments.source_payment_id = 13`
+
+→ bank_account_id 2
+
+→ entry_id 9
+
+→ accounting entry 9
+
+→ balanced GL
+
+→ one public tax line 9910
+
+Payment 14:
+
+same structure with:
+
+source payment 14
+
+mirror source_payment_id 14
+
+entry 10
+
+tax 4955.
+
+---
+
+# 9. COMPANY CONSISTENCY
+
+Verify:
+
+# source payment company
+
+# mirror company
+
+# accounting company
+
+1 / CST.
+
+---
+
+# 10. PROVIDER CONSISTENCY
+
+Verify:
+
+payment_method:
+`QRIS`
+
+payment_provider:
+`mandiri_direct`
+
+on:
+
+* source
+* mirror
+* accounting metadata
+
+Do not infer provider from bank account.
+
+Use source canonical provider.
+
+---
+
+# 11. BANK ACCOUNT CONSISTENCY
+
+Important:
+
+Source:
+
+`1640006707220`
+
+remains source/reference semantic.
+
+Canonical mirror/accounting:
+
+`bank_account_id = 2`
+
+Do not compare numeric equality between source ref and canonical ID.
+
+Compare via approved mapping.
+
+---
+
+# 12. IDEMPOTENCY RERUN
+
+After repair, run repair again in dry-run.
+
+Expected:
+
+Payment 13:
+`ALREADY_COMPLETE`
+
+Payment 14:
+`ALREADY_COMPLETE`
+
+Mapping:
+`ALREADY_PRESENT`
+
+Expected new rows:
+
+* mirror = 0
+* accounting entry = 0
+* GL lines = 0
+* tax = 0
+* mappings = 0
+
+Expected required updates:
+0
+
+except harmless technical timestamps if unavoidable.
+
+---
+
+# 13. NO ACCOUNTING REDESIGN
+
+Do not change current QRIS GL mapping:
+
+`Bank Mandiri CST`
+`1-1020-CST`
+
+Continue reporting:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+because QRIS is still debited to bank before actual settlement.
+
+Clearing-account redesign is separate.
+
+---
+
+# 14. INTERNAL JOURNAL
+
+Read-only verification only.
+
+Payment 13:
+one internal journal.
+
+Payment 14:
+one internal journal.
+
+Do not alter amounts.
+
+---
+
+# 15. VALIDATION
+
+Run:
+
+* `pnpm run typecheck:libs`
+* scripts typecheck
+* API typecheck
+* API build
+* ownership tests
+* bank mapping tests
+* payment/provider tests
+* accounting recovery tests
+* tax tests
+* idempotency tests
+* `git diff --check`
+
+Runtime:
+
+* `/health` 200
+* `/readiness` 200
+* `/api/health` 200
+
+---
+
+# 16. FINAL AUDIT
+
+Run read-only audit after repair.
+
+For payment 13 and 14 report:
+
+* source payment
+* source company
+* source account reference
+* canonical bank account
+* mirror
+* accounting entry
+* GL
+* tax
+* posting status
+* invariant status
+
+---
+
+# 17. FINAL STATUS
+
+Use:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+only if:
+
+1. bank mapping created/reused successfully;
+2. source company = 1;
+3. mirror canonical complete;
+4. canonical bank account = 2;
+5. entry 9/10 reused;
+6. no duplicate accounting;
+7. GL unchanged and balanced;
+8. canonical tax line exists exactly once;
+9. provider/method metadata complete;
+10. second dry-run = ALREADY_COMPLETE;
+11. no out-of-scope records modified.
+
+Otherwise use:
+
+`CONTROLLED_REPAIR_PARTIAL`
+
+or:
+
+`MANUAL_REVIEW_REQUIRED`
+
+with exact blocker.
+
+# HARD SAFETY
+
+Do not:
+
+* touch payments outside 13/14
+* mass backfill
+* alter source account ref
+* alter balanced GL
+* final QRIS reconciliation
+* settlement posting
+* MDR posting
+* production deploy
+* modify Admin user
+* change facility ownership beyond approved mappings.

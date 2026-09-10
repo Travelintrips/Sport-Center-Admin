@@ -1,0 +1,383 @@
+# CF-SC-7C — CANONICAL FINANCE CONFIG DISCOVERY
+## DEVELOPMENT READ-ONLY
+## ONE-SHOT COMPLETE AUDIT
+## DO NOT CREATE FAKE CONFIG
+
+CONTEXT
+
+CF-SC-7A/7B is complete.
+
+Verified:
+
+Finance suites:
+- 14 PASS
+- 99 assertions PASS
+- 0 blocked
+- 0 failed
+
+Quality:
+- workspace typecheck PASS / 0 errors
+- API build PASS
+- git diff --check PASS
+- API + Sport Center workflows RUNNING
+
+Rollback harness:
+scripts/src/cf-sc-7ab-harness.ts
+
+DEV safety:
+- APP_ENV=development required
+- SUPABASE_DATABASE_URL_DEV required
+- production rejected
+- transaction always ROLLBACK
+- no Paylabs call
+- no WhatsApp
+- no persistent fixture rows
+
+Runtime-proven control:
+
+QRIS
+provider = mandiri_direct
+payment_type = full_payment
+
+Other payment shapes remain BLOCKED because canonical
+fixture/config evidence is unavailable.
+
+Current known DEV config counts:
+
+active settlement configs = 1
+active tax configs = 1
+
+OBJECTIVE
+
+Perform ONE comprehensive READ-ONLY discovery of the actual
+canonical finance configuration and payment contracts available
+in DEV.
+
+Do NOT create configuration merely to make tests pass.
+
+Do NOT modify database.
+
+============================================================
+PHASE 1 — DISCOVER ACTUAL SCHEMA
+============================================================
+
+Inspect information_schema / pg_catalog first.
+
+Discover actual tables, columns, enums, constraints and FKs
+related to:
+
+- companies
+- Sport Center payment settings
+- payment methods
+- payment providers
+- receiving bank accounts
+- payment settlement configs
+- tax settings
+- COA/account mapping
+- accounting settings
+- sport_payments
+- sport_bookings
+- booking groups/group payments
+- Paylabs identities
+- DP / installment / settlement identities
+
+Do not assume table or column names.
+
+Report actual object names.
+
+============================================================
+PHASE 2 — COMPANY OWNERSHIP
+============================================================
+
+Resolve canonical company for Sport Center.
+
+Report:
+
+company_id
+company name
+ownership/config source
+
+Verify whether all relevant Sport Center facilities/payments
+resolve deterministically to the configured company.
+
+Do not guess missing ownership.
+
+============================================================
+PHASE 3 — PAYMENT METHOD INVENTORY
+============================================================
+
+Discover every payment method represented by:
+
+A. canonical configuration
+B. actual DEV payments
+C. application enum/contract
+
+Compare them.
+
+Classify each:
+
+CONFIGURED_AND_USED
+CONFIGURED_NOT_USED
+USED_NOT_CONFIGURED
+APPLICATION_ONLY
+UNKNOWN
+
+Specifically inspect:
+
+QRIS
+bank_transfer / transfer
+Paylabs
+cash if supported
+other existing methods
+
+============================================================
+PHASE 4 — PROVIDER INVENTORY
+============================================================
+
+Discover providers from:
+
+configuration
+sport_payments
+application contract
+
+Specifically inspect:
+
+mandiri_direct
+Paylabs
+unknown/null
+other providers
+
+For each determine:
+
+payment method
+bank/receiving account
+settlement config
+effective date
+active status
+
+============================================================
+PHASE 5 — SETTLEMENT CONFIG
+============================================================
+
+Inspect the single active settlement config.
+
+Return exact non-secret business configuration:
+
+company
+payment method
+provider
+receiving bank/account identity
+settlement timing
+MDR/rate
+fixed fee
+tax/fee rule
+effective_from
+effective_to
+active status
+
+Do not print credentials or secrets.
+
+Determine which payment matrix shapes it legitimately covers.
+
+============================================================
+PHASE 6 — TAX CONFIG
+============================================================
+
+Inspect the single active tax config.
+
+Return:
+
+company/project scope
+tax code/type
+rate
+inclusive/exclusive
+effective_from
+effective_to
+active status
+
+Determine whether it applies to:
+
+QRIS
+Transfer Bank
+Paylabs
+DP
+pelunasan
+group payment
+
+Do not infer applicability if scope is ambiguous.
+
+============================================================
+PHASE 7 — COA CONFIG
+============================================================
+
+Find canonical account mapping required by Central Finance:
+
+revenue
+PPN output
+bank/receivable
+clearing
+MDR/provider fee
+rounding if applicable
+
+Report exact configuration source.
+
+For each classify:
+
+CANONICAL
+LEGACY_FALLBACK
+MISSING
+AMBIGUOUS
+
+Do not create new COA.
+
+============================================================
+PHASE 8 — PAYMENT SHAPE INVENTORY
+============================================================
+
+READ ONLY.
+
+Inspect existing DEV sport_payments and related booking/group
+relationships.
+
+Count actual examples of:
+
+QRIS full_payment
+Transfer full_payment
+Paylabs full_payment
+QRIS DP
+QRIS pelunasan
+Transfer DP
+Transfer pelunasan
+Group payment
+historical confirmed without accounting
+provider unknown/null
+
+For every category return:
+
+row count
+whether a safe existing example exists
+whether canonical configuration resolves
+
+Do NOT process or modify them.
+
+============================================================
+PHASE 9 — CONTRACT DISCOVERY
+============================================================
+
+For payment shapes with zero DEV rows, inspect source/schema
+contracts to determine whether the application actually supports them.
+
+Distinguish:
+
+SUPPORTED_BUT_NO_DEV_FIXTURE
+NOT_SUPPORTED
+LEGACY_ONLY
+UNKNOWN
+
+Do not manufacture runtime evidence.
+
+============================================================
+PHASE 10 — MATRIX READINESS
+============================================================
+
+Produce exactly one matrix:
+
+PAYMENT SHAPE
+APP SUPPORT
+DEV ROW EXISTS
+COMPANY CONFIG
+PROVIDER CONFIG
+BANK CONFIG
+TAX CONFIG
+COA CONFIG
+SETTLEMENT CONFIG
+FIXTURE POSSIBLE
+CLASSIFICATION
+
+Classification:
+
+READY_FOR_ROLLBACK_FIXTURE
+BLOCKED_CONFIG_MISSING
+BLOCKED_NO_CONTRACT
+BLOCKED_AMBIGUOUS
+LEGACY_ONLY
+NOT_SUPPORTED
+
+============================================================
+PHASE 11 — IDENTIFY MINIMAL OWNER CONFIG DECISIONS
+============================================================
+
+If configuration is missing, do NOT add it.
+
+List exact owner decisions required.
+
+Example:
+
+Transfer Bank:
+- receiving bank configuration missing
+
+Paylabs:
+- settlement provider config missing
+
+DP:
+- no separate financial configuration required / required
+
+Only report what evidence proves.
+
+============================================================
+PHASE 12 — NO DATABASE MUTATION
+============================================================
+
+Required:
+
+INSERT = 0
+UPDATE = 0
+DELETE = 0
+DDL = 0
+
+Do not seed fixtures.
+Do not add config.
+Do not modify migration.
+
+============================================================
+FINAL REPORT
+============================================================
+
+ACTUAL CONFIG TABLES =
+
+SPORT CENTER COMPANY =
+
+PAYMENT METHODS =
+PROVIDERS =
+
+ACTIVE SETTLEMENT CONFIG =
+ACTIVE TAX CONFIG =
+
+COA CONFIG =
+MISSING COA CONFIG =
+
+QRIS FULL =
+TRANSFER FULL =
+PAYLABS FULL =
+QRIS DP =
+QRIS PELUNASAN =
+TRANSFER DP =
+TRANSFER PELUNASAN =
+GROUP PAYMENT =
+HISTORICAL RECOVERY =
+PROVIDER UNKNOWN =
+
+READY_FOR_ROLLBACK_FIXTURE =
+BLOCKED_CONFIG_MISSING =
+BLOCKED_NO_CONTRACT =
+LEGACY_ONLY =
+NOT_SUPPORTED =
+
+OWNER DECISIONS REQUIRED =
+
+DB WRITES = 0
+
+READY TO EXTEND CF-SC-7AB MATRIX =
+YES/NO
+
+STOP.

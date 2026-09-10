@@ -1,0 +1,344 @@
+RESTORE DEV RUNTIME SAFELY + FINAL PRE-PRODUCTION HARDENING
+
+JANGAN BERTANYA KONFIRMASI.
+LANGSUNG AUDIT → FIX → TEST → VERIFY.
+
+KONDISI SAAT INI:
+
+- DEV application sebelumnya FULLY VERIFIED.
+- Production audit BLOCKED secara benar karena production identity/connection tidak tersedia.
+- DEV sekarang juga fail-closed karena SUPABASE_DATABASE_URL_DEV tidak tersedia.
+- Frontend dan mockup berjalan.
+- API berhenti sesuai security guard.
+
+TARGET:
+
+1. Pulihkan API DEV secara aman.
+2. Jangan membuka fallback database.
+3. Jangan pernah mengizinkan DEV → PROD.
+4. Jangan mengubah production.
+5. Setelah API DEV pulih, ulangi full verification.
+6. Lakukan static final audit terhadap seluruh production-access/security boundary.
+7. Production data audit tetap BLOCKED jika production identity belum tersedia.
+
+==================================================
+PHASE 1 — AUDIT DEV SECRET PATH
+==================================================
+
+Cari source of truth DEV database configuration.
+
+Audit:
+
+- SUPABASE_DATABASE_URL_DEV
+- GCP Secret Manager loader
+- existing DEV bootstrap
+- Replit Secrets
+- development environment resolver
+- workflow configuration
+- API startup script
+- database client initialization
+
+Tentukan mengapa:
+
+SUPABASE_DATABASE_URL_DEV
+
+sekarang tidak tersedia.
+
+Jangan membuat credential baru secara asal.
+
+Jangan memakai:
+
+SUPABASE_DATABASE_URL
+DATABASE_URL
+production secret
+anonymous fallback
+
+sebagai pengganti DEV.
+
+==================================================
+PHASE 2 — RESTORE DEV USING EXISTING ARCHITECTURE
+==================================================
+
+Jika repository/project sudah memiliki mekanisme bootstrap DEV:
+
+→ gunakan mekanisme tersebut.
+
+Jika DEV secret memang seharusnya berasal dari Secret Manager:
+
+→ gunakan existing Secret Manager loader.
+
+Jika DEV memang menggunakan Replit bootstrap secret:
+
+→ gunakan existing bootstrap mechanism.
+
+Jangan menyimpan permanent application secret di source code.
+
+Jangan mencetak secret ke log.
+
+Jangan membuat .env committed.
+
+==================================================
+PHASE 3 — ENVIRONMENT ISOLATION
+==================================================
+
+WAJIB memastikan:
+
+DEV
+→ DEV database
+
+PRODUCTION
+→ PRODUCTION database
+
+Tidak boleh:
+
+DEV
+→ PROD fallback
+
+PROD
+→ DEV fallback
+
+Jika database target tidak tersedia:
+→ fail closed.
+
+Jangan mengubah guard hanya agar workflow hijau.
+
+==================================================
+PHASE 4 — DATABASE IDENTITY GUARD
+==================================================
+
+Setelah DEV connection tersedia:
+
+verifikasi database identity secara aman.
+
+Pastikan benar-benar DEV.
+
+Gunakan metadata non-sensitive.
+
+Jika target bukan DEV:
+→ API jangan start.
+
+Expected:
+
+isDevUsingProdDb = false
+
+dan database identity sesuai DEV.
+
+==================================================
+PHASE 5 — API RUNTIME
+==================================================
+
+Restart API workflow.
+
+Pastikan:
+
+- API starts
+- database connection succeeds
+- readiness endpoint PASS
+- no secret exposure
+- no fallback warning
+- no production connection
+
+Frontend tetap berjalan.
+
+==================================================
+PHASE 6 — REGRESSION
+==================================================
+
+Jalankan kembali:
+
+- full API tests
+- full workspace typecheck
+- API build
+- Sport Center build
+- full workspace build
+- git diff --check
+
+Target:
+
+103+ tests PASS
+typecheck PASS
+build PASS
+
+Jika ada regression:
+→ root cause
+→ fix
+→ test ulang.
+
+==================================================
+PHASE 7 — STATIC PRODUCTION ACCESS AUDIT
+==================================================
+
+Walaupun production DB belum tersedia, audit repository secara menyeluruh untuk memastikan tidak ada jalur yang memungkinkan production access secara tidak sengaja.
+
+Cari:
+
+- SUPABASE_DATABASE_URL
+- SUPABASE_DATABASE_URL_DEV
+- DATABASE_URL
+- NODE_ENV
+- isDevUsingProdDb
+- production
+- development
+- Secret Manager
+- database client initialization
+
+Pastikan:
+
+development cannot select production DB accidentally.
+
+production cannot fallback to development.
+
+Unknown environment → fail closed.
+
+==================================================
+PHASE 8 — CENTRAL FINANCE STATIC AUDIT
+==================================================
+
+Tanpa menyentuh production:
+
+audit seluruh source untuk:
+
+- accounting_journals
+- journal lines
+- payment outbox
+- accounting workers
+- settlement
+- reconciliation
+- finance mode
+- Central Finance integration
+
+Pastikan:
+
+SPORT_CENTER_FINANCE_MODE
+
+tetap mutually exclusive.
+
+Tidak ada jalur:
+
+legacy worker + Central Finance worker
+
+berjalan bersamaan.
+
+Tidak ada duplicate posting path.
+
+==================================================
+PHASE 9 — COMPLETION STATIC AUDIT
+==================================================
+
+Cari seluruh executable code yang dapat menghasilkan:
+
+completed
+
+Pastikan semua menuju centralized:
+
+bookingLifecycle.completeBooking()
+
+atau service canonical yang memang digunakan architecture sekarang.
+
+Tidak boleh ada bypass melalui:
+
+- admin
+- scheduler
+- WhatsApp
+- QR
+- payment
+- invoice
+- group
+- recurring
+- webhook
+
+==================================================
+PHASE 10 — EVENT STATIC AUDIT
+==================================================
+
+Pastikan executable code hanya menggunakan Event discount canonical:
+
+21.4%
+
+Pastikan tidak ada lagi:
+
+3 / 14
+21.43%
+21,43%
+
+sebagai executable calculation.
+
+Jangan mengubah komentar dokumentasi.
+
+==================================================
+PHASE 11 — SECURITY REGRESSION
+==================================================
+
+Test:
+
+1. DEV secret missing
+   → API fail closed
+
+2. DEV secret available
+   → API starts
+
+3. DEV points to production
+   → API refuses startup
+
+4. Production secret unavailable
+   → production path fails closed
+
+5. Service-role secret
+   → never exposed frontend
+
+6. Secret value
+   → never logged
+
+7. Unknown environment
+   → fail closed
+
+==================================================
+PHASE 12 — PRODUCTION AUDIT STATUS
+==================================================
+
+DO NOT claim production audit PASS.
+
+Production remains:
+
+BLOCKED — production identity/database unavailable.
+
+Do not query DEV and call it production.
+
+Do not manufacture production evidence.
+
+==================================================
+PHASE 13 — FINAL REPORT
+==================================================
+
+Report separately:
+
+A. DEV runtime
+B. DEV database identity
+C. DEV test suite
+D. DEV build
+E. environment isolation
+F. Central Finance static audit
+G. booking completion static audit
+H. Event static audit
+I. security regression
+J. production access
+
+Expected:
+
+DEV RUNTIME = PASS
+DEV DATABASE = VERIFIED
+TESTS = PASS
+BUILD = PASS
+ENVIRONMENT ISOLATION = PASS
+CENTRAL FINANCE STATIC = PASS
+BOOKING LIFECYCLE STATIC = PASS
+EVENT STATIC = PASS
+SECURITY = PASS
+PRODUCTION DATA AUDIT = BLOCKED
+
+Do not stop if DEV runtime can safely be fixed.
+
+Only remain BLOCKED for the genuinely unavailable production access.
+
+DO NOT ASK FOR CONFIRMATION.
+FIX EVERYTHING THAT CAN SAFELY BE FIXED NOW.

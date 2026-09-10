@@ -1,0 +1,562 @@
+# TASK — APPROVE CST COMPANY ID 1 + CONTROLLED REPAIR PAYMENT 13/14
+
+Lanjutkan dari state workspace saat ini.
+
+Business owner telah memberikan approval eksplisit:
+
+`CST = company_id 1`
+
+Ownership facility yang disetujui:
+
+* Facility 1 — Lapangan Badminton A → CST / `company_id = 1`
+* Facility 7 — Meja Billiard → CST / `company_id = 1`
+
+Jangan mencari atau memilih company lain sebagai owner kedua facility tersebut.
+
+Tetapi sebelum melakukan write, tetap lakukan sanity check read-only bahwa `company_id = 1` ada pada master/company configuration yang digunakan aplikasi.
+
+Jika record tidak ada atau terdapat structural inconsistency:
+
+STOP:
+
+`CST_COMPANY_ID_1_INVALID`
+
+Jangan fallback ke company lain.
+
+---
+
+# 1. ENVIRONMENT SAFETY
+
+Task hanya boleh berjalan pada development database aktif.
+
+Verifikasi:
+
+* environment
+* database source
+* sanitized database identity
+* schema
+
+Production tidak boleh digunakan.
+
+Jangan:
+
+* production deploy
+* production migration
+* mass backfill
+* final QRIS reconciliation
+* settlement posting
+* MDR posting
+
+---
+
+# 2. APPROVED OWNERSHIP
+
+Canonical ownership:
+
+Facility 1
+→ company_id = 1 / CST
+
+Facility 7
+→ company_id = 1 / CST
+
+Evidence source:
+
+`manual_business_approval`
+
+Evidence reference:
+
+`Business owner confirmed CST is company_id 1 and owns Facility 1 and Facility 7`
+
+Effective date harus mencakup payment 13/14 pada:
+
+`2026-08-09`
+
+Jika belum terdapat historical effective date yang lebih authoritative, gunakan:
+
+`effective_from = 2026-08-09`
+
+dan tandai bahwa tanggal tersebut merupakan controlled repair effective date berdasarkan approval task ini.
+
+Jangan mengklaim bahwa mapping telah berlaku sebelum tanggal tersebut tanpa evidence.
+
+---
+
+# 3. FACILITY OWNERSHIP MAPPING
+
+Gunakan canonical:
+
+`sport_center.facility_company_mappings`
+
+Buat mapping development secara idempotent:
+
+Facility 1 → company 1
+
+Facility 7 → company 1
+
+Sebelum INSERT:
+
+* cek existing mapping;
+* cek overlapping effective period;
+* cek conflicting company.
+
+Jika existing mapping yang efektif menunjuk company lain:
+
+STOP:
+
+`OWNERSHIP_CONFLICT`
+
+Jangan overwrite otomatis.
+
+Jika mapping company 1 sudah ada:
+
+reuse.
+
+Jangan membuat duplicate.
+
+---
+
+# 4. VERIFY OWNERSHIP RESOLVER
+
+Setelah mapping:
+
+Payment 13 harus resolve:
+
+* facility_id = 1
+* company_id = 1
+* deterministic = true
+* evidence = approved facility ownership mapping
+
+Payment 14 harus resolve:
+
+* facility_id = 7
+* company_id = 1
+* deterministic = true
+* evidence = approved facility ownership mapping
+
+Expected result:
+
+`OWNERSHIP_RESOLVED`
+
+Legacy accounting entry tidak lagi digunakan sebagai evidence. Ia hanya boleh dibandingkan sebagai consistency check.
+
+---
+
+# 5. IMPORTANT LEGACY COMPANY RESULT
+
+Accounting entry existing:
+
+Payment 13:
+`entry_id = 9`
+`company_id = 1`
+
+Payment 14:
+`entry_id = 10`
+`company_id = 1`
+
+Karena approved canonical CST company sekarang adalah:
+
+`company_id = 1`
+
+maka jika runtime data masih sama:
+
+JANGAN classify sebagai:
+
+`LEGACY_COMPANY_MISMATCH`
+
+Classify:
+
+`LEGACY_COMPANY_CONSISTENT`
+
+Company accounting tidak perlu diubah jika nilainya sudah `1`.
+
+---
+
+# 6. PAYMENT 13 CONTROLLED REPAIR
+
+Source:
+
+`sport_center.sport_payments.id = 13`
+
+Expected canonical dimensions:
+
+* company_id = 1
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* bank_account_id = `1640006707220`
+* payment_type = full_payment
+* amount = Rp100.000
+* paid_at = existing canonical timestamp
+
+Repair source payment company only if current:
+
+`company_id IS NULL`
+
+Do not overwrite conflicting non-null company without stopping for review.
+
+---
+
+# 7. PAYMENT 13 MIRROR REPAIR
+
+Canonical mirror:
+
+`public.sport_payments`
+
+Existing mirror expected:
+
+`SCPAY-SC-13`
+
+Repair idempotently:
+
+* source_payment_id = 13
+* company_id = 1
+* bank_account_id = source bank account
+* method/payment_method = QRIS
+* payment_provider = mandiri_direct
+* provider_code = mandiri_direct
+* provider_reference from source if available
+* provider_order_id from source if available
+* merchant_trade_no from source if available
+* provider_trade_no from source if available
+* paid_at from source
+* expected_settlement_date only if deterministically available
+* entry_id = 9
+
+Do not create second mirror.
+
+Use null-preserving semantics.
+
+Do not replace valid metadata with NULL.
+
+---
+
+# 8. PAYMENT 14 CONTROLLED REPAIR
+
+Source:
+
+`sport_center.sport_payments.id = 14`
+
+Canonical:
+
+* company_id = 1
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* bank_account_id = `1640006707220`
+* payment_type = full_payment
+* amount = Rp50.000
+
+Mirror:
+
+`SCPAY-SC-14`
+
+Repair:
+
+* source_payment_id = 14
+* company_id = 1
+* bank_account_id
+* QRIS
+* mandiri_direct
+* provider metadata
+* paid_at
+* expected settlement date if deterministic
+* entry_id = 10
+
+Do not create duplicate mirror.
+
+---
+
+# 9. ACCOUNTING ENTRY RECOVERY
+
+Existing canonical correlation must be reused:
+
+Payment 13:
+
+`sc_payment_13 → entry 9`
+
+Payment 14:
+
+`sc_payment_14 → entry 10`
+
+Do not create accounting entry baru.
+
+Recover metadata idempotently where schema supports it.
+
+Canonical accounting metadata should identify:
+
+* source = `sport_center_payment`
+* source payment ID
+* company_id = 1
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* payment_type = full_payment
+* bank_account_id
+* correlation_id
+
+If some metadata belongs in governance/JSON metadata rather than physical columns, use the existing canonical project convention.
+
+Do not add unnecessary duplicate columns.
+
+---
+
+# 10. PRESERVE EXISTING GL
+
+Payment 13:
+
+* debit = Rp100.000
+* credit = Rp100.000
+* balanced
+
+Payment 14:
+
+* debit = Rp50.000
+* credit = Rp50.000
+* balanced
+
+Do NOT recreate GL.
+
+Do NOT change GL amount merely for metadata repair.
+
+Verify revenue/PPN composition remains correct.
+
+---
+
+# 11. PUBLIC TAX REPAIR
+
+Payment 13:
+
+* internal PPN = Rp9.910
+* public GL tax currently missing
+
+Payment 14:
+
+* internal PPN = Rp4.955
+* public GL tax currently missing
+
+After ownership resolution and accounting validation:
+
+classify missing public tax rows.
+
+If all conditions deterministic:
+
+`SAFE_PUBLIC_TAX_REPAIR`
+
+Then prepare idempotent repair using existing accounting entry.
+
+Requirements:
+
+* company_id = 1
+* correct accounting_entry_id
+* tax_type = PPN_OUT
+* correct rate
+* correct base amount
+* correct tax amount
+* direction = out
+* correct period/entity reference
+
+Use `NOT EXISTS`, unique key, or equivalent idempotency guard.
+
+Never duplicate tax rows.
+
+---
+
+# 12. APPLY STRATEGY
+
+Execute in two phases.
+
+## Phase A — mandatory dry-run
+
+Show exact proposed changes for:
+
+* ownership mapping
+* source payment 13
+* source payment 14
+* mirror 13
+* mirror 14
+* accounting entry 9
+* accounting entry 10
+* public tax payment 13
+* public tax payment 14
+
+If any unexpected conflict exists:
+
+STOP.
+
+## Phase B — controlled development repair
+
+Only if Phase A is completely deterministic and conflict-free:
+
+apply the repair ONLY for:
+
+* Facility 1
+* Facility 7
+* Payment 13
+* Payment 14
+* their existing mirror rows
+* existing accounting entries 9/10
+* missing public tax rows associated with these exact payments
+
+Do not expand scope.
+
+Use transaction boundaries where appropriate.
+
+---
+
+# 13. POST-REPAIR AUDIT
+
+After apply, verify:
+
+Payment 13:
+
+`sport_center.sport_payments.id = 13`
+
+must link consistently to:
+
+`public.sport_payments.source_payment_id = 13`
+
+→ existing accounting entry 9
+
+→ balanced GL
+
+→ public tax line Rp9.910
+
+Payment 14:
+
+`sport_center.sport_payments.id = 14`
+
+→ mirror source_payment_id 14
+
+→ existing accounting entry 10
+
+→ balanced GL
+
+→ public tax line Rp4.955
+
+Verify mirror metadata:
+
+* company = 1
+* QRIS
+* mandiri_direct
+* bank account
+* payment type
+* paid_at
+* source payment ID
+* entry ID
+
+---
+
+# 14. IDEMPOTENCY TEST
+
+Run controlled repair logic a second time in dry-run mode.
+
+Expected:
+
+* ownership mapping: already complete
+* source payments: already complete
+* mirror: already complete
+* accounting metadata: already complete
+* tax rows: already complete
+* new accounting entries: 0
+* new GL lines: 0
+* new tax duplicates: 0
+
+Expected classification:
+
+`ALREADY_COMPLETE`
+
+---
+
+# 15. ACCOUNTING DESIGN WARNING
+
+Do NOT redesign QRIS accounting in this task.
+
+Current QRIS debit account remains:
+
+`Bank Mandiri CST`
+`1-1020-CST`
+
+Continue reporting:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+because confirmed QRIS currently debits bank before actual settlement.
+
+Clearing-account redesign is a separate task.
+
+---
+
+# 16. VALIDATION
+
+Run:
+
+`pnpm run typecheck:libs`
+
+`pnpm --filter @workspace/api-server run typecheck`
+
+`pnpm --filter @workspace/api-server run build`
+
+relevant ownership/accounting/provider/tax tests
+
+`git diff --check`
+
+Runtime:
+
+* `/health` = 200
+* `/readiness` = 200
+* `/api/health` = 200
+
+---
+
+# 17. FINAL REPORT
+
+Return:
+
+## A. Environment
+
+## B. CST company ID validation
+
+Explicitly confirm:
+
+`CST = company_id 1`
+
+## C. Ownership mapping result
+
+Facility 1 → company 1
+
+Facility 7 → company 1
+
+## D. Payment 13 before/after
+
+## E. Payment 14 before/after
+
+## F. Mirror before/after
+
+## G. Existing accounting entry recovery
+
+## H. GL validation
+
+## I. Public tax repair
+
+## J. Idempotency rerun
+
+## K. Tests/build/runtime
+
+## L. Remaining risks
+
+## M. Final status
+
+Use:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+only if all scoped repairs succeed and post-repair audit passes.
+
+Otherwise use:
+
+`CONTROLLED_REPAIR_PARTIAL`
+
+or:
+
+`MANUAL_REVIEW_REQUIRED`
+
+with exact reason.
+
+Do not commit, push, production deploy, final QRIS reconciliation, settlement posting, MDR posting, or mass backfill.

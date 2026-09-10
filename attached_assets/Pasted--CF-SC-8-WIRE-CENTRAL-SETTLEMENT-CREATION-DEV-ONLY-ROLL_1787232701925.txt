@@ -1,0 +1,377 @@
+# CF-SC-8 — WIRE CENTRAL SETTLEMENT CREATION
+## DEV ONLY — ROLLBACK PROOF — NO PROD CUTOVER
+
+CURRENT VERIFIED STATE
+
+CF-SC-7D PASS for:
+
+- QRIS full payment
+- QRIS DP
+- QRIS pelunasan
+- group payment
+
+Verified per fixture:
+
+finance event = 1
+accounting effect = 1
+balanced accounting
+PPN_OUT_11 = 11%
+public.bank_mutations = 1
+sport_center.bank_mutations = 0
+booking-level accounting entries = 0
+retry idempotent
+fixture rollback = confirmed
+
+DP/pelunasan accounting identity now correctly uses payment-level identity.
+
+Current blocker:
+
+Central runtime does NOT create:
+
+sport_center.payment_settlement_batches
+
+Observed:
+
+settlement batch count = 0
+
+Existing CF-SC-5 schema already supports:
+
+payment_settlement_batches.canonical_bank_mutation_id
+→ public.bank_mutations(id)
+
+Legacy:
+bank_mutation_id
+→ sport_center.bank_mutations(id)
+
+Central must use canonical_bank_mutation_id only.
+
+OBJECTIVE
+
+Wire settlement creation into the Central Finance runtime path.
+
+Target:
+
+payment confirmed
+→ finance event
+→ accounting
+→ tax
+→ public.bank_mutations
+→ payment_settlement_batches
+→ canonical_bank_mutation_id populated
+
+NO projection into sport_center.bank_mutations.
+
+============================================================
+PHASE 1 — FIND SETTLEMENT OWNER
+============================================================
+
+Audit current source/runtime after accounting/public mutation creation.
+
+Identify the correct reusable settlement service/function.
+
+Do NOT create a second settlement engine.
+
+Reuse existing canonical settlement calculation where possible.
+
+Find why CF-SC-6 could create settlement batch ID 15
+but CF-SC-7D full runtime path currently stops before settlement batch creation.
+
+Report exact missing invocation/wiring.
+
+============================================================
+PHASE 2 — CENTRAL SETTLEMENT INVOCATION
+============================================================
+
+After successful canonical public.bank_mutations creation:
+
+invoke settlement calculation/creation through the canonical owner.
+
+Required input:
+
+source_project = sport_center
+source_payment_id
+company_id
+payment method
+provider
+gross amount
+canonical public bank mutation ID
+effective settlement config
+
+For central path write:
+
+canonical_bank_mutation_id = public.bank_mutations.id
+
+Do NOT require or populate:
+bank_mutation_id
+
+============================================================
+PHASE 3 — TRANSACTION SUPPORT
+============================================================
+
+Preserve the injectable transaction support added in CF-SC-7D.
+
+Settlement creation must participate in the same controlled transaction when
+called by rollback harness.
+
+No independent connection that commits outside fixture transaction.
+
+Rollback proof must include settlement rows.
+
+============================================================
+PHASE 4 — SETTLEMENT IDEMPOTENCY
+============================================================
+
+Required invariant:
+
+one canonical payment
+→ maximum one active settlement batch for the same settlement identity
+
+Retry:
+
+payment accounting
+public mutation
+settlement creation
+
+must return the existing batch.
+
+Do not create a second batch.
+
+Use database-level uniqueness where already available.
+
+Do not invent duplicate identity mechanisms unnecessarily.
+
+============================================================
+PHASE 5 — QRIS FULL RUNTIME PROOF
+============================================================
+
+Rollback-only DEV fixture.
+
+Expected:
+
+payment event = 1
+accounting = 1
+public mutation = 1
+SC mutation = 0
+settlement batch = 1
+
+Batch:
+status = calculated or canonical expected pre-post status
+gross = payment gross
+MDR = canonical config
+net = gross - configured deductions
+
+canonical_bank_mutation_id != NULL
+bank_mutation_id = NULL
+
+Retry returns same batch ID.
+
+Rollback confirmed.
+
+============================================================
+PHASE 6 — QRIS DP
+============================================================
+
+Same proof for QRIS DP.
+
+DP payment identity must remain payment-level.
+
+One DP payment:
+→ one public mutation
+→ one settlement batch
+
+No booking collision.
+
+============================================================
+PHASE 7 — QRIS PELUNASAN
+============================================================
+
+Same proof for pelunasan.
+
+DP and pelunasan:
+- distinct payment IDs
+- distinct public mutation identities
+- distinct settlement identities
+
+No collision through booking order/reference.
+
+============================================================
+PHASE 8 — GROUP PAYMENT
+============================================================
+
+One group payment:
+→ one accounting effect
+→ one public mutation
+→ one settlement batch
+
+Do not multiply settlement by number of bookings.
+
+No:
+source=sport_center_booking accounting.
+
+============================================================
+PHASE 9 — MDR / NET SETTLEMENT
+============================================================
+
+Use canonical active settlement config.
+
+For Mandiri Direct current DEV config:
+
+derive MDR from configuration.
+
+Do NOT hardcode 0.3%.
+
+Verify:
+
+gross
+- MDR/provider fee
+- configured deductions
+= net settlement
+
+Record config/rule identity used.
+
+============================================================
+PHASE 10 — LEGACY MUTATION EXCLUSION
+============================================================
+
+For all central fixtures require:
+
+new sport_center.bank_mutations = 0
+
+new sport_center.bank_reconciliation_matches = 0
+
+payment_settlement_batches.bank_mutation_id = NULL
+
+payment_settlement_batches.canonical_bank_mutation_id = populated
+
+============================================================
+PHASE 11 — FAILURE SAFETY
+============================================================
+
+Controlled missing settlement-config case:
+
+Required:
+
+manual_review or deterministic configuration failure
+
+No partial:
+- accounting mutation after rollback fixture
+- settlement batch
+- SC mutation
+
+Do not guess settlement configuration.
+
+============================================================
+PHASE 12 — CONCURRENCY
+============================================================
+
+Concurrent settlement creation for same payment/public mutation.
+
+Required:
+
+settlement batches = 1
+public mutation = 1
+accounting effect = 1
+
+No duplicate financial effect.
+
+============================================================
+PHASE 13 — ROLLBACK PROOF
+============================================================
+
+After each fixture confirm zero committed fixture-owned rows for:
+
+sport_payments
+outbox
+central_finance_processing
+public.sport_payments
+accounting_payments
+accounting_entries
+accounting_entry_lines
+public.bank_mutations
+payment_settlement_batches
+
+============================================================
+PHASE 14 — TEST RUNNER
+============================================================
+
+The repository test runner must now be deterministic.
+
+If focused Jest suites are still blocked by ESM configuration:
+
+fix the runner root cause first.
+
+Do not leave:
+
+blocked suite before assertion
+
+as accepted baseline.
+
+Required:
+
+all CF-SC relevant finance suites executable.
+
+============================================================
+PHASE 15 — QUALITY GATE
+============================================================
+
+Run:
+
+full workspace typecheck
+Central Finance tests
+accounting integration tests
+settlement tests
+boundary tests
+Paylabs tests
+API build
+git diff --check
+
+Required:
+
+typecheck = PASS / 0 errors
+blocked finance suites = 0
+
+============================================================
+FINAL REPORT
+============================================================
+
+SETTLEMENT WIRING ROOT CAUSE =
+
+SETTLEMENT OWNER =
+SETTLEMENT INVOCATION =
+
+QRIS FULL SETTLEMENT =
+QRIS DP SETTLEMENT =
+QRIS PELUNASAN SETTLEMENT =
+GROUP SETTLEMENT =
+
+CANONICAL MUTATION FK =
+LEGACY MUTATION FK =
+
+MDR CONFIG SOURCE =
+GROSS/NET PROOF =
+
+SETTLEMENT IDEMPOTENCY =
+CONCURRENCY =
+
+SC MUTATIONS CREATED =
+SC RECONCILIATION MATCHES CREATED =
+
+ROLLBACK PROOF =
+
+TEST RUNNER =
+TESTS =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+
+PROD WRITES = 0
+PROD CUTOVER = NO
+
+READY PAYMENT MATRIX WITH SETTLEMENT =
+READY FOR PROD SHADOW MODE = YES/NO
+READY FOR CONTROLLED CUTOVER = NO
+READY FOR LEGACY CLEANUP = NO
+
+BLOCKERS =
+
+STOP.

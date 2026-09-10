@@ -45,7 +45,8 @@ export async function logAccountingError(opts: {
     | "createPublicMembershipAccountingEntry"
     | "createInvoiceJournalEntry"
     | "createPublicInvoiceAccountingEntry"
-    | "postConfirmedPaymentAccounting";
+    | "postConfirmedPaymentAccounting"
+    | "postConfirmedPaymentAccounting:autoInquiryRecovery";
   orderNumber: string;
   bookingId: number;
   error: unknown;

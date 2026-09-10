@@ -22,6 +22,7 @@ import { getInternalPdfToken } from "./internalPdfToken";
 import { logAudit } from "./auditLog";
 import { logger } from "./logger";
 import { getBaseUrl } from "./appUrl";
+import { allowWhatsAppProviderSend } from "./whatsappSafety";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -169,6 +170,7 @@ async function sendInvoicePdfWA(params: {
   publicPdfLink: string;
   orderNumber: string;
 }): Promise<void> {
+  if (!allowWhatsAppProviderSend()) return;
   const phone = cleanPhone(params.customerPhone);
   if (!phone) {
     logger.warn({ orderNumber: params.orderNumber }, "[InvoiceDelivery] Nomor HP customer kosong — WA tidak dikirim");
@@ -508,47 +510,51 @@ export async function sendGroupInvoiceToCustomer(
   // ── 6. Kirim WhatsApp — pesan khusus multi-sesi ───────────────────────────
   try {
     const phone = cleanPhone(customerPhone);
-    if (!phone) throw new Error("Nomor HP customer kosong");
+    if (!allowWhatsAppProviderSend()) {
+      logger.info({ groupRef }, "[InvoiceDelivery] WA group invoice simulated/blocked");
+    } else {
+      if (!phone) throw new Error("Nomor HP customer kosong");
 
-    const token = await getFonnteToken();
-    if (!token) throw new Error("FONNTE_TOKEN tidak tersedia");
+      const token = await getFonnteToken();
+      if (!token) throw new Error("FONNTE_TOKEN tidak tersedia");
 
-    const fmtNum = (n: number) => new Intl.NumberFormat("id-ID").format(n);
-    const sessionLines = sorted.slice(0, 8)
-      .map((b) => `• ${b.bookingDate}, ${b.startTime}–${b.endTime}`)
-      .join("\n");
-    const moreNote = sorted.length > 8 ? `\n_(+${sorted.length - 8} sesi lainnya)_` : "";
+      const fmtNum = (n: number) => new Intl.NumberFormat("id-ID").format(n);
+      const sessionLines = sorted.slice(0, 8)
+        .map((b) => `• ${b.bookingDate}, ${b.startTime}–${b.endTime}`)
+        .join("\n");
+      const moreNote = sorted.length > 8 ? `\n_(+${sorted.length - 8} sesi lainnya)_` : "";
 
-    const message =
-      `✅ *Pembayaran Dikonfirmasi!*\n\n` +
-      `Halo *${customerName}*,\n\n` +
-      `Invoice booking gabungan Anda sudah siap:\n\n` +
-      `📅 *${sorted.length} Sesi Booking:*\n${sessionLines}${moreNote}\n\n` +
-      `✅ *Total: Rp ${fmtNum(totalGrandTotal)}*\n\n` +
-      `📄 *Download Invoice PDF:*\n${publicPdfLink}\n\n` +
-      `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`;
+      const message =
+        `✅ *Pembayaran Dikonfirmasi!*\n\n` +
+        `Halo *${customerName}*,\n\n` +
+        `Invoice booking gabungan Anda sudah siap:\n\n` +
+        `📅 *${sorted.length} Sesi Booking:*\n${sessionLines}${moreNote}\n\n` +
+        `✅ *Total: Rp ${fmtNum(totalGrandTotal)}*\n\n` +
+        `📄 *Download Invoice PDF:*\n${publicPdfLink}\n\n` +
+        `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`;
 
-    const resp = await fetch("https://api.fonnte.com/send", {
-      method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: phone, message }),
-    });
-    const body = await resp.json().catch(() => ({}));
-    if (!resp.ok || (body as any).status === false) {
-      throw new Error(`Fonnte error: ${JSON.stringify(body)}`);
+      const resp = await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        body: JSON.stringify({ target: phone, message }),
+      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok || (body as any).status === false) {
+        throw new Error(`Fonnte error: ${JSON.stringify(body)}`);
+      }
+
+      waSent = true;
+      logger.info({ phone, groupRef }, "[InvoiceDelivery] WA group invoice terkirim");
+      await logAudit({
+        userId: audit?.userId,
+        userName: audit?.userName ?? "system",
+        action: "INVOICE_PDF_SENT_WA",
+        entity: "booking_group",
+        after: { groupRef, invoiceNumber, phone: customerPhone },
+        ipAddress: audit?.ipAddress,
+        userAgent: audit?.userAgent,
+      });
     }
-
-    waSent = true;
-    logger.info({ phone, groupRef }, "[InvoiceDelivery] WA group invoice terkirim");
-    await logAudit({
-      userId: audit?.userId,
-      userName: audit?.userName ?? "system",
-      action: "INVOICE_PDF_SENT_WA",
-      entity: "booking_group",
-      after: { groupRef, invoiceNumber, phone: customerPhone },
-      ipAddress: audit?.ipAddress,
-      userAgent: audit?.userAgent,
-    });
   } catch (err) {
     errors.push(`WA gagal: ${(err as Error).message}`);
     logger.error({ err, groupRef }, "[InvoiceDelivery] Gagal kirim WA group invoice");

@@ -115,11 +115,20 @@ async function main() {
 
     // Payments for confirmed/completed
     await q(`
-      INSERT INTO sport_center.payments (booking_id, amount, payment_method, proof_url, status, confirmed_at)
+      INSERT INTO sport_center.payments
+        (booking_id, amount, payment_method, proof_url, bank_account_id, status, confirmed_at)
       SELECT b.id, b.total_price, 'Transfer Bank',
              'https://images.unsplash.com/photo-1518458028785-8fbcd101ebb9?w=400',
+             s.bank_account,
              'confirmed', now() - interval '1 day'
       FROM sport_center.bookings b
+      CROSS JOIN LATERAL (
+        SELECT bank_account
+        FROM sport_center.settings
+        WHERE bank_account IS NOT NULL AND btrim(bank_account) <> ''
+        ORDER BY id
+        LIMIT 1
+      ) s
       WHERE b.status IN ('confirmed','completed')
       AND NOT EXISTS (SELECT 1 FROM sport_center.payments p WHERE p.booking_id=b.id)
     `).catch((e: any) => console.log("Payments skip:", e.message));

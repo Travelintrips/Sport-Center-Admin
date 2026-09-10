@@ -1,0 +1,391 @@
+SPORT CENTER — PRODUCTION READINESS GATE
+FINAL PRE-PRODUCTION AUDIT
+
+DEV SUDAH FULLY VERIFIED.
+JANGAN MENGULANG REMEDIATION DEV.
+
+VERIFIED:
+- API RUNNING
+- DEV DATABASE VERIFIED
+- isDevUsingProdDb=false
+- DEV tidak fallback ke DATABASE_URL/PROD
+- /health 200
+- /healthz 200
+- /readiness 200
+- DEV storage isolated
+- ALLOW_DEV_ON_PROD_STORAGE tidak aktif
+- 103/103 tests PASS
+- Full typecheck PASS
+- Full workspace build PASS
+- git diff --check PASS
+
+TARGET:
+Pastikan application code/config benar-benar production-safe dan tidak akan mengganggu Central Finance.
+
+==================================================
+1. PRODUCTION ENVIRONMENT CONTRACT
+==================================================
+
+Audit seluruh production startup/configuration.
+
+Pastikan production menggunakan:
+
+PRODUCTION RUNTIME
+→ PRODUCTION SECRET MANAGER
+→ PRODUCTION DATABASE
+→ PRODUCTION STORAGE
+→ CENTRAL FINANCE
+
+dan tidak pernah:
+
+PRODUCTION
+→ DEV DATABASE
+PRODUCTION
+→ DEV STORAGE
+PRODUCTION
+→ fallback DATABASE_URL
+PRODUCTION
+→ fallback DEV secret
+
+Jika production secret unavailable:
+→ fail closed.
+
+==================================================
+2. DATABASE ISOLATION
+==================================================
+
+Pastikan:
+
+DEV → DEV database
+PROD → PROD database
+
+Tidak ada environment auto-detection yang dapat salah memilih database.
+
+Audit:
+
+- database resolver
+- Supabase client creation
+- Drizzle connection
+- API initialization
+- background worker
+- scripts
+- cron
+- migration runner
+
+Pastikan semua menggunakan environment resolver canonical.
+
+==================================================
+3. STORAGE ISOLATION
+==================================================
+
+Audit:
+
+- Supabase Storage
+- Replit Object Storage
+- media upload
+- invoice documents
+- booking documentation
+- customer files
+- vendor files
+
+Pastikan:
+
+DEV tidak dapat upload/delete production storage.
+
+PROD tidak fallback ke DEV storage.
+
+ALLOW_DEV_ON_PROD_STORAGE harus tetap disabled.
+
+==================================================
+4. CENTRAL FINANCE SAFETY
+==================================================
+
+Audit final semua production startup/worker:
+
+SPORT_CENTER_FINANCE_MODE
+
+Pastikan hanya satu accounting worker architecture aktif.
+
+Tidak boleh:
+
+Legacy Finance Worker
++
+Central Finance Worker
+
+posting transaksi yang sama.
+
+Pastikan:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL ACCOUNTING POSTING
+
+Tidak ada fallback journal.
+
+Tidak ada manual balancing.
+
+==================================================
+5. BOOKING COMPLETION
+==================================================
+
+Final search seluruh executable source.
+
+Semua completion harus menggunakan centralized lifecycle.
+
+Pastikan:
+
+payment paid ≠ completed
+invoice paid ≠ completed
+group payment ≠ completed
+corporate invoice ≠ completed
+
+Completion:
+
+confirmed
++
+check-in
++
+endTime passed
+=
+completed
+
+Tidak ada bypass dari:
+
+- admin
+- scheduler
+- WhatsApp
+- QR
+- payment
+- invoice
+- recurring
+- group
+- reschedule.
+
+==================================================
+6. PAYMENT / IDEMPOTENCY
+==================================================
+
+Final audit:
+
+payment_id
+correlation ID
+outbox
+journal
+
+Pastikan retry tidak membuat duplicate posting.
+
+Audit:
+
+- DP
+- final payment
+- corporate payment
+- group payment
+- Event payment
+- refund
+
+==================================================
+7. CORPORATE BILLING
+==================================================
+
+Final security audit:
+
+customer
+→ authorized company
+→ corporate booking
+→ monthly invoice
+→ payment
+
+Pastikan user tidak dapat memilih arbitrary company_id/companyCustomerId.
+
+Pastikan employee/company authorization tetap enforced backend.
+
+==================================================
+8. EVENT
+==================================================
+
+Final search executable calculation.
+
+Event discount harus:
+
+21.4%
+
+Rp100.000:
+→ discount Rp21.400
+→ final Rp78.600
+
+Tidak boleh ada executable:
+
+3 / 14
+21.43%
+21,43%
+
+Tax calculation harus menggunakan canonical calculation.
+
+==================================================
+9. TAX / INVOICE
+==================================================
+
+Final verify:
+
+hargaDasar = hargaIncludePPN / 1.11
+dpp = hargaDasar × durasi
+dppNilaiLain = dpp × 11/12
+ppn = dppNilaiLain × 12%
+total = dpp + ppn
+
+Invoice harus menampilkan:
+
+DPP
+DPP Nilai Lain
+PPN 12%
+Total
+
+Jangan membuat duplicate tax calculation layer.
+
+==================================================
+10. DOCUMENTS
+==================================================
+
+Audit:
+
+Invoice
+SPP
+Kwitansi
+Lampiran
+
+Template hanya presentation.
+
+Template tidak boleh mengubah:
+
+payment
+booking
+tax
+accounting
+
+Pastikan uploaded template tidak dapat inject executable code.
+
+==================================================
+11. WHATSAPP
+==================================================
+
+Audit token/action authorization.
+
+Pastikan:
+
+- token scoped
+- expiry
+- replay protection
+- booking ownership
+- company authorization
+- payment approval authorization
+
+WhatsApp completion tetap centralized lifecycle.
+
+==================================================
+12. SECURITY
+==================================================
+
+Audit production bundle dan server logs.
+
+Pastikan tidak ada:
+
+- Supabase service role di frontend
+- production DB URL di frontend
+- secret di VITE variables
+- token dalam logs
+- password dalam error
+- credential dalam source
+- production credential dalam git
+
+Run secret scan jika tersedia.
+
+==================================================
+13. DEPLOYMENT SAFETY
+==================================================
+
+Audit:
+
+- startup scripts
+- migrations
+- workers
+- cron
+- health endpoints
+- readiness
+- environment validation
+
+Pastikan startup production tidak menjalankan:
+
+- DEV migration
+- DEV backfill
+- accidental accounting sync
+- destructive seed
+- test fixture
+- mock payment
+- mock accounting
+
+==================================================
+14. PRODUCTION DATA AUDIT STATUS
+==================================================
+
+Jangan mengklaim production data audit PASS.
+
+Jika production connection/identity belum tersedia:
+
+PRODUCTION DATA AUDIT = BLOCKED
+
+Ini terpisah dari code-level production readiness.
+
+==================================================
+15. FULL VERIFICATION
+==================================================
+
+Run:
+
+- 103+ tests
+- full typecheck
+- full build
+- git diff --check
+- startup validation
+- environment validation
+- secret scan
+
+Jika ada failure:
+→ root cause
+→ fix
+→ rerun.
+
+Jangan berhenti pada laporan jika masalah aman diperbaiki.
+
+==================================================
+FINAL REPORT
+==================================================
+
+Berikan tabel:
+
+Area | Status | Evidence
+
+1. DEV runtime
+2. DEV DB isolation
+3. DEV storage isolation
+4. Production environment contract
+5. Central Finance safety
+6. Booking lifecycle
+7. Payment idempotency
+8. Corporate billing
+9. Event
+10. Tax
+11. Documents
+12. WhatsApp
+13. Security
+14. Deployment
+15. Production data audit
+
+FINAL STATUS:
+
+PRODUCTION CODE READY
+jika seluruh code/config/security gate PASS.
+
+PRODUCTION DATA AUDIT BLOCKED
+jika production DB belum dapat diverifikasi.
+
+JANGAN MEMINTA KONFIRMASI.
+FIX SEMUA TEMUAN YANG AMAN DIPERBAIKI.

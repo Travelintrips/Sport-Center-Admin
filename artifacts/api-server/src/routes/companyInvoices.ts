@@ -1,15 +1,16 @@
 import { Router } from "express";
+import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
+import { eq, and, gte, lt, inArray, isNull, or, desc } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
-import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
 import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -45,6 +46,34 @@ function calcTaxBreakdown(totalAmountInclusive: number) {
   const ppnAmount = Math.round(dppNilaiLain * 0.12);
   const grandTotal = dpp + ppnAmount;
   return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+}
+
+// Keep the invoice flow compatible with production databases that may contain
+// legacy booking columns not represented in the current Drizzle schema. The
+// previous SELECT * made preview fail even when the fields needed for billing
+// were present.
+const invoiceBookingSelection = {
+  id: bookingsTable.id,
+  orderNumber: bookingsTable.orderNumber,
+  customerName: bookingsTable.customerName,
+  customerPhone: bookingsTable.customerPhone,
+  facilityId: bookingsTable.facilityId,
+  bookingDate: bookingsTable.bookingDate,
+  startTime: bookingsTable.startTime,
+  endTime: bookingsTable.endTime,
+  durationHours: bookingsTable.durationHours,
+  totalPrice: bookingsTable.totalPrice,
+  ppnAmount: bookingsTable.ppnAmount,
+  grandTotal: bookingsTable.grandTotal,
+} as const;
+
+function invoiceBookingFilter(companyCustomerId: number, startDate: string, endDate: string) {
+  return and(
+    eq(bookingsTable.companyCustomerId, companyCustomerId),
+    eq(bookingsTable.billingStatus, "unbilled"),
+    gte(bookingsTable.bookingDate, startDate),
+    lt(bookingsTable.bookingDate, endDate),
+  );
 }
 
 function mapInvoice(
@@ -122,7 +151,22 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
 router.get("/company-invoices", adminMiddleware, async (req, res) => {
   try {
     const { companyCustomerId, status } = req.query;
-    let invoices = await db.select().from(companyInvoicesTable);
+    // Keep the list query limited to the fields used by the portal. Production
+    // databases may contain legacy billing columns, and a SELECT * makes this
+    // endpoint unnecessarily sensitive to schema drift.
+    let invoices = await db.select({
+      id: companyInvoicesTable.id,
+      invoiceNumber: companyInvoicesTable.invoiceNumber,
+      companyCustomerId: companyInvoicesTable.companyCustomerId,
+      periodMonth: companyInvoicesTable.periodMonth,
+      totalAmount: companyInvoicesTable.totalAmount,
+      ppnAmount: companyInvoicesTable.ppnAmount,
+      grandTotal: companyInvoicesTable.grandTotal,
+      status: companyInvoicesTable.status,
+      paidAt: companyInvoicesTable.paidAt,
+      notes: companyInvoicesTable.notes,
+      createdAt: companyInvoicesTable.createdAt,
+    }).from(companyInvoicesTable);
 
     if (companyCustomerId) {
       invoices = invoices.filter((i) => i.companyCustomerId === parseInt(String(companyCustomerId)));
@@ -134,10 +178,10 @@ router.get("/company-invoices", adminMiddleware, async (req, res) => {
     const companies = await db.select({ id: usersTable.id, name: usersTable.name, companyName: usersTable.companyName }).from(usersTable);
     const companyMap = Object.fromEntries(companies.map((c) => [c.id, c.companyName ?? c.name]));
 
-    const result = invoices.map((inv) => mapInvoice(inv, companyMap[inv.companyCustomerId]));
+    const result = invoices.map((inv) => mapInvoice(inv as typeof companyInvoicesTable.$inferSelect, companyMap[inv.companyCustomerId]));
     res.json(result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
   } catch (err) {
-    req.log.error({ err }, "List company invoices error");
+    req.log.error({ err, query: req.query }, "List company invoices error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -158,14 +202,10 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
 
     const { startDate, endDate } = periodDateRange(String(periodMonth));
 
-    const unbilledBookings = await db.select().from(bookingsTable).where(
-      and(
-        eq(bookingsTable.companyCustomerId, compId),
-        eq(bookingsTable.billingStatus, "unbilled"),
-        gte(bookingsTable.bookingDate, startDate),
-        lt(bookingsTable.bookingDate, endDate),
-      )
-    );
+    const unbilledBookings = await db
+      .select(invoiceBookingSelection)
+      .from(bookingsTable)
+      .where(invoiceBookingFilter(compId, startDate, endDate));
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
@@ -237,14 +277,10 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     const { startDate, endDate } = periodDateRange(periodMonth);
 
-    const unbilledBookings = await db.select().from(bookingsTable).where(
-      and(
-        eq(bookingsTable.companyCustomerId, companyCustomerId),
-        eq(bookingsTable.billingStatus, "unbilled"),
-        gte(bookingsTable.bookingDate, startDate),
-        lt(bookingsTable.bookingDate, endDate),
-      )
-    );
+    const unbilledBookings = await db
+      .select(invoiceBookingSelection)
+      .from(bookingsTable)
+      .where(invoiceBookingFilter(companyCustomerId, startDate, endDate));
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
@@ -504,6 +540,22 @@ router.post("/company-invoices/:id/rebuild-items", adminMiddleware, async (req, 
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_ITEMS_REBUILT",
+      entity: "company_invoice",
+      entityId: id,
+      after: {
+        invoiceNumber: inv.invoiceNumber,
+        companyId: inv.companyCustomerId,
+        rebuiltCount: items.length,
+        linkedBookingCount: bookings.length,
+      },
+      ipAddress,
+      userAgent,
+    });
     res.json({ ...mapInvoice(inv, company?.companyName ?? company?.name, items, company), rebuiltCount: items.length });
   } catch (err) {
     req.log.error({ err }, "Rebuild invoice items error");
@@ -527,13 +579,14 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
 
-    if (status === "paid") {
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+
+    if (status === "paid" && inv.status !== "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid", status: "completed" })
+        .set({ billingStatus: "paid" })
         .where(eq(bookingsTable.companyInvoiceId, id));
 
-      const { ipAddress, userAgent } = getClientInfo(req);
-      const userInfo = getUserFromReq(req);
       await logAudit({
         ...userInfo,
         action: "COMPANY_INVOICE_PAID",
@@ -541,6 +594,23 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
         entityId: id,
         before: { status: inv.status },
         after: { status: "paid", invoiceNumber: inv.invoiceNumber },
+        ipAddress,
+        userAgent,
+      });
+    } else if (status !== undefined || notes !== undefined) {
+      await logAudit({
+        ...userInfo,
+        action: "COMPANY_INVOICE_UPDATED",
+        entity: "company_invoice",
+        entityId: id,
+        before: {
+          status: inv.status,
+          notes: inv.notes,
+        },
+        after: {
+          status: updated.status,
+          notes: updated.notes,
+        },
         ipAddress,
         userAgent,
       });
@@ -567,6 +637,43 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Update company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /company-invoices/:id/audit-trail — invoice-specific audit history
+router.get("/company-invoices/:id/audit-trail", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "ID invoice tidak valid" });
+      return;
+    }
+
+    const [invoice] = await db
+      .select({ id: companyInvoicesTable.id, invoiceNumber: companyInvoicesTable.invoiceNumber })
+      .from(companyInvoicesTable)
+      .where(eq(companyInvoicesTable.id, id))
+      .limit(1);
+
+    if (!invoice) {
+      res.status(404).json({ error: "Invoice tidak ditemukan" });
+      return;
+    }
+
+    const logs = await db
+      .select()
+      .from(auditLogsTable)
+      .where(and(
+        eq(auditLogsTable.entity, "company_invoice"),
+        eq(auditLogsTable.entityId, id),
+      ))
+      .orderBy(desc(auditLogsTable.createdAt))
+      .limit(100);
+
+    res.json({ invoiceId: id, invoiceNumber: invoice.invoiceNumber, logs });
+  } catch (err) {
+    req.log.error({ err }, "Company invoice audit trail error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -603,7 +710,7 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
     if (markPaid && inv.status !== "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid", status: "completed" })
+        .set({ billingStatus: "paid" })
         .where(eq(bookingsTable.companyInvoiceId, id));
     }
 
@@ -624,6 +731,7 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Upload company invoice proof error");
+
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -658,7 +766,7 @@ router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) =
     );
 
     const token = process.env.FONNTE_TOKEN;
-    if (token) {
+    if (token && allowWhatsAppProviderSend()) {
       const phone = picPhone.replace(/^\+/, "").replace(/^0/, "62");
       await fetch("https://api.fonnte.com/send", {
         method: "POST",

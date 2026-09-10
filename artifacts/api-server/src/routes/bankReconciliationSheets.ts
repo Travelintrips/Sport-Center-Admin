@@ -14,6 +14,8 @@ import {
   extractProviderName,
   buildMutationKey,
 } from "../lib/bankMatcher";
+import { normalizePaymentProvider } from "../lib/paymentProvider";
+import { resolveBankImportSource } from "../lib/paymentEnrichment";
 
 const router = Router();
 
@@ -43,7 +45,9 @@ router.post("/bank-reconciliation/sheets/pull", adminMiddleware, async (req, res
       return;
     }
 
-    const rows = await pullMutationsFromSheet(sheetId, sheetName ?? undefined);
+    const resolvedSheetName = sheetName ?? undefined;
+    const sourceMapping = await resolveBankImportSource(sheetId, resolvedSheetName);
+    const rows = await pullMutationsFromSheet(sheetId, resolvedSheetName);
     if (!rows.length) {
       res.json({ ok: true, importedCount: 0, skippedCount: 0 });
       return;
@@ -72,11 +76,30 @@ router.post("/bank-reconciliation/sheets/pull", adminMiddleware, async (req, res
 
       const normalizedDescription = normalizeDescription(row.description);
       const providerOrderId = extractOrderId(row.description) ?? null;
-      const providerName = extractProviderName(normalizedDescription) ?? null;
+      const detectedDescriptionProvider = extractProviderName(normalizedDescription);
+      const mappedProvider = normalizePaymentProvider(sourceMapping?.providerName);
+      const providerName = mappedProvider ?? detectedDescriptionProvider ?? null;
+      const providerDetectionSource = mappedProvider
+        ? "provider-specific import source"
+        : detectedDescriptionProvider
+          ? "proven description pattern"
+          : null;
+      const mappedBankAccountId = sourceMapping?.bankAccountId ?? null;
+      const mappedCompanyId = sourceMapping?.companyId ?? null;
+      const rawPayload = {
+        ...row,
+        sourceType: "google_sheet",
+        sourceId: sheetId,
+        worksheetName: resolvedSheetName ?? null,
+        sourceClassification: "actual_bank_mutation",
+        sourceMappingConfigured: Boolean(sourceMapping),
+        sourceMappingValidated: Boolean(sourceMapping),
+      };
 
       try {
         await db.insert(bankMutationsTable).values({
-          bankAccountId: row.bankAccountId ?? null,
+          companyId: mappedCompanyId,
+          bankAccountId: mappedBankAccountId,
           transactionDate: row.transactionDate,
           description: row.description,
           creditAmount: String(creditAmount),
@@ -85,9 +108,10 @@ router.post("/bank-reconciliation/sheets/pull", adminMiddleware, async (req, res
           direction,
           mutationKey,
           normalizedDescription,
+          providerDetectionSource,
           providerOrderId,
           providerName,
-          rawPayload: row,
+          rawPayload,
           status: "unmatched",
         });
         importedCount++;

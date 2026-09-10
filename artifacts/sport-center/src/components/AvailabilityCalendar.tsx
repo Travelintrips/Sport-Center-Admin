@@ -12,6 +12,7 @@ interface Props {
   date: string;
   slots: Slot[] | undefined;
   isLoading: boolean;
+  isError: boolean;
   selectedTime: string;
   duration: number;
   onSelectTime: (time: string) => void;
@@ -31,6 +32,7 @@ export default function AvailabilityCalendar({
   date,
   slots,
   isLoading,
+  isError,
   selectedTime,
   duration,
   onSelectTime,
@@ -43,6 +45,15 @@ export default function AvailabilityCalendar({
         {Array.from({ length: 10 }).map((_, i) => (
           <Skeleton key={i} className="h-12 w-full rounded-lg" />
         ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="text-center text-red-600 py-8 border border-red-200 rounded-lg text-sm bg-red-50">
+        Gagal memuat slot. Silakan pilih tanggal lagi atau coba beberapa saat
+        kemudian.
       </div>
     );
   }

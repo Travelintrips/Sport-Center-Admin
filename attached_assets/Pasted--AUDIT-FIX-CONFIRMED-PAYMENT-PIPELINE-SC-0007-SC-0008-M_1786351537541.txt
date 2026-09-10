@@ -1,0 +1,485 @@
+# AUDIT & FIX CONFIRMED PAYMENT PIPELINE
+
+## SC-0007 / SC-0008 — Mirror Missing + Legacy Accounting Entry Mismatch
+
+Lanjutkan dari state workspace saat ini.
+
+Kasus aktual:
+
+### SC-0007
+
+* booking confirmed
+* source payment confirmed
+* public payment mirror tidak terbentuk
+* internal Sport Center accounting journal tidak terbentuk
+* public accounting entry ADA:
+
+  * entry ID 14
+  * ref = SC-0007
+  * company_id = 1
+  * balanced
+  * source_id = 94
+* source_id tersebut tidak cocok dengan booking ID 10 atau payment ID 18
+
+### SC-0008
+
+* booking confirmed
+* source payment confirmed
+* public payment mirror tidak terbentuk
+* internal Sport Center accounting journal tidak terbentuk
+* public accounting entry tidak ditemukan
+
+Tujuan task:
+
+1. menemukan kenapa mirror gagal untuk SC-0007/8;
+2. menemukan kenapa SC-0007 masih membuat public accounting entry legacy;
+3. memastikan confirmed payment memakai satu canonical pipeline;
+4. mencegah accounting entry yang tidak punya valid payment linkage;
+5. melakukan dry-run repair plan untuk SC-0007/8;
+6. jangan langsung repair historical record sampai root cause jelas.
+
+---
+
+# 1. SAFETY
+
+Development only.
+
+Jangan:
+
+* production deploy;
+* mass backfill;
+* final reconciliation;
+* settlement posting;
+* MDR posting;
+* historical GL rewrite;
+* delete accounting entry;
+* assume `source_id=94` valid.
+
+Read-only audit first.
+
+---
+
+# 2. TRACE SC-0007 END TO END
+
+Audit exact chain:
+
+booking SC-0007
+→ booking ID
+→ payment ID
+→ confirmation route
+→ mirror attempt
+→ internal journal attempt
+→ public accounting attempt
+→ tax posting.
+
+Capture:
+
+* booking ID
+* payment ID
+* payment status
+* payment company_id
+* payment method
+* provider
+* source_payment_id if any
+* mirror row if any
+* internal journal if any
+* public entry ID
+* correlation ID
+* source
+* source_id
+* GL
+* tax.
+
+---
+
+# 3. TRACE SC-0008 END TO END
+
+Do the same for SC-0008.
+
+Focus on exact point where pipeline stops.
+
+---
+
+# 4. IDENTIFY MIRROR FAILURE
+
+Runtime log already indicates:
+
+`mirror booking failed / booking not found`
+
+Find exact function/file responsible.
+
+Audit whether mirror code looks up booking by:
+
+* Sport Center booking ID;
+* public booking ID;
+* order number;
+* legacy booking mapping;
+* wrong schema.
+
+Determine whether SC-0007/8 fail because:
+
+* booking mapping missing;
+* wrong ID namespace;
+* mirror booking not created;
+* wrong company ownership;
+* transaction timing/race condition;
+* stale legacy dependency.
+
+Do not patch until exact cause identified.
+
+---
+
+# 5. PAYMENT SHOULD BE PRIMARY ACCOUNTING IDENTITY
+
+For confirmed payment accounting, canonical identity must be:
+
+`payment_id`
+
+not arbitrary booking/source IDs.
+
+Expected:
+
+`correlation_id = sc_payment_<payment_id>`
+
+Mirror:
+
+`source_payment_id = payment_id`
+
+Accounting:
+
+payment linkage must point to same source payment.
+
+Booking can remain reference metadata.
+
+---
+
+# 6. AUDIT ENTRY 14 / SOURCE_ID 94
+
+Find what record:
+
+`source_id = 94`
+
+actually points to.
+
+Search exact creation path for entry 14.
+
+Answer:
+
+* what table/entity is 94?
+* why was it selected?
+* which function generated entry 14?
+* was this legacy booking accounting?
+* did it run before/after mirror failure?
+* is correlation_id payment-level or booking-level?
+
+Do not modify entry 14 yet.
+
+Classify:
+
+`LEGACY_UNLINKED_ENTRY`
+
+if it is not deterministically linked to payment 18.
+
+---
+
+# 7. PREVENT PUBLIC ACCOUNTING WITHOUT CANONICAL PAYMENT LINKAGE
+
+For new Sport Center confirmed payments:
+
+public accounting must not be considered complete unless:
+
+* source payment exists;
+* company resolved;
+* payment ID known;
+* mirror exists or canonical payment linkage exists;
+* accounting correlation is payment-level;
+* entry can be traced back to payment.
+
+If mirror/accounting dependency fails:
+
+do not silently create unrelated legacy entry.
+
+Set:
+
+`posting_status = failed`
+
+with explicit reason.
+
+---
+
+# 8. INTERNAL JOURNAL MISSING
+
+Audit why:
+
+`sport_center.accounting_journals`
+
+does not contain SC-0007/8.
+
+Determine whether:
+
+* journal creation path was skipped;
+* failed transaction rolled back;
+* company missing prevented journal;
+* route bypassed canonical journal service;
+* old confirmation flow no longer calls it.
+
+Internal/public accounting should not diverge silently.
+
+---
+
+# 9. COMPANY OWNERSHIP
+
+SC-0007/8 are personal bookings with source `company_id = NULL`.
+
+Do not assume this means no accounting company.
+
+Use approved facility ownership mapping:
+
+facility
+→ `public.companies`
+
+If facility mapping resolves to CST:
+use company 1.
+
+If no mapping:
+remain blocked.
+
+Do not infer from payer type `personal`.
+
+---
+
+# 10. CANONICAL PIPELINE
+
+Target for new confirmed payment:
+
+`source payment`
+→ ownership resolver
+→ payment enrichment
+→ public mirror
+→ internal journal
+→ public accounting
+→ tax
+
+All steps keyed by payment ID.
+
+No second legacy public accounting path should bypass this.
+
+---
+
+# 11. REMOVE/BLOCK LEGACY DUPLICATE PATH
+
+Audit all callers that can create public Sport Center accounting entries.
+
+If an old path still creates:
+
+`source = sport_center_booking`
+
+independently from canonical payment pipeline,
+
+change behavior for NEW confirmations so it no longer posts separately.
+
+Do not delete old function if historical compatibility needs it.
+
+Guard it or route it through canonical payment accounting.
+
+---
+
+# 12. TRANSACTION / OUTBOX ORDER
+
+Audit whether confirmation currently does:
+
+payment confirmed
+→ accounting immediately
+→ mirror asynchronously
+
+If so, this can create exactly the SC-0007 condition.
+
+Preferred:
+
+payment confirmed
+→ durable canonical event/outbox
+→ mirror/payment projection
+→ accounting posting idempotently
+
+Or another atomic/idempotent ordering already supported by project.
+
+Do not create race between mirror and accounting.
+
+---
+
+# 13. SC-0007 DRY-RUN REPAIR PLAN
+
+Only after root cause is understood.
+
+Expected canonical repair target:
+
+* identify payment 18
+* resolve company deterministically
+* create/reuse mirror
+* link source_payment_id = 18
+* identify whether entry 14 can be safely reused
+* if entry 14 correlation/linkage is wrong, classify manual review
+* preserve balanced GL
+* preserve tax if correct
+* do not create second accounting entry unless accounting recovery rules explicitly require it
+
+Return:
+
+`SAFE_TO_REPAIR`
+or
+`MANUAL_REVIEW_REQUIRED`.
+
+---
+
+# 14. SC-0008 DRY-RUN REPAIR PLAN
+
+Expected:
+
+* identify payment 19
+* resolve company
+* create canonical mirror
+* determine whether accounting is completely missing
+* if no existing entry/correlation:
+  prepare one canonical accounting posting plan
+* do not apply yet
+
+---
+
+# 15. NO REPAIR IF SOURCE_ID SEMANTICS UNCLEAR
+
+If entry 14 cannot be deterministically related to payment 18:
+
+do not repurpose it automatically.
+
+Return:
+
+`ACCOUNTING_ENTRY_LINKAGE_AMBIGUOUS`
+
+---
+
+# 16. TESTS
+
+Add regression tests:
+
+### Confirmed payment
+
+→ mirror created
+→ internal journal created
+→ public accounting created
+→ tax created.
+
+### Mirror failure
+
+→ no unrelated public accounting entry created.
+
+### Same booking multiple payments
+
+→ payment-level accounting identities remain distinct.
+
+### Legacy path
+
+→ cannot bypass canonical payment pipeline for new payment.
+
+### Idempotency
+
+→ retry confirmation does not duplicate mirror/journal/accounting/tax.
+
+### Personal booking
+
+→ company resolved via facility ownership, not payer type.
+
+---
+
+# 17. AUDIT SC-0002–SC-0006
+
+Read-only compare working historical examples.
+
+Identify why SC-0002–SC-0006 successfully created internal journals.
+
+Compare pipeline fields against SC-0007/8:
+
+* company resolution
+* booking mapping
+* payment ID
+* route used
+* confirmation path
+* mirror timing
+* accounting function called.
+
+Use this comparison to isolate regression introduction.
+
+---
+
+# 18. VALIDATION
+
+Run:
+
+* typecheck libs
+* scripts typecheck
+* API typecheck
+* API build
+* payment/accounting tests
+* mirror tests
+* tax tests
+* idempotency tests
+* git diff --check
+
+Runtime:
+
+* /health 200
+* /readiness 200
+* /api/health 200
+
+---
+
+# 19. FINAL REPORT
+
+Return:
+
+## A. SC-0007 root cause
+
+## B. SC-0008 root cause
+
+## C. Why mirror failed
+
+## D. What source_id 94 actually is
+
+## E. Why entry 14 was created
+
+## F. Why internal journal missing
+
+## G. Legacy accounting path found
+
+## H. Canonical pipeline fix
+
+## I. SC-0007 dry-run repair eligibility
+
+## J. SC-0008 dry-run repair eligibility
+
+## K. Tests/build/runtime
+
+## L. Remaining risks
+
+## M. Final status
+
+Use:
+
+`PIPELINE_FIXED_READY_FOR_CONTROLLED_REPAIR`
+
+`ACCOUNTING_ENTRY_LINKAGE_AMBIGUOUS`
+
+`MIRROR_MAPPING_REQUIRED`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# HARD SAFETY
+
+Do not:
+
+* change GL historical amounts
+* delete entry 14
+* create duplicate accounting entry
+* production deploy
+* final reconciliation
+* MDR/settlement posting
+* mass backfill

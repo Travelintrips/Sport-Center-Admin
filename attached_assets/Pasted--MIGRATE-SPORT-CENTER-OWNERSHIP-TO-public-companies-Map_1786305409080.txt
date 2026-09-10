@@ -1,0 +1,703 @@
+# MIGRATE SPORT CENTER OWNERSHIP TO `public.companies`
+
+## + Map Facility 1/7 to CST + Dry-Run Repair Payment 13/14
+
+Lanjutkan dari state workspace saat ini.
+
+Temuan arsitektural final:
+
+* `public.companies.id = 1`
+
+  * `PT Cahaya Sejati Teknologi`
+  * code `CST`
+  * active
+  * merupakan canonical company master yang benar.
+
+* `sport_center.users.id = 1`
+
+  * Admin login
+  * role `admin`
+  * `account_type = personal`
+  * bukan company master.
+
+Ownership mapping Sport Center saat ini masih mereferensikan:
+
+`sport_center.users.id`
+
+dan resolver mensyaratkan:
+
+`account_type = company`.
+
+Model tersebut harus diperbaiki.
+
+JANGAN mengubah `sport_center.users.id = 1`.
+
+JANGAN mengubah account type Admin.
+
+JANGAN membuat user-company dummy hanya untuk memuaskan resolver lama.
+
+Target canonical:
+
+`facility ownership → public.companies.id`
+
+---
+
+# 1. SAFETY
+
+Development only terlebih dahulu.
+
+Sebelum write:
+
+verifikasi:
+
+* environment
+* database
+* schema
+* `public.companies.id = 1`
+* `sport_center.users.id = 1`
+
+Production harus STOP.
+
+Jangan:
+
+* production deploy
+* mass backfill
+* final reconciliation
+* MDR posting
+* settlement posting
+* accounting redesign
+* modify Admin user semantics
+
+---
+
+# 2. AUDIT EXISTING OWNERSHIP MODEL
+
+Audit exact schema:
+
+`sport_center.facility_company_mappings`
+
+atau table ownership equivalent.
+
+Tentukan:
+
+* current FK target;
+* column type;
+* constraints;
+* indexes;
+* overlapping-effective-date constraints;
+* code/resolver yang membaca mapping;
+* admin/API yang menulis mapping.
+
+Dokumentasikan semua tempat yang masih menganggap company = `sport_center.users`.
+
+---
+
+# 3. TARGET OWNERSHIP MODEL
+
+Canonical company source:
+
+`public.companies`
+
+Target mapping:
+
+```text
+sport_center.facility_company_mappings
+--------------------------------------
+id
+facility_id
+company_id        → public.companies.id
+effective_from
+effective_until
+is_active
+source
+notes
+created_by
+updated_by
+created_at
+updated_at
+```
+
+Jika nama table existing berbeda, gunakan existing table jika bisa dimigrasikan aman.
+
+Jangan membuat duplicate ownership subsystem tanpa alasan.
+
+---
+
+# 4. MIGRATION STRATEGY
+
+Migration harus additive/backward-compatible.
+
+Preferred approach:
+
+## Option A — Repoint existing FK safely
+
+Jika schema memungkinkan:
+
+* drop/recreate FK only if necessary;
+* preserve existing rows;
+* verify every existing mapped company can be translated.
+
+## Option B — Transitional column
+
+Jika existing mappings sudah terpakai luas:
+tambahkan column baru, misalnya:
+
+`canonical_company_id`
+
+→ `public.companies.id`
+
+lalu resolver baru menggunakan canonical field.
+
+Setelah migration stabil, legacy user-based ownership bisa deprecated.
+
+Jangan destructive remove legacy field pada task ini.
+
+Pilih opsi yang paling aman berdasarkan data existing.
+
+---
+
+# 5. MIGRATE EXISTING OWNERSHIP DATA SAFELY
+
+Audit existing mapping rows.
+
+Untuk setiap legacy mapping yang menunjuk `sport_center.users`:
+
+* cari apakah user tersebut memiliki deterministic link ke `public.companies`;
+* jika ya, classify safe mapping;
+* jika tidak, mark `MANUAL_REVIEW`.
+
+Jangan infer company hanya dari name/email.
+
+Jangan mass-convert ambiguous rows.
+
+Jika tidak ada legacy mappings:
+laporkan dan lanjut.
+
+---
+
+# 6. RESOLVER UPDATE
+
+Update canonical resolver:
+
+`resolvePaymentCompany(...)`
+
+Jangan lagi mensyaratkan:
+
+`sport_center.users.account_type = company`
+
+untuk facility ownership.
+
+Ownership resolution priority:
+
+1. source payment company snapshot → `public.companies`
+2. booking company relation → `public.companies`
+3. invoice company relation → `public.companies`
+4. facility ownership mapping → `public.companies`
+5. validated merchant/store mapping → `public.companies`
+
+Return:
+
+* companyId
+* companyCode
+* companyName
+* evidenceSource
+* evidenceReference
+* effectiveDate
+* deterministic
+* reason
+
+---
+
+# 7. AUTH SEPARATION
+
+Pastikan perubahan ownership tidak mengubah auth model.
+
+`sport_center.users`
+
+tetap:
+
+* login identity
+* personal/company user profile jika bisnis membutuhkan
+
+`public.companies`
+
+tetap:
+
+* legal/accounting company master
+
+Jangan membuat resolver company bergantung pada login account.
+
+Tambahkan regression test:
+
+`users.id=1 Admin personal`
+tetap valid login setelah ownership migration.
+
+---
+
+# 8. FACILITY 1 & 7 APPROVED MAPPING
+
+Business approval:
+
+Facility 1 — Lapangan Badminton A
+→ `public.companies.id = 1` / CST
+
+Facility 7 — Meja Billiard
+→ `public.companies.id = 1` / CST
+
+Effective date:
+
+must include:
+`2026-08-09`
+
+Jika belum ada historical date lebih authoritative:
+gunakan:
+
+`effective_from = 2026-08-09`
+
+Source:
+
+`manual_business_approval`
+
+Notes/reference:
+
+`Business owner confirmed Facility 1 and Facility 7 belong to CST / public.companies.id=1`
+
+---
+
+# 9. APPLY OWNERSHIP MAPPING — DEVELOPMENT
+
+Setelah migration/resolver pass:
+
+buat mapping development secara idempotent:
+
+Facility 1 → company 1
+
+Facility 7 → company 1
+
+Sebelum insert:
+
+* check overlap;
+* check conflicting company;
+* check effective date.
+
+Jika conflict:
+STOP:
+`OWNERSHIP_CONFLICT`
+
+Jangan overwrite existing mapping otomatis.
+
+---
+
+# 10. VERIFY RESOLVER
+
+Expected:
+
+Payment 13:
+
+* facility 1
+* resolved company = 1
+* code = CST
+* deterministic = true
+* evidence = facility mapping
+
+Payment 14:
+
+* facility 7
+* resolved company = 1
+* code = CST
+* deterministic = true
+* evidence = facility mapping
+
+Legacy accounting company no longer acts as evidence.
+
+---
+
+# 11. DRY-RUN REPAIR PAYMENT 13
+
+After resolver succeeds:
+
+Source:
+`sport_center.sport_payments.id = 13`
+
+Expected canonical:
+
+* company_id = 1
+* amount = 100000
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* bank_account_id = existing source
+* payment_type = full_payment
+* paid_at = existing canonical
+
+Dry-run proposed source repair:
+`company_id NULL → 1`
+
+Do not apply yet unless Phase B later approved inside this task.
+
+---
+
+# 12. DRY-RUN MIRROR 13
+
+Existing mirror:
+`SCPAY-SC-13`
+
+Prepare idempotent repair:
+
+* source_payment_id = 13
+* company_id = 1
+* bank_account_id from source
+* method = QRIS
+* payment_provider = mandiri_direct
+* provider_code = mandiri_direct
+* provider_reference if available
+* provider_order_id if available
+* merchant_trade_no if available
+* provider_trade_no if available
+* paid_at
+* expected_settlement_date if deterministic
+* entry_id = 9
+
+No duplicate mirror.
+
+---
+
+# 13. DRY-RUN ACCOUNTING ENTRY 13
+
+Reuse:
+
+`correlation_id = sc_payment_13`
+
+Existing entry:
+`id = 9`
+
+Canonical metadata:
+
+* source = sport_center_payment
+* source_payment_id = 13
+* company_id = 1
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* payment_type = full_payment
+* bank_account_id
+
+Do not recreate entry.
+
+Do not modify balanced GL amounts.
+
+---
+
+# 14. PAYMENT 14
+
+Repeat exact same process:
+
+Source:
+`payment_id = 14`
+
+Canonical company:
+`1 / CST`
+
+Mirror:
+`SCPAY-SC-14`
+
+Existing accounting:
+`sc_payment_14`
+entry:
+`10`
+
+Expected amount:
+`50000`
+
+Provider:
+`mandiri_direct`
+
+---
+
+# 15. LEGACY ACCOUNTING COMPANY
+
+Existing entries 9/10 already have:
+
+`company_id = 1`
+
+After canonical migration:
+
+classify:
+
+`LEGACY_COMPANY_CONSISTENT`
+
+Do not update company unnecessarily.
+
+---
+
+# 16. TAX DRY-RUN
+
+Payment 13:
+internal tax = Rp9.910
+public gl_tax_lines missing
+
+Payment 14:
+internal tax = Rp4.955
+public gl_tax_lines missing
+
+If:
+
+* company canonical;
+* entry exists;
+* GL balanced;
+* tax source valid;
+* no duplicate public tax line;
+
+classify:
+
+`SAFE_PUBLIC_TAX_REPAIR`
+
+Do not insert until controlled repair phase.
+
+---
+
+# 17. CONTROLLED PHASES
+
+## Phase A — migration + resolver + mapping + dry-run
+
+Allowed:
+
+* additive schema migration
+* resolver update
+* facility mappings development
+* read-only/dry-run payment repair plan
+
+Not yet:
+
+* source payment repair
+* mirror repair
+* accounting metadata repair
+* tax insertion
+
+After Phase A report:
+if all deterministic and tests pass:
+continue to Phase B only if task runner interprets this prompt as explicit controlled approval.
+
+## Phase B — controlled scoped repair
+
+Allowed ONLY for:
+
+* payment 13
+* payment 14
+* mirrors 8/9
+* entries 9/10
+* their missing public tax lines
+
+Do not expand scope.
+
+If any unexpected conflict:
+STOP.
+
+---
+
+# 18. GL SAFETY
+
+Existing GL:
+
+Payment 13:
+100000 debit = credit
+
+Payment 14:
+50000 debit = credit
+
+Preserve lines.
+
+Do not regenerate.
+
+Do not alter amounts.
+
+---
+
+# 19. CURRENT QRIS ACCOUNTING DESIGN
+
+Do not change:
+
+`Bank Mandiri CST / 1-1020-CST`
+
+Keep warning:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+Clearing redesign remains separate.
+
+---
+
+# 20. INTERNAL JOURNAL
+
+Do not delete/rewrite:
+
+`sport_center.accounting_journals`
+
+Verify payment IDs remain correct.
+
+Metadata enhancement can be separate unless already part of canonical patch.
+
+---
+
+# 21. TESTS
+
+Required:
+
+### Ownership
+
+* facility mapping resolves public company
+* effective date
+* no mapping
+* overlap conflict
+
+### Auth regression
+
+* Admin user ID 1 remains personal/admin
+* login/auth semantics unaffected
+
+### Resolver
+
+* no dependency on `users.account_type=company`
+
+### Payment 13/14
+
+* resolves CST
+
+### Mirror
+
+* source_payment_id
+* provider metadata
+* company/account
+
+### Accounting recovery
+
+* existing entry reused
+* no duplicate
+* company consistent
+
+### Tax
+
+* safe missing public tax repair
+* duplicate prevented
+
+Run:
+
+* `pnpm run typecheck:libs`
+* API typecheck
+* API build
+* relevant tests
+* git diff --check
+
+---
+
+# 22. RUNTIME
+
+Restart development combined workflow.
+
+Verify:
+
+* /health 200
+* /readiness 200
+* /api/health 200
+* auth/admin route still works
+* no startup migration error
+
+---
+
+# 23. POST-REPAIR AUDIT
+
+If Phase B applied:
+
+Payment 13:
+
+source
+→ mirror source_payment_id 13
+→ entry 9
+→ balanced GL
+→ public tax line
+
+Payment 14:
+
+source
+→ mirror source_payment_id 14
+→ entry 10
+→ balanced GL
+→ public tax line
+
+Expected source/mirror/accounting company:
+`public.companies.id = 1 / CST`
+
+---
+
+# 24. IDEMPOTENCY
+
+Second dry-run after repair must show:
+
+`ALREADY_COMPLETE`
+
+No new:
+
+* mappings
+* mirrors
+* entries
+* GL lines
+* tax lines
+
+---
+
+# 25. FINAL REPORT
+
+Return:
+
+## A. Ownership model before/after
+
+## B. Migration strategy used
+
+## C. Admin/auth separation result
+
+## D. Facility 1 mapping
+
+## E. Facility 7 mapping
+
+## F. Payment 13 before/after
+
+## G. Payment 14 before/after
+
+## H. Mirror before/after
+
+## I. Accounting recovery
+
+## J. GL validation
+
+## K. Tax repair
+
+## L. Idempotency
+
+## M. Tests/build/runtime
+
+## N. Remaining risks
+
+## O. Final status
+
+Use one:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+`READY_FOR_CONTROLLED_REPAIR`
+
+`OWNERSHIP_CONFLICT`
+
+`COMPANY_MODEL_MIGRATION_BLOCKED`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# SAFETY
+
+Do not:
+
+* modify `sport_center.users.id=1`
+* break admin auth
+* mass backfill
+* production deploy
+* final QRIS reconciliation
+* MDR posting
+* settlement accounting
+* change balanced GL amounts

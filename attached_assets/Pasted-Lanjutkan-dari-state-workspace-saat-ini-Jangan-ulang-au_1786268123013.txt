@@ -1,0 +1,434 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang audit atau implementasi yang sudah masuk.
+
+Status terakhir:
+
+* Schema/enrichment core sudah mulai diterapkan.
+* Manual QRIS creation/confirmation sudah mengisi canonical dimensions ketika payment menjadi confirmed.
+* Paylabs finalization sudah terhubung ke enrichment.
+* Paylabs tetap gateway-only; manual QRIS tidak menerima provider `paylabs`.
+* Resolver sudah disesuaikan ke API Drizzle yang benar.
+* Scripts typecheck dan diff-check terakhir lulus.
+* API standalone failure adalah konflik port dengan combined workflow, bukan aplikasi.
+* Strict reconciliation matcher JANGAN diubah atau dilonggarkan.
+* Fixture `UAT_QRIS_202608` JANGAN disentuh.
+* Historical backfill tetap dry-run only.
+
+Task sekarang adalah MENYELESAIKAN pipeline enrichment dan VALIDASI.
+
+# 1. REVIEW CURRENT DIFF
+
+Tampilkan ringkas perubahan yang sudah ada:
+
+* schema files;
+* resolver/helper;
+* payment routes;
+* Paylabs finalization;
+* migration/runtime schema;
+* mirror;
+* Google Sheet importer;
+* diagnostic/classifier scripts/routes;
+* tests.
+
+Jangan revert perubahan valid yang sudah masuk.
+
+# 2. COMPLETE CANONICAL PAYMENT SCHEMA
+
+Pastikan canonical payment memiliki secara additive:
+
+`company_id`
+`bank_account_id`
+`expected_settlement_date`
+
+dan tetap mempertahankan:
+
+`payment_provider`
+`provider_reference`
+`merchant_trade_no`
+`provider_trade_no`
+`paid_at`
+
+Historical rows boleh NULL.
+
+Pastikan Drizzle schema dan runtime/startup migration konsisten.
+
+Tidak boleh ada destructive DROP.
+
+# 3. COMPLETE RESOLUTION HELPERS
+
+Pastikan helper final tersedia dan testable untuk:
+
+## Company
+
+`resolvePaymentCompany(...)`
+
+Evidence priority:
+
+* booking/company;
+* facility/venue ownership;
+* merchant/store config;
+* explicit validated config.
+
+Jangan infer dari mutation.
+
+## Settlement account
+
+`resolveSettlementBankAccount(companyId, provider, paidAt)`
+
+Gunakan effective-dated config.
+
+Jangan hardcode DB ID.
+
+Jika config tidak ada:
+`NULL`.
+
+## Expected settlement
+
+`resolveExpectedSettlementDate(...)`
+
+Gunakan:
+
+* canonical `paid_at`;
+* Asia/Jakarta;
+* provider rule;
+* business calendar.
+
+Jika rule tidak tersedia:
+`NULL`, jangan invent.
+
+# 4. VERIFY MANUAL QRIS END-TO-END
+
+Pada jalur manual QRIS:
+
+Allowed provider:
+
+* `mandiri_direct`
+* `unknown`
+
+Saat payment menjadi confirmed, pastikan:
+
+* company_id terisi jika deterministic;
+* bank_account_id terisi jika config tersedia;
+* payment_provider final;
+* paid_at canonical;
+* expected_settlement_date terisi jika rule tersedia.
+
+Non-QRIS tetap backward-compatible.
+
+Paylabs tetap ditolak di jalur manual.
+
+# 5. VERIFY PAYLABS END-TO-END
+
+Saat Paylabs success/finalization:
+
+`payment_provider = paylabs`
+
+Isi secara idempotent:
+
+* company_id
+* bank_account_id
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* expected_settlement_date
+
+Company berasal dari booking/facility/config.
+
+Bank account berasal dari settlement config.
+
+Replay webhook tidak boleh overwrite snapshot valid dengan NULL atau timestamp baru.
+
+Terminal booking guard tetap dipertahankan.
+
+# 6. COMPLETE CST MIRROR
+
+Pastikan mirror:
+
+`sport_center.sport_payments`
+→ `public.sport_payments`
+
+membawa:
+
+* company_id
+* bank_account_id
+* payment_provider
+* provider_code
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* expected_settlement_date
+* amount
+
+Gunakan COALESCE/merge semantics sehingga NULL source tidak menghapus existing value.
+
+Pastikan:
+`payment_provider`
+dan
+`provider_code`
+tidak menjadi kontradiktif.
+
+Tambahkan consistency test.
+
+# 7. COMPLETE GOOGLE SHEET SOURCE MAPPING
+
+Implementasikan/configure deterministic mapping:
+
+`sheet/source identifier`
+→ `company_id`
+→ `bank_account_id`
+
+Gunakan identifier stabil seperti:
+
+* spreadsheet ID;
+* worksheet/tab;
+* import source ID.
+
+Jangan infer rekening dari amount/description.
+
+Saat import mutation:
+
+* populate company_id;
+* populate bank_account_id;
+* validate bank account belongs to company;
+* populate provenance;
+* leave provider unknown unless provider evidence exists.
+
+Jika source mapping tidak ada:
+mutation tetap fail-safe dan tidak auto-match QRIS.
+
+# 8. PROVIDER DETECTION
+
+Pastikan mutation provider detection tidak berasal hanya dari nama rekening.
+
+Allowed evidence:
+
+* provider reference;
+* settlement reference;
+* batch reference;
+* proven description pattern;
+* provider-specific source;
+* manual reviewed classification.
+
+Simpan:
+`provider_name`
+`provider_detection_source`
+
+Jika evidence kurang:
+`unknown`.
+
+# 9. STARTUP MIGRATION
+
+Pastikan seluruh tabel/kolom/config baru dibuat secara additive sebelum route/resolver meng-query-nya.
+
+Startup migration harus aman jika dijalankan berulang.
+
+Tidak boleh:
+
+* DROP;
+* destructive rewrite;
+* production-specific assumption.
+
+Jika table config opsional tidak tersedia pada legacy environment:
+resolver harus fail-safe, bukan crash seluruh API.
+
+# 10. ENVIRONMENT IDENTITY DIAGNOSTIC
+
+Selesaikan diagnostic read-only yang menampilkan secara sanitized:
+
+* APP_ENV;
+* DB/project fingerprint;
+* schema;
+* company target;
+* UAT marker presence.
+
+Jika requested ID tidak ada pada active environment:
+return:
+
+`RECORD_NOT_FOUND_IN_ACTIVE_ENVIRONMENT`
+
+Jangan mencari ID sama di environment lain.
+
+# 11. MIRROR COMPLETENESS DIAGNOSTIC
+
+Selesaikan read-only diagnostic:
+
+Sport Center source
+vs
+CST mirror
+
+Untuk date range/provider.
+
+Output:
+
+| Metric              | Sport Center | CST |
+| ------------------- | -----------: | --: |
+| payment count       |              |     |
+| gross               |              |     |
+| Mandiri count/gross |              |     |
+| Paylabs count/gross |              |     |
+| unknown count/gross |              |     |
+| missing source IDs  |              |     |
+
+Tidak boleh melakukan write.
+
+# 12. HISTORICAL BACKFILL CLASSIFIER
+
+Selesaikan DRY-RUN classifier:
+
+* SAFE_COMPANY_BACKFILL
+* SAFE_BANK_ACCOUNT_BACKFILL
+* SAFE_PROVIDER_BACKFILL
+* SAFE_EXPECTED_DATE_BACKFILL
+* AMBIGUOUS
+* NO_EVIDENCE
+
+Setiap classification harus menjelaskan evidence.
+
+Jangan apply.
+
+# 13. DO NOT TOUCH HISTORICAL IDs FROM OTHER ENV
+
+Jangan melakukan update terhadap previous:
+
+* payment ID 3
+* mutation ID 96
+
+karena active development environment tidak membuktikan kedua ID itu sebagai kasus aktual tersebut.
+
+Jika diagnostic diminta:
+laporkan environment mismatch secara eksplisit.
+
+# 14. TESTS
+
+Tambahkan/finalisasi test untuk:
+
+### Manual QRIS
+
+* company resolution
+* bank account resolution
+* expected settlement
+* provider mandiri_direct
+* unknown fail-safe
+
+### Paylabs
+
+* canonical company/account
+* provider references
+* expected settlement
+* replay idempotency
+
+### Mirror
+
+* canonical fields preserved
+* NULL source tidak overwrite
+* provider/provider_code consistency
+
+### Google Sheet
+
+* source mapping → company/account
+* invalid account/company rejected/fail-safe
+* missing mapping does not auto-match
+
+### Diagnostic
+
+* environment collision
+* mirror completeness
+
+### Backfill
+
+* safe classification
+* ambiguous remains untouched
+
+# 15. REGRESSION
+
+Jalankan existing strict QRIS UAT regression.
+
+Expected:
+
+* 14/14 scenario pass
+* 14/14 matcher parity
+* provider/account/date boundaries tetap
+* no persistence
+
+Jangan mengubah strict matcher untuk membuat enrichment test pass.
+
+# 16. VALIDATION ORDER
+
+Agar error declaration workspace tidak menyesatkan, jalankan:
+
+1. `pnpm install --frozen-lockfile` jika node_modules belum tersedia
+2. `pnpm run typecheck:libs`
+3. scripts typecheck
+4. API typecheck
+5. API build
+6. relevant tests
+7. strict UAT harness
+8. combined workflow restart/health
+
+Jika API standalone gagal karena port dipakai combined workflow:
+laporkan sebagai port conflict, bukan application failure.
+
+# 17. FINAL REPORT
+
+Berikan:
+
+## A. Root causes final
+
+## B. Files changed
+
+## C. Schema/migration
+
+## D. Company resolution
+
+## E. Settlement account resolution
+
+## F. Expected settlement resolution
+
+## G. Manual QRIS enrichment
+
+## H. Paylabs enrichment
+
+## I. CST mirror
+
+## J. Google Sheet source mapping
+
+## K. Provider detection
+
+## L. Environment diagnostic
+
+## M. Mirror completeness diagnostic
+
+## N. Historical backfill dry-run classifier
+
+## O. Tests/typecheck/build/UAT
+
+## P. Remaining risks
+
+## Q. Readiness answers
+
+Jawab eksplisit:
+
+1. Payment QRIS baru mendapat company_id?
+2. Payment QRIS baru mendapat bank_account_id jika config tersedia?
+3. Paylabs finalization lengkap?
+4. Expected settlement tersimpan bila rule tersedia?
+5. CST mirror lengkap?
+6. Google Sheet mutation mendapat company/account dari configured source?
+7. Provider tetap fail-safe?
+8. Historical backfill masih dry-run only?
+9. Environment mismatch terdeteksi?
+10. Strict UAT reconciliation masih 14/14?
+11. Ada blocker sebelum staging enrichment rollout?
+
+# SAFETY
+
+Jangan:
+
+* commit;
+* push;
+* deploy production;
+* apply historical backfill;
+* final reconcile;
+* accounting post;
+* modify UAT fixture.

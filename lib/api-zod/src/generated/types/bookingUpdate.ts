@@ -5,9 +5,11 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AdditionalCharge } from './additionalCharge';
 import type { BookingUpdateStatus } from './bookingUpdateStatus';
 
 export interface BookingUpdate {
   status?: BookingUpdateStatus;
   adminNotes?: string;
+  additionalCharges?: AdditionalCharge[];
 }

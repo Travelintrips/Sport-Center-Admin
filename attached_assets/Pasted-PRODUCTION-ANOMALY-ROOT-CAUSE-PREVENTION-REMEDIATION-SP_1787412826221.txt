@@ -1,0 +1,700 @@
+PRODUCTION ANOMALY ROOT-CAUSE + PREVENTION REMEDIATION
+SPORT CENTER — CONTINUE WITHOUT CONFIRMATION
+
+JANGAN mengulang full transaction audit yang sudah selesai.
+
+CURRENT VERIFIED STATUS:
+
+Production runtime = PASS
+Production database = PASS
+Read-only audit = PASS
+
+Baseline:
+sport_bookings              = 429
+sport_payments              = 374
+company_invoices            = 4
+booking_groups              = 47
+accounting_journals         = 380
+accounting_journal_lines    = 211
+tax_transactions            = 1,134
+bank_reconciliation_matches = 68
+payment_accounting_outbox   = 362
+
+NO PRODUCTION DATA WAS MUTATED.
+
+Current anomalies:
+
+1. 376 completed bookings without checked_in_at
+2. 8 completed bookings without completed_at
+3. 2 future completed bookings:
+   - booking 380
+   - booking 511
+4. 16 duplicate payment groups / 32 payment rows
+5. 70 confirmed/completed bookings without confirmed payment
+6. outbox:
+   - 323 posted
+   - 27 processing
+   - 12 failed
+7. 68 reconciliation candidate rows
+8. sport_center.bank_reconciliation_matches lacks candidate_source
+9. Event not fully audited
+10. Recurring not fully audited
+11. Cross-entity integrity still REVIEW
+
+==================================================
+GLOBAL RULE
+==================================================
+
+DO NOT mutate Production transaction data in this task.
+
+DO NOT:
+
+INSERT
+UPDATE
+DELETE
+ALTER
+TRUNCATE
+backfill
+repair historical financial records
+approve reconciliation
+post accounting
+retry payment accounting
+create payment
+delete duplicate payment
+
+The purpose of this phase is:
+
+AUDIT ROOT CAUSE
++
+CLASSIFY RECORDS
++
+HARDEN CODE
++
+CREATE SAFE REMEDIATION PLAN
++
+VERIFY CODE
+
+Production historical data remains untouched.
+
+==================================================
+PHASE 1 — BOOKING LIFECYCLE ROOT CAUSE
+==================================================
+
+Investigate WHY 403 bookings became completed without check-in.
+
+Audit every possible completion writer:
+
+- bookingLifecycle.completeBooking()
+- scheduler
+- admin status update
+- WhatsApp finish
+- corporate invoice
+- payment
+- refund
+- group operation
+- webhook
+- worker
+- direct SQL
+- trigger
+- legacy endpoint
+- migration
+- RPC/function
+
+Search the entire repository.
+
+For each writer determine:
+
+FILE
+FUNCTION
+ENDPOINT/WORKER
+CAN WRITE completed?
+GUARD PRESENT?
+USES bookingLifecycle?
+BYPASS POSSIBLE?
+
+Expected contract:
+
+completed MUST require:
+
+status = confirmed
+check-in exists
+session end passed
+no pending reschedule
+non-terminal prior state
+atomic status/history update
+
+Find every bypass.
+
+==================================================
+PHASE 2 — FUTURE COMPLETED BOOKINGS
+==================================================
+
+Investigate booking:
+
+380
+511
+
+READ ONLY.
+
+For each:
+
+- booking status
+- start
+- end
+- check-in
+- completion history
+- audit log
+- payment
+- invoice
+- group
+- reschedule
+- completion writer if identifiable
+
+Determine exact historical completion path.
+
+If the source is identifiable as an old application bug:
+
+REPORT:
+
+ROOT_CAUSE = ...
+
+DO NOT change historical status.
+
+Then verify current code prevents recurrence.
+
+==================================================
+PHASE 3 — 376 MISSING CHECK-IN
+==================================================
+
+Do NOT attempt historical backfill.
+
+Determine whether this is:
+
+A. historical data before lifecycle remediation
+B. completion bypass
+C. missing check-in records
+D. QR check-in migration issue
+E. direct admin status mutation
+F. scheduler bug
+G. WhatsApp finish bypass
+H. other
+
+Search historical code and deployment timeline.
+
+Determine whether current code can still create:
+
+completed + checked_in_at IS NULL
+
+If yes:
+
+FIX CODE.
+
+If no:
+
+prove with tests.
+
+==================================================
+PHASE 4 — completed_at MISSING
+==================================================
+
+For 8 records determine:
+
+- whether completion history exists
+- whether current lifecycle service always writes completed_at
+- whether legacy path omitted it
+
+Do NOT backfill Production.
+
+Fix current source path if bypass exists.
+
+Add regression tests.
+
+==================================================
+PHASE 5 — PAYMENT DUPLICATES
+==================================================
+
+For 16 groups / 32 rows:
+
+Perform READ-ONLY record-level classification.
+
+For each:
+
+- payment IDs
+- booking ID
+- payment_type
+- amount
+- status
+- provider reference
+- external transaction ID
+- correlation ID
+- created_at
+- accounting linkage
+- settlement linkage
+
+Classify each duplicate:
+
+EXACT_TECHNICAL_DUPLICATE
+LEGITIMATE_MULTIPLE_PAYMENT
+DP_PLUS_FINAL
+RETRY_ATTEMPT
+UNKNOWN
+
+Do NOT delete or merge.
+
+==================================================
+PHASE 6 — PREVENT PAYMENT DUPLICATES
+==================================================
+
+Audit current payment creation paths.
+
+Determine whether uniqueness is protected by:
+
+- idempotency key
+- provider transaction ID
+- payment intent
+- booking + payment type
+- database unique constraint
+- transaction lock
+
+Do NOT assume booking_id + payment_type is globally unique if the business
+contract permits DP and final payments.
+
+Fix code/schema ONLY if the required uniqueness contract is unambiguous.
+
+Do not run Production migration.
+
+Prepare migration SQL only if needed.
+
+Run tests against DEV.
+
+==================================================
+PHASE 7 — 70 BOOKINGS WITHOUT CONFIRMED PAYMENT
+==================================================
+
+READ ONLY classify every record:
+
+CORPORATE_BILLING
+INVOICE_BILLED
+PAYMENT_PENDING
+PAYMENT_EXEMPT
+PAYMENT_MISSING
+HISTORICAL_LEGACY
+UNKNOWN
+
+Do NOT create payments.
+
+Do NOT mark payments confirmed.
+
+Do NOT modify bookings.
+
+Identify the exact reason for each category.
+
+Verify current booking/payment contract.
+
+==================================================
+PHASE 8 — OUTBOX ROOT CAUSE
+==================================================
+
+Audit all:
+
+27 processing
+12 failed
+
+For each:
+
+- payment ID
+- event
+- attempts
+- last error
+- correlation ID
+- accounting journal
+- journal lines
+- public accounting entry
+- existing canonical accounting record
+
+Classify:
+
+ALREADY_POSTED
+SAFE_RETRY
+STALE_PROCESSING
+PERMANENT_FAILURE
+MISSING_PAYMENT
+UNKNOWN
+
+Do NOT retry.
+
+Do NOT modify status.
+
+Then inspect the worker code and determine why these states can remain.
+
+Harden worker if required.
+
+Required properties:
+
+- idempotent
+- payment identity
+- correlation ID
+- advisory lock
+- existing journal detection
+- safe retry
+- no duplicate journal
+
+==================================================
+PHASE 9 — RECONCILIATION ROOT CAUSE
+==================================================
+
+68 candidate rows.
+
+Determine which runtime table is actually canonical.
+
+Search:
+
+- routes
+- services
+- queries
+- approval endpoints
+- reconciliation worker
+- settlement worker
+- schema
+- migrations
+- tests
+
+Compare:
+
+sport_center.bank_reconciliation_matches
+
+vs
+
+public.bank_reconciliation_matches
+
+Specifically investigate candidate_source.
+
+DO NOT migrate Production schema.
+
+DO NOT copy rows.
+
+DO NOT approve candidates.
+
+Produce:
+
+CANONICAL_RUNTIME_TABLE
+LEGACY_TABLE
+SOURCE_IDENTITY_MODEL
+COLLISION_RISK
+REQUIRED_SCHEMA_CHANGE
+REQUIRED_RUNTIME_CHANGE
+
+If schema change is required, prepare DEV migration + tests only.
+
+==================================================
+PHASE 10 — EVENT FULL AUDIT
+==================================================
+
+Complete the previously missing Event audit.
+
+Audit all:
+
+bookingType = event
+
+including recurring event.
+
+Verify:
+
+facility base price
+duration
+discount
+final price
+invoice
+payment
+
+Expected discount:
+
+214 / 1000
+
+Example:
+
+100,000
+→ 21,400 discount
+→ 78,600 final
+
+Find any historical event calculation that differs.
+
+Do NOT rewrite Production historical amounts.
+
+Fix code if current calculation can still be wrong.
+
+Add regression tests.
+
+==================================================
+PHASE 11 — RECURRING FULL AUDIT
+==================================================
+
+Audit all recurring bookings.
+
+Check:
+
+- past dates
+- today elapsed slots
+- operating hours
+- closing time
+- duration
+- duplicate dates
+- conflicts
+- blocked schedules
+- corporate approval
+- waiting_confirmation
+- confirmed
+- completed
+- payment
+- lifecycle
+
+Compare every rule against single booking.
+
+Find any remaining code divergence.
+
+Fix code.
+
+Add regression tests.
+
+Do not mutate Production recurring records.
+
+==================================================
+PHASE 12 — RESCHEDULE FULL AUDIT
+==================================================
+
+Pending requests = 0.
+
+Do not stop there.
+
+Audit historical reschedule records.
+
+Verify:
+
+- original schedule
+- requested schedule
+- approval
+- rejection
+- booking status
+- history
+- atomicity
+- conflict validation
+- blocked schedule
+- check-in
+- completion
+
+Ensure approval cannot bypass booking lifecycle.
+
+Fix code if required.
+
+Add tests.
+
+==================================================
+PHASE 13 — CROSS-ENTITY CONTRACT
+==================================================
+
+Formalize the contract:
+
+BOOKING
+↓
+PAYMENT
+↓
+INVOICE
+↓
+SETTLEMENT
+↓
+RECONCILIATION
+↓
+ACCOUNTING
+
+For each edge determine:
+
+REQUIRED
+OPTIONAL
+NOT_APPLICABLE
+
+Important:
+
+Corporate billing may legitimately have:
+
+booking
+→ invoice
+→ payment
+
+without direct per-booking confirmed payment.
+
+Do not classify legitimate corporate billing as payment anomaly.
+
+Personal booking should have appropriate payment evidence.
+
+Event and recurring must follow same payment contract.
+
+==================================================
+PHASE 14 — CENTRAL FINANCE
+==================================================
+
+DO NOT modify Production finance data.
+
+Audit code only.
+
+Verify:
+
+payment
+→ accounting outbox
+→ Central Finance
+
+is:
+
+idempotent
+atomic
+duplicate-safe
+payment-level
+correlation-safe
+
+Ensure Sport Center does NOT create an alternative accounting path.
+
+DO NOT change:
+
+SPORT_CENTER_FINANCE_MODE
+
+Do not create another worker.
+
+Do not create another journal path.
+
+==================================================
+PHASE 15 — SAFE CODE HARDENING
+==================================================
+
+If current source code still allows any of these:
+
+completed without check-in
+completed before end
+future completed
+duplicate payment creation
+duplicate accounting
+unsafe outbox retry
+reconciliation source ambiguity
+recurring validation bypass
+corporate recurring approval bypass
+reschedule lifecycle bypass
+
+FIX THE CODE NOW.
+
+Use existing architecture.
+
+Prefer:
+
+central lifecycle service
+existing payment identity
+existing idempotency
+existing accounting worker
+existing reconciliation service
+
+Do not introduce parallel architecture.
+
+==================================================
+PHASE 16 — TESTS
+==================================================
+
+Add regression tests for every root cause found.
+
+Minimum:
+
+1. cannot complete without check-in
+2. cannot complete before end time
+3. cannot complete future booking
+4. invoice payment cannot complete future booking
+5. WhatsApp finish cannot bypass lifecycle
+6. scheduler cannot complete without check-in
+7. admin cannot directly force completed
+8. duplicate payment protection
+9. outbox retry cannot duplicate journal
+10. recurring validation
+11. recurring corporate approval
+12. reschedule lifecycle
+13. event 21.4% calculation
+14. reconciliation source identity
+
+Run:
+
+full tests
+typecheck
+build
+git diff --check
+
+==================================================
+PHASE 17 — DEV VERIFICATION
+==================================================
+
+Any code/schema remediation must first be verified against DEV.
+
+Expected:
+
+tests PASS
+typecheck PASS
+build PASS
+DEV runtime PASS
+
+Do NOT apply historical Production data fixes.
+
+==================================================
+PHASE 18 — PRODUCTION HISTORICAL REMEDIATION PLAN
+==================================================
+
+After root cause classification create a report:
+
+PRODUCTION_REMEDIATION_PLAN.md
+
+For each anomaly:
+
+record/group
+classification
+root cause
+evidence
+safe fix?
+required owner decision?
+recommended action
+
+Only deterministic non-financial historical fixes may be candidates.
+
+Financial records remain REVIEW unless canonical evidence is absolute.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Return:
+
+CODE ROOT CAUSES = COMPLETE
+CODE HARDENING = COMPLETE / BLOCKED
+EVENT = VERIFIED
+RECURRING = VERIFIED
+RESCHEDULE = VERIFIED
+PAYMENT DUPLICATES = CLASSIFIED
+PAYMENT MISSING = CLASSIFIED
+OUTBOX = CLASSIFIED
+RECONCILIATION = ROOT CAUSE IDENTIFIED / BLOCKED
+BOOKING LIFECYCLE = ROOT CAUSE IDENTIFIED
+CROSS-ENTITY = VERIFIED / REVIEW
+
+Production historical mutation:
+NONE
+
+Central Finance:
+NO UNAUTHORIZED CHANGE
+
+Tests:
+PASS/FAIL
+
+Typecheck:
+PASS/FAIL
+
+Build:
+PASS/FAIL
+
+Do not stop merely because Production historical data is ambiguous.
+
+The objective is to FIX THE SYSTEM so these anomalies cannot recur,
+while preserving ambiguous historical data for controlled review.
+
+Continue automatically.
+Do not ask for confirmation.

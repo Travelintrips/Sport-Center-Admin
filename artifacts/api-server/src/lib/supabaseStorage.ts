@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
+import { compressImage, isCompressibleImage, replaceExtension } from "./imageCompression";
+import { isReplitStorageAvailable } from "./replitStorage";
 
 // ─── Dev/Prod Storage Isolation ────────────────────────────────────────────
 // Development: SUPABASE_SERVICE_ROLE_KEY_DEV (isolated dev Supabase project)
@@ -31,6 +33,11 @@ if (IS_DEV) {
     SERVICE_KEY = devKey;
     const ref = getProjectRef(devKey) ?? "unknown";
     storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY_DEV (dev — isolated, ref=${ref})`;
+  } else if (isReplitStorageAvailable()) {
+    // Replit Object Storage is the primary development adapter. Do not force
+    // a Supabase service-role key when the isolated Replit bucket is present.
+    SERVICE_KEY = "";
+    storageProjectSource = "Replit Object Storage (dev — primary)";
   } else if (allowDevOnProdStorage) {
     const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
     SERVICE_KEY = prodKey;
@@ -93,6 +100,10 @@ const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
+
+  invoiceTemplates: "invoice-templates",
+  documentTemplates: "document-templates",
+
   docTemplates: "doc-templates",
   corporateDocs: "corporate-docs",
   invoicePdfs: "invoice-pdfs",
@@ -102,9 +113,14 @@ export const BUCKETS = {
 export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | null; error: string | null }> = {
   [BUCKETS.facility]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.proof]: { ok: false, checkedAt: null, error: null },
+
+  [BUCKETS.invoiceTemplates]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.documentTemplates]: { ok: false, checkedAt: null, error: null },
+
   [BUCKETS.docTemplates]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.corporateDocs]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.invoicePdfs]: { ok: false, checkedAt: null, error: null },
+
 };
 
 let client: SupabaseClient | null = null;
@@ -147,7 +163,16 @@ export async function validateBuckets(): Promise<void> {
     try {
       const { data, error } = await supabase.storage.getBucket(bucket);
       if (error || !data) {
-        // Auto-create in both dev and prod — idempotent, safe
+        const requiredRuntimeBucket = bucket === BUCKETS.facility || bucket === BUCKETS.proof;
+        if (!IS_DEV && !requiredRuntimeBucket) {
+          const message = error?.message ?? "Bucket does not exist";
+          console.error(`[Storage] ❌ Production bucket "${bucket}" is unavailable: ${message}`);
+          bucketStatus[bucket] = { ok: false, checkedAt: now, error: message };
+          continue;
+        }
+
+        // Required upload buckets are safe to provision in-place in production;
+        // creating an empty bucket never mutates existing financial records.
         const mimeTypes = bucket === BUCKETS.facility
           ? ["image/jpeg", "image/png", "image/webp"]
           : ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"];
@@ -184,6 +209,16 @@ export async function uploadToStorage(
   contentType: string,
 ): Promise<string> {
   const supabase = getClient();
+  const compressed = isCompressibleImage(contentType, objectPath)
+    ? await compressImage(body, contentType, objectPath)
+    : { buffer: body, contentType, extension: "", wasCompressed: false };
+  const uploadPath = compressed.wasCompressed
+    ? replaceExtension(objectPath, compressed.extension)
+    : objectPath;
+  body = compressed.buffer;
+  contentType = compressed.contentType;
+  objectPath = uploadPath;
+
   let { error } = await supabase.storage
     .from(bucket)
     .upload(objectPath, body, { contentType, upsert: true });
@@ -212,6 +247,27 @@ export function parseStorageUrl(
   const m = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
   if (!m) return null;
   return { bucket: m[1], objectPath: decodeURIComponent(m[2]) };
+}
+
+export async function downloadFromStorageUrl(
+  url: string,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const parsed = parseStorageUrl(url);
+  if (!parsed) {
+    throw new Error("Unsupported storage URL");
+  }
+
+  const { data, error } = await getClient().storage
+    .from(parsed.bucket)
+    .download(parsed.objectPath);
+  if (error || !data) {
+    throw error ?? new Error("Stored file not found");
+  }
+
+  return {
+    buffer: Buffer.from(await data.arrayBuffer()),
+    contentType: data.type || "application/octet-stream",
+  };
 }
 
 export async function deleteFromStorage(url: string): Promise<void> {

@@ -13,14 +13,8 @@ import {
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
 import { format } from "date-fns";
 import { id, enUS } from "date-fns/locale";
 import { 
@@ -34,6 +28,8 @@ import {
   Star,
   MessageCircle,
   ShoppingCart,
+  Dumbbell,
+  RefreshCw,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
@@ -48,6 +44,23 @@ const MULTIGUNA_ACTIVITIES = [
   { value: "voli", label: "Voli", icon: "🏐" },
 ];
 
+const OPERATIONAL_BOOKING_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "admin_booking",
+  "staff",
+]);
+
+function effectiveCloseTime(facility: { name?: string | null; category?: string | null; closeTime: string }) {
+  return "00:00";
+}
+
+function addHoursToDisplayTime(time: string, hours: number) {
+  const [hour, minute] = time.split(":").map(Number);
+  const total = (hour * 60 + minute + hours * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export default function FacilityDetail() {
   const { t, lang } = useLang();
   const { addItem, items } = useCart();
@@ -57,7 +70,8 @@ export default function FacilityDetail() {
   const facilityId = params?.id ? parseInt(params.id) : 0;
 
   const { data: meData } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
-  const isAdminOrOperator = !!meData && (meData as { role?: string }).role !== "customer";
+  const isOperationalAccount =
+    !!meData && OPERATIONAL_BOOKING_ROLES.has((meData as { role?: string }).role ?? "");
 
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState<string>("");
@@ -70,6 +84,10 @@ export default function FacilityDetail() {
       queryKey: getGetFacilityQueryKey(facilityId)
     }
   });
+  const minDuration = Math.max(1, facility?.minDuration ?? 1);
+  const durationHours = Number.parseInt(duration, 10);
+  const hasValidDuration =
+    Number.isInteger(durationHours) && durationHours >= minDuration;
 
   const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId, queryKey: ["getReviews", facilityId] } });
   const { data: reviewsSummary } = useGetReviewsSummary();
@@ -79,7 +97,11 @@ export default function FacilityDetail() {
 
   const formattedDate = date ? format(date, "yyyy-MM-dd") : "";
 
-  const { data: slots, isLoading: isLoadingSlots } = useCheckAvailability(
+  const {
+    data: slots,
+    isLoading: isLoadingSlots,
+    isError: isSlotsError,
+  } = useCheckAvailability(
     { facilityId, date: formattedDate },
     {
       query: {
@@ -108,10 +130,8 @@ export default function FacilityDetail() {
     let phone = settings.whatsapp;
     if (phone.startsWith("0")) phone = "62" + phone.substring(1);
 
-    const durationNum = parseInt(duration);
-    const [startH, startM] = selectedTime.split(":").map(Number);
-    const endH = startH + durationNum;
-    const endTime = `${String(endH).padStart(2, "0")}:${String(startM).padStart(2, "00")}`;
+    const durationNum = durationHours;
+    const endTime = addHoursToDisplayTime(selectedTime, durationNum);
     const totalPrice = isWalkIn ? facility.pricePerHour : facility.pricePerHour * durationNum;
     const dateStr = format(date, "EEEE, d MMMM yyyy", { locale: lang === "en" ? enUS : id });
     const actLabel = isMultiguna && activityType ? ` (${activityType})` : "";
@@ -139,7 +159,7 @@ export default function FacilityDetail() {
 
   const isWaBookingReady =
     !!date &&
-    (isWalkIn || (!!selectedTime && (!isMultiguna || !!activityType)));
+    (isWalkIn || (hasValidDuration && !!selectedTime && (!isMultiguna || !!activityType)));
 
   const handleBook = () => {
     if (!facility || !date) return;
@@ -155,6 +175,7 @@ export default function FacilityDetail() {
     }
 
     if (!selectedTime) return;
+    if (!hasValidDuration) return;
     if (isMultiguna && !activityType) return;
 
     const searchParams = new URLSearchParams({
@@ -236,7 +257,11 @@ export default function FacilityDetail() {
     );
   }
 
-  const totalPrice = isWalkIn ? facility.pricePerHour : facility.pricePerHour * parseInt(duration);
+  const totalPrice = isWalkIn
+    ? facility.pricePerHour
+    : hasValidDuration
+      ? facility.pricePerHour * durationHours
+      : 0;
 
   return (
     <div className="bg-[#F8FAFC] dark:bg-slate-950 min-h-screen pb-24">
@@ -269,7 +294,7 @@ export default function FacilityDetail() {
                   
                   <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-muted-foreground">
                     <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-foreground/80">
-                      <Clock className="w-4 h-4 text-primary" /> {facility.openTime.substring(0,5)} - {facility.closeTime.substring(0,5)} {t("WIB", "WIB")}
+                      <Clock className="w-4 h-4 text-primary" /> {facility.openTime.substring(0,5)} - {effectiveCloseTime(facility)} {t("WIB", "WIB")}
                     </div>
                     {facility.capacity && (
                       <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-foreground/80">
@@ -394,12 +419,23 @@ export default function FacilityDetail() {
                       <Calendar
                         mode="single"
                         selected={date}
-                        onSelect={setDate}
-                        disabled={isAdminOrOperator ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
+                        onSelect={(nextDate) => {
+                          setDate(nextDate);
+                          setSelectedTime("");
+                        }}
+                        disabled={isOperationalAccount ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
                         className="rounded-xl bg-transparent"
                         locale={lang === "en" ? enUS : id}
                       />
                     </div>
+                    {isOperationalAccount && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        {t(
+                          "Akun operasional dapat mencatat booking untuk tanggal dan jam yang sudah lewat.",
+                          "Operational accounts can record bookings for past dates and times."
+                        )}
+                      </p>
+                    )}
                   </div>
 
                   {/* Walk-in (Gym) info block */}
@@ -412,6 +448,42 @@ export default function FacilityDetail() {
                           "Gym is accessible anytime between 06:00–22:00 WIB. No time slot needed — just come and enjoy."
                         )}
                       </p>
+                    </div>
+                  )}
+
+                  {/* Gym membership actions */}
+                  {isGymFacility && (
+                    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                          <Dumbbell className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-bold text-foreground">
+                            {t("Sudah punya atau ingin jadi member?", "Already a member or want to join?")}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {t(
+                              "Daftar membership bulanan dan nikmati akses Gym tanpa perlu membayar setiap kunjungan.",
+                              "Register for monthly membership and enjoy Gym access without paying per visit."
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Button asChild variant="outline" className="w-full border-primary/30 text-primary hover:bg-primary/10">
+                          <Link href="/membership?mode=register">
+                            <Dumbbell className="w-4 h-4 mr-2" />
+                            {t("Daftar Member Gym", "Register Gym Member")}
+                          </Link>
+                        </Button>
+                        <Button asChild variant="outline" className="w-full border-primary/30 text-primary hover:bg-primary/10">
+                          <Link href="/membership?mode=renew">
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            {t("Perpanjang Membership", "Renew Membership")}
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   )}
 
@@ -452,25 +524,37 @@ export default function FacilityDetail() {
                       <label className="text-sm font-bold text-foreground/80 block">
                         {isMultiguna ? t("3. Durasi Bermain", "3. Playing Duration") : t("2. Durasi Bermain", "2. Playing Duration")}
                       </label>
-                      <Select value={duration} onValueChange={(v) => { setDuration(v); setSelectedTime(""); }}>
-                        <SelectTrigger className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold">
-                          <SelectValue placeholder={t("Pilih durasi", "Choose duration")} />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl">
-                          <SelectItem value="1" className="font-medium py-3">{t("1 Jam", "1 Hour")}</SelectItem>
-                          <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
-                          <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
-                          <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
-                          <SelectItem value="5" className="font-medium py-3">{t("5 Jam", "5 Hours")}</SelectItem>
-                          <SelectItem value="6" className="font-medium py-3">{t("6 Jam", "6 Hours")}</SelectItem>
-                          <SelectItem value="7" className="font-medium py-3">{t("7 Jam", "7 Hours")}</SelectItem>
-                          <SelectItem value="8" className="font-medium py-3">{t("8 Jam", "8 Hours")}</SelectItem>
-                          <SelectItem value="9" className="font-medium py-3">{t("9 Jam", "9 Hours")}</SelectItem>
-                          <SelectItem value="10" className="font-medium py-3">{t("10 Jam", "10 Hours")}</SelectItem>
-                          <SelectItem value="11" className="font-medium py-3">{t("11 Jam", "11 Hours")}</SelectItem>
-                          <SelectItem value="12" className="font-medium py-3">{t("12 Jam", "12 Hours")}</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        id="playing-duration"
+                        type="number"
+                        min={minDuration}
+                        step="1"
+                        inputMode="numeric"
+                        value={duration}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          if (nextValue === "" || /^\d+$/.test(nextValue)) {
+                            setDuration(nextValue);
+                          }
+                          setSelectedTime("");
+                        }}
+                        className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold"
+                        placeholder={t("Ketik durasi dalam jam", "Enter duration in hours")}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {t(
+                          `Ketik jumlah jam (minimal ${minDuration} jam). Durasi mengikuti jam operasional fasilitas.`,
+                          `Enter the number of hours (minimum ${minDuration} hours). Duration follows facility operating hours.`
+                        )}
+                      </p>
+                      {duration !== "" && !hasValidDuration && (
+                        <p className="text-xs text-destructive">
+                          {t(
+                            `Durasi minimal ${minDuration} jam.`,
+                            `Minimum duration is ${minDuration} hours.`
+                          )}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -488,6 +572,10 @@ export default function FacilityDetail() {
                         <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
                           {t("Pilih tanggal terlebih dahulu", "Please choose a date first")}
                         </div>
+                      ) : !hasValidDuration ? (
+                        <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
+                          {t("Masukkan durasi yang valid terlebih dahulu", "Enter a valid duration first")}
+                        </div>
                       ) : (
                         <div className="bg-[#F8FAFC] dark:bg-slate-900 rounded-2xl p-4 border shadow-inner max-h-[250px] overflow-y-auto">
                           <AvailabilityCalendar
@@ -495,6 +583,7 @@ export default function FacilityDetail() {
                             date={formattedDate}
                             slots={slots as any}
                             isLoading={isLoadingSlots}
+                            isError={isSlotsError}
                             selectedTime={selectedTime}
                             duration={parseInt(duration)}
                             onSelectTime={setSelectedTime}
@@ -520,6 +609,7 @@ export default function FacilityDetail() {
                         onClick={handleBook}
                         disabled={
                           !date || 
+                          !hasValidDuration ||
                           (!isWalkIn && !selectedTime) ||
                           (isMultiguna && !activityType)
                         }

@@ -1,0 +1,239 @@
+DETERMINE ACTUAL PRODUCTION GCP PROJECT
+SPORT CENTER — READ ONLY / NO CHANGES
+
+JANGAN membuat project baru.
+JANGAN mengubah IAM.
+JANGAN mengubah Secret Manager.
+JANGAN deploy.
+JANGAN mengubah database.
+JANGAN menggunakan DEV sebagai PROD.
+
+Masalah saat ini:
+
+Configuration sebelumnya menyebut:
+
+GCP_PROJECT_ID = sc-sport-center
+Project Number = 212300252439
+
+Tetapi project sc-sport-center tidak muncul di Google Cloud Console dan akun production audit tidak dapat mengaksesnya.
+
+Project yang benar-benar terlihat di Google Cloud:
+
+Name:
+Sport center
+
+Project ID:
+sport-center-506306
+
+Project Number:
+398772007342
+
+Target sekarang adalah MENENTUKAN PROJECT PRODUCTION SEBENARNYA.
+
+==================================================
+1. AUDIT PRODUCTION BOOTSTRAP
+==================================================
+
+Baca GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD melalui existing official loader.
+
+JANGAN print:
+- credential
+- private key
+- token
+- secret value
+- database URL
+- service account key
+
+Parse hanya metadata non-sensitive.
+
+Cari:
+
+- projectId
+- projectNumber
+- secretId
+- service account/project metadata
+- Secret Manager target
+- deployment project
+- App Engine configuration
+
+Jika JSON memiliki project ID:
+
+report sebagai:
+
+BOOTSTRAP_PROJECT_ID
+
+==================================================
+2. AUDIT ALL PRODUCTION CONFIG
+==================================================
+
+Cari secara read-only seluruh repository:
+
+GCP_PROJECT_ID
+GCP_PROJECT_NUMBER
+projectId
+projectNumber
+app.yaml
+gae-deploy
+App Engine
+Secret Manager
+production bootstrap
+deployment scripts
+Cloud Build
+cloudbuild.yaml
+deploy scripts
+service account
+APP_ENGINE
+PROJECT_ID
+
+Buat mapping:
+
+SOURCE
+VALUE
+CLASSIFICATION
+
+Classification:
+
+ACTUAL SOURCE
+CONFIGURED
+EXPECTED
+LEGACY
+DEV
+PROD
+UNKNOWN
+
+Jangan menganggap `sc-sport-center` benar hanya karena muncul di dokumentasi.
+
+==================================================
+3. AUDIT APP ENGINE CONFIG
+==================================================
+
+Periksa:
+
+gae-deploy/app.yaml
+deployment scripts
+service configuration
+
+Cari project yang digunakan oleh deployment.
+
+Jangan deploy.
+
+==================================================
+4. AUDIT SECRET MANAGER TARGET
+==================================================
+
+Dari GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD tentukan:
+
+project ID target
+secret ID target
+
+Jangan membaca atau mencetak secret payload.
+
+Verifikasi apakah secret target berada pada:
+
+sport-center-506306
+
+atau:
+
+sc-sport-center
+
+atau project lain.
+
+==================================================
+5. COMPARE PROJECTS
+==================================================
+
+Buat tabel:
+
+| Project | Source | Environment | Evidence |
+|---|---|---|---|
+| sport-center-506306 | ... | ... | ... |
+| sc-sport-center | ... | ... | ... |
+| other | ... | ... | ... |
+
+Jangan menyatakan Production berdasarkan nama saja.
+
+==================================================
+6. DETERMINE SOURCE OF TRUTH
+==================================================
+
+Prioritas evidence:
+
+1. Actual GCP Secret Manager production bootstrap
+2. Actual production deployment configuration
+3. Actual App Engine deployment target
+4. Actual production service account
+5. Repository configuration
+6. Documentation
+
+Dokumentasi paling rendah prioritasnya.
+
+==================================================
+7. CRITICAL SAFETY
+==================================================
+
+Jika ternyata:
+
+sport-center-506306 = actual production
+
+JANGAN langsung mengubah configuration.
+
+Laporkan:
+
+ACTUAL PRODUCTION PROJECT = sport-center-506306
+
+dan jelaskan configuration mana yang masih salah/legacy.
+
+Jika ternyata project lain:
+
+laporkan project tersebut.
+
+Jika tidak dapat ditentukan:
+
+PRODUCTION PROJECT = UNVERIFIED
+
+Jangan menebak.
+
+==================================================
+8. SECRET SAFETY
+==================================================
+
+JANGAN mengubah:
+
+GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD
+
+JANGAN membuat secret baru.
+
+JANGAN memindahkan secret.
+
+JANGAN mengubah secret value.
+
+==================================================
+9. FINAL VERDICT
+==================================================
+
+Berikan:
+
+ACTUAL PRODUCTION PROJECT:
+ACTUAL PRODUCTION PROJECT NUMBER:
+PRODUCTION SECRET MANAGER PROJECT:
+PRODUCTION APP ENGINE PROJECT:
+EXPECTED RUNTIME SERVICE ACCOUNT:
+EVIDENCE SOURCE:
+
+Kemudian:
+
+PROJECT ID STATUS:
+CONFIRMED / UNVERIFIED / CONFLICT
+
+RUNTIME IDENTITY:
+CONFIRMED / UNVERIFIED
+
+DO NOT continue to production transaction audit.
+
+DO NOT modify any data.
+
+DO NOT deploy.
+
+DO NOT modify IAM.
+
+DO NOT ask for confirmation.

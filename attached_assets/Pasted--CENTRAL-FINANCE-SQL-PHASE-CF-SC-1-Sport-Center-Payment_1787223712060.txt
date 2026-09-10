@@ -1,0 +1,826 @@
+# CENTRAL FINANCE SQL — PHASE CF-SC-1
+## Sport Center Payment Event → Central Finance Processor
+## BUILD + VERIFY ONLY — NO PROD CUTOVER
+
+CURRENT VERIFIED STATE
+
+Sport Center boundary is READY.
+
+Verified:
+
+- canonical payment:
+  sport_center.sport_payments.id
+
+- payment confirmed event:
+  sport_center.payment_accounting_outbox
+
+- event uniqueness:
+  UNIQUE(payment_id, event_type)
+
+- deterministic correlation:
+  sc_payment_<payment_id>
+
+- Paylabs retry idempotent
+- concurrent callback safe
+- callback + admin race safe
+
+- live direct sport_center_booking accounting producer = 0
+
+- SPORT_CENTER_FINANCE_MODE modes:
+  legacy
+  shadow
+  central
+
+- production currently:
+  SPORT_CENTER_FINANCE_MODE=legacy
+
+- central mode proof:
+  payment confirmed
+  → durable finance event
+  → zero Sport Center downstream finance writes
+
+Verification:
+- accounting integration 7/7 PASS
+- Paylabs tests 15/15 PASS
+- boundary tests 23/23 PASS
+- boundary-related typecheck errors = 0
+- API build PASS
+- API ready PASS
+
+DO NOT CUT OVER PRODUCTION.
+
+============================================================
+OBJECTIVE
+============================================================
+
+Build the first Central Finance processor for:
+
+source_project = SPORT_CENTER
+
+Target future flow:
+
+Sport Center
+→ canonical payment confirmed
+→ durable finance event
+→ STOP
+
+Central Finance
+→ consume event
+→ resolve finance configuration
+→ sync public mirror
+→ calculate accounting tax
+→ accounting payment
+→ accounting entry
+→ entry lines
+→ ledger
+→ settlement preparation
+→ reconciliation preparation
+
+This phase must support SHADOW verification before production ownership
+moves from Sport Center to Central Finance.
+
+============================================================
+ARCHITECTURE RULE
+============================================================
+
+Central Finance must become the ONLY future downstream finance owner.
+
+Do NOT build another Sport Center-specific accounting engine that duplicates
+the old logic permanently.
+
+Build a generic processor contract with:
+
+source_project = SPORT_CENTER
+
+so Tenant and other projects can use the same engine later.
+
+Project-specific behavior must come from adapters/configuration,
+not duplicated posting engines.
+
+============================================================
+PHASE 0 — DATABASE SOURCE OF TRUTH
+============================================================
+
+Use Supabase DEVELOPMENT first.
+
+Do NOT use PROD for writes.
+
+Inventory actual schemas/tables before designing SQL.
+
+Required existing objects to inspect:
+
+sport_center.sport_payments
+sport_center.payment_accounting_outbox
+
+public.sport_payments
+public.accounting_payments
+public.accounting_entries
+public.accounting_entry_lines
+
+company_bank_accounts
+tax_rules
+chart_of_accounts
+
+settlement/config tables already used by Sport Center
+
+reconciliation tables
+
+Do not invent table or column names.
+
+Report exact existing schema contract first.
+
+============================================================
+PHASE 1 — DEFINE UNIVERSAL FINANCE EVENT CONTRACT
+============================================================
+
+Use the existing Sport Center durable event/outbox as input.
+
+Define a normalized Central Finance event contract.
+
+Required semantic fields:
+
+event_id
+event_type
+
+source_project
+source_schema
+source_table
+source_payment_id
+
+business_reference
+booking_id
+
+company evidence
+
+amount
+payment_type
+payment_method
+
+payment_provider
+provider_reference
+provider_order_id
+merchant_trade_no
+provider_trade_no
+
+paid_at
+confirmed_at
+
+correlation_id
+
+schema_version
+created_at
+
+Do NOT re-read mutable source fields if immutable snapshot is already present.
+
+If the current outbox snapshot is incomplete:
+make the smallest additive schema change required.
+
+No destructive migration.
+
+============================================================
+PHASE 2 — CENTRAL FINANCE PROCESSING STATE
+============================================================
+
+Create/reuse one Central Finance processing state.
+
+Do NOT use Sport Center's legacy worker status as the final central processor
+ownership state if that creates ambiguity.
+
+Required semantics:
+
+pending
+processing
+posted
+failed
+manual_review
+
+Support:
+
+- attempts
+- available_at
+- locked_at
+- processed_at
+- last_error
+
+Concurrency:
+safe claim using transaction/locking.
+
+Stale lock:
+recoverable.
+
+Deterministic/non-retryable configuration failures:
+manual_review, not infinite retry.
+
+Transient failures:
+retryable.
+
+============================================================
+PHASE 3 — IDEMPOTENCY CONTRACT
+============================================================
+
+Critical invariant:
+
+ONE source project + source payment + finance event
+→ maximum ONE accounting financial effect.
+
+Canonical identity:
+
+source_project = SPORT_CENTER
+source_payment_id = payment.id
+event_type = payment_confirmed
+
+Use database unique protection.
+
+Do not rely only on SELECT-before-INSERT.
+
+Must safely handle:
+
+- duplicate event
+- worker retry
+- concurrent workers
+- callback retry
+- application restart
+- race after partial transaction failure
+
+Required behavior:
+
+If valid financial posting already exists:
+return ALREADY_POSTED / RECOVERED.
+
+Do not create another journal/entry/payment.
+
+============================================================
+PHASE 4 — COMPANY RESOLVER
+============================================================
+
+For this first Sport Center phase, reuse actual existing canonical company
+evidence/configuration.
+
+Do NOT hardcode company_id merely because historical Sport Center commonly
+uses a known company.
+
+Resolve using:
+
+1. immutable event/payment company evidence
+2. validated project/facility company mapping
+3. current canonical configuration where appropriate
+
+Fail closed on:
+
+- missing company
+- inactive company
+- ambiguous company
+- conflicting company evidence
+
+Design resolver interface generically:
+
+resolveFinanceCompany(
+  source_project,
+  source_event,
+  effective_date
+)
+
+so BizPortal multi-project config can replace/extend its configuration source
+later without rewriting the processor.
+
+============================================================
+PHASE 5 — PAYMENT METHOD CONFIG RESOLVER
+============================================================
+
+Implement one resolver interface:
+
+resolvePaymentMethodConfig(
+  source_project,
+  company_id,
+  payment_method,
+  payment_provider,
+  effective_date
+)
+
+For SPORT_CENTER support current methods:
+
+- Transfer Bank
+- QRIS
+- Paylabs
+
+Use existing configuration tables.
+
+Do NOT hardcode bank/account/provider IDs.
+
+Required output:
+
+company_id
+payment_method
+provider
+receiving_bank_account
+settlement_account
+merchant/provider identity
+MDR rule if available
+settlement rule
+required COA mappings
+
+Fail closed if required configuration is absent.
+
+Legacy transaction provider facts remain evidence and must not be overwritten.
+
+============================================================
+PHASE 6 — TAX RESOLVER
+============================================================
+
+Do NOT hardcode:
+
+11%
+PPN_OUT_11
+specific PPN COA
+
+Use:
+
+tax_rules
+
+and actual tax/COA configuration.
+
+Create generic resolver:
+
+resolveEffectiveTaxRule(
+  project,
+  company,
+  transaction_type,
+  effective_date
+)
+
+Required behavior:
+
+- effective-date aware
+- company scoped
+- inclusive/exclusive aware
+- versioned
+- fail closed on ambiguity
+
+Important distinction:
+
+Sport Center may already store commercial tax snapshot.
+
+Central Finance must determine final ACCOUNTING tax rule.
+
+For historical/reprocessed posted payments:
+do not silently recalculate posted accounting.
+
+For new Central Finance posting:
+store snapshot of the rule used.
+
+============================================================
+PHASE 7 — COA RESOLVER
+============================================================
+
+Central Finance must not rely on module-specific hardcoded COA.
+
+Resolve at least:
+
+receiving bank / cash
+revenue
+PPN output
+clearing
+MDR/provider fee
+settlement
+
+Reuse:
+
+chart_of_accounts
+existing mapping/configuration
+
+Design generic contract:
+
+resolveAccountingMapping(
+  project,
+  company,
+  payment_method,
+  provider,
+  transaction_type,
+  effective_date
+)
+
+For missing mapping:
+fail closed.
+
+============================================================
+PHASE 8 — PUBLIC PAYMENT MIRROR
+============================================================
+
+Central Finance becomes future owner of:
+
+public.sport_payments
+
+Use:
+
+source_payment_id
+
+as canonical link.
+
+Required behavior:
+
+- create if missing
+- reconcile/update metadata if existing
+- never create duplicate mirror
+- preserve immutable business/provider facts
+- do not rewrite historical amount arbitrarily
+
+Mirror operation must be idempotent.
+
+Payment-method metadata edits should later be able to synchronize:
+
+canonical payment
+→ mirror
+
+without creating accounting duplicates.
+
+============================================================
+PHASE 9 — ACCOUNTING PAYMENT
+============================================================
+
+Create/reuse:
+
+public.accounting_payments
+
+Canonical Central Finance identity must include:
+
+source_project/module
+source_payment_id
+
+Do not use legacy public mirror ID as the canonical finance identity.
+
+Required:
+
+one source payment
+→ at most one active canonical accounting payment
+
+If legacy/adopted valid posting exists:
+support explicit idempotent adoption/recovery.
+
+Do not duplicate historical valid entries.
+
+============================================================
+PHASE 10 — ACCOUNTING ENTRY + LINES
+============================================================
+
+Create accounting entry through the canonical accounting posting guard/service
+or a hardened PostgreSQL owner function.
+
+Do NOT directly scatter INSERT logic across triggers.
+
+Required:
+
+draft-first or equivalent safe posting contract
+balanced debit/credit
+period lock
+company scope
+source payment identity
+idempotency
+auditability
+
+For tax-inclusive example:
+
+gross payment
+→ debit bank gross
+→ credit revenue net
+→ credit PPN output
+
+But calculation MUST come from effective configuration.
+
+Do not hardcode Sport Center PPN split.
+
+============================================================
+PHASE 11 — LEDGER
+============================================================
+
+Ledger effect must be derived from the canonical accounting entry.
+
+Do not create an independent second financial posting source.
+
+Required invariant:
+
+accounting entry
+→ ONE ledger projection
+
+Retry must not duplicate ledger lines.
+
+If the existing ledger trigger/function already provides this safely:
+reuse it.
+
+Do not create competing ledger logic.
+
+============================================================
+PHASE 12 — SETTLEMENT
+============================================================
+
+Do NOT immediately move all existing Sport Center settlement logic.
+
+For CF-SC-1:
+
+separate:
+
+PAYMENT ACCOUNTING POSTING
+
+from
+
+SETTLEMENT ACCOUNTING
+
+Central Finance should at minimum calculate/store enough provider/account
+identity for future settlement processing.
+
+Reuse existing canonical settlement structures if safe.
+
+Do not duplicate settlement journals.
+
+For QRIS/Paylabs:
+
+gross payment
+→ expected settlement
+→ MDR/fee
+→ net settlement
+
+must be config-driven.
+
+============================================================
+PHASE 13 — RECONCILIATION
+============================================================
+
+Do not create a new accounting effect from bank mutation if the original
+payment has already been posted.
+
+Target future:
+
+payment accounting
+→ expected bank settlement
+→ bank mutation
+→ reconciliation link
+
+NOT:
+
+payment accounting
++
+bank mutation creates another revenue accounting entry
+
+Ensure source-aware reconciliation identity.
+
+Do not rewrite existing bank reconciliation architecture unnecessarily.
+
+============================================================
+PHASE 14 — REFUND/CORRECTION EVENT CONTRACT
+============================================================
+
+Design but do not necessarily fully implement:
+
+payment_refunded
+payment_corrected
+payment_voided
+
+Operational Sport Center later emits business event.
+
+Central Finance performs financial reversal/correction.
+
+Never delete posted accounting as normal runtime correction.
+
+Use reversal governance.
+
+============================================================
+PHASE 15 — NO LARGE FINANCIAL TRIGGER
+============================================================
+
+Do NOT implement:
+
+AFTER payment confirmed
+→ huge synchronous trigger
+→ mirror
+→ tax
+→ accounting
+→ settlement
+→ reconciliation
+
+Use trigger only for small durable event creation if needed.
+
+Complex finance processing must use controlled processor/function/worker with:
+
+- transaction
+- idempotency
+- retry
+- observable errors
+- manual review state
+
+============================================================
+PHASE 16 — SHADOW MODE
+============================================================
+
+Central Finance must support SHADOW comparison before cutover.
+
+Production remains:
+
+SPORT_CENTER_FINANCE_MODE=legacy
+
+Central Finance in shadow mode may:
+
+- read finance events
+- resolve company/config
+- calculate expected accounting result
+- calculate expected tax
+- calculate expected COA mapping
+
+But MUST NOT create financial writes in PROD shadow mode.
+
+Persist/return comparison evidence safely if needed.
+
+Compare:
+
+OLD Sport Center accounting result
+vs
+NEW Central Finance expected result
+
+Required comparison:
+
+company
+amount
+bank account
+revenue
+PPN
+COA
+provider
+MDR
+settlement date
+source identity
+
+Classify:
+
+MATCH
+MISMATCH_CONFIG
+MISMATCH_TAX
+MISMATCH_COA
+MISMATCH_PROVIDER
+MISSING_CONFIG
+LEGACY_EXCEPTION
+
+============================================================
+PHASE 17 — DEVELOPMENT IMPLEMENTATION
+============================================================
+
+Implement Central Finance against DEVELOPMENT.
+
+Use representative scenarios:
+
+A. Transfer Bank full payment
+
+B. QRIS full payment
+
+C. Paylabs payment
+
+D. DP
+
+E. Pelunasan
+
+F. Group payment
+
+G. duplicate event
+
+H. concurrent processing
+
+I. provider missing
+
+J. company missing
+
+K. tax config missing
+
+L. COA mapping missing
+
+M. already-posted legacy payment
+
+N. stale processing lock
+
+No PROD finance writes.
+
+============================================================
+PHASE 18 — TESTS
+============================================================
+
+Required tests:
+
+1. confirmed payment consumed once
+2. duplicate event no duplicate posting
+3. concurrent worker no duplicate posting
+4. Transfer Bank config resolution
+5. QRIS config resolution
+6. Paylabs provider identity preservation
+7. effective tax rule resolution
+8. inclusive tax accounting
+9. missing tax fails closed
+10. missing COA fails closed
+11. company isolation
+12. mirror idempotency
+13. accounting_payment idempotency
+14. accounting_entry idempotency
+15. ledger no duplicate
+16. DP separate identity
+17. pelunasan separate identity
+18. group payment identity
+19. already-posted recovery/adoption
+20. stale lock recovery
+21. deterministic configuration failure → manual_review
+22. transient failure → retry
+23. shadow mode creates ZERO PROD finance writes
+24. Paylabs business callback remains outside Central Finance
+
+============================================================
+PHASE 19 — VERIFICATION
+============================================================
+
+Run:
+
+- Central Finance focused tests
+- accounting integration tests
+- API typecheck delta analysis
+- API build
+- migration/schema validation
+- git diff --check
+
+Development runtime proof.
+
+Production:
+READ-ONLY shadow/preflight only.
+
+Do not switch:
+SPORT_CENTER_FINANCE_MODE=central
+
+============================================================
+PHASE 20 — CUTOVER READINESS REPORT
+============================================================
+
+Before cutover, prove:
+
+Sport Center:
+payment confirmed → event only
+
+Central Finance:
+event → deterministic expected accounting
+
+Legacy processor and Central Finance shadow outputs match for controlled sample.
+
+Define exact future cutover sequence:
+
+1. pause/coordinate event workers
+2. drain legacy events
+3. verify no processing locks
+4. switch Sport Center finance mode
+5. start Central Finance ownership
+6. monitor
+7. rollback plan
+
+Do NOT perform this cutover in CF-SC-1.
+
+============================================================
+FINAL REPORT ONLY
+============================================================
+
+CENTRAL FINANCE EVENT CONTRACT =
+
+PROCESSING STATE =
+
+IDEMPOTENCY IDENTITY =
+
+COMPANY RESOLVER =
+PAYMENT CONFIG RESOLVER =
+TAX RESOLVER =
+COA RESOLVER =
+
+PUBLIC MIRROR OWNER =
+ACCOUNTING PAYMENT OWNER =
+ACCOUNTING ENTRY OWNER =
+LEDGER OWNER =
+
+SETTLEMENT CONTRACT =
+RECONCILIATION CONTRACT =
+REFUND/CORRECTION CONTRACT =
+
+HARDCODED SPORT CENTER FINANCE VALUES REMAINING =
+
+DEVELOPMENT TESTS =
+ACCOUNTING INTEGRATION =
+TYPECHECK =
+BUILD =
+MIGRATION VALIDATION =
+GIT DIFF CHECK =
+
+SHADOW MODE =
+PROD FINANCE WRITES = 0
+SPORT_CENTER PROD MODE = legacy
+
+SHADOW MATCH RESULT =
+MISMATCHES =
+
+READY FOR CONTROLLED SPORT CENTER CUTOVER = YES/NO
+
+BLOCKERS =
+
+NEXT PHASE =
+
+STOP.
+
+Do not modify BizPortal.
+Do not migrate Tenant.
+Do not switch production to central.

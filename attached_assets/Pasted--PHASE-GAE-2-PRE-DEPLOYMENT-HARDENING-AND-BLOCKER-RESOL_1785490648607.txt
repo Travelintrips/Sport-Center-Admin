@@ -1,0 +1,351 @@
+# PHASE GAE-2 — PRE-DEPLOYMENT HARDENING AND BLOCKER RESOLUTION
+
+PHASE GAE-1 telah selesai pada commit:
+
+b90b964
+
+Target:
+
+- GCP Project ID: sc-sport-center
+- App Engine Region: asia-southeast2
+- App Engine Environment: Standard
+- Service: default
+- Production Domain: https://sc.travelintrips.co.id
+- Repository: Travelintrips/Sport-Center-Admin
+- Production Branch: main
+
+IMPORTANT:
+
+Jangan deploy.
+Jangan mengubah DNS.
+Jangan membuat Cloud Build Trigger dahulu.
+Jangan memasukkan secret ke command line, app.yaml, cloudbuild.yaml,
+GitHub, build log, atau commit.
+
+Tujuan fase ini adalah memastikan deployment benar-benar aman dan kompatibel
+sebelum deployment pertama dilakukan.
+
+## PHASE 1 — SHOW AND AUDIT DEPLOYMENT FILES
+
+Tampilkan isi lengkap file berikut dalam laporan:
+
+1. gae-deploy/app.yaml
+2. gae-deploy/package.json
+3. gae-deploy/.gcloudignore
+4. cloudbuild.yaml
+
+Audit setiap file dan pastikan tidak ada:
+
+- secret;
+- placeholder credential;
+- hardcoded database URL;
+- hardcoded API key;
+- dependency Replit-only yang dibutuhkan saat startup;
+- path yang salah;
+- output build yang tidak ikut ter-copy;
+- source map atau file sensitif yang tidak diperlukan.
+
+## PHASE 2 — FIX ALL TYPESCRIPT ERRORS
+
+Perbaiki seluruh error typecheck yang telah ditemukan:
+
+- src/lib/auth.ts
+- src/lib/invoiceDelivery.ts
+- src/lib/pdfGenerator.ts
+- src/routes/analyticsPublic.ts
+- src/routes/corporateDocumentation.ts
+
+Ketentuan:
+
+- Jangan menonaktifkan strict mode.
+- Jangan menambahkan `any` hanya untuk menghilangkan error.
+- Jangan memakai `@ts-ignore` atau `@ts-expect-error` tanpa justifikasi teknis.
+- SESSION_SECRET harus divalidasi melalui startup environment validation.
+- Tambahkan type package yang memang diperlukan.
+- Pastikan perubahan tidak mengubah perilaku bisnis secara tidak sengaja.
+
+Acceptance criteria:
+
+pnpm typecheck
+atau command typecheck repository yang benar harus PASS dengan 0 error.
+
+## PHASE 3 — STARTUP ENVIRONMENT VALIDATION
+
+Audit seluruh environment variable yang dibaca saat startup.
+
+Kelompokkan menjadi:
+
+1. Wajib untuk startup.
+2. Opsional.
+3. Wajib hanya ketika fitur tertentu digunakan.
+4. Build-time frontend variable.
+5. Runtime backend variable.
+
+Jangan menyatakan semua integration secret wajib jika server sebenarnya dapat
+berjalan tanpa fitur tersebut.
+
+Buat centralized environment validation menggunakan mekanisme yang sudah ada
+atau schema validation yang konsisten.
+
+Minimal:
+
+- SUPABASE_DATABASE_URL
+- SESSION_SECRET
+
+harus gagal secara eksplisit dengan pesan aman apabila benar-benar wajib.
+
+Pesan error tidak boleh mencetak isi secret.
+
+Pastikan:
+
+- VITE_PUBLIC_URL dipakai saat frontend build;
+- jangan mengandalkan nilai VITE_PUBLIC_URL dari app.yaml untuk mengubah
+  frontend yang sudah selesai dibuild;
+- PORT tetap berasal dari App Engine runtime.
+
+## PHASE 4 — SECRET MANAGER DESIGN
+
+Hapus rencana deployment berikut:
+
+gcloud app deploy ... --set-env-vars="SECRET=..."
+
+Jangan mengirim secret melalui command line.
+
+Siapkan desain penggunaan Google Secret Manager.
+
+Gunakan nama secret yang dipisahkan untuk production, contohnya:
+
+sport-center-prod-supabase-database-url
+sport-center-prod-session-secret
+sport-center-prod-fonnte-token
+
+Jangan membuat nilai secret dan jangan meminta nilainya.
+
+Audit mekanisme aplikasi saat ini:
+
+- apakah aplikasi sudah memiliki secret loader;
+- apakah secret loader hanya bekerja di Replit atau GCP;
+- apakah dapat membaca Google Secret Manager memakai Application Default
+  Credentials;
+- service account runtime apa yang akan dipakai;
+- IAM role minimum yang dibutuhkan.
+
+Gunakan:
+
+roles/secretmanager.secretAccessor
+
+hanya pada secret yang diperlukan oleh runtime service account.
+
+Cloud Build harus memakai `availableSecrets` hanya apabila build benar-benar
+memerlukan secret. Jangan memberikan production runtime secrets kepada step
+build jika build tidak membutuhkannya.
+
+Secret Manager adalah metode yang harus digunakan untuk data sensitif pada
+Cloud Build, bukan substitution biasa atau plain environment value.
+
+## PHASE 5 — REPLIT OBJECT STORAGE COMPATIBILITY
+
+Audit seluruh penggunaan:
+
+@replit/object-storage
+replitStorage.ts
+
+Cari semua route dan service yang bergantung padanya.
+
+Laporkan:
+
+- fitur yang terdampak;
+- apakah dipanggil saat startup;
+- apakah kegagalan storage dapat membuat server crash;
+- apakah hanya digunakan saat upload/download tertentu;
+- data apa yang saat ini disimpan di Replit Object Storage.
+
+Karena production sudah memakai Supabase, prioritaskan Supabase Storage,
+bukan membuat storage provider baru tanpa alasan.
+
+Buat storage abstraction yang mendukung:
+
+- Supabase Storage untuk production GAE;
+- implementasi lama hanya bila masih diperlukan untuk development;
+- tidak ada koneksi ke 127.0.0.1:1106 di production;
+- clear error handling;
+- tidak ada silent fallback yang menghilangkan file.
+
+Jangan melakukan migrasi file lama tanpa inventaris dan persetujuan.
+
+Tambahkan test untuk memastikan production mode tidak pernah mencoba memakai
+Replit sidecar.
+
+## PHASE 6 — PDF AND CHROMIUM COMPATIBILITY
+
+Audit penggunaan:
+
+- playwright
+- @sparticuz/chromium-min
+- executablePath
+- temporary file paths
+- browser launch args
+
+Pastikan semua temporary files hanya ditulis ke:
+
+/tmp
+
+Jangan menulis file runtime ke folder aplikasi karena filesystem App Engine
+Standard bersifat read-only selain /tmp.
+
+Buat health check atau isolated smoke test untuk PDF generation.
+
+Jika Chromium belum dapat dibuktikan kompatibel dengan App Engine Standard:
+
+- jangan menyatakan fitur PDF PASS;
+- jangan langsung memindahkan seluruh app ke Flexible;
+- buat feature flag aman;
+- pastikan kegagalan PDF tidak membuat seluruh API crash;
+- berikan rekomendasi terpisah, misalnya PDF worker di Cloud Run bila diperlukan.
+
+## PHASE 7 — SCALING AND COST REVIEW
+
+Review konfigurasi:
+
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  target_cpu_utilization: 0.65
+
+Untuk deployment pertama/staging verification, ubah menjadi konfigurasi hemat
+biaya kecuali ada alasan terukur untuk selalu menjaga satu instance aktif.
+
+Rekomendasi awal:
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 3
+  target_cpu_utilization: 0.65
+
+Jelaskan dampak:
+
+- cold start;
+- biaya;
+- database connection;
+- concurrency;
+- background job.
+
+Audit apakah aplikasi menjalankan cron, scheduler, queue consumer, atau
+background loop di dalam process. Jika ada, jangan mengandalkan instance web
+yang dapat scale to zero untuk pekerjaan terjadwal.
+
+## PHASE 8 — HEALTH CHECK AND STATIC ROUTING
+
+Pastikan tersedia endpoint ringan:
+
+GET /health
+
+Acceptance criteria:
+
+- tidak memerlukan autentikasi;
+- tidak mengungkap secret;
+- tidak menjalankan query berat;
+- mengembalikan status server;
+- bila perlu, sediakan readiness check terpisah untuk database.
+
+Audit static serving agar setiap route berikut benar-benar mengirim file
+prerender yang tepat, bukan selalu index.html homepage:
+
+/
+ /facilities
+ /promos
+ /membership
+ /contact
+ /privacy
+ /terms
+
+Uji melalui production server bundle, bukan hanya membaca file hasil build.
+
+Jalankan server bundle lokal dengan struktur persis seperti gae-deploy,
+kemudian gunakan curl terhadap seluruh route.
+
+## PHASE 9 — BUILD ARTIFACT REPRODUCIBILITY
+
+Buat local simulation dari package deployment yang sama dengan Cloud Build:
+
+1. Clean install.
+2. API build.
+3. Frontend build.
+4. Prerender.
+5. Assemble gae-deploy.
+6. npm install --omit=dev di gae-deploy.
+7. Start dari gae-deploy.
+8. Test seluruh route dan health endpoint.
+
+Pastikan gae-deploy tidak bergantung pada:
+
+- workspace symlink;
+- source TypeScript;
+- Replit environment;
+- dependency dev yang hilang;
+- file di luar package deployment;
+- uncommitted file.
+
+## PHASE 10 — TESTS
+
+Jalankan dan laporkan:
+
+- typecheck;
+- lint yang relevan;
+- unit tests;
+- production API build;
+- frontend build;
+- prerender;
+- assembled deployment smoke test;
+- storage provider test;
+- PDF isolated test;
+- health endpoint test.
+
+Jangan menyebut PASS bila test dilewati.
+
+Bedakan:
+
+PASS
+FAIL
+SKIPPED
+BLOCKED
+
+## PHASE 11 — FINAL GO/NO-GO REPORT
+
+Tampilkan:
+
+1. Isi final gae-deploy/app.yaml.
+2. Isi final gae-deploy/package.json.
+3. Isi final gae-deploy/.gcloudignore.
+4. Isi final cloudbuild.yaml.
+5. Semua file yang berubah.
+6. Semua commit baru.
+7. Typecheck result.
+8. Test result.
+9. Build result.
+10. Assembled deployment smoke-test result.
+11. Storage compatibility result.
+12. PDF compatibility result.
+13. Secret Manager integration design.
+14. Runtime service account yang direkomendasikan.
+15. Cloud Build service account yang direkomendasikan.
+16. IAM roles minimum.
+17. Estimated deployment risks.
+18. Exact manual deployment command tanpa secret.
+19. Exact post-deployment verification commands.
+20. Rollback command.
+21. Verdict:
+    - GO
+    - CONDITIONAL GO
+    - NO-GO
+
+Rules:
+
+- Jangan deploy.
+- Jangan mengubah DNS.
+- Jangan membuat trigger.
+- Jangan memasukkan secret.
+- Jangan menutupi test failure.
+- Jangan menyatakan siap deploy jika typecheck masih gagal,
+  Replit Object Storage masih dapat dipanggil di production,
+  atau startup package belum lulus assembled smoke test.

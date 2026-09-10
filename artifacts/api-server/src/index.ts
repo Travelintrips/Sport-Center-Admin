@@ -1,23 +1,14 @@
+import crypto from "crypto";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startScheduler } from "./lib/scheduler";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
+import { sql, eq } from "drizzle-orm";
 import { validateEnv } from "./lib/envValidation";
-import { loadSecretsFromGSM } from "./lib/secretLoader";
-
-// ── 1. Load secrets from Google Secret Manager (production/GAE only) ──────────
-// Must run before any other import reads process.env for secrets.
-// Non-fatal: if GSM is unavailable, envValidation below catches missing vars.
-const gsmResult = await loadSecretsFromGSM();
-if (gsmResult.loaded.length > 0) {
-  logger.info({ loaded: gsmResult.loaded }, "[secretLoader] Secrets loaded from Google Secret Manager");
-}
-if (gsmResult.failed.length > 0) {
-  logger.warn({ failed: gsmResult.failed }, "[secretLoader] Some secrets could not be loaded from GSM");
-}
+import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
+import { markStartupReady } from "./lib/startupReadiness";
 
 const rawPort = process.env["PORT"];
 
@@ -137,6 +128,21 @@ async function runStartupMigrations() {
        memo text,
        candidate_type text,
        candidate_id int,
+        payment_id int,
+        payment_method text,
+        payment_provider text,
+        provider_name text,
+        provider_reference text,
+        provider_id text,
+        provider_order_id text,
+        merchant_trade_no text,
+        provider_trade_no text,
+        payment_company_id int,
+        payment_bank_account_id text,
+        payment_expected_settlement_date text,
+        payment_mdr_rate numeric(8,5),
+        payment_mdr_amount numeric(14,2),
+        payment_settlement_status text,
        posted_at timestamptz NOT NULL DEFAULT NOW(),
        posted_by text
      )`,
@@ -234,9 +240,42 @@ async function runStartupMigrations() {
        memo text,
        candidate_type text,
        candidate_id int,
+        payment_id int,
+        payment_method text,
+        payment_provider text,
+        provider_name text,
+        provider_reference text,
+        provider_id text,
+        provider_order_id text,
+        merchant_trade_no text,
+        provider_trade_no text,
+        payment_company_id int,
+        payment_bank_account_id text,
+        payment_expected_settlement_date text,
+        payment_mdr_rate numeric(8,5),
+        payment_mdr_amount numeric(14,2),
+        payment_settlement_status text,
        posted_at timestamptz NOT NULL DEFAULT NOW(),
        posted_by text
      )`,
+     `ALTER TABLE sport_center.bank_journal_entries
+        ADD COLUMN IF NOT EXISTS payment_id integer,
+        ADD COLUMN IF NOT EXISTS payment_method text,
+        ADD COLUMN IF NOT EXISTS payment_provider text,
+        ADD COLUMN IF NOT EXISTS provider_name text,
+        ADD COLUMN IF NOT EXISTS provider_reference text,
+        ADD COLUMN IF NOT EXISTS provider_id text,
+        ADD COLUMN IF NOT EXISTS provider_order_id text,
+        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+        ADD COLUMN IF NOT EXISTS provider_trade_no text,
+        ADD COLUMN IF NOT EXISTS payment_company_id integer,
+        ADD COLUMN IF NOT EXISTS payment_bank_account_id text,
+        ADD COLUMN IF NOT EXISTS payment_expected_settlement_date text,
+        ADD COLUMN IF NOT EXISTS payment_mdr_rate numeric(8,5),
+        ADD COLUMN IF NOT EXISTS payment_mdr_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS payment_settlement_status text`,
+     `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_payment
+        ON sport_center.bank_journal_entries (payment_id)`,
     `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_mutation
        ON sport_center.bank_journal_entries (mutation_id)`,
     // Kolom OCR pada payments
@@ -250,6 +289,115 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS ocr_raw text`,
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
+     // Canonical payment provider metadata.
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+       ADD COLUMN IF NOT EXISTS provider_name text,
+       ADD COLUMN IF NOT EXISTS provider_reference text,
+       ADD COLUMN IF NOT EXISTS provider_id text,
+       ADD COLUMN IF NOT EXISTS provider_order_id text,
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+       ADD COLUMN IF NOT EXISTS provider_trade_no text,
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+       ADD COLUMN IF NOT EXISTS company_id integer,
+       ADD COLUMN IF NOT EXISTS bank_account_id text,
+        ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled',
+        ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+        ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false`,
+    `UPDATE sport_center.sport_payments
+        SET payment_provider = COALESCE(payment_provider, 'unknown'::sport_center.payment_provider),
+            provider_name = COALESCE(NULLIF(btrim(provider_name), ''), payment_provider::text, 'unknown'),
+            provider_id = COALESCE(
+              NULLIF(btrim(provider_id), ''),
+              NULLIF(btrim(provider_trade_no), ''),
+              NULLIF(btrim(provider_reference), ''),
+              NULLIF(btrim(merchant_trade_no), ''),
+              'legacy-' || id::text
+             ),
+             provider_order_id = COALESCE(
+               NULLIF(btrim(provider_order_id), ''),
+               NULLIF(btrim(merchant_trade_no), ''),
+               NULLIF(btrim(provider_trade_no), ''),
+               NULLIF(btrim(provider_reference), ''),
+               'legacy-order-' || id::text
+             )
+      WHERE payment_provider IS NULL
+         OR provider_name IS NULL
+         OR btrim(provider_name) = ''
+         OR provider_id IS NULL
+          OR btrim(provider_id) = ''
+          OR provider_order_id IS NULL
+          OR btrim(provider_order_id) = ''`,
+    `ALTER TABLE sport_center.sport_payments
+       ALTER COLUMN payment_provider SET NOT NULL,
+       ALTER COLUMN provider_name SET NOT NULL,
+       ALTER COLUMN provider_id SET NOT NULL,
+       ALTER COLUMN provider_order_id SET NOT NULL`,
+     `UPDATE sport_center.sport_payments p
+         SET bank_account_id = s.bank_account
+        FROM sport_center.settings s
+       WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
+         AND s.bank_account IS NOT NULL
+         AND btrim(s.bank_account) <> ''`,
+     `DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM sport_center.sport_payments
+           WHERE bank_account_id IS NULL OR btrim(bank_account_id) = ''
+        ) THEN
+          RAISE EXCEPTION 'Cannot enforce sport_payments.bank_account_id: payment rows still lack a receiving account';
+        END IF;
+        ALTER TABLE sport_center.sport_payments
+          ALTER COLUMN bank_account_id SET NOT NULL;
+      END $$`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS provider_detection_source text`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_settlement_configs (
+       id serial PRIMARY KEY,
+       company_id integer NOT NULL,
+       provider_code text NOT NULL,
+       bank_account_id text NOT NULL,
+       settlement_delay_business_days integer NOT NULL DEFAULT 1,
+       effective_from date NOT NULL,
+       effective_until date,
+       is_active boolean NOT NULL DEFAULT true,
+       source text NOT NULL DEFAULT 'admin_config',
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (company_id, provider_code, bank_account_id, effective_from)
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_business_calendar (
+       calendar_date date PRIMARY KEY,
+       is_business_day boolean NOT NULL DEFAULT true,
+       label text,
+       source text NOT NULL DEFAULT 'admin_config',
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_import_source_mappings (
+       id serial PRIMARY KEY,
+       source_type text NOT NULL DEFAULT 'google_sheet',
+       source_id text NOT NULL,
+       worksheet_name text,
+       company_id integer NOT NULL,
+       bank_account_id text NOT NULL,
+       provider_name text,
+       is_active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (source_type, source_id, worksheet_name)
+     )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.payment_enrichment_provenance (
+        id serial PRIMARY KEY,
+        payment_id integer NOT NULL,
+        field_name text NOT NULL,
+        evidence_source text NOT NULL,
+        evidence text,
+        created_at timestamptz NOT NULL DEFAULT NOW()
+      )`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
@@ -287,6 +435,12 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS rejected_reason text`,
     `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+     // Kolom yang dipakai saat admin mengonfirmasi pembayaran.
+     // Wajib idempotent karena tabel production bisa berasal dari schema lama.
+      `ALTER TABLE sport_center.sport_payments
+        ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+     `ALTER TABLE sport_center.booking_history
+        ADD COLUMN IF NOT EXISTS changed_by_name text`,
     // ── Tabel-tabel yang belum ada di prod ─────────────────────────────────────
     // booking_groups
     `DO $$ BEGIN
@@ -303,6 +457,10 @@ async function runStartupMigrations() {
        created_at timestamptz NOT NULL DEFAULT NOW(),
        updated_at timestamptz NOT NULL DEFAULT NOW()
      )`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
     // wa_booking_sessions
     `CREATE TABLE IF NOT EXISTS sport_center.wa_booking_sessions (
        id serial PRIMARY KEY,
@@ -456,11 +614,27 @@ async function runStartupMigrations() {
     `UPDATE sport_center.tax_settings SET is_active = true
      WHERE tax_code = 'PPN_OUT_11' AND applies_to = 'sport_booking' AND is_active = false`,
     // payment_type enum untuk DP flow
-    `DO $$ BEGIN
+     `DO $$ BEGIN
+        ALTER TYPE sport_center.payment_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
+      EXCEPTION WHEN others THEN null; END $$`,
+     `DO $$ BEGIN
        CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct', 'paylabs', 'unknown');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_reference text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
     // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
     `ALTER TABLE sport_center.sport_payments
        DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
@@ -502,12 +676,60 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // Payment-confirmed journals are finalized accounting projections, not drafts.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
+    `ALTER TABLE sport_center.accounting_journals
+       ALTER COLUMN status SET DEFAULT 'posted'`,
+    `UPDATE sport_center.accounting_journals
+       SET status = 'posted'
+       WHERE journal_type = 'payment_confirmed'
+         AND is_reversal = false
+         AND status IS DISTINCT FROM 'posted'`,
     // A confirmed payment may have only one internal payment journal. Keep this
     // nullable for historical journals and enforce uniqueness for new payment
     // journals only.
     `ALTER TABLE sport_center.accounting_journals
        ADD COLUMN IF NOT EXISTS payment_id int
        REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL`,
+     `ALTER TABLE sport_center.accounting_journals
+        ADD COLUMN IF NOT EXISTS payment_method text,
+        ADD COLUMN IF NOT EXISTS payment_provider text,
+         ADD COLUMN IF NOT EXISTS provider_name text,
+         ADD COLUMN IF NOT EXISTS provider_id text,
+        ADD COLUMN IF NOT EXISTS payment_type text,
+        ADD COLUMN IF NOT EXISTS bank_account_id text,
+         ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+         ADD COLUMN IF NOT EXISTS settlement_status text,
+         ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5),
+         ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS provider_reference text,
+        ADD COLUMN IF NOT EXISTS provider_order_id text,
+        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+        ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+     `UPDATE sport_center.accounting_journals aj
+         SET payment_method = sp.payment_method,
+             payment_provider = sp.payment_provider::text,
+             provider_name = sp.provider_name,
+             provider_id = sp.provider_id,
+             payment_type = sp.payment_type::text,
+             bank_account_id = sp.bank_account_id,
+             expected_settlement_date = sp.expected_settlement_date,
+             settlement_status = sp.settlement_status,
+             mdr_rate = sp.mdr_rate,
+             mdr_amount = sp.mdr_amount,
+             provider_reference = sp.provider_reference,
+             provider_order_id = sp.provider_order_id,
+             merchant_trade_no = sp.merchant_trade_no,
+             provider_trade_no = sp.provider_trade_no,
+             company_id = COALESCE(sp.company_id, aj.company_id)
+        FROM sport_center.sport_payments sp
+       WHERE aj.payment_id = sp.id
+         AND aj.journal_type = 'payment_confirmed'
+         AND aj.is_reversal = false`,
     `CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
        ON sport_center.accounting_journals (payment_id)
        WHERE payment_id IS NOT NULL
@@ -684,6 +906,35 @@ async function runStartupMigrations() {
        created_at        timestamptz NOT NULL DEFAULT NOW(),
        updated_at        timestamptz NOT NULL DEFAULT NOW()
      )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_membership_payments (
+       id                serial PRIMARY KEY,
+       membership_id     integer NOT NULL REFERENCES sport_center.sport_memberships(id) ON DELETE CASCADE,
+       period_start      text NOT NULL,
+       period_end        text NOT NULL,
+       months            integer NOT NULL DEFAULT 1 CHECK (months > 0),
+       amount            numeric(14,2) NOT NULL CHECK (amount > 0),
+       status            text NOT NULL DEFAULT 'pending_payment'
+                         CHECK (status IN ('pending_payment','waiting_confirmation','confirmed','cancelled')),
+       payment_method    text,
+       payment_proof_url text,
+       submitted_at      timestamptz,
+       confirmed_at      timestamptz,
+       mutation_key      text,
+       accounting_ref    text,
+       created_at        timestamptz NOT NULL DEFAULT NOW(),
+       updated_at        timestamptz NOT NULL DEFAULT NOW(),
+       CHECK (period_end >= period_start)
+     )`,
+    `CREATE INDEX IF NOT EXISTS sport_membership_payments_membership_idx
+       ON sport_center.sport_membership_payments (membership_id)`,
+    `CREATE INDEX IF NOT EXISTS sport_membership_payments_period_idx
+       ON sport_center.sport_membership_payments (period_start, period_end)`,
+    `CREATE INDEX IF NOT EXISTS sport_membership_payments_status_idx
+       ON sport_center.sport_membership_payments (status)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sport_membership_payments_mutation_key_idx
+       ON sport_center.sport_membership_payments (mutation_key) WHERE mutation_key IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sport_membership_payments_accounting_ref_idx
+       ON sport_center.sport_membership_payments (accounting_ref) WHERE accounting_ref IS NOT NULL`,
     // ── ap_members (Angkasa Pura member list) ─────────────────────────────
     `CREATE TABLE IF NOT EXISTS sport_center.ap_members (
        id             serial PRIMARY KEY,
@@ -729,8 +980,9 @@ async function runStartupMigrations() {
        caption     text,
        created_at  timestamptz NOT NULL DEFAULT NOW()
      )`,
-    // ── company_invoices: payment_proof_url + waiting_verification status ────
+    // ── company_invoices: payment proof fields + waiting_verification status ─
     `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_proof_url text`,
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_notes text`,
     `DO $mig$ BEGIN ALTER TYPE sport_center.invoice_status ADD VALUE IF NOT EXISTS 'waiting_verification'; EXCEPTION WHEN OTHERS THEN null; END $mig$`,
     // ── paylabs_settings ─────────────────────────────────────────────────────
     `CREATE TABLE IF NOT EXISTS sport_center.paylabs_settings (
@@ -753,6 +1005,63 @@ async function runStartupMigrations() {
        created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
      )`,
+     `DO $$ BEGIN
+        CREATE TYPE sport_center.corporate_subscription_status AS ENUM ('active','paused','stop_requested','stopped');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+     `CREATE TABLE IF NOT EXISTS sport_center.corporate_subscriptions (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES sport_center.users(id),
+        facility_id INTEGER NOT NULL REFERENCES sport_center.facilities(id),
+        day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        effective_start_date TEXT NOT NULL,
+        billing_period TEXT NOT NULL DEFAULT 'monthly',
+        status sport_center.corporate_subscription_status NOT NULL DEFAULT 'active',
+        created_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        stopped_at TIMESTAMPTZ,
+        stopped_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        stop_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.corporate_occurrences (
+        id SERIAL PRIMARY KEY,
+        subscription_id INTEGER NOT NULL REFERENCES sport_center.corporate_subscriptions(id) ON DELETE CASCADE,
+        occurrence_date TEXT NOT NULL,
+        booking_id INTEGER REFERENCES sport_center.sport_bookings(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT corporate_occurrences_subscription_date_unique UNIQUE (subscription_id, occurrence_date)
+      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.usage_proofs (
+        id SERIAL PRIMARY KEY,
+        booking_id INTEGER NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+        storage_path TEXT NOT NULL,
+        photo_url TEXT NOT NULL,
+        uploaded_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        captured_at TIMESTAMPTZ,
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+     `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS subscription_id INTEGER`,
+     `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS occurrence_id INTEGER`,
+      `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS membership_id INTEGER`,
+       `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS membership_payment_id INTEGER`,
+       `CREATE UNIQUE INDEX IF NOT EXISTS sport_bookings_membership_payment_uidx
+          ON sport_center.sport_bookings (membership_payment_id)
+          WHERE membership_payment_id IS NOT NULL`,
+      `CREATE TABLE IF NOT EXISTS sport_center.sport_payment_allocations (
+         id SERIAL PRIMARY KEY,
+         payment_id INTEGER NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+         booking_id INTEGER NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+         amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         CONSTRAINT sport_payment_allocations_payment_booking_unique UNIQUE (payment_id, booking_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS sport_payment_allocations_booking_idx
+         ON sport_center.sport_payment_allocations (booking_id)`,
+      `ALTER TABLE sport_center.sport_bookings
+         ADD COLUMN IF NOT EXISTS additional_charges jsonb NOT NULL DEFAULT '[]'::jsonb`,
   ];
 
   for (const stmt of migrations) {
@@ -762,11 +1071,210 @@ async function runStartupMigrations() {
       logger.warn({ err, stmt: stmt.slice(0, 80) }, "Startup migration warning (non-fatal)");
     }
   }
-  logger.info("Startup migrations OK");
+  logger.info("Development startup migrations OK");
 }
 
 // env validation already ran above (step 2) — no-op placeholder kept for clarity
 
+async function runStartupSeed() {
+  // ── Pre-flight: SESSION_SECRET must be set — no hardcoded fallback ──────────
+  const SECRET = process.env.SESSION_SECRET;
+  if (!SECRET) {
+    logger.error(
+      "Startup seed SKIPPED: SESSION_SECRET is not set. " +
+      "Admin credentials cannot be seeded without a valid secret. " +
+      "Set SESSION_SECRET in the environment and restart the server."
+    );
+    return;
+  }
+
+  function hashPassword(password: string): string {
+    return crypto.createHmac("sha256", SECRET!).update(password).digest("hex");
+  }
+
+  // ── Pre-flight: verify core tables exist before attempting any seed ─────────
+  // If migrations failed or haven't run yet, the tables won't be present and we
+  // must skip rather than crash or partially seed.
+  try {
+    const checkResult = await db.execute<{ count: string }>(sql.raw(`
+      SELECT COUNT(*)::text AS count
+      FROM information_schema.tables
+      WHERE table_schema = 'sport_center'
+        AND table_name IN ('users', 'sport_settings', 'sport_facilities')
+    `));
+    const coreTableCount = parseInt((checkResult.rows as Array<{ count: string }>)[0]?.count ?? "0", 10);
+    if (coreTableCount < 3) {
+      logger.warn(
+        { coreTableCount },
+        "Startup seed SKIPPED: core tables (users / sport_settings / sport_facilities) " +
+        "are not all present yet — migrations may not have completed."
+      );
+      return;
+    }
+  } catch (err) {
+    logger.warn({ err }, "Startup seed SKIPPED: could not verify core table presence");
+    return;
+  }
+
+  // ── Seed within a transaction protected by a PostgreSQL advisory lock ───────
+  // pg_advisory_xact_lock ensures that even with multiple concurrent server
+  // instances starting simultaneously, exactly one performs the seed. The lock
+  // is released automatically when the transaction commits or rolls back.
+  // Lock key 6174737363 = "scsc" in ASCII (sport-center startup seed coordinator).
+  const SEED_LOCK_ID = 6174737363;
+
+  const facilitySeed = [
+    {
+      name: "Lapangan Badminton A",
+      category: "Badminton",
+      description: "Lapangan badminton indoor premium dengan lantai kayu parket, pencahayaan LED terang, dan AC.",
+      pricePerHour: "80000",
+      openTime: "06:00",
+      closeTime: "22:00",
+      minDuration: 1,
+      maxDuration: 4,
+      capacity: 4,
+      isActive: true,
+    },
+    {
+      name: "Lapangan Badminton B",
+      category: "Badminton",
+      description: "Lapangan badminton indoor dengan fasilitas lengkap. Cocok untuk latihan dan pertandingan.",
+      pricePerHour: "75000",
+      openTime: "06:00",
+      closeTime: "22:00",
+      minDuration: 1,
+      maxDuration: 4,
+      capacity: 4,
+      isActive: true,
+    },
+    {
+      name: "Lapangan Tenis",
+      category: "Tenis",
+      description: "Lapangan tenis indoor dengan permukaan hard court standar ITF dan net berkualitas.",
+      pricePerHour: "120000",
+      openTime: "06:00",
+      closeTime: "21:00",
+      minDuration: 1,
+      maxDuration: 3,
+      capacity: 4,
+      isActive: true,
+    },
+  ];
+
+  try {
+    await db.transaction(async (tx) => {
+      // Acquire transaction-scoped advisory lock — blocks until acquired, then
+      // released automatically on transaction end (commit or rollback).
+      await tx.execute(sql.raw(`SELECT pg_advisory_xact_lock(${SEED_LOCK_ID})`));
+
+      // ── Admin user (INSERT only — never overwrite an existing account) ──────
+      // All existence checks happen AFTER acquiring the lock so a second instance
+      // that waited for the lock will observe the already-seeded data and skip.
+      //
+      // Credential strategy:
+      //   1. Use ADMIN_BOOTSTRAP_PASSWORD env var if explicitly set by the operator.
+      //   2. Otherwise generate a cryptographically random 24-char password and log
+      //      it ONCE to stdout so the operator can retrieve it from deployment logs.
+      //      This is equivalent to the GitLab/Jenkins first-boot pattern — the
+      //      password is never hardcoded and never sent to any client.
+      const existingAdmin = await tx
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(eq(usersTable.email, "admin@sportcenter.com"))
+        .limit(1);
+
+      if (existingAdmin.length === 0) {
+        const bootstrapEnvPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+        const isGeneratedPassword = !bootstrapEnvPassword;
+        const plainPassword = bootstrapEnvPassword ?? crypto.randomBytes(18).toString("base64url");
+        const passwordHash = hashPassword(plainPassword);
+
+        const adminEmail = process.env.ADMIN_BOOTSTRAP_EMAIL ?? "admin@sportcenter.com";
+
+        await tx.insert(usersTable).values({
+          name: "Admin",
+          email: adminEmail,
+          passwordHash,
+          role: "admin",
+        });
+
+        if (isGeneratedPassword) {
+          // Log the generated password prominently — operator MUST read this from
+          // deployment logs. This value is never sent to any client.
+          logger.info(
+            "\n╔══════════════════════════════════════════════════════════════╗\n" +
+            "║  FIRST-BOOT ADMIN CREDENTIALS — SAVE IMMEDIATELY            ║\n" +
+            "║  These will not be shown again.                             ║\n" +
+            "╠══════════════════════════════════════════════════════════════╣\n" +
+            `║  Email   : ${adminEmail.padEnd(50)}║\n` +
+            `║  Password: ${plainPassword.padEnd(50)}║\n` +
+            "║                                                              ║\n" +
+            "║  Change this password at your earliest opportunity.         ║\n" +
+            "╚══════════════════════════════════════════════════════════════╝\n"
+          );
+        } else {
+          logger.info({ email: adminEmail }, "Startup seed: admin user created with ADMIN_BOOTSTRAP_PASSWORD");
+        }
+      } else {
+        logger.info("Startup seed: admin user already exists — leaving untouched");
+      }
+
+      // ── Default settings (INSERT only when table is empty) ─────────────────
+      const existingSettings = await tx
+        .select({ id: settingsTable.id })
+        .from(settingsTable)
+        .limit(1);
+
+      if (existingSettings.length === 0) {
+        await tx.insert(settingsTable).values({
+          centerName: "Sport Center Jakarta",
+          address: "Jl. Sudirman No. 123, Jakarta Pusat",
+          phone: "+62-21-1234567",
+          whatsapp: "+6281216104734",
+          email: "info@sportcenterjakarta.com",
+          openHour: "06:00",
+          closeHour: "22:00",
+          bankName: "BCA",
+          bankAccount: "1234567890",
+          bankAccountName: "Sport Center Jakarta",
+          qrisImageUrl: "/uploads/qris-263226c1-c51d-4353-9165-cedaba32adb4.jpeg",
+        });
+        logger.info("Startup seed: default settings created");
+      }
+
+      // ── Default facilities (only those that don't already exist) ───────────
+      const existingFacilities = await tx
+        .select({ name: facilitiesTable.name })
+        .from(facilitiesTable);
+      const existingNames = new Set(existingFacilities.map((f: { name: string }) => f.name));
+      const missing = facilitySeed.filter((f) => !existingNames.has(f.name));
+      if (missing.length > 0) {
+        await tx.insert(facilitiesTable).values(missing);
+        logger.info({ count: missing.length }, "Startup seed: default facilities created");
+      }
+    });
+  } catch (err) {
+    logger.error({ err }, "Startup seed ERROR: seed transaction failed");
+  }
+}
+
+// This is a financial safety migration, not a best-effort schema migration.
+// Finish it before binding the port so every confirmation entry point
+// (admin, WhatsApp, reconciliation, and gateway callbacks) sees the same
+// verified trigger from its first request.
+try {
+  await startPaymentMirrorMigration();
+  logger.info("Payment mirror migration verified");
+} catch (err) {
+  logger.error({ err }, "Payment mirror migration FAILED; refusing to accept traffic");
+  throw err;
+}
+
+// Bind the port immediately so the deployment health check passes, then run
+// migrations and seed in the background. Previously migrations ran before
+// app.listen(), which meant a slow/paused Supabase DB would timeout and
+// the port would never open, causing the deploy to fail.
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -774,15 +1282,36 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  runStartupMigrations().catch(() => {});
-  initBizportalTables().catch(() => {});
-  startScheduler();
-  ensureDefaultTemplates().catch(() => {});
+  if (process.env.NODE_ENV !== "production") {
+    initBizportalTables().catch(() => {});
+    ensureDefaultTemplates().catch(() => {});
+  } else {
+    logger.info("Production schema provisioning is external; skipping BizPortal setup and template seeding");
+  }
+  // Local development can use the configured local database without requiring
+  // Supabase Storage. Production always verifies its remote storage only.
+  if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
+    logger.info("Skipping Supabase Storage bucket validation for local development");
+  } else {
+    import("./lib/supabaseStorage").then(({ validateBuckets }) => {
+      validateBuckets().catch((err) =>
+        logger.warn({ err }, "Storage bucket validation failed (non-fatal)")
+      );
+    });
+  }
 
-  // Validate Supabase Storage buckets at startup
-  import("./lib/supabaseStorage").then(({ validateBuckets }) => {
-    validateBuckets().catch((err) =>
-      logger.warn({ err }, "Storage bucket validation failed (non-fatal)")
-    );
-  });
+  if (process.env.NODE_ENV !== "production") {
+    // Development-only schema/data setup. Production schema provisioning is
+    // handled externally and must never be performed by application startup.
+    runStartupMigrations()
+      .then(() => runStartupSeed())
+      .then(() => {
+        markStartupReady();
+        return startScheduler();
+      })
+      .catch((err) => logger.error({ err }, "Background development startup task error"));
+  } else {
+    logger.info("Production startup migrations and seed disabled");
+    startScheduler();
+  }
 });

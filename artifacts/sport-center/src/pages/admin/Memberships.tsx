@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useListMemberships, useUpdateMembership, useDeleteMembership, getListMembershipsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download } from "lucide-react";
+import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download, Pencil, Save, X, ReceiptText } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { getToken } from "@/lib/auth";
 
@@ -44,6 +44,29 @@ interface Checkin {
   memberPhone: string | null;
 }
 
+interface MembershipPayment {
+  id: number;
+  membershipId: number;
+  periodStart: string;
+  periodEnd: string;
+  months: number;
+  amount: number;
+  status: "pending_payment" | "waiting_confirmation" | "confirmed" | "cancelled";
+  paymentMethod: string | null;
+  paymentProofUrl: string | null;
+  submittedAt: string | null;
+  confirmedAt: string | null;
+  mutationKey: string | null;
+  accountingRef: string | null;
+}
+
+function PaymentStatusBadge({ status }: { status: MembershipPayment["status"] }) {
+  if (status === "confirmed") return <Badge className="bg-green-100 text-green-700 border-green-200">Terkonfirmasi</Badge>;
+  if (status === "waiting_confirmation") return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">Verifikasi</Badge>;
+  if (status === "pending_payment") return <Badge className="bg-blue-100 text-blue-700 border-blue-200">Menunggu Bayar</Badge>;
+  return <Badge className="bg-red-100 text-red-700 border-red-200">Dibatalkan</Badge>;
+}
+
 export default function AdminMemberships() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -51,8 +74,68 @@ export default function AdminMemberships() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewMember, setViewMember] = useState<any>(null);
+  const [editingDates, setEditingDates] = useState(false);
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [dateError, setDateError] = useState("");
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [currentProofUrl, setCurrentProofUrl] = useState<string | null>(null);
+  const [proofLoadingId, setProofLoadingId] = useState<number | null>(null);
+
+  async function loadProtectedProof(path: string): Promise<string> {
+    const response = await fetch(`${API}${path}`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || "Bukti pembayaran tidak dapat dimuat");
+    }
+    return URL.createObjectURL(await response.blob());
+  }
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setImgError(false);
+    setCurrentProofUrl(null);
+
+    if (viewMember?.id && viewMember?.paymentProofUrl) {
+      loadProtectedProof(`/memberships/${viewMember.id}/payment-proof-file`)
+        .then((url) => {
+          objectUrl = url;
+          if (active) setCurrentProofUrl(url);
+          else URL.revokeObjectURL(url);
+        })
+        .catch(() => {
+          if (active) setImgError(true);
+        });
+    }
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [viewMember?.id, viewMember?.paymentProofUrl]);
+
+  async function openPaymentHistoryProof(payment: MembershipPayment) {
+    if (!viewMember?.id) return;
+    setProofLoadingId(payment.id);
+    try {
+      const url = await loadProtectedProof(
+        `/memberships/${viewMember.id}/payments/${payment.id}/proof-file`,
+      );
+      setLightboxUrl(url);
+    } catch (error) {
+      toast({
+        title: "Bukti tidak dapat dibuka",
+        description: error instanceof Error ? error.message : "File tidak tersedia",
+        variant: "destructive",
+      });
+    } finally {
+      setProofLoadingId(null);
+    }
+  }
 
   // Export CSV
   const now = new Date();
@@ -111,6 +194,17 @@ export default function AdminMemberships() {
   });
   const checkins: Checkin[] = Array.isArray(rawCheckins) ? rawCheckins : [];
 
+  const { data: rawPaymentHistory, isLoading: isPaymentHistoryLoading } = useQuery<MembershipPayment[]>({
+    queryKey: ["membership-payments", viewMember?.id],
+    enabled: Boolean(viewMember?.id),
+    queryFn: async () => {
+      const response = await fetch(`${API}/memberships/${viewMember.id}/payments`, { headers: authHeaders() });
+      if (!response.ok) throw new Error("Gagal memuat histori pembayaran");
+      return response.json();
+    },
+  });
+  const paymentHistory = Array.isArray(rawPaymentHistory) ? rawPaymentHistory : [];
+
   const checkedInIds = new Set(checkins.map((c) => c.membershipId));
   const checkinById = new Map(checkins.map((c) => [c.membershipId, c]));
 
@@ -145,8 +239,9 @@ export default function AdminMemberships() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListMembershipsQueryKey() });
-        toast({ title: "Status berhasil diperbarui" });
+        toast({ title: "Data member berhasil diperbarui" });
         setViewMember(null);
+        setEditingDates(false);
       },
       onError: () => toast({ title: "Gagal memperbarui", variant: "destructive" }),
     },
@@ -180,7 +275,27 @@ export default function AdminMemberships() {
 
   function openMember(m: any) {
     setViewMember(m);
+    setEditingDates(false);
+    setEditStartDate(m.startDate ?? "");
+    setEditEndDate(m.endDate ?? "");
+    setDateError("");
     setImgError(false);
+  }
+
+  function saveDates() {
+    if (!editStartDate || !editEndDate) {
+      setDateError("Tanggal mulai dan berakhir wajib diisi.");
+      return;
+    }
+    if (editStartDate > editEndDate) {
+      setDateError("Tanggal mulai tidak boleh setelah tanggal berakhir.");
+      return;
+    }
+    setDateError("");
+    updateMutation.mutate({
+      id: viewMember.id,
+      data: { startDate: editStartDate, endDate: editEndDate },
+    });
   }
 
   return (
@@ -510,10 +625,6 @@ export default function AdminMemberships() {
                 <div className="font-medium break-all">{viewMember.email}</div>
                 <div className="text-muted-foreground">Telepon</div>
                 <div className="font-medium">{viewMember.phone}</div>
-                <div className="text-muted-foreground">Mulai</div>
-                <div className="font-medium">{viewMember.startDate}</div>
-                <div className="text-muted-foreground">Berakhir</div>
-                <div className="font-medium">{viewMember.endDate}</div>
                 <div className="text-muted-foreground">Durasi</div>
                 <div className="font-medium">{viewMember.months} bulan</div>
                 <div className="text-muted-foreground">Total Bayar</div>
@@ -544,6 +655,159 @@ export default function AdminMemberships() {
                 )}
               </div>
 
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Periode Membership</p>
+                  {!editingDates && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setEditStartDate(viewMember.startDate ?? "");
+                        setEditEndDate(viewMember.endDate ?? "");
+                        setDateError("");
+                        setEditingDates(true);
+                      }}
+                    >
+                      <Pencil size={13} />
+                      Edit Tanggal
+                    </Button>
+                  )}
+                </div>
+
+                {editingDates ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="membership-start-date">Mulai</Label>
+                        <Input
+                          id="membership-start-date"
+                          type="date"
+                          value={editStartDate}
+                          onChange={(e) => setEditStartDate(e.target.value)}
+                          disabled={updateMutation.isPending}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="membership-end-date">Berakhir</Label>
+                        <Input
+                          id="membership-end-date"
+                          type="date"
+                          value={editEndDate}
+                          onChange={(e) => setEditEndDate(e.target.value)}
+                          disabled={updateMutation.isPending}
+                        />
+                      </div>
+                    </div>
+                    {dateError && <p className="text-xs text-destructive">{dateError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="gap-1.5"
+                        onClick={() => {
+                          setEditingDates(false);
+                          setDateError("");
+                        }}
+                        disabled={updateMutation.isPending}
+                      >
+                        <X size={13} />
+                        Batal
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={saveDates}
+                        disabled={updateMutation.isPending}
+                      >
+                        <Save size={13} />
+                        Simpan Tanggal
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Mulai</div>
+                      <div className="font-medium">{viewMember.startDate}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Berakhir</div>
+                      <div className="font-medium">{viewMember.endDate}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <ReceiptText size={15} className="text-primary" />
+                  <p className="text-sm font-semibold">Histori Pembayaran Bulanan</p>
+                </div>
+                {isPaymentHistoryLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-16 w-full rounded-lg" />
+                    <Skeleton className="h-16 w-full rounded-lg" />
+                  </div>
+                ) : paymentHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Belum ada histori pembayaran per periode. Data lama akan mulai tercatat saat pembayaran berikutnya.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {paymentHistory.map((payment) => (
+                      <div key={payment.id} className="rounded-lg bg-muted/40 border border-border/70 p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {payment.periodStart} s/d {payment.periodEnd}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {payment.months} bulan · #{payment.id}
+                            </p>
+                          </div>
+                          <PaymentStatusBadge status={payment.status} />
+                        </div>
+                        <div className="flex items-end justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-primary">{formatCurrency(payment.amount)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {payment.paymentMethod === "qris"
+                                ? "QRIS"
+                                : payment.paymentMethod
+                                  ? "Transfer Bank"
+                                  : "Metode belum dipilih"}
+                            </p>
+                          </div>
+                          {payment.paymentProofUrl && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1.5"
+                              disabled={proofLoadingId === payment.id}
+                              onClick={() => openPaymentHistoryProof(payment)}
+                            >
+                              <ImageIcon size={13} />
+                              {proofLoadingId === payment.id ? "Memuat..." : "Bukti"}
+                            </Button>
+                          )}
+                        </div>
+                        {payment.confirmedAt && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Dikonfirmasi {new Date(payment.confirmedAt).toLocaleString("id-ID")}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {viewMember.paymentProofUrl && (
                 <div className="space-y-2">
                   <div className="text-sm font-medium flex items-center gap-2">
@@ -554,30 +818,27 @@ export default function AdminMemberships() {
                     <div className="w-full rounded-xl border border-border bg-muted/40 flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
                       <ImageIcon size={28} className="opacity-40" />
                       <span>Gambar tidak dapat dimuat</span>
-                      <a
-                        href={viewMember.paymentProofUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary underline text-xs"
-                      >
-                        Coba buka langsung
-                      </a>
+                      <span className="text-xs text-center px-4">
+                        File tidak ditemukan di Storage. Silakan upload ulang bukti pembayaran.
+                      </span>
                     </div>
-                  ) : (
+                  ) : currentProofUrl ? (
                     <img
-                      src={viewMember.paymentProofUrl}
+                      src={currentProofUrl}
                       alt="Bukti Pembayaran"
                       className="w-full max-h-64 object-contain rounded-xl border border-border cursor-zoom-in"
                       onError={() => setImgError(true)}
-                      onClick={() => setLightboxUrl(viewMember.paymentProofUrl)}
+                      onClick={() => setLightboxUrl(currentProofUrl)}
                     />
+                  ) : (
+                    <Skeleton className="h-44 w-full rounded-xl" />
                   )}
-                  {!imgError && (
+                  {!imgError && currentProofUrl && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-full gap-2"
-                      onClick={() => setLightboxUrl(viewMember.paymentProofUrl)}
+                      onClick={() => setLightboxUrl(currentProofUrl)}
                     >
                       <ExternalLink size={14} />
                       Lihat Penuh

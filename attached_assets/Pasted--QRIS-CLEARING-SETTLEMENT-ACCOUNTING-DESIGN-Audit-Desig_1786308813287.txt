@@ -1,0 +1,916 @@
+# QRIS CLEARING + SETTLEMENT ACCOUNTING DESIGN
+
+## Audit → Design → Development Implementation → Read-Only Validation
+
+Lanjutkan dari state workspace dan database development saat ini.
+
+Status sebelumnya:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+Payment 13 dan 14 sudah canonical dan JANGAN diperbaiki ulang.
+
+Current known state:
+
+* Company = `1 / CST / PT Cahaya Sejati Teknologi`
+* QRIS source account reference = `1640006707220`
+* Canonical Bank Mandiri CST = `public.company_bank_accounts.id = 2`
+* Bank GL = `1-1020-CST / Bank Mandiri CST`
+* Provider payment 13/14 = `mandiri_direct`
+* Existing QRIS confirmed accounting saat ini langsung mendebit Bank Mandiri CST.
+* Settlement reconciliation dan MDR posting belum dilakukan.
+
+Current warning:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+Tujuan task ini adalah memastikan accounting QRIS mengikuti economic event yang benar:
+
+1. customer melakukan pembayaran QRIS;
+2. provider memiliki kewajiban settlement kepada CST;
+3. bank belum boleh dianggap menerima uang sebelum settlement aktual;
+4. saat settlement masuk, clearing ditutup;
+5. MDR dicatat berdasarkan settlement evidence/configuration;
+6. reconciliation harus idempotent dan auditable.
+
+---
+
+# 1. SAFETY GATE
+
+Development only.
+
+Sebelum melakukan write apa pun, verifikasi:
+
+* `NODE_ENV != production`
+* menggunakan `SUPABASE_DATABASE_URL_DEV`
+* `isDevUsingProdDb = false`
+* `ALLOW_DEV_ON_PROD_DB = false`
+
+Jika database production terdeteksi:
+
+STOP.
+
+Jangan:
+
+* deploy production;
+* final reconcile historical payment;
+* mengubah payment 13/14;
+* reverse entry 9/10;
+* mengubah GL historical 9/10;
+* mass backfill;
+* menjalankan accounting posting terhadap mutation production;
+* menggunakan MDR UAT sebagai production contract.
+
+Payment 13/14 hanya boleh digunakan sebagai READ-ONLY reference/audit case.
+
+---
+
+# 2. AUDIT CURRENT ACCOUNTING FLOW FIRST
+
+Sebelum implementasi, petakan flow aktual untuk:
+
+`QRIS payment confirmed`
+
+dan:
+
+`bank mutation settlement`
+
+Temukan seluruh function/service/route/job yang dapat:
+
+* membuat `public.accounting_entries`;
+* membuat `public.accounting_entry_lines`;
+* membuat internal Sport Center journal;
+* membuat tax transaction;
+* membuat public tax line;
+* melakukan bank reconciliation;
+* melakukan settlement posting;
+* melakukan MDR posting.
+
+Laporkan call graph singkat.
+
+Pastikan tidak ada dua jalur accounting yang akan menghasilkan duplicate journal.
+
+---
+
+# 3. DEFINE ACCOUNTING EVENTS
+
+Pisahkan dengan tegas:
+
+## Event A — QRIS PAYMENT CONFIRMED
+
+Economic event:
+
+Customer sudah membayar, tetapi dana masih berada pada provider/acquirer dan belum masuk rekening bank CST.
+
+Expected accounting:
+
+DEBIT:
+`QRIS Clearing / Receivable from Payment Provider`
+
+CREDIT:
+`Revenue`
+
+CREDIT:
+`PPN Output`
+
+Contoh payment Rp100.000 dengan PPN:
+
+DEBIT  QRIS Clearing      Rp100.000
+
+CREDIT Revenue            Rp90.090
+
+CREDIT PPN Output         Rp9.910
+
+Bank Mandiri CST TIDAK boleh didebit pada event ini untuk transaksi baru setelah cutover.
+
+---
+
+# 4. EVENT B — QRIS SETTLEMENT RECEIVED
+
+Saat actual bank mutation terbukti merupakan settlement provider:
+
+Contoh:
+
+Gross settlement:
+`Rp100.000`
+
+MDR:
+`Rp300`
+
+Net bank credit:
+`Rp99.700`
+
+Expected accounting:
+
+DEBIT:
+`Bank Mandiri CST` Rp99.700
+
+DEBIT:
+`MDR Expense` Rp300
+
+CREDIT:
+`QRIS Clearing` Rp100.000
+
+Settlement entry tidak boleh mengakui revenue atau PPN lagi.
+
+Revenue/PPN sudah diakui pada payment confirmation.
+
+---
+
+# 5. NO DOUBLE REVENUE / TAX
+
+Hard invariant:
+
+Settlement MUST NOT create:
+
+* revenue;
+* PPN output;
+* sales tax transaction kedua.
+
+Settlement hanya memindahkan balance:
+
+`QRIS Clearing`
+
+→
+
+`Bank + MDR Expense`
+
+Tax remains linked to original payment accounting event.
+
+---
+
+# 6. CLEARING ACCOUNT DESIGN
+
+Audit COA existing terlebih dahulu.
+
+Cari apakah sudah ada account yang secara semantik cocok:
+
+* QRIS Clearing
+* Payment Gateway Clearing
+* Settlement Receivable
+* Receivable from Payment Provider
+* Merchant Receivable
+* Electronic Payment Clearing
+
+Jangan membuat COA baru jika account valid sudah tersedia.
+
+Jika tidak tersedia, PROPOSE account baru terlebih dahulu.
+
+Preferred classification:
+
+Asset / Current Asset
+
+Suggested semantic:
+
+`QRIS Clearing / Payment Provider Receivable`
+
+Jangan memilih nomor COA secara sembarang.
+
+Ikuti numbering convention CST yang existing.
+
+Jika COA baru membutuhkan business/accounting approval:
+
+STOP sebelum membuatnya dan return:
+
+`CLEARING_ACCOUNT_APPROVAL_REQUIRED`
+
+---
+
+# 7. PROVIDER DIMENSION
+
+Clearing harus dapat diaudit per provider:
+
+* `mandiri_direct`
+* `paylabs`
+
+Tentukan apakah:
+
+A. satu GL clearing account dengan provider metadata/subledger;
+
+atau
+
+B. clearing account berbeda per provider.
+
+Gunakan desain existing accounting/subledger terlebih dahulu.
+
+Jangan membuat provider-specific COA tanpa alasan accounting yang kuat.
+
+Minimum requirement:
+
+setiap settlement harus dapat ditelusuri ke provider.
+
+---
+
+# 8. PAYMENT ACCOUNTING CUTOVER
+
+Untuk transaksi QRIS BARU setelah cutover:
+
+jangan debit:
+
+`Bank Mandiri CST`
+
+pada payment confirmation.
+
+Debit:
+
+`QRIS Clearing`
+
+instead.
+
+Non-QRIS flow tidak boleh berubah.
+
+Pastikan:
+
+* cash;
+* bank transfer;
+* non-QRIS payment;
+
+tetap memakai behavior existing kecuali memang secara eksplisit termasuk scope.
+
+---
+
+# 9. HISTORICAL PAYMENT SAFETY
+
+Payment 13/14 sudah posted menggunakan historical design:
+
+`DEBIT Bank Mandiri CST`
+
+JANGAN:
+
+* reverse;
+* regenerate;
+* edit GL;
+* migrate otomatis ke clearing.
+
+Classify them as:
+
+`LEGACY_PRE_CLEARING_ACCOUNTING`
+
+Mereka hanya digunakan untuk memastikan metadata/linkage tetap valid.
+
+Historical conversion membutuhkan task terpisah.
+
+---
+
+# 10. SETTLEMENT ELIGIBILITY
+
+Settlement accounting hanya boleh dibuat jika strict QRIS matcher menghasilkan deterministic match.
+
+Required hard boundaries:
+
+* company
+* provider
+* canonical bank account
+* expected settlement/business date
+* payment partition
+* gross amount
+* net bank credit
+* MDR/deduction
+* provenance
+
+Unknown provider:
+
+`REVIEW`
+
+Ambiguous partition:
+
+`REVIEW`
+
+Wrong bank account:
+
+no settlement posting.
+
+Date mismatch:
+
+`REVIEW`
+
+MDR mismatch:
+
+`REVIEW`
+
+Negative deduction:
+
+`REVIEW`
+
+Tidak boleh accounting-post settlement yang masih REVIEW.
+
+---
+
+# 11. MDR CALCULATION
+
+Do not hardcode:
+
+`0.3%`
+
+atau:
+
+`0.7%`
+
+sebagai production truth.
+
+MDR harus berasal dari effective-dated approved provider configuration.
+
+Required dimensions minimal:
+
+* company
+* provider
+* effective_from
+* effective_until
+* MDR/rate
+* rounding policy
+* settlement rule/version
+
+Jika approved configuration tidak tersedia:
+
+`MDR_CONFIGURATION_REQUIRED`
+
+dan settlement posting tidak boleh dilakukan.
+
+---
+
+# 12. MDR ROUNDING
+
+Gunakan aturan rounding yang eksplisit.
+
+Audit apakah provider melakukan:
+
+* rounding per transaction;
+* rounding per settlement batch;
+* atau rule lain.
+
+Jangan mengasumsikan.
+
+Store/audit:
+
+* gross
+* expected MDR
+* observed deduction
+* net settlement
+* rounding variance
+* effective rate
+
+Tolerance harus configuration-driven.
+
+---
+
+# 13. SETTLEMENT JOURNAL BUSINESS KEY
+
+Settlement journal wajib idempotent.
+
+Define canonical business key.
+
+Preferred basis:
+
+company
+
+* provider
+* bank mutation ID
+* settlement partition/reference
+
+Contoh correlation semantic:
+
+`qris_settlement_{mutation_id}_{partition}`
+
+Tetapi ikuti naming convention project existing jika sudah ada.
+
+Database/application harus mencegah settlement mutation yang sama menghasilkan journal dua kali.
+
+---
+
+# 14. PAYMENT → CLEARING SUBLEDGER
+
+Untuk multi-payment settlement, settlement record harus menyimpan hubungan ke seluruh payment IDs.
+
+Example:
+
+Settlement mutation X
+
+→ payment 101
+→ payment 102
+→ payment 103
+
+Store deterministic partition/linkage.
+
+Jangan hanya menyimpan total gross tanpa payment-level linkage.
+
+---
+
+# 15. ACCOUNTING ENTRY METADATA
+
+Payment confirmation accounting minimum metadata:
+
+* source payment ID
+* booking ID
+* company ID
+* payment method
+* payment provider
+* payment type
+* provider reference
+* provider order ID
+* merchant trade number
+* provider trade number
+* clearing account ID
+* paid_at
+* correlation ID
+
+Settlement accounting minimum metadata:
+
+* company ID
+* provider
+* bank mutation ID
+* bank account ID
+* settlement reference
+* payment IDs/partition
+* gross
+* net credit
+* MDR
+* effective MDR rate
+* settlement date
+* source/provenance
+* correlation/business key
+
+Do not overload immutable ledger identity fields if live schema protects them.
+
+Use additive metadata/linkage where necessary.
+
+---
+
+# 16. INTERNAL SPORT CENTER JOURNAL
+
+Audit internal journal behavior separately.
+
+For new QRIS payment confirmation, internal journal should follow the same economic meaning:
+
+DEBIT QRIS Clearing
+
+CREDIT Revenue
+
+CREDIT PPN
+
+Do not let internal journal say:
+
+`Bank Mandiri`
+
+while public accounting says:
+
+`QRIS Clearing`
+
+unless there is an intentional documented reason.
+
+Internal/public accounting semantics should agree.
+
+---
+
+# 17. MIRROR BEHAVIOR
+
+`public.sport_payments` remains payment mirror.
+
+It should carry canonical dimensions including:
+
+* source_payment_id
+* company_id
+* payment_method
+* payment_provider
+* provider references
+* canonical bank/settlement account
+* paid_at
+* expected settlement date
+* payment accounting entry ID
+
+Do NOT treat mirror `bank_account_id` as proof that bank settlement already occurred.
+
+Distinguish:
+
+`expected/canonical settlement account`
+
+from:
+
+`actual settlement received`.
+
+If current schema conflates them, document the issue and propose additive field rather than silently changing semantics.
+
+---
+
+# 18. BANK MUTATION PROVENANCE
+
+Settlement accounting requires actual bank evidence.
+
+Mutation must preserve:
+
+* source_app
+* source_module
+* source table/import
+* source ID
+* import batch ID
+* sanitized raw payload/reference
+* source classification
+
+Required classification:
+
+`actual_bank_mutation`
+
+Synthetic/forecast mutation cannot trigger accounting posting.
+
+---
+
+# 19. PURE SETTLEMENT ACCOUNTING EVALUATOR
+
+Before DB write, implement or reuse a pure function that accepts:
+
+* matched payment partition;
+* provider;
+* company;
+* gross;
+* bank credit;
+* MDR config;
+* bank account;
+* mutation;
+* settlement date.
+
+Returns proposed accounting:
+
+* debit bank
+* debit MDR expense
+* credit clearing
+* correlation key
+* status
+* reason
+
+Pure evaluator MUST NOT write DB.
+
+This makes accounting testable independently from reconciliation persistence.
+
+---
+
+# 20. ACCOUNTING INVARIANTS
+
+For each proposed settlement:
+
+`gross = bank_credit + MDR`
+
+subject only to approved rounding tolerance.
+
+Accounting:
+
+`total debit = total credit`
+
+and:
+
+`bank debit = actual mutation credit`
+
+`MDR debit = observed/approved deduction`
+
+`clearing credit = matched payment gross`
+
+If invariant fails:
+
+STOP posting.
+
+Return:
+
+`SETTLEMENT_ACCOUNTING_INVARIANT_FAILED`
+
+---
+
+# 21. CLEARING BALANCE INVARIANT
+
+For a fully settled payment partition:
+
+Payment confirmation:
+
+DEBIT clearing = gross
+
+Settlement:
+
+CREDIT clearing = same gross
+
+Net clearing impact:
+
+`0`
+
+unless legitimate partial/unsettled balance remains.
+
+Provide audit showing clearing opening, debit, credit, and residual.
+
+---
+
+# 22. PARTIAL SETTLEMENT
+
+Do not invent partial settlement behavior.
+
+Audit whether current provider flow permits:
+
+* partial settlement;
+* split settlement;
+* settlement retry;
+* multiple bank credits for one payment batch.
+
+If unsupported:
+
+route to:
+
+`MANUAL_REVIEW_REQUIRED`
+
+rather than arbitrary allocation.
+
+---
+
+# 23. REVERSAL / REFUND
+
+Do not implement refund/reversal unless existing semantics are already defined.
+
+Audit current behavior and report separately.
+
+No destructive journal editing.
+
+Accounting correction should use reversal entries if/when designed.
+
+---
+
+# 24. TAX
+
+Payment confirmation remains tax recognition point under current design.
+
+Settlement:
+
+NO new PPN.
+
+Verify settlement code cannot create:
+
+* `sport_center.tax_transactions`
+* `public.gl_tax_lines`
+
+for the same sale.
+
+---
+
+# 25. DEVELOPMENT TEST FIXTURES
+
+Do not modify historical payment 13/14.
+
+Create isolated development-only smoke fixture if necessary.
+
+Use unique marker, for example:
+
+`DEV_QRIS_CLEARING_202608`
+
+Never use real production account numbers or credentials.
+
+Fixture must be clearly marked development-only.
+
+---
+
+# 26. REQUIRED TEST SCENARIOS
+
+At minimum test:
+
+1. Mandiri normal settlement
+2. Paylabs normal settlement
+3. Weekend
+4. Holiday
+5. Unknown provider
+6. Wrong bank account
+7. Amount mismatch
+8. MDR mismatch
+9. Negative deduction
+10. Deterministic multi-payment partition
+11. Ambiguous partition
+12. Rounding
+13. Duplicate settlement posting
+14. Duplicate payment confirmation webhook
+15. Settlement does not duplicate revenue
+16. Settlement does not duplicate PPN
+17. Clearing closes to zero for fully settled partition
+18. Non-QRIS regression
+
+---
+
+# 27. IDEMPOTENCY
+
+Run payment accounting twice.
+
+Expected:
+
+one payment accounting entry.
+
+Run settlement accounting twice.
+
+Expected:
+
+one settlement accounting entry.
+
+Run webhook twice.
+
+Expected:
+
+no duplicate.
+
+Run reconciliation dry-run twice.
+
+Expected:
+
+identical result.
+
+---
+
+# 28. NO-PERSISTENCE HARNESS
+
+Provide dry-run mode that produces:
+
+* matched payments
+* gross
+* bank credit
+* MDR
+* proposed GL
+* clearing residual
+* decision/reason
+
+without:
+
+* creating accounting entry;
+* changing reconciliation status;
+* changing payment status;
+* changing mutation status.
+
+---
+
+# 29. MIGRATION SAFETY
+
+Any schema changes must be additive.
+
+Allowed:
+
+* `ADD COLUMN IF NOT EXISTS`
+* `CREATE TABLE IF NOT EXISTS`
+* additive indexes/constraints after conflict audit
+
+Forbidden:
+
+* destructive DROP
+* truncate
+* rewriting historical GL
+* automatic historical migration
+
+Migration must be idempotent.
+
+---
+
+# 30. VALIDATION ORDER
+
+Run:
+
+1. `pnpm run typecheck:libs`
+2. scripts typecheck
+3. API typecheck
+4. API build
+5. payment accounting tests
+6. settlement accounting tests
+7. QRIS matcher regression
+8. non-QRIS regression
+9. tax regression
+10. idempotency tests
+11. `git diff --check`
+
+Then runtime:
+
+* `/health` → 200
+* `/readiness` → 200
+* `/api/health` → 200
+
+---
+
+# 31. DO NOT POST REAL SETTLEMENT YET
+
+Even if implementation/tests pass:
+
+DO NOT perform final settlement accounting against actual bank mutations in this task.
+
+First return:
+
+`READY_FOR_QRIS_CLEARING_SMOKE_TEST`
+
+Then a separate controlled smoke-test task can validate one Mandiri and one Paylabs transaction.
+
+---
+
+# 32. REQUIRED FINAL REPORT
+
+Return:
+
+## A. Current accounting flow audit
+
+## B. Existing COA findings
+
+## C. Proposed clearing design
+
+## D. Payment-confirmation journal design
+
+## E. Settlement journal design
+
+## F. MDR source/configuration
+
+## G. Matcher-to-accounting boundary
+
+## H. Payment/mirror metadata
+
+## I. Internal journal alignment
+
+## J. Tax behavior
+
+## K. Idempotency strategy
+
+## L. Development test results
+
+## M. Non-QRIS regression
+
+## N. Historical payment 13/14 safety
+
+## O. Migration/schema changes
+
+## P. Runtime health
+
+## Q. Remaining risks
+
+## R. Final decision
+
+Final decision must be one of:
+
+`CLEARING_ACCOUNT_APPROVAL_REQUIRED`
+
+`MDR_CONFIGURATION_REQUIRED`
+
+`MANUAL_REVIEW_REQUIRED`
+
+`READY_FOR_QRIS_CLEARING_SMOKE_TEST`
+
+Do NOT use `READY_FOR_QRIS_CLEARING_SMOKE_TEST` unless:
+
+* clearing account is approved/configured;
+* new QRIS confirmations debit clearing rather than bank;
+* settlement accounting credits clearing;
+* bank debit equals actual bank credit;
+* MDR is configuration-driven;
+* revenue/PPN are not duplicated;
+* accounting balances;
+* provider/account boundaries remain strict;
+* idempotency passes;
+* non-QRIS behavior remains unchanged;
+* payment 13/14 historical GL remains untouched;
+* no real settlement posting has been executed.
+
+# HARD SAFETY
+
+Do not:
+
+* modify payment 13/14 historical GL;
+* reverse entry 9/10;
+* mass backfill;
+* weaken strict matcher;
+* treat REVIEW as MATCHED;
+* infer provider from bank account alone;
+* hardcode UAT MDR as production truth;
+* post settlement without actual bank provenance;
+* duplicate revenue;
+* duplicate PPN;
+* run production deployment;
+* run final reconciliation in this task.

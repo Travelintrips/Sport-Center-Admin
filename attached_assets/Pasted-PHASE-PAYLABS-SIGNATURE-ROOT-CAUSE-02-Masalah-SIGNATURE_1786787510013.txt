@@ -1,0 +1,222 @@
+PHASE PAYLABS-SIGNATURE-ROOT-CAUSE-02
+
+Masalah SIGNATURE_INVALID masih terjadi pada callback Sandbox nyata.
+
+Evidence terbaru:
+
+merchantId: 010728
+partnerId: 010728
+status: 02
+errCode: 0
+paymentType: BRIVA
+
+Runtime sebelumnya sudah membuktikan:
+
+paylabsMode = SANDBOX
+merchant aktif = 010728
+publicKeyValid = true
+hasOriginalRawBody = true
+endpoint = /api/paylabs/webhook
+
+JANGAN ubah booking, certificate, WhatsApp, Email, atau database.
+
+Sekarang cari ROOT CAUSE signature mismatch secara deterministik.
+
+==================================================
+1. VERIFY KEY OWNERSHIP — PRIORITAS TERTINGGI
+==================================================
+
+Pastikan PAYLABS_SANDBOX_PUBLIC_KEY adalah:
+
+PUBLIC KEY MILIK PAYLABS SANDBOX
+
+yang diberikan Paylabs kepada merchant.
+
+Bukan:
+
+- public key pasangan PAYLABS_SANDBOX_PRIVATE_KEY milik merchant
+- merchant public key yang pernah dikirim ke Paylabs
+- production Paylabs public key
+
+Audit secara kriptografis:
+
+Derive public key dari:
+PAYLABS_SANDBOX_PRIVATE_KEY
+
+Bandingkan fingerprint SHA-256 derived merchant public key
+dengan fingerprint:
+
+PAYLABS_SANDBOX_PUBLIC_KEY
+
+JANGAN tampilkan key.
+
+Tampilkan hanya:
+
+merchantDerivedPublicKeyFingerprint=<hash aman>
+configuredPaylabsPublicKeyFingerprint=<hash aman>
+sameKey=true/false
+
+EXPECTED:
+
+sameKey MUST BE false.
+
+Jika sameKey=true:
+
+ROOT CAUSE FOUND:
+configured PAYLABS_SANDBOX_PUBLIC_KEY adalah merchant public key,
+bukan Paylabs public key.
+
+STOP dan minta owner menggantinya dengan public key Paylabs Sandbox
+yang diterima dari Paylabs.
+
+==================================================
+2. CAPTURE EXACT CALLBACK INPUT
+==================================================
+
+Pada callback Sandbox berikutnya capture secara aman:
+
+method
+original req.originalUrl
+req.path
+X-TIMESTAMP
+X-PARTNER-ID
+X-REQUEST-ID
+bodyHash
+rawBodyLength
+signatureLength
+
+Jangan log full X-SIGNATURE.
+
+==================================================
+3. ENDPOINT PATH PROOF
+==================================================
+
+Jangan hard-code asumsi sebelum dibandingkan.
+
+Ambil notifyUrl yang benar-benar dikirim ketika membuat transaksi:
+
+SC-0006-1786787105358
+
+Laporkan:
+
+notifyUrl=<URL tanpa query secret jika ada>
+
+Kemudian ambil pathname dari notifyUrl.
+
+Contoh:
+
+https://domain.com/api/paylabs/webhook
+→ /api/paylabs/webhook
+
+Pastikan pathname tersebut IDENTIK dengan endpoint yang digunakan verifier.
+
+Laporkan:
+
+notifyPath
+verificationPath
+pathMatch=true/false
+
+Jika false:
+ROOT CAUSE = CALLBACK_ENDPOINT_MISMATCH.
+
+==================================================
+4. RAW BODY CANONICALIZATION PROOF
+==================================================
+
+Gunakan ORIGINAL HTTP BODY dari Paylabs.
+
+Buat minified body sesuai dokumentasi Paylabs.
+
+Jangan:
+
+- reorder keys
+- reconstruct productInfo
+- menambah metadata internal
+- menambah _reason
+- menambah _rejected
+- menambah partnerId
+- menambah timestamp
+
+Field null dikeluarkan sesuai aturan Paylabs.
+
+Tampilkan hanya:
+
+rawBodyLength
+minifiedBodyLength
+bodyHash
+
+==================================================
+5. BUILD EXACT STRING TO VERIFY
+==================================================
+
+Format wajib:
+
+POST:<notifyPath>:<lowercase SHA256 hex body>:<X-TIMESTAMP>
+
+Untuk debugging boleh log canonical string karena tidak berisi secret,
+tetapi JANGAN log signature atau key.
+
+Pastikan timestamp berasal dari HEADER callback,
+bukan timestamp metadata database.
+
+==================================================
+6. VERIFY USING ONLY PAYLABS PUBLIC KEY
+==================================================
+
+Algorithm:
+
+RSA-SHA256 / SHA256withRSA
+
+Input:
+exact canonical string
+
+Signature:
+X-SIGNATURE callback
+
+Public key:
+PAYLABS_SANDBOX_PUBLIC_KEY
+
+Laporkan:
+
+signatureValid=true/false
+
+==================================================
+7. CROSS-CHECK WITH PAYLABS SIGNATURE PLAYGROUND
+==================================================
+
+Siapkan diagnostic bundle aman untuk dibandingkan dengan
+Paylabs Signature Playground:
+
+- method
+- endpoint
+- timestamp
+- exact callback JSON body
+- bodyHash
+
+Jangan masukkan private key.
+
+Gunakan configured PAYLABS_SANDBOX_PUBLIC_KEY untuk VERIFY saja.
+
+Jika playground juga menghasilkan invalid:
+masalahnya adalah PUBLIC KEY / input dari Paylabs, bukan Node crypto.
+
+Jika playground valid tetapi aplikasi invalid:
+masalahnya implementasi verifier aplikasi.
+
+==================================================
+8. FINAL OUTPUT
+==================================================
+
+Saya hanya ingin salah satu root cause:
+
+A. WRONG_PAYLABS_PUBLIC_KEY
+B. CALLBACK_ENDPOINT_MISMATCH
+C. BODY_CANONICALIZATION_MISMATCH
+D. TIMESTAMP_MISMATCH
+E. RSA_VERIFY_IMPLEMENTATION_ERROR
+F. UNKNOWN — dengan evidence yang masih kurang
+
+Jangan melakukan patch spekulatif lagi.
+
+Jangan bypass signature verification.
+Jangan menerima status 02 selama signatureValid=false.

@@ -8,7 +8,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "start": "node --enable-source-maps ./dist/index.mjs"
+    "start": "node --enable-source-maps ./dist/bootstrap.mjs"
   },
   "dependencies": {
     "@google-cloud/secret-manager": "^6.0.0",
@@ -17,6 +17,8 @@
     "nodemailer": "^9.0.3",
     "openai": "^6.42.0",
     "pg": "^8.20.0",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0",
     "ws": "^8.21.0",
     "xlsx": "^0.18.5"
   },

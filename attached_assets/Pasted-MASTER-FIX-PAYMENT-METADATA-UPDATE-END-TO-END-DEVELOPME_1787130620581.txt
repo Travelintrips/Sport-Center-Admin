@@ -1,0 +1,302 @@
+MASTER FIX — PAYMENT METADATA UPDATE END-TO-END
+
+DEVELOPMENT ONLY.
+
+Do NOT disable immutability.
+Do NOT loosen posted journal financial protection.
+Do NOT touch settlement, reconciliation, or accounting economics.
+Do NOT stop after finding one intermediate defect.
+
+Objective:
+make payment metadata edits from BizPortal succeed reliably from frontend → API → Supabase trigger → posted accounting journal, while preserving financial immutability.
+
+Known required behavior:
+
+Editable from frontend:
+- payment_method
+- payment_provider
+- provider_name on sport_payments if required by UI
+
+Automatically synced to accounting_journals:
+- payment_method
+- payment_provider
+
+Never changed by this flow:
+- amount
+- gross_amount
+- dpp_amount
+- tax_amount
+- debit_amount
+- credit amounts
+- account_code / COA
+- accounting_journal_lines
+- journal_date
+- status
+- settlement
+- reconciliation
+
+Current database contract already intended:
+
+trg_sync_payment_accounting_journal
+AFTER INSERT OR UPDATE OF payment_method, payment_provider
+
+sync_payment_accounting_journal()
+must update only:
+payment_method
+payment_provider
+
+posted journal guard must allow those metadata fields only.
+
+==================================================
+1. TRACE THE REAL FRONTEND PATH
+==================================================
+
+Find the exact BizPortal component used to edit payment method/provider.
+
+Trace:
+
+UI control
+→ mutation/request
+→ API route
+→ validation schema
+→ service/repository
+→ SQL update
+→ Supabase triggers
+→ API response
+
+Do not assume the request payload.
+
+Capture the actual payload and exact runtime error.
+
+==================================================
+2. CREATE A DEDICATED METADATA UPDATE CONTRACT
+==================================================
+
+The frontend metadata-edit action must send only:
+
+payment_method
+payment_provider
+
+Optionally:
+provider_name
+
+but only for sport_payments.
+
+Do not reuse a generic payment update endpoint that also writes:
+amount
+status
+paid_at
+confirmed_at
+payment_type
+bank_account_id
+settlement fields
+accounting fields
+
+If current endpoint is generic, split or narrow it.
+
+==================================================
+3. API VALIDATION
+==================================================
+
+Create/reuse a dedicated Zod/input schema that allows only:
+
+payment_method
+payment_provider
+provider_name if required
+
+Reject all financial/status fields.
+
+Unknown extra fields should fail validation rather than being silently forwarded.
+
+==================================================
+4. SQL WRITE
+==================================================
+
+The payment metadata update must perform only:
+
+UPDATE sport_center.sport_payments
+SET
+  payment_method = ...,
+  payment_provider = ...,
+  provider_name = ... where applicable
+WHERE id = ...
+
+Do not update amount/status/accounting fields in the same statement.
+
+==================================================
+5. TRIGGER CONTRACT
+==================================================
+
+Verify live trigger definition is:
+
+AFTER INSERT OR UPDATE OF payment_method, payment_provider
+
+and that sync_payment_accounting_journal() updates only:
+
+accounting_journals.payment_method
+accounting_journals.payment_provider
+
+No journal lines.
+
+No financial fields.
+
+No hardcoded COA rewrite.
+
+No amount recalculation.
+
+==================================================
+6. POSTED JOURNAL GUARD
+==================================================
+
+Keep immutability.
+
+For posted journals allow only:
+
+payment_method
+payment_provider
+
+Everything else remains immutable.
+
+Do not disable the guard globally.
+Do not add generic bypass flags.
+
+==================================================
+7. REMOVE LEGACY SIDE EFFECTS
+==================================================
+
+Audit the metadata update path for calls to:
+
+create_payment_accounting_draft
+post_accounting_journal
+settlement builder
+generic /post
+reconciliation approval
+legacy sport_center_booking accounting
+full journal sync
+
+A metadata edit must call NONE of those.
+
+Remove any such side effect from this action.
+
+==================================================
+8. ERROR HANDLING
+==================================================
+
+Development logs must preserve the exact PostgreSQL/API error.
+
+Frontend should show a useful message, e.g.:
+
+`Gagal memperbarui metode pembayaran. Tidak ada perubahan finansial yang dilakukan.`
+
+Do not mask all errors as generic Internal server error in development logs.
+
+==================================================
+9. RUNTIME TEST MATRIX
+==================================================
+
+Use DEVELOPMENT.
+
+Test on a payment with posted journal.
+
+A. change payment_method only
+Expected:
+sport_payments changes
+accounting_journals changes
+PASS
+
+B. change payment_provider only
+Expected:
+both sync
+PASS
+
+C. change both together
+PASS
+
+D. same values submitted again
+PASS / idempotent
+
+E. attempt amount through metadata endpoint
+REJECT
+
+F. attempt status through metadata endpoint
+REJECT
+
+G. verify after successful metadata edit:
+
+amount unchanged
+gross unchanged
+DPP unchanged
+PPN unchanged
+journal lines unchanged
+COA unchanged
+journal status remains posted
+no new journal
+no new accounting payment
+no new ledger entry
+
+==================================================
+10. FRONTEND UAT
+==================================================
+
+Actually edit one payment from BizPortal.
+
+Prove:
+
+UI saves successfully
+toast success appears
+row refreshes
+sport_payments metadata updated
+accounting_journals metadata updated
+no financial fields changed
+
+Do not certify based on direct SQL only.
+
+==================================================
+11. TEST ONCE AT END
+==================================================
+
+Run:
+
+focused payment metadata update tests
+posted journal immutability tests
+trigger sync tests
+accounting regression
+
+Then:
+
+API typecheck
+API build
+BizPortal typecheck
+BizPortal build
+/api/health/ready
+
+==================================================
+12. FINAL REPORT ONLY
+==================================================
+
+Return:
+
+ROOT CAUSE
+FRONTEND OLD PAYLOAD
+FRONTEND NEW PAYLOAD
+API ROUTE
+VALIDATION
+SQL WRITE
+TRIGGER CONTRACT
+POSTED GUARD
+LEGACY SIDE EFFECTS REMOVED
+RUNTIME UAT
+FINANCIAL FIELDS UNCHANGED
+TESTS
+TYPECHECK/BUILD
+READINESS
+
+Final verdict:
+
+PAYMENT METADATA UPDATE END-TO-END FIXED — POSTED FINANCIAL IMMUTABILITY PRESERVED
+
+or
+
+PAYMENT METADATA UPDATE BLOCKED — <ONE EXACT BLOCKER>
+
+STOP.

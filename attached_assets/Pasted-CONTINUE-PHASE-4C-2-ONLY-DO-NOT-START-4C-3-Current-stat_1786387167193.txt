@@ -1,0 +1,401 @@
+CONTINUE PHASE 4C-2 ONLY.
+
+DO NOT START 4C-3.
+
+Current state from previous session:
+
+* source-aware identity propagation has been partially implemented;
+* persisted match rows now carry candidate_source where applicable;
+* approval boundary has source awareness;
+* journal reuse gate fails closed for canonical/ambiguous QRIS source;
+* historical NULL source remains nullable;
+* canonical source must stop before legacy SQL;
+* several SQL selectors/readers were patched;
+* remaining defects before quota ended:
+
+  * approval UI callback had scope issue;
+  * two SQL selectors still needed candidate_source selected;
+  * manual reconciliation/detail CASE/source propagation needed final validation;
+* no final compile/test verdict was produced.
+
+Resume from current working tree.
+
+## 1. RECOVERY
+
+Run:
+
+```bash
+git status --short
+git diff --stat
+git diff
+```
+
+Inspect all 4C-2 changes.
+
+Do not discard valid changes.
+
+Identify any unfinished patch fragments, malformed SQL CASE blocks, argument-order drift, undefined variables, duplicate candidate_source aliases, or broken callback signatures.
+
+---
+
+## 2. FINISH ONLY REMAINING 4C-2 WIRING
+
+Ensure candidate_source is preserved through:
+
+* reconciliation match reads;
+* candidate detail reads;
+* manual reconciliation reads;
+* approval request/handler;
+* journal reuse decision;
+* historical/document/sheet readers where identity is consumed;
+* API response payload;
+* UI/API callback typing only as needed for propagation.
+
+Do not add canonical settlement adapter behavior.
+
+---
+
+## 3. SOURCE RESOLUTION CONTRACT
+
+Freeze exact behavior:
+
+```text
+qris_settlement
++ public.qris_settlements
+→ legacy resolver
+```
+
+```text
+qris_settlement
++ sport_center.payment_settlement_batches
+→ controlled:
+CANONICAL_SETTLEMENT_ADAPTER_NOT_IMPLEMENTED
+```
+
+```text
+qris_settlement
++ NULL
+→ controlled:
+AMBIGUOUS_QRIS_SETTLEMENT_SOURCE
+```
+
+Non-QRIS candidate types remain unchanged.
+
+Canonical source MUST NOT fall through to public.qris_settlements lookup.
+
+---
+
+## 4. APPROVAL SAFETY
+
+Verify canonical or ambiguous QRIS source cannot enter:
+
+* generic approval journal creation;
+* journalReuseEngine legacy qris branch;
+* generic accounting fallback.
+
+Expected:
+
+```text
+canonical source
+→ safe controlled rejection
+
+NULL source
+→ safe controlled rejection
+
+legacy public source
+→ existing behavior
+```
+
+Do not implement canonical approval.
+
+---
+
+## 5. SQL READ VERIFICATION
+
+Audit all SQL that later consumes:
+
+```text
+candidate_type
+candidate_id
+```
+
+If identity affects qris_settlement resolution, candidate_source must be selected as well.
+
+Pay special attention to:
+
+* detail SQL CASE expressions;
+* manual reconciliation query;
+* history query;
+* sheet-related lateral/subquery;
+* approval match fetch.
+
+Use searched CASE syntax correctly where source branching is needed.
+
+---
+
+## 6. FUNCTION SIGNATURE COMPATIBILITY
+
+Review any function whose signature was changed.
+
+Existing callers must remain backward-compatible where intended.
+
+Do not silently reorder positional arguments in a way that breaks existing callers.
+
+If candidate_source was added:
+
+prefer object/named propagation where existing architecture supports it;
+
+otherwise preserve previous positional parameters and add optional source safely.
+
+---
+
+## 7. DEDUPE / IDENTITY KEYS
+
+Verify qris_settlement identity keys include candidate_source.
+
+Prove these are distinct:
+
+```text
+qris_settlement | 1 | public.qris_settlements
+```
+
+and:
+
+```text
+qris_settlement | 1 | sport_center.payment_settlement_batches
+```
+
+Historical NULL remains a third distinct state.
+
+Do not alter unrelated candidate-type dedupe semantics.
+
+---
+
+## 8. UI/API PROPAGATION
+
+candidate_source may be exposed as nullable.
+
+Do not change user-facing reconciliation behavior yet.
+
+Do not implement canonical settlement details UI.
+
+Only propagate identity required for correctness.
+
+Fix any callback scope/type defects introduced in the previous patch.
+
+---
+
+## 9. FOCUSED TESTS
+
+Run/add focused tests for:
+
+### Legacy
+
+```text
+type = qris_settlement
+id = 1
+source = public.qris_settlements
+→ legacy resolution
+```
+
+### Canonical same ID
+
+```text
+type = qris_settlement
+id = 1
+source = sport_center.payment_settlement_batches
+→ must NOT resolve public row
+→ controlled canonical-not-yet-implemented result
+```
+
+### Historical NULL
+
+```text
+type = qris_settlement
+source = NULL
+→ mutation-changing path rejects as ambiguous
+```
+
+### Collision
+
+Same candidate_type/id with different source remains distinct through:
+
+* persistence;
+* read;
+* identity helper/dedupe;
+* approval boundary.
+
+### Non-QRIS regression
+
+Existing invoice/expense/logistic/etc. behavior unchanged.
+
+### Legacy qris regression
+
+Existing explicit public.qris_settlements path remains functional.
+
+---
+
+## 10. COMPILE / BUILD
+
+Run:
+
+```text
+focused 4C-2 tests
+existing reconciliation tests
+API typecheck
+API build
+```
+
+If lib/db build prerequisite is required, run the normal repository prerequisite first.
+
+If full workspace fails due unrelated frontend errors, report separately and do not expand scope.
+
+---
+
+## 11. SEARCH AFTER CHANGE
+
+Search repository for:
+
+```text
+candidate_source
+candidate_type
+candidate_id
+qris_settlement
+```
+
+Classify every remaining qris_settlement public assumption as:
+
+```text
+fixed in 4C-2
+safe legacy-only
+scheduled for 4C-3+
+```
+
+No unexplained source-blind qris resolution may remain on mutation-changing paths.
+
+---
+
+## 12. SCOPE GUARD
+
+Confirm zero implementation of:
+
+```text
+canonical settlement adapter
+canonical candidate generation
+payment exclusion
+canonical matching
+link-only approval
+generic /post final guard
+canonical void/reopen
+settlement status changes
+bank mutation lifecycle changes
+accounting changes
+MDR changes
+Google Sheet ingestion changes
+database schema changes
+production changes
+```
+
+---
+
+## REQUIRED FINAL REPORT
+
+Report:
+
+### Files changed
+
+Exact paths.
+
+### Source constants
+
+```text
+CANONICAL =
+sport_center.payment_settlement_batches
+
+LEGACY =
+public.qris_settlements
+```
+
+### Resolution matrix
+
+| Type            | Source                                  | Result                        |
+| --------------- | --------------------------------------- | ----------------------------- |
+| qris_settlement | public.qris_settlements                 | legacy resolver               |
+| qris_settlement | sport_center.payment_settlement_batches | controlled blocked until 4C-3 |
+| qris_settlement | NULL                                    | ambiguous safe reject         |
+| non-QRIS        | existing                                | unchanged                     |
+
+### Approval safety
+
+```text
+canonical can reach legacy/generic approval = YES/NO
+NULL source can reach mutation-changing QRIS flow = YES/NO
+```
+
+Expected both:
+
+```text
+NO
+```
+
+### Collision proof
+
+```text
+legacy id=1
+canonical id=1
+distinct through persistence/read/approval = YES/NO
+```
+
+### Historical policy
+
+```text
+NULL auto-assumed legacy = NO
+```
+
+### Verification
+
+```text
+focused tests =
+reconciliation regression tests =
+API typecheck =
+API build =
+```
+
+### Scope confirmation
+
+```text
+Canonical adapter implemented: 0
+Matching behavior changes: 0
+Payment exclusion changes: 0
+Canonical approval changes: 0
+Posting changes: 0
+Void changes: 0
+Accounting changes: 0
+Google Sheet ingestion changes: 0
+Database schema changes: 0
+Production changes: 0
+```
+
+## FINAL VERDICT
+
+Choose exactly:
+
+```text
+4C-2 COMPLETE — READY FOR 4C-3
+```
+
+or:
+
+```text
+4C-2 PARTIAL — DO NOT CONTINUE
+```
+
+or:
+
+```text
+4C-2 BLOCKED — IDENTITY RESOLUTION CONFLICT
+```
+
+STOP.
+
+DO NOT START 4C-3.

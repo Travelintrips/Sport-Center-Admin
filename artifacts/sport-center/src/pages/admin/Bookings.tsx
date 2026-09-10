@@ -4,6 +4,7 @@ import {
   useListBookings,
   useUpdateBooking,
   useUpdatePayment,
+  useUpdatePaymentMetadata,
   useCheckInBooking,
   getListBookingsQueryKey,
   useGetBookingWaLogs,
@@ -63,35 +64,25 @@ import {
   MessageCircle,
   CheckCircle,
   AlertCircle,
+  Lock as LockIcon,
+  Dumbbell,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
 
-/* ─── Helpers ───────────────────────────────────────────────────── */
-
-function proofImageUrl(rawUrl: string): string {
-  if (!rawUrl) return rawUrl;
-  // External URL — use as-is
-  if (rawUrl.startsWith("http")) return rawUrl;
-  // Find /api/uploads/ anywhere (handles malformed /api/storage/objects//api/uploads/... paths)
-  const uploadsIdx = rawUrl.lastIndexOf("/api/uploads/");
-  if (uploadsIdx !== -1) return rawUrl.slice(uploadsIdx);
-  // No leading slash variant: api/uploads/proofs/...
-  if (rawUrl.startsWith("api/uploads/")) return `/${rawUrl}`;
-  // Bare filename — assume proofs/ subdir
-  const bare = rawUrl.replace(/^\/+/, "");
-  return `/api/uploads/proofs/${bare}`;
-}
-
 /* ─── Status Config ────────────────────────────────────────────── */
 
 type BookingStatus =
   | "pending_payment"
+  | "waiting_confirmation"
+  | "waiting_admin_approval"
   | "paid"
   | "confirmed"
   | "completed"
   | "cancelled"
+  | "rejected"
+  | "expired"
   | "refunded";
 
 const STATUS_CONFIG: Record<
@@ -100,6 +91,20 @@ const STATUS_CONFIG: Record<
 > = {
   pending_payment: {
     label: "Menunggu Pembayaran",
+    color: "text-amber-700 dark:text-amber-300",
+    bg: "bg-amber-100 dark:bg-amber-900/30",
+    icon: Clock,
+    pill: "border-amber-200 dark:border-amber-800",
+  },
+  waiting_confirmation: {
+    label: "Menunggu Verifikasi",
+    color: "text-blue-700 dark:text-blue-300",
+    bg: "bg-blue-100 dark:bg-blue-900/30",
+    icon: Clock,
+    pill: "border-blue-200 dark:border-blue-800",
+  },
+  waiting_admin_approval: {
+    label: "Menunggu Persetujuan Admin",
     color: "text-amber-700 dark:text-amber-300",
     bg: "bg-amber-100 dark:bg-amber-900/30",
     icon: Clock,
@@ -133,6 +138,20 @@ const STATUS_CONFIG: Record<
     icon: XCircle,
     pill: "border-red-200 dark:border-red-800",
   },
+  rejected: {
+    label: "Ditolak",
+    color: "text-red-700 dark:text-red-300",
+    bg: "bg-red-100 dark:bg-red-900/30",
+    icon: XCircle,
+    pill: "border-red-200 dark:border-red-800",
+  },
+  expired: {
+    label: "Kedaluwarsa",
+    color: "text-slate-700 dark:text-slate-300",
+    bg: "bg-slate-100 dark:bg-slate-900/30",
+    icon: Clock,
+    pill: "border-slate-200 dark:border-slate-700",
+  },
   refunded: {
     label: "Pengembalian Dana",
     color: "text-purple-700 dark:text-purple-300",
@@ -145,6 +164,7 @@ const STATUS_CONFIG: Record<
 const FILTER_OPTIONS = [
   { value: "all",             label: "Semua Status" },
   { value: "pending_payment", label: "Menunggu Pembayaran" },
+  { value: "waiting_confirmation", label: "Perlu Verifikasi" },
   { value: "paid",            label: "Pembayaran Selesai" },
   { value: "confirmed",       label: "Dikonfirmasi" },
   { value: "completed",       label: "Selesai" },
@@ -181,6 +201,50 @@ function formatCurrency(n: number) {
   }).format(n);
 }
 
+/**
+ * Group/recurring sessions are separate booking rows, but their payment
+ * decision is made once for the group. Keep mirrored payment rows for
+ * history, but show one representative in the confirmation queue.
+ */
+function dedupePaymentConfirmationBookings<T extends {
+  groupRef?: string | null;
+  status?: string;
+  payment?: { status?: string; proofUrl?: string | null } | null;
+}>(rows: T[]): T[] {
+  const representatives = new Map<string, T>();
+  const singles: T[] = [];
+
+  for (const row of rows) {
+    if (!row.groupRef) {
+      singles.push(row);
+      continue;
+    }
+
+    const current = representatives.get(row.groupRef);
+    if (!current) {
+      representatives.set(row.groupRef, row);
+      continue;
+    }
+
+    const isPendingWithProof =
+      (row.status === "waiting_confirmation" || row.status === "paid") &&
+      row.payment?.status === "pending" &&
+      Boolean(row.payment?.proofUrl);
+    const currentIsPendingWithProof =
+      (current.status === "waiting_confirmation" || current.status === "paid") &&
+      current.payment?.status === "pending" &&
+      Boolean(current.payment?.proofUrl);
+
+    // Prefer an actionable pending-proof row if the group is temporarily
+    // inconsistent between sessions.
+    if (isPendingWithProof && !currentIsPendingWithProof) {
+      representatives.set(row.groupRef, row);
+    }
+  }
+
+  return [...singles, ...representatives.values()];
+}
+
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString("id-ID", {
     weekday: "short",
@@ -193,6 +257,7 @@ function formatDate(d: string) {
 type PaymentMethodOption = {
   value: string;
   label: string;
+  providerCode?: string;
 };
 
 function PaymentMethodSelect({
@@ -200,30 +265,50 @@ function PaymentMethodSelect({
   options,
   onChange,
   disabled = false,
+  lockedReason,
 }: {
   payment: any;
   options: PaymentMethodOption[];
   onChange: (paymentId: number, paymentMethod: string) => void;
   disabled?: boolean;
+  lockedReason?: string;
 }) {
   if (!payment) {
     return <span className="text-xs text-slate-300 dark:text-slate-600">—</span>;
   }
 
-  const currentValue = String(payment.paymentMethod ?? "Transfer Bank");
-  const mergedOptions = options.some((option) => option.value === currentValue)
-    ? options
-    : [{ value: currentValue, label: `${currentValue} (tersimpan)` }, ...options];
+  const storedValue = String(payment.paymentMethod ?? "Transfer Bank");
+  const storedCode = storedValue.trim().toLowerCase();
+  const isDirectQris = payment.paymentProvider === "mandiri_direct" && storedCode === "qris";
+  const configuredOption = options.find(
+    (option) =>
+      option.providerCode?.trim().toLowerCase() === storedCode &&
+      (payment.paymentProvider === "paylabs" || !option.providerCode),
+  );
+  const currentValue = configuredOption?.value ?? storedValue;
+  // A QRIS Direct payment must not be changed back to a Paylabs display
+  // option. That would change the provider/settlement identity of an already
+  // classified payment and is correctly rejected by the accounting guard.
+  // Keep the valid direct method visible while hiding only gateway options.
+  const availableOptions = isDirectQris
+    ? options.filter((option) => !option.providerCode)
+    : options;
+  const mergedOptions = availableOptions.some((option) => option.value === currentValue)
+    ? availableOptions
+    : [{ value: currentValue, label: `${storedValue} (tersimpan)` }, ...availableOptions];
 
   return (
-    <Select
-      value={currentValue}
-      onValueChange={(value) => onChange(payment.id, value)}
-      disabled={disabled}
-    >
-      <SelectTrigger className="h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700">
-        <SelectValue />
-      </SelectTrigger>
+    <div title={lockedReason}>
+      <Select
+        value={currentValue}
+        onValueChange={(value) => onChange(payment.id, value)}
+        aria-label={lockedReason ?? "Metode pembayaran"}
+        disabled={disabled || Boolean(lockedReason)}
+      >
+        <SelectTrigger className={`h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700 ${lockedReason ? "cursor-not-allowed opacity-70" : ""}`}>
+          {lockedReason && <LockIcon size={12} className="mr-1.5 shrink-0 text-slate-400" aria-hidden="true" />}
+          <SelectValue />
+        </SelectTrigger>
       <SelectContent>
         {mergedOptions.map((option) => (
           <SelectItem key={option.value} value={option.value} className="text-xs">
@@ -231,7 +316,8 @@ function PaymentMethodSelect({
           </SelectItem>
         ))}
       </SelectContent>
-    </Select>
+      </Select>
+    </div>
   );
 }
 
@@ -613,7 +699,7 @@ async function printKwitansi(booking: any, settings?: any) {
         <td>${formatCurrency(totalPpnAll)}</td>
       </tr>` : ""}
       <tr class="grand-total">
-        <td>${isGroup ? `Total ${sessions.length} Sesi` : "Total DPP + PPN"}</td>
+        <td>${isGroup ? `Total ${sessions.length} Sesi (sudah termasuk PPN)` : "Total (sudah termasuk PPN)"}</td>
         <td>${formatCurrency(grandTotalAll)}</td>
       </tr>
     </table>
@@ -659,6 +745,11 @@ function SummaryStats({
   activeFilter: string;
   onStatClick: (filter: string) => void;
 }) {
+  const verificationKeys = new Set(
+    bookings
+      .filter((b) => b.status === "waiting_confirmation" || b.status === "paid")
+      .map((b) => b.groupRef ? `group:${b.groupRef}` : `booking:${b.id}`),
+  );
   const stats = [
     {
       label: "Total Booking",
@@ -673,7 +764,7 @@ function SummaryStats({
     },
     {
       label: "Perlu Verifikasi",
-      value: bookings.filter((b) => b.status === "waiting_confirmation" || b.status === "paid").length,
+      value: verificationKeys.size,
       filter: "waiting_confirmation",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
@@ -751,24 +842,62 @@ function SummaryStats({
 
 /* ─── Proof Image Component ─────────────────────────────────────── */
 
-function ProofImage({ proofUrl }: { proofUrl: string }) {
+function ProofImage({
+  paymentId,
+  membershipId,
+}: {
+  paymentId: number;
+  membershipId?: number | null;
+}) {
   const [imgError, setImgError] = useState(false);
-  const url = proofImageUrl(proofUrl);
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setImgError(false);
+    setUrl(null);
+
+    const proofEndpoint = membershipId
+      ? `${API_BASE}/memberships/${membershipId}/payments/${paymentId}/proof-file`
+      : `${API_BASE}/payments/${paymentId}/proof-file`;
+
+    fetch(proofEndpoint, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.error || "Bukti pembayaran tidak dapat dimuat");
+        }
+        return response.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        if (active) setUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      })
+      .catch(() => {
+        if (active) setImgError(true);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [membershipId, paymentId]);
 
   return (
     <div className="space-y-2">
       <div className="text-xs font-medium text-slate-500">Bukti Transfer</div>
       {imgError ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+        <div
+          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30"
         >
-          <FileImage size={14} /> Buka File Bukti
-          <ExternalLink size={11} className="ml-auto" />
-        </a>
-      ) : (
+          <AlertTriangle size={14} />
+          File tidak tersedia di Storage. Minta pelanggan upload ulang.
+        </div>
+      ) : url ? (
         <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group">
           <img
             src={url}
@@ -787,6 +916,8 @@ function ProofImage({ proofUrl }: { proofUrl: string }) {
             </span>
           </a>
         </div>
+      ) : (
+        <Skeleton className="h-28 w-full rounded-lg" />
       )}
     </div>
   );
@@ -896,28 +1027,97 @@ function BookingDetailDrawer({
   onUpdateStatus,
   onConfirmPayment,
   onRejectPayment,
+  onConfirmMembershipPayment,
+  onRejectMembershipPayment,
   onClearProof,
   onDelete,
   paymentMethodOptions,
   onUpdatePaymentMethod,
   isUpdating,
   settings,
+  onUpdateDates,
+  onUpdateAdditionalCharges,
 }: {
   booking: any;
   onClose: () => void;
   onUpdateStatus: (status: string, notes?: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
+  onConfirmMembershipPayment: (membershipId: number) => void;
+  onRejectMembershipPayment: (membershipId: number) => void;
   onClearProof: (paymentId: number) => void;
   onDelete: (id: number) => void;
   paymentMethodOptions: PaymentMethodOption[];
   onUpdatePaymentMethod: (paymentId: number, paymentMethod: string) => void;
   isUpdating: boolean;
   settings?: any;
+  onUpdateDates: (
+    bookingId: number,
+    bookingDate?: string,
+    paymentDate?: string,
+    startTime?: string,
+    endTime?: string,
+  ) => Promise<void>;
+  onUpdateAdditionalCharges: (charges: { name: string; amount: number }[]) => void;
 }) {
+  const membershipPaymentBooking =
+    booking.source === "gym_membership_payment" || booking.membershipPaymentId != null;
+  const membershipUsageBooking = booking.source === "gym_membership";
+  const membershipPayment = booking.membershipPayment
+    ? {
+        ...booking.membershipPayment,
+        id: booking.membershipPayment.id,
+        amount: Number(booking.membershipPayment.amount),
+        proofUrl: booking.membershipPayment.paymentProofUrl,
+        paymentType: "full_payment",
+        isMembershipPayment: true,
+        membershipId: booking.membershipId,
+      }
+    : null;
+  const allPayments: any[] =
+    booking.payments?.length > 0
+      ? booking.payments
+      : membershipPaymentBooking && membershipPayment
+        ? [membershipPayment]
+        : booking.payment
+          ? [booking.payment]
+          : [];
+  const editablePayment =
+    [...allPayments]
+      .sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))
+      .find((payment) => payment.status === "pending" || payment.status === "confirmed") ??
+    [...allPayments].sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))[0] ??
+    booking.payment ??
+    null;
+  const paymentDateValue =
+    editablePayment?.paidAt ??
+    editablePayment?.confirmedAt ??
+    editablePayment?.submittedAt ??
+    booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [bookingDate, setBookingDate] = useState(String(booking.bookingDate ?? ""));
+  const [paymentDate, setPaymentDate] = useState(
+    paymentDateValue?.slice(0, 10) ?? "",
+  );
+  const [startTime, setStartTime] = useState(String(booking.startTime ?? "").slice(0, 5));
+  const [endTime, setEndTime] = useState(String(booking.endTime ?? "").slice(0, 5));
+  const [savingDates, setSavingDates] = useState(false);
+  const displayedAdditionalCharges =
+    Array.isArray(booking.groupAdditionalCharges) && booking.groupAdditionalCharges.length > 0
+      ? booking.groupAdditionalCharges
+      : (booking.additionalCharges ?? []);
+  const [chargeDraft, setChargeDraft] = useState<{ name: string; amount: string }[]>(
+    displayedAdditionalCharges.map((charge: any) => ({
+      name: String(charge.name ?? ""),
+      amount: String(Number(charge.amount ?? 0)),
+    })),
+  );
+  const originalBookingDate = String(booking.bookingDate ?? "");
+  const originalPaymentDate = paymentDateValue?.slice(0, 10) ?? "";
+  const originalStartTime = String(booking.startTime ?? "").slice(0, 5);
+  const originalEndTime = String(booking.endTime ?? "").slice(0, 5);
 
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
@@ -933,8 +1133,61 @@ function BookingDetailDrawer({
     }
   };
 
-  const allPayments: any[] = booking.payments ?? (booking.payment ? [booking.payment] : []);
   const isCompleted = booking.status === "completed" || booking.status === "confirmed";
+  const hasPaymentData = Boolean(editablePayment || booking.paidAt || booking.membershipPayment);
+  const hasConfirmedPaymentBookingMismatch =
+    !isCompleted &&
+    ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) &&
+    allPayments.some((pmt) => pmt.status === "confirmed" && pmt.proofUrl);
+  const datesChanged =
+    bookingDate !== originalBookingDate ||
+    paymentDate !== originalPaymentDate ||
+    startTime !== originalStartTime ||
+    endTime !== originalEndTime;
+
+  const saveDates = async () => {
+    const nextBookingDate = bookingDate !== originalBookingDate ? bookingDate : undefined;
+    const nextPaymentDate =
+      paymentDate !== originalPaymentDate ? paymentDate || undefined : undefined;
+    const nextStartTime = startTime !== originalStartTime ? startTime : undefined;
+    const nextEndTime = endTime !== originalEndTime ? endTime : undefined;
+    const timeChanged = nextStartTime !== undefined || nextEndTime !== undefined;
+
+    if (
+      !bookingDate ||
+      (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) ||
+      (timeChanged &&
+        (!/^\d{2}:\d{2}$/.test(startTime) ||
+          !/^\d{2}:\d{2}$/.test(endTime) ||
+          startTime >= endTime))
+    ) return;
+    if (
+      nextBookingDate === undefined &&
+      nextPaymentDate === undefined &&
+      nextStartTime === undefined &&
+      nextEndTime === undefined
+    ) return;
+    setSavingDates(true);
+    try {
+      await onUpdateDates(
+        booking.id,
+        nextBookingDate,
+        nextPaymentDate,
+        nextStartTime,
+        nextEndTime,
+      );
+    } finally {
+      setSavingDates(false);
+    }
+  };
+
+  const saveAdditionalCharges = () => {
+    const validCharges = chargeDraft
+      .filter((charge) => charge.name.trim() && Number(charge.amount) > 0)
+      .map((charge) => ({ name: charge.name.trim(), amount: Number(charge.amount) }));
+    if (validCharges.length !== chargeDraft.length) return;
+    onUpdateAdditionalCharges(validCharges);
+  };
 
   return (
     <AnimatePresence>
@@ -1017,7 +1270,10 @@ function BookingDetailDrawer({
               <div className={`text-sm font-bold ${cfg.color}`}>{cfg.label}</div>
               <div className="text-xs text-slate-500">
                 {booking.status === "pending_payment" && "Menunggu customer upload bukti pembayaran"}
-                {booking.status === "paid" && "Bukti transfer diterima — perlu verifikasi admin"}
+                {membershipPaymentBooking && (booking.status === "waiting_confirmation" || booking.status === "paid") &&
+                  "Bukti pembayaran membership diterima — perlu verifikasi admin"}
+                {!membershipPaymentBooking && booking.status === "paid" && "Bukti transfer diterima — perlu verifikasi admin"}
+                {!membershipPaymentBooking && booking.status === "waiting_confirmation" && "Bukti pembayaran diterima — perlu verifikasi admin"}
                 {(booking.status === "completed" || booking.status === "confirmed") && (
                   booking.payerType === "company"
                     ? "Booking perusahaan — dikonfirmasi otomatis, masuk tagihan bulanan"
@@ -1034,11 +1290,35 @@ function BookingDetailDrawer({
             <div className="flex items-center gap-3 p-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20">
               <PartyPopper size={16} className="text-purple-600 dark:text-purple-400 shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold text-purple-700 dark:text-purple-300">Booking Event — Diskon 21,43%</div>
+                <div className="text-sm font-bold text-purple-700 dark:text-purple-300">Booking Event — Diskon 21,4%</div>
                 <div className="text-xs text-purple-500 dark:text-purple-400">
                   {(booking as any).eventDiscountAmount != null && Number((booking as any).eventDiscountAmount) > 0
                     ? `Diskon diterapkan: ${formatCurrency(Number((booking as any).eventDiscountAmount))} dari harga normal ${formatCurrency(Number((booking as any).basePrice ?? booking.totalPrice) + Number((booking as any).eventDiscountAmount))}`
                     : "Diskon event sudah diterapkan ke harga"}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Gym membership usage */}
+          {membershipUsageBooking && (
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20">
+              <Dumbbell size={16} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-cyan-700 dark:text-cyan-300">Pemakaian Member Gym</div>
+                <div className="text-xs text-cyan-600 dark:text-cyan-400">
+                  Membership #{(booking as any).membershipId ?? "—"} — kunjungan sudah termasuk membership (Rp0)
+                </div>
+              </div>
+            </div>
+          )}
+          {membershipPaymentBooking && membershipPayment && (
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20">
+              <Dumbbell size={16} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-cyan-700 dark:text-cyan-300">Pembayaran Membership Gym</div>
+                <div className="text-xs text-cyan-600 dark:text-cyan-400">
+                  Membership #{booking.membershipId ?? "—"} · Periode {membershipPayment.periodStart} s/d {membershipPayment.periodEnd}
                 </div>
               </div>
             </div>
@@ -1085,7 +1365,61 @@ function BookingDetailDrawer({
                 <InfoRow icon={User} label="Nama" value={booking.customerName} span />
               )}
               <InfoRow icon={Building2} label="Fasilitas" value={booking.facilityName} span />
-              <InfoRow icon={CalendarDays} label="Tanggal" value={formatDate(booking.bookingDate)} />
+              <div className="col-span-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                  <CalendarDays size={13} /> Koreksi tanggal & jam
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Tanggal booking</Label>
+                    <Input
+                      type="date"
+                      value={bookingDate}
+                      onChange={(event) => setBookingDate(event.target.value)}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Tanggal pembayaran</Label>
+                    <Input
+                      type="date"
+                      value={paymentDate}
+                      onChange={(event) => setPaymentDate(event.target.value)}
+                      disabled={!hasPaymentData}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Jam mulai</Label>
+                    <Input
+                      type="time"
+                      value={startTime}
+                      onChange={(event) => setStartTime(event.target.value)}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Jam selesai</Label>
+                    <Input
+                      type="time"
+                      value={endTime}
+                      onChange={(event) => setEndTime(event.target.value)}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                </div>
+                {!hasPaymentData && <div className="text-[10px] text-slate-500">Belum ada pembayaran untuk dikoreksi.</div>}
+                <Button
+                  size="sm"
+                  onClick={saveDates}
+                  disabled={!datesChanged || savingDates || !bookingDate}
+                  className="h-8 text-xs"
+                >
+                  {savingDates ? "Menyimpan..." : "Simpan tanggal"}
+                </Button>
+              </div>
               <InfoRow icon={Clock} label="Waktu" value={`${booking.startTime?.slice(0, 5)} – ${booking.endTime?.slice(0, 5)}`} />
               <InfoRow icon={Hash} label="Durasi" value={`${booking.durationHours} jam`} />
               {/* Breakdown harga event */}
@@ -1096,7 +1430,7 @@ function BookingDetailDrawer({
                     <span className="line-through text-slate-400">{formatCurrency(Number((booking as any).basePrice ?? booking.totalPrice) + Number((booking as any).eventDiscountAmount))}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span className="flex items-center gap-1 text-purple-600"><PartyPopper size={11} />Diskon Event 21,43%</span>
+                    <span className="flex items-center gap-1 text-purple-600"><PartyPopper size={11} />Diskon Event 21,4%</span>
                     <span className="font-semibold text-purple-600">−{formatCurrency(Number((booking as any).eventDiscountAmount))}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm border-t border-purple-100 dark:border-purple-800 pt-1.5 mt-1">
@@ -1152,7 +1486,7 @@ function BookingDetailDrawer({
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-slate-500">Sisa Pembayaran</span>
-                    <span className="font-bold text-amber-600 dark:text-amber-400">{formatCurrency(Math.max(0, Number(booking.totalPrice) - Number(booking.downPayment || 0)))}</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">{formatCurrency(Math.max(0, Number(booking.grandTotal ?? booking.totalPrice) - Number(booking.downPayment || 0)))}</span>
                   </div>
                 </div>
               )}
@@ -1191,6 +1525,17 @@ function BookingDetailDrawer({
                 </div>
               )}
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {hasConfirmedPaymentBookingMismatch && (
+                  <div className="m-4 p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                      <div className="text-xs leading-relaxed">
+                        Pembayaran sudah dikonfirmasi, tetapi status booking belum sinkron.
+                        Gunakan tombol <span className="font-semibold">Sinkronkan Booking</span> di bawah.
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {allPayments.map((pmt: any) => {
                   const typeLabel =
                     pmt.paymentType === "dp"
@@ -1207,17 +1552,23 @@ function BookingDetailDrawer({
                   const statusColor =
                     pmt.status === "confirmed"
                       ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                      : pmt.status === "rejected"
+                      : pmt.status === "rejected" || pmt.status === "cancelled"
                       ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                       : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
                   const statusLabel =
                     pmt.status === "confirmed"
                       ? "Dikonfirmasi"
-                      : pmt.status === "rejected"
+                      : pmt.status === "rejected" || pmt.status === "cancelled"
                       ? "Ditolak"
                       : "Menunggu";
-                  const confirmLabel =
-                    pmt.paymentType === "dp"
+                  const isRepairingBooking =
+                    pmt.status === "confirmed" &&
+                    pmt.proofUrl &&
+                    !isCompleted &&
+                    ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status);
+                  const confirmLabel = isRepairingBooking
+                    ? "Sinkronkan Booking"
+                    : pmt.paymentType === "dp"
                       ? "Konfirmasi DP"
                       : "Konfirmasi → Selesai";
                   return (
@@ -1242,13 +1593,60 @@ function BookingDetailDrawer({
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
                           disabled={isUpdating}
+                          lockedReason={pmt.isMembershipPayment ? "Metode pembayaran membership dikelola dari data membership" : undefined}
                         />
+                        {(() => {
+                          const ocr = pmt.ocrData as {
+                            paymentMethod?: string;
+                            confidence?: number;
+                            signals?: string[];
+                            methodMatch?: boolean | null;
+                            engine?: string;
+                          } | null | undefined;
+                          if (!ocr || ocr.engine !== "tesseract" || !ocr.paymentMethod || ocr.paymentMethod === "unknown") {
+                            return (
+                              <div className="text-[11px] text-slate-400">
+                                OCR metode: belum dapat dibaca
+                              </div>
+                            );
+                          }
+                          const mismatch = ocr.methodMatch === false;
+                          return (
+                            <div className={`rounded-lg border px-2.5 py-2 text-[11px] ${
+                              mismatch
+                                ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+                            }`}>
+                              <div className="flex items-center gap-1 font-semibold">
+                                {mismatch ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                                OCR mendeteksi: {ocr.paymentMethod}
+                                {typeof ocr.confidence === "number" && ocr.confidence > 0
+                                  ? ` (${Math.round(ocr.confidence * 100)}%)`
+                                  : ""}
+                              </div>
+                              {mismatch && (
+                                <div className="mt-0.5">
+                                  Sesuaikan metode sebelum konfirmasi pembayaran.
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
-                      {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
-                      {pmt.status === "pending" && pmt.proofUrl && (
+                      {pmt.proofUrl && (
+                        <ProofImage
+                          paymentId={pmt.id}
+                          membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
+                        />
+                      )}
+                      {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
-                            onClick={() => onConfirmPayment(pmt.id)}
+                            onClick={() =>
+                              pmt.isMembershipPayment
+                                ? onConfirmMembershipPayment(pmt.membershipId)
+                                : onConfirmPayment(pmt.id)
+                            }
                             disabled={isUpdating}
                             className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                           >
@@ -1256,21 +1654,27 @@ function BookingDetailDrawer({
                             {confirmLabel}
                           </button>
                           <button
-                            onClick={() => onRejectPayment(pmt.id)}
+                            onClick={() =>
+                              pmt.isMembershipPayment
+                                ? onRejectMembershipPayment(pmt.membershipId)
+                                : onRejectPayment(pmt.id)
+                            }
                             disabled={isUpdating}
                             className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
                           >
                             <XCircle size={13} />
                             Tolak
                           </button>
-                          <button
-                            onClick={() => onClearProof(pmt.id)}
-                            disabled={isUpdating}
-                            title="Hapus bukti transfer"
-                            className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-600 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {!pmt.isMembershipPayment && (
+                            <button
+                              onClick={() => onClearProof(pmt.id)}
+                              disabled={isUpdating}
+                              title="Hapus bukti transfer"
+                              className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-600 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1327,6 +1731,63 @@ function BookingDetailDrawer({
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Admin Notes */}
+          <div className="space-y-2 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 p-4">
+            <div>
+              <label className="text-xs font-semibold text-amber-800 dark:text-amber-200 uppercase tracking-wide">
+                 {booking.groupRef ? "Biaya Tambahan (sekali untuk seluruh grup)" : "Biaya Tambahan"}
+              </label>
+              <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+                Hanya dapat diubah sebelum booking memiliki pembayaran.
+              </p>
+            </div>
+            {chargeDraft.map((charge, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <Input
+                  value={charge.name}
+                  onChange={(event) => setChargeDraft((current) => current.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, name: event.target.value } : item,
+                  ))}
+                  placeholder="Nama biaya"
+                  className="h-8 bg-white dark:bg-slate-900 text-xs"
+                />
+                <Input
+                  value={charge.amount ? Number(charge.amount).toLocaleString("id-ID") : ""}
+                  onChange={(event) => setChargeDraft((current) => current.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, amount: event.target.value.replace(/[^0-9]/g, "") } : item,
+                  ))}
+                  placeholder="Nominal"
+                  className="h-8 w-28 bg-white dark:bg-slate-900 text-xs font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setChargeDraft((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  className="rounded p-1.5 text-slate-400 hover:bg-red-100 hover:text-red-600"
+                  aria-label="Hapus biaya tambahan"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setChargeDraft((current) => [...current, { name: "", amount: "" }])}
+                className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300"
+              >
+                + Tambah biaya
+              </button>
+              <button
+                type="button"
+                onClick={saveAdditionalCharges}
+                disabled={isUpdating}
+                className="ml-auto rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                Simpan biaya
+              </button>
             </div>
           </div>
 
@@ -2086,6 +2547,7 @@ export default function AdminBookings() {
   const [dateTo, setDateTo] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
+  const [fixDiscountId, setFixDiscountId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [extendBooking, setExtendBooking] = useState<any>(null);
@@ -2097,8 +2559,15 @@ export default function AdminBookings() {
   const [waAlertOpen, setWaAlertOpen] = useState(true);
   const [sendingWaId, setSendingWaId] = useState<number | null>(null);
 
-  const { data: rawBookings, isLoading } = useListBookings();
+  const {
+    data: rawBookings,
+    isLoading,
+    error: bookingsError,
+    refetch: refetchBookings,
+  } = useListBookings();
   const bookings = rawBookings ?? [];
+  const bookingErrorMessage =
+    (bookingsError as any)?.message ?? "Gagal mengambil data booking dari server.";
 
   const { data: paymentSettings } = useQuery<any>({
     queryKey: ["paylabs-settings-payment-methods"],
@@ -2124,12 +2593,10 @@ export default function AdminBookings() {
 
     for (const method of configured) {
       if (!method?.active || typeof method.name !== "string" || !method.name.trim()) continue;
-      // QRIS is already in the static list above — skip duplicates from Paylabs config.
       const id = String(method.id ?? "").trim().toLowerCase();
-      if (id === "qris") continue;
       const label = method.name.trim();
       if (!options.some((option) => option.value === label)) {
-        options.push({ value: label, label });
+        options.push({ value: label, label, providerCode: id });
       }
     }
     return options;
@@ -2189,6 +2656,14 @@ export default function AdminBookings() {
     return m;
   }, [bookings]);
 
+  const bookingsByGroupRef = useMemo(() => {
+    const m: Record<string, any[]> = {};
+    for (const b of bookings as any[]) {
+      if (b.groupRef) (m[b.groupRef] ??= []).push(b);
+    }
+    return m;
+  }, [bookings]);
+
   const dissolveGroup = async (groupRef: string) => {
     setDissolvingRef(groupRef);
     try {
@@ -2238,6 +2713,47 @@ export default function AdminBookings() {
     });
   };
 
+  const handleFixDiscount = async (booking: any) => {
+    if (fixDiscountId !== null) return;
+    const isMultiguna = `${booking.facilityName ?? ""} ${booking.facilityCategory ?? ""}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .includes("multiguna");
+    const priceLabel = isMultiguna ? "Rp300.000/jam" : "diskon AP 20%";
+    const confirmed = window.confirm(
+      `Terapkan Fix Diskon untuk ${booking.orderNumber}?\n\n` +
+      `Harga akan diubah menjadi ${priceLabel}. Status verifikasi ID Card tetap ${booking.verificationStatus ?? "pending"} ` +
+      `dan tindakan ini dicatat sebagai override admin.`,
+    );
+    if (!confirmed) return;
+
+    setFixDiscountId(booking.id);
+    try {
+      const res = await fetch(`/api/bookings/${booking.id}/fix-discount`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal menerapkan fix diskon");
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({
+        title: "Fix Diskon berhasil",
+        description: data.message ?? "Harga AP sudah diterapkan.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Fix Diskon gagal",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setFixDiscountId(null);
+    }
+  };
+
 
   const updateBookingMutation = useUpdateBooking({
     mutation: {
@@ -2252,9 +2768,19 @@ export default function AdminBookings() {
 
   const updatePaymentMutation = useUpdatePayment({
     mutation: {
-      onSuccess: (data, variables) => {
-        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
-        toast({ title: "Pembayaran diperbarui" });
+      onSuccess: async (data: any, variables: any) => {
+        // Konfirmasi payment grup memperbarui semua sibling di server. Tunggu
+        // refetch selesai sebelum menutup drawer agar tabel tidak sempat
+        // menampilkan tombol verifikasi untuk sesi-sesi yang sudah ikut
+        // terkonfirmasi.
+        await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        await refetchBookings();
+        toast({
+          title: "Pembayaran diperbarui",
+          description: variables.data.status === "confirmed" && selectedBooking?.groupRef
+            ? "Status seluruh sesi dalam grup sudah disinkronkan."
+            : undefined,
+        });
         if (variables.data.paymentMethod !== undefined) {
           setSelectedBooking((current: any) => {
             if (!current) return current;
@@ -2272,9 +2798,127 @@ export default function AdminBookings() {
           setSelectedBooking(null);
         }
       },
-      onError: () => toast({ title: "Gagal memperbarui pembayaran", variant: "destructive" }),
+      onError: (error: any) =>
+        toast({
+          title: "Gagal memperbarui pembayaran",
+          description: error?.message?.replace(/^HTTP \d+ [^:]+:\s*/, "") || "Terjadi kesalahan pada server.",
+          variant: "destructive",
+        }),
     },
   });
+
+  const membershipPaymentMutation = useMutation({
+    mutationFn: async ({
+      membershipId,
+      status,
+    }: {
+      membershipId: number;
+      status: "active" | "cancelled";
+    }) => {
+      const response = await fetch(`${API_BASE}/memberships/${membershipId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error ?? `HTTP ${response.status}`);
+      }
+      return { data, status };
+    },
+    onSuccess: async ({ status }) => {
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      const refreshed = await refetchBookings();
+      setSelectedBooking((current: any) => {
+        if (!current) return current;
+        return (
+          (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current.id) ??
+          current
+        );
+      });
+      toast({
+        title: status === "active"
+          ? "Pembayaran membership dikonfirmasi"
+          : "Pembayaran membership ditolak",
+        description: status === "active"
+          ? "Membership dan booking pembayaran sudah diaktifkan."
+          : "Membership dibatalkan dan booking pembayaran ditolak.",
+      });
+    },
+    onError: (error: Error) =>
+      toast({
+        title: "Gagal memperbarui pembayaran membership",
+        description: error.message,
+        variant: "destructive",
+      }),
+  });
+
+  // Edit metadata pembayaran (metode/provider) memakai endpoint khusus yang
+  // tidak menyentuh status, konfirmasi, settlement, atau akuntansi finansial.
+  const updatePaymentMetadataMutation = useUpdatePaymentMetadata({
+    mutation: {
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        toast({ title: "Metadata pembayaran diperbarui" });
+        setSelectedBooking((current: any) => {
+          if (!current) return current;
+          const currentPayments = current.payments ?? (current.payment ? [current.payment] : []);
+          const updatedPayments = currentPayments.map((payment: any) =>
+            payment.id === data.id ? data : payment,
+          );
+          return {
+            ...current,
+            payments: updatedPayments,
+            payment: current.payment?.id === data.id ? data : current.payment,
+          };
+        });
+      },
+      onError: (error: any) =>
+        toast({
+          title: "Gagal memperbarui metadata pembayaran",
+          description: error?.message?.replace(/^HTTP \d+ [^:]+:\s*/, "") || "Terjadi kesalahan pada server.",
+          variant: "destructive",
+        }),
+    },
+  });
+
+  const updateDates = async (
+    bookingId: number,
+    bookingDate?: string,
+    paymentDate?: string,
+    startTime?: string,
+    endTime?: string,
+  ) => {
+    const response = await fetch(`${API_BASE}/bookings/${bookingId}/dates`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({
+        ...(bookingDate !== undefined ? { bookingDate } : {}),
+        ...(paymentDate !== undefined ? { paymentDate } : {}),
+        ...(startTime !== undefined ? { startTime } : {}),
+        ...(endTime !== undefined ? { endTime } : {}),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = data.error ?? "Gagal memperbarui tanggal";
+      toast({ title: "Tanggal tidak dapat diperbarui", description: message, variant: "destructive" });
+      throw new Error(message);
+    }
+    queryClient.setQueryData(getListBookingsQueryKey(), (current: any) =>
+      Array.isArray(current)
+        ? current.map((item) => item.id === data.id ? data : item)
+        : current,
+    );
+    setSelectedBooking(data);
+    toast({ title: "Tanggal berhasil diperbarui" });
+  };
 
   const clearProofMutation = useMutation({
     mutationFn: async (paymentId: number) => {
@@ -2308,7 +2952,16 @@ export default function AdminBookings() {
   });
 
   const filtered = useMemo(() => {
-    return bookings.filter((b: any) => {
+    const matching = bookings.filter((b: any) => {
+      // Check-in member Gym tetap disimpan sebagai booking mirror untuk audit
+      // operasional, tetapi bukan transaksi pemesanan yang perlu ditampilkan.
+      // Untuk entri membership, hanya pendaftaran/perpanjangan yang memiliki
+      // membershipPaymentId yang boleh tampil, termasuk pada data legacy.
+      const isMembershipCheckIn =
+        b.source === "gym_membership" ||
+        (b.membershipId != null && b.membershipPaymentId == null);
+      if (isMembershipCheckIn) return false;
+
       if (statusFilter !== "all") {
         const match =
           statusFilter === "completed"
@@ -2326,20 +2979,54 @@ export default function AdminBookings() {
         const q = search.toLowerCase();
         return (
           b.customerName?.toLowerCase().includes(q) ||
+          b.companyName?.toLowerCase().includes(q) ||
           b.orderNumber?.toLowerCase().includes(q) ||
           b.facilityName?.toLowerCase().includes(q) ||
           b.customerPhone?.toLowerCase().includes(q)
         );
       }
       return true;
-    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    });
+    const sorted = matching.sort(
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    return statusFilter === "waiting_confirmation"
+      ? dedupePaymentConfirmationBookings(sorted)
+      : sorted;
   }, [bookings, statusFilter, search, dateFrom, dateTo]);
+
+  // Satu groupRef hanya boleh memiliki satu entry aksi verifikasi pada
+  // tampilan saat ini. Memilih row dengan bukti pembayaran membuat aksi tetap
+  // tersedia walaupun admin sedang memakai pencarian/filter.
+  const groupVerificationRowByRef = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const b of filtered as any[]) {
+      if (!b.groupRef || m[b.groupRef]) continue;
+      const isWaiting = b.status === "waiting_confirmation" || b.status === "paid";
+      if (isWaiting && b.payment?.proofUrl) m[b.groupRef] = b;
+    }
+    for (const b of filtered as any[]) {
+      if (b.groupRef && !m[b.groupRef] &&
+          (b.status === "waiting_confirmation" || b.status === "paid")) {
+        m[b.groupRef] = b;
+      }
+    }
+    return m;
+  }, [filtered]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
     updateBookingMutation.mutate({
       id: selectedBooking.id,
       data: { status: status as any, adminNotes },
+    });
+  };
+
+  const handleAdditionalChargesUpdate = (charges: { name: string; amount: number }[]) => {
+    if (!selectedBooking) return;
+    updateBookingMutation.mutate({
+      id: selectedBooking.id,
+      data: { additionalCharges: charges } as any,
     });
   };
 
@@ -2353,14 +3040,21 @@ export default function AdminBookings() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
+        const error = new Error(body?.error ?? `HTTP ${res.status}`) as Error & {
+          code?: string;
+        };
+        error.code = body?.code;
+        throw error;
       }
       queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
       toast({ title: "Booking berhasil dihapus" });
       setSelectedBooking(null);
     } catch (err: any) {
+      const hasPostedAccounting = err?.code === "BOOKING_HAS_POSTED_ACCOUNTING";
       toast({
-        title: "Gagal menghapus booking",
+        title: hasPostedAccounting
+          ? "Booking tidak dapat dihapus permanen"
+          : "Gagal menghapus booking",
         description: err?.message ?? "Terjadi kesalahan",
         variant: "destructive",
       });
@@ -2490,8 +3184,20 @@ export default function AdminBookings() {
     onError: (err: Error) => toast({ title: "Gagal", description: err.message, variant: "destructive" }),
   });
 
-  const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
-  const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
+  const isUpdating =
+    updateBookingMutation.isPending ||
+    updatePaymentMutation.isPending ||
+    membershipPaymentMutation.isPending ||
+    updatePaymentMetadataMutation.isPending ||
+    deletingId !== null;
+  const pendingVerification = useMemo(() => {
+    const keys = new Set(
+      bookings
+        .filter((b: any) => b.status === "waiting_confirmation" || b.status === "paid")
+        .map((b: any) => b.groupRef ? `group:${b.groupRef}` : `booking:${b.id}`),
+    );
+    return keys.size;
+  }, [bookings]);
 
   const mergeSelectedBookings = useMemo(
     () => filtered.filter((b: any) => selectedIds.has(b.id)),
@@ -2677,7 +3383,7 @@ export default function AdminBookings() {
       </Dialog>
 
       {/* Stats */}
-      {!isLoading && (
+      {!isLoading && !bookingsError && (
         <SummaryStats
           bookings={bookings}
           activeFilter={statusFilter}
@@ -2690,8 +3396,29 @@ export default function AdminBookings() {
         />
       )}
 
+      {bookingsError && (
+        <div className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          <AlertCircle size={19} className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">Data booking gagal dimuat</p>
+            <p className="mt-0.5 truncate text-sm text-red-700/80 dark:text-red-300/80">
+              {bookingErrorMessage}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-red-300 bg-transparent text-red-800 hover:bg-red-100 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/60"
+            onClick={() => refetchBookings()}
+          >
+            <RefreshCw size={14} className="mr-1.5" />
+            Coba lagi
+          </Button>
+        </div>
+      )}
+
       {/* Revenue Summary */}
-      {!isLoading && filtered.length > 0 && (
+      {!isLoading && !bookingsError && filtered.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -2951,7 +3678,7 @@ export default function AdminBookings() {
             )}
           </div>
           <span className="text-xs text-slate-400 ml-auto shrink-0">
-            {filtered.length} booking
+            {bookingsError ? "Data tidak tersedia" : `${filtered.length} booking`}
           </span>
         </div>
 
@@ -2961,6 +3688,10 @@ export default function AdminBookings() {
             {[...Array(6)].map((_, i) => (
               <Skeleton key={i} className="h-14 rounded-xl" />
             ))}
+          </div>
+        ) : bookingsError ? (
+          <div className="flex min-h-40 items-center justify-center px-5 text-sm text-slate-500">
+            Perbaiki koneksi server lalu tekan &quot;Coba lagi&quot;.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -2990,7 +3721,36 @@ export default function AdminBookings() {
               </thead>
               <tbody>
                 <AnimatePresence mode="popLayout">
-                  {filtered.map((b: any, i: number) => (
+                  {filtered.map((b: any, i: number) => {
+                    const groupRows = b.groupRef ? (bookingsByGroupRef[b.groupRef] ?? []) : [];
+                    const isMultiSessionGroup = Boolean(b.groupRef && groupRows.length > 1);
+                    const groupPendingRows = groupRows.filter(
+                      (row: any) => row.status === "waiting_confirmation" || row.status === "paid",
+                    );
+                    const isPendingVerificationBooking =
+                      b.status === "waiting_confirmation" || b.status === "paid";
+                    const groupVerificationRow = b.groupRef
+                      ? groupVerificationRowByRef[b.groupRef]
+                      : undefined;
+                    const isGroupVerificationRow =
+                      isMultiSessionGroup &&
+                      isPendingVerificationBooking &&
+                      groupPendingRows.length > 0 &&
+                      groupVerificationRow?.id === b.id;
+                    const listPayment = b.membershipPayment ?? b.payment;
+                    const listPaymentDate =
+                      listPayment?.confirmedAt ??
+                      listPayment?.submittedAt ??
+                      listPayment?.paidAt ??
+                      listPayment?.updatedAt ??
+                      listPayment?.createdAt;
+                    const isMembershipPayment = Boolean(b.membershipPayment);
+                    const isBankReconciled = Boolean(
+                      listPayment?.isBankReconciled ||
+                      (Array.isArray(b.payments) && b.payments.some((payment: any) => payment.isBankReconciled)),
+                    );
+
+                    return (
                     <motion.tr
                       key={b.id}
                       initial={{ opacity: 0, y: 4 }}
@@ -3007,10 +3767,20 @@ export default function AdminBookings() {
                           onChange={() => toggleSelect(b.id)}
                         />
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-400">
-                          {b.orderNumber}
-                        </span>
+                       <td className="px-4 py-3">
+                         <span
+                           className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 font-mono text-xs font-bold ${
+                             isBankReconciled
+                               ? "bg-yellow-100 text-yellow-800 ring-1 ring-inset ring-yellow-300 dark:bg-yellow-900/40 dark:text-yellow-200 dark:ring-yellow-700"
+                               : "text-slate-600 dark:text-slate-400"
+                           }`}
+                           title={isBankReconciled ? "Payment settled dan matched dengan mutasi bank" : undefined}
+                         >
+                           {b.orderNumber}
+                           {isBankReconciled && (
+                             <CheckCircle2 size={11} className="text-yellow-700 dark:text-yellow-300" aria-label="Settled dan matched" />
+                           )}
+                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -3079,31 +3849,33 @@ export default function AdminBookings() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                          <PaymentMethodSelect
-                           payment={b.payment}
+                            payment={listPayment}
                            options={paymentMethodOptions}
                            onChange={(paymentId, paymentMethod) =>
-                             updatePaymentMutation.mutate({
-                               id: paymentId,
-                               data: { paymentMethod },
-                             })
+                              !isMembershipPayment &&
+                              updatePaymentMetadataMutation.mutate({
+                                id: paymentId,
+                                data: { paymentMethod },
+                              })
                            }
-                           disabled={updatePaymentMutation.isPending}
+                           disabled={updatePaymentMetadataMutation.isPending}
+                            lockedReason={
+                              isMembershipPayment
+                                ? "Metode pembayaran dikelola dari data membership"
+                                : undefined
+                            }
                          />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {b.payment?.confirmedAt ? (
+                        {listPaymentDate ? (
                           <div>
                             <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                              {new Date(b.payment.confirmedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                              {new Date(listPaymentDate).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
                             </div>
                             <div className="text-[11px] text-slate-400">
-                              {new Date(b.payment.confirmedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                              {new Date(listPaymentDate).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                             </div>
                           </div>
-                        ) : b.payment?.updatedAt ? (
-                          <span className="text-[11px] text-slate-400">
-                            {new Date(b.payment.updatedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })}
-                          </span>
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
@@ -3158,7 +3930,27 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {(b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
+                        {isMultiSessionGroup && isPendingVerificationBooking && groupPendingRows.length > 0 ? (
+                          isGroupVerificationRow ? (
+                            <button
+                              onClick={() => setSelectedBooking(b)}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/40 transition-colors"
+                              title="Verifikasi satu kali untuk seluruh sesi dalam grup"
+                            >
+                              <CreditCard size={11} />
+                              Verifikasi Grup
+                              <span className="text-[10px] opacity-70">({groupRows.length} sesi)</span>
+                            </button>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800"
+                              title="Sesi ini ikut terverifikasi saat pembayaran grup dikonfirmasi"
+                            >
+                              <Users size={11} />
+                              Ikut Grup
+                            </span>
+                          )
+                        ) : (b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
                           <InlineCheckInSelect
                             booking={b}
                             onCheckIn={(id) => checkInMutation.mutate({ id })}
@@ -3227,9 +4019,28 @@ export default function AdminBookings() {
                               className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-colors whitespace-nowrap"
                             >
                               <ShieldCheck size={12} />
-                              Verifikasi ID
+                              {b.verificationStatus === "rejected" ? "Verifikasi Ulang" : "Verifikasi ID"}
                             </motion.button>
                           )}
+                          {b.customerType === "angkasa_pura"
+                            && b.verificationStatus !== "verified"
+                            && !["cancelled", "expired", "refunded"].includes(b.status)
+                            && (
+                              <motion.button
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => void handleFixDiscount(b)}
+                                disabled={fixDiscountId === b.id}
+                                className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-emerald-600 border border-emerald-300 hover:bg-emerald-50 transition-colors whitespace-nowrap disabled:opacity-50"
+                              >
+                                {fixDiscountId === b.id ? (
+                                  <span className="w-3 h-3 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <CheckCircle2 size={12} />
+                                )}
+                                {fixDiscountId === b.id ? "Memproses..." : "Fix Diskon"}
+                              </motion.button>
+                            )}
                           {b.groupRef && (
                             <>
                               <motion.button
@@ -3331,7 +4142,8 @@ export default function AdminBookings() {
                         </div>
                       </td>
                     </motion.tr>
-                  ))}
+                    );
+                  })}
                 </AnimatePresence>
                 {filtered.length === 0 && (
                   <tr>
@@ -3379,13 +4191,21 @@ export default function AdminBookings() {
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
           }
+          onConfirmMembershipPayment={(membershipId) =>
+            membershipPaymentMutation.mutate({ membershipId, status: "active" })
+          }
+          onRejectMembershipPayment={(membershipId) =>
+            membershipPaymentMutation.mutate({ membershipId, status: "cancelled" })
+          }
            paymentMethodOptions={paymentMethodOptions}
            onUpdatePaymentMethod={(paymentId, paymentMethod) =>
-             updatePaymentMutation.mutate({ id: paymentId, data: { paymentMethod } })
+             updatePaymentMetadataMutation.mutate({ id: paymentId, data: { paymentMethod } })
            }
           onClearProof={(paymentId) => clearProofMutation.mutate(paymentId)}
           onDelete={handleDelete}
           isUpdating={isUpdating || clearProofMutation.isPending}
+           onUpdateDates={updateDates}
+           onUpdateAdditionalCharges={handleAdditionalChargesUpdate}
         />
       )}
 

@@ -1,0 +1,410 @@
+# FIX CST MASTER RECORD ID 1 + RESUME CONTROLLED OWNERSHIP REPAIR
+
+Business approval sudah eksplisit:
+
+`CST = company_id 1`
+
+Audit terakhir menemukan structural inconsistency:
+
+Record ID 1:
+
+* ID = 1
+* Name = Admin
+* account_type = personal
+* account_status = active
+* company_name = NULL
+* email = [admin@sportcenter.com](mailto:admin@sportcenter.com)
+
+Tetapi business rule menyatakan record ID 1 harus merepresentasikan:
+
+`CST`
+
+Task ini adalah memperbaiki master company identity ID 1 secara terkontrol di DEVELOPMENT, kemudian melanjutkan ownership mapping Facility 1/7 dan dry-run repair payment 13/14.
+
+JANGAN memilih company lain.
+
+JANGAN fallback ke ID 24/25/57/62.
+
+---
+
+# 1. SAFETY
+
+Development only.
+
+Sebelum write, verifikasi:
+
+* APP_ENV/NODE_ENV
+* database source
+* sanitized project/database identity
+* schema
+
+Production harus STOP.
+
+Jangan:
+
+* production deploy
+* mass backfill
+* final reconciliation
+* MDR posting
+* settlement posting
+* accounting redesign
+* arbitrary historical rewrite
+
+---
+
+# 2. AUDIT MASTER MODEL FIRST
+
+Sebelum mengubah record ID 1, audit schema/master data yang menentukan:
+
+* user/person
+* company/legal entity
+* account_type
+* company_name
+* company master table jika terpisah
+* company settings/configuration
+* foreign keys yang menggunakan `company_id`
+
+PENTING:
+
+Jangan langsung mengubah `sport_center.users.id=1` menjadi company jika architecture sebenarnya mempunyai dedicated company table lain.
+
+Tentukan dulu apakah:
+
+A. `sport_center.users` memang menjadi master company/account record
+
+atau
+
+B. company seharusnya berada di table master lain dan `users.id=1` hanya admin user.
+
+Jika B:
+STOP dengan:
+
+`COMPANY_MASTER_MODEL_MISMATCH`
+
+dan jelaskan model yang benar.
+
+---
+
+# 3. CHECK REFERENCES TO ID 1
+
+Audit read-only seluruh penggunaan:
+
+`company_id = 1`
+
+pada tabel penting:
+
+* payments
+* bookings
+* accounting entries
+* invoices
+* bank accounts
+* tax
+* facilities/mappings
+* configuration
+
+Juga audit references ke:
+
+`user_id = 1`
+
+Tujuannya memastikan perubahan account_type/name tidak merusak semantic user/admin existing.
+
+Buat report:
+
+| Table | Column | Count | Semantic |
+| ----- | ------ | ----: | -------- |
+
+---
+
+# 4. DECIDE SAFE CST MASTER REPRESENTATION
+
+Jika architecture memang menggunakan record ID 1 sebagai company/account master:
+
+repair minimal:
+
+* account_type = `company`
+* company_name = canonical CST legal/display name
+* preserve account_status active
+* preserve primary identity unless business approval explicitly says otherwise
+
+Jangan menghapus admin login capability jika record yang sama juga dipakai login tanpa memahami impact.
+
+Jika user/company role dipisahkan:
+gunakan existing role/profile mechanism.
+
+Jangan overload satu row secara sembrono.
+
+---
+
+# 5. CST NAME
+
+Gunakan canonical company name yang sudah ada pada configuration/business context jika tersedia.
+
+Jika belum ada exact legal name:
+jangan invent nama legal.
+
+Gunakan approved display name:
+
+`CST`
+
+hanya jika schema mengizinkan display company name.
+
+Jika legal company name wajib tetapi belum tersedia:
+STOP:
+
+`CST_LEGAL_NAME_REQUIRED`
+
+---
+
+# 6. APPLY MASTER REPAIR — DEVELOPMENT ONLY
+
+Jika audit menunjukkan aman:
+
+buat Phase A dry-run.
+
+Tampilkan exact changes ke ID 1.
+
+Jika tidak ada conflict:
+Phase B controlled update hanya record master terkait CST ID 1.
+
+Jangan menyentuh payment 13/14 dulu.
+
+---
+
+# 7. POST-MASTER VALIDATION
+
+Setelah ID 1 valid sebagai CST company:
+
+verify:
+
+* company resolver dapat menerima ID 1
+* company record active
+* company name tersedia
+* no FK break
+* admin/auth flow tetap sehat
+* accounting entries company 1 tetap valid
+* bank account ownership/config masih konsisten
+
+Run health checks.
+
+---
+
+# 8. CREATE FACILITY OWNERSHIP MAPPINGS
+
+Business ownership approval:
+
+Facility 1 → CST / company 1
+
+Facility 7 → CST / company 1
+
+Effective from:
+
+`2026-08-09`
+
+unless more authoritative existing date is available.
+
+Evidence source:
+
+`manual_business_approval`
+
+Evidence reference:
+
+`Business owner confirmed CST company_id 1 owns Facility 1 and Facility 7`
+
+Create idempotently.
+
+Check overlap/conflict before insert.
+
+---
+
+# 9. RESOLVE PAYMENT 13/14
+
+After mapping:
+
+Payment 13:
+company resolver must produce 1.
+
+Payment 14:
+company resolver must produce 1.
+
+Expected:
+
+`deterministic = true`
+
+evidence:
+
+facility ownership mapping.
+
+---
+
+# 10. DRY-RUN PAYMENT REPAIR
+
+Now rerun controlled dry-run.
+
+Payment 13:
+
+Source:
+
+* company_id → 1
+
+Mirror:
+
+* source_payment_id = 13
+* company_id = 1
+* QRIS
+* mandiri_direct
+* bank_account_id preserved
+* entry_id = 9
+
+Accounting:
+reuse:
+`sc_payment_13`
+entry 9
+
+Payment 14 similarly:
+entry 10.
+
+Do not create duplicate accounting entries.
+
+---
+
+# 11. LEGACY COMPANY CONSISTENCY
+
+Existing entries 9/10 already have:
+
+`company_id = 1`
+
+After CST master repair:
+
+classify:
+
+`LEGACY_COMPANY_CONSISTENT`
+
+Do not rewrite company unnecessarily.
+
+---
+
+# 12. PUBLIC TAX DRY-RUN
+
+Payment 13:
+internal PPN = Rp9.910
+
+Payment 14:
+internal PPN = Rp4.955
+
+If public GL tax missing:
+
+classify:
+
+`SAFE_PUBLIC_TAX_REPAIR`
+
+but remain dry-run first.
+
+---
+
+# 13. DO NOT CHANGE GL AMOUNTS
+
+Existing GL is balanced.
+
+Preserve:
+
+Payment 13:
+100,000 debit/credit
+
+Payment 14:
+50,000 debit/credit
+
+Metadata repair only.
+
+---
+
+# 14. TEST AUTH/USER REGRESSION
+
+Because ID 1 currently appears as Admin/personal, this is critical.
+
+Test:
+
+* admin login/auth
+* permissions
+* user profile lookup
+* company lookup
+* accounting company lookup
+
+If changing account_type breaks auth or user semantics:
+
+ROLLBACK master repair.
+
+Status:
+
+`COMPANY_MASTER_MODEL_MISMATCH`
+
+Do not force.
+
+---
+
+# 15. TESTS
+
+Run:
+
+* typecheck libs
+* API typecheck
+* API build
+* ownership resolver tests
+* auth/account tests
+* accounting recovery tests
+* payment/provider tests
+* tax tests
+* git diff --check
+
+---
+
+# 16. FINAL REPORT
+
+Provide:
+
+## A. Master data model finding
+
+Is ID 1 valid to represent company?
+
+## B. References to ID 1
+
+## C. CST master repair
+
+Before/after
+
+## D. Auth regression
+
+## E. Facility ownership mappings
+
+## F. Payment 13 dry-run
+
+## G. Payment 14 dry-run
+
+## H. Accounting consistency
+
+## I. Tax repair eligibility
+
+## J. Tests/build/runtime
+
+## K. Final status
+
+Use one:
+
+`CST_MASTER_FIXED_READY_FOR_CONTROLLED_REPAIR`
+
+`COMPANY_MASTER_MODEL_MISMATCH`
+
+`CST_LEGAL_NAME_REQUIRED`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# SAFETY
+
+Do not:
+
+* production deploy
+* mass historical backfill
+* final reconcile
+* MDR posting
+* settlement accounting
+* modify balanced GL amounts
+* silently break admin/user auth

@@ -1,0 +1,627 @@
+# IMPLEMENT OWNERSHIP MAPPING + DRY-RUN REPAIR HISTORICAL SPORT CENTER PAYMENTS
+
+Lanjutkan dari state workspace saat ini.
+
+Status terakhir:
+
+`BLOCKED_BY_COMPANY_OWNERSHIP`
+
+Payment 13/14 tidak boleh direpair karena company ownership belum dapat dibuktikan secara deterministic.
+
+Tujuan task ini:
+
+1. membuat source of truth ownership Sport Center yang deterministic;
+2. menghubungkan facility/venue/merchant ke company;
+3. menggunakan mapping tersebut untuk resolver payment;
+4. melakukan DRY-RUN repair payment 13/14;
+5. jika evidence valid, menyiapkan repair idempotent tanpa langsung apply;
+6. tetap tidak mengubah desain QRIS clearing/accounting pada task ini.
+
+JANGAN mengarang company ID.
+
+---
+
+# 1. SAFETY
+
+Jangan:
+
+* hardcode company ID untuk facility;
+* menganggap semua Sport Center milik company yang sama;
+* menggunakan legacy accounting entry company sebagai ownership evidence;
+* menggunakan bank account sebagai ownership evidence;
+* mass backfill historical payments;
+* final reconcile;
+* accounting settlement posting;
+* MDR posting;
+* deploy production.
+
+Historical repair hanya boleh:
+`DRY-RUN`
+
+kecuali task secara eksplisit nanti mendapat approval untuk apply.
+
+---
+
+# 2. AUDIT OWNERSHIP SOURCES EXISTING
+
+Cari apakah code/database sudah memiliki relasi seperti:
+
+* facility → company
+* venue → company
+* branch → company
+* merchant/store → company
+* location → company
+* sport center configuration → company
+
+Audit tables/schema seperti:
+
+`sport_center.facilities`
+
+`sport_center.venues`
+
+`sport_center.locations`
+
+`sport_center.settings`
+
+merchant/store/config tables
+
+dan table company master.
+
+Jangan membuat mapping baru sebelum memastikan source existing memang tidak ada.
+
+---
+
+# 3. CANONICAL OWNERSHIP MODEL
+
+Jika tidak ada source of truth ownership yang memadai, buat model additive/backward-compatible.
+
+Contoh preferred:
+
+`sport_center.facility_company_mappings`
+
+Minimal:
+
+* `id`
+* `facility_id`
+* `company_id`
+* `effective_from`
+* `effective_until`
+* `is_active`
+* `source`
+* `notes`
+* `created_at`
+* `updated_at`
+
+Constraint penting:
+
+* satu facility tidak boleh mempunyai dua active overlapping ownership mapping untuk tanggal yang sama;
+* company harus valid/existing;
+* facility harus valid/existing.
+
+Jika ownership lebih tepat pada venue/location level, gunakan model yang sesuai existing architecture.
+
+Jangan membuat dua competing source of truth.
+
+---
+
+# 4. OWNERSHIP PRIORITY
+
+Resolver company harus menggunakan evidence priority yang deterministic.
+
+Recommended:
+
+1. payment.company_id jika sudah valid;
+2. booking.company_id jika ada;
+3. facility ownership mapping;
+4. venue/location ownership mapping;
+5. validated merchant/store mapping;
+6. explicit Sport Center configuration.
+
+Jika beberapa evidence tersedia dan konflik:
+
+return:
+
+`AMBIGUOUS_COMPANY_OWNERSHIP`
+
+Jangan pilih salah satu secara arbitrary.
+
+---
+
+# 5. EFFECTIVE DATE
+
+Ownership harus dinilai berdasarkan tanggal transaksi/payment.
+
+Gunakan:
+
+`paid_at`
+
+atau booking/payment business date yang canonical.
+
+Jika facility berpindah company di masa depan, historical payment tetap harus resolve ke company yang berlaku saat transaksi.
+
+Contoh:
+
+Facility 1:
+
+2026-01-01 s/d 2026-12-31
+→ company 24
+
+2027-01-01+
+→ company 31
+
+Payment 2026 harus tetap company 24.
+
+---
+
+# 6. OWNERSHIP CONFIG VALIDATION
+
+Sebelum insert mapping:
+
+validasi company existing.
+
+Jangan menggunakan legacy entry:
+
+`accounting_entries.company_id = 1`
+
+sebagai bukti ownership.
+
+Ownership harus berasal dari approved operational/business mapping.
+
+Jika belum diketahui company yang benar untuk facility 1 dan 7:
+
+JANGAN invent.
+
+Buat report:
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+dan berhenti sebelum repair.
+
+---
+
+# 7. FACILITY 1 & 7 SPECIFIC AUDIT
+
+Audit:
+
+Facility 1 — Lapangan Badminton A
+
+Facility 7 — Meja Billiard
+
+Tampilkan:
+
+* facility ID;
+* facility name;
+* venue/location;
+* current config;
+* existing owner reference jika ada;
+* candidate company mappings;
+* evidence source;
+* apakah deterministic.
+
+Jangan update dulu.
+
+---
+
+# 8. ADMIN/CONFIG SURFACE
+
+Jika project sudah punya settings/admin mechanism yang sesuai, tambahkan cara aman untuk mengelola ownership mapping.
+
+Minimal harus bisa:
+
+* assign facility → company;
+* effective date;
+* deactivate/supersede mapping;
+* audit who/when changed.
+
+Jika UI terlalu besar untuk scope ini, cukup implement backend/config table + read-only/admin API minimal.
+
+Jangan expose ke public user.
+
+---
+
+# 9. RESOLVER UPDATE
+
+Update:
+
+`resolvePaymentCompany(...)`
+
+agar menggunakan canonical ownership mapping.
+
+Return:
+
+* `companyId`
+* `evidenceSource`
+* `evidenceReference`
+* `effectiveDate`
+* `deterministic`
+* `reason`
+
+Contoh:
+
+`companyId = 24`
+
+`evidenceSource = facility_company_mapping`
+
+`evidenceReference = facility:1`
+
+`effectiveDate = 2026-08-09`
+
+`deterministic = true`
+
+---
+
+# 10. TEST OWNERSHIP RESOLVER
+
+Tambahkan test:
+
+### Single mapping
+
+→ resolves company.
+
+### Effective date
+
+→ historical date resolves correct owner.
+
+### Future owner
+
+→ historical payment tidak berubah.
+
+### Overlap conflict
+
+→ ambiguous / rejected.
+
+### No mapping
+
+→ NULL.
+
+### Legacy accounting company
+
+→ tidak digunakan sebagai ownership evidence.
+
+---
+
+# 11. PAYMENT 13/14 DRY-RUN
+
+Setelah mapping tersedia, lakukan DRY-RUN untuk:
+
+Payment 13
+
+Payment 14
+
+Tampilkan:
+
+## Source
+
+* payment ID
+* booking
+* facility
+* paid_at
+* source company
+
+## Ownership
+
+* resolved company
+* evidence source
+* mapping ID
+* effective date
+
+## Mirror
+
+* current mirror company
+* expected mirror company
+
+## Accounting
+
+* existing entry ID
+* existing company
+* expected canonical company
+
+## Tax
+
+* internal tax
+* public GL tax status
+
+No UPDATE.
+
+---
+
+# 12. REPAIR PLAN
+
+Jika company resolve deterministic, generate exact repair plan:
+
+For each payment:
+
+1. update source payment company if NULL;
+2. update mirror:
+
+   * source_payment_id
+   * company_id
+   * provider metadata
+   * bank_account_id
+   * expected settlement
+   * entry_id
+3. upgrade existing accounting entry metadata:
+
+   * source = sport_center_payment
+   * source_payment_id
+   * company_id
+   * payment_method
+   * payment_provider
+   * bank_account_id
+4. keep existing correlation:
+   `sc_payment_{payment_id}`
+5. preserve GL lines if already balanced;
+6. create missing `gl_tax_lines` only if deterministic and not duplicate.
+
+But:
+DO NOT APPLY.
+
+Output SQL/operations plan only or dry-run result.
+
+---
+
+# 13. IDPOTENCY
+
+Repair mechanism must be safe to rerun.
+
+Second run should produce:
+
+`NO_CHANGES_REQUIRED`
+
+for already-canonical rows.
+
+Use:
+
+* unique correlation;
+* source payment ID;
+* NOT EXISTS for tax;
+* COALESCE safe metadata updates.
+
+---
+
+# 14. GL SAFETY
+
+Do not regenerate balanced GL just because metadata is incomplete.
+
+If:
+
+debit = credit
+
+and nominal correct,
+
+preserve GL lines.
+
+Only repair metadata/linkage.
+
+If GL amount is wrong:
+
+flag:
+
+`GL_REPAIR_REQUIRES_SEPARATE_APPROVAL`.
+
+Do not silently modify values.
+
+---
+
+# 15. TAX SAFETY
+
+Payment 13/14 have internal tax rows but public GL tax missing.
+
+If canonical accounting entry and company are resolved:
+
+dry-run expected public tax repair:
+
+`accounting_entry_id`
+`company_id`
+`tax_type = PPN_OUT`
+`base_amount`
+`tax_amount`
+`direction = out`
+`period`
+`entity_type`
+`entity_id`
+
+Do not insert yet.
+
+Ensure no duplicate.
+
+---
+
+# 16. COMPANY MISMATCH POLICY
+
+If existing accounting entry has:
+
+`company_id = 1`
+
+but canonical ownership resolves to another company:
+
+do not treat legacy company as authority.
+
+Dry-run should report:
+
+`LEGACY_COMPANY_MISMATCH`
+
+with:
+
+existing company
+vs
+resolved company.
+
+Repair must wait for explicit approval.
+
+---
+
+# 17. MIRROR CONSISTENCY
+
+After ownership is available, new payment mirror must inherit same company.
+
+Add test:
+
+# source company
+
+# mirror company
+
+accounting company.
+
+Mismatch:
+posting failed/review.
+
+---
+
+# 18. NEW PAYMENT REGRESSION
+
+Ensure new confirmed payments:
+
+booking/facility
+→ ownership resolver
+→ company_id
+→ mirror
+→ accounting
+
+without requiring historical backfill.
+
+Manual QRIS and Paylabs must both use the same company resolver.
+
+---
+
+# 19. CURRENT QRIS ACCOUNTING DESIGN
+
+Do not change:
+
+`QRIS → Bank Mandiri CST`
+
+in this task.
+
+Keep:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+as follow-up.
+
+This task only solves ownership + metadata repair readiness.
+
+---
+
+# 20. READ-ONLY AUDIT ENDPOINT
+
+Extend existing endpoint if useful:
+
+`GET /api/admin/audit-sport-center-payment/:sourcePaymentId`
+
+Include ownership block:
+
+* resolved company
+* evidence source
+* mapping ID
+* effective date
+* ambiguity reason
+
+Still read-only.
+
+---
+
+# 21. HISTORICAL OWNERSHIP DRY-RUN
+
+Run classifier over confirmed Sport Center payments with `company_id IS NULL`.
+
+Report counts:
+
+* `SAFE_FACILITY_COMPANY_BACKFILL`
+* `SAFE_VENUE_COMPANY_BACKFILL`
+* `AMBIGUOUS_OWNERSHIP`
+* `NO_OWNERSHIP_EVIDENCE`
+
+Do not apply.
+
+---
+
+# 22. TEST / VALIDATION
+
+Run:
+
+1. `pnpm run typecheck:libs`
+2. API typecheck
+3. API build
+4. ownership resolver tests
+5. accounting recovery tests
+6. payment/provider tests
+7. audit endpoint tests
+8. `git diff --check`
+9. strict QRIS UAT regression
+
+Strict QRIS UAT must remain:
+14/14 PASS
+14/14 parity
+no persistence.
+
+---
+
+# 23. OUTPUT
+
+Provide:
+
+## A. Existing ownership sources
+
+## B. Ownership model implemented
+
+## C. Facility 1 ownership
+
+## D. Facility 7 ownership
+
+## E. Resolver behavior
+
+## F. Payment 13 dry-run
+
+## G. Payment 14 dry-run
+
+## H. Legacy company mismatch
+
+## I. Repair plan
+
+## J. Public tax GL repair plan
+
+## K. Historical ownership classifier
+
+## L. Tests/typecheck/build
+
+## M. Strict QRIS regression
+
+## N. Remaining risks
+
+## O. Final status
+
+Use one:
+
+`OWNERSHIP_READY_FOR_REPAIR_APPROVAL`
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+`BLOCKED_BY_AMBIGUOUS_OWNERSHIP`
+
+---
+
+# ACCEPTANCE
+
+Ready only if:
+
+1. company ownership source deterministic;
+2. facility mapping effective-dated;
+3. no hardcoded company fallback;
+4. payment 13/14 can resolve company with evidence;
+5. repair remains dry-run;
+6. no duplicate accounting;
+7. GL remains balanced;
+8. tax repair is explicit;
+9. strict matcher unchanged.
+
+# SAFETY
+
+Do not:
+
+* apply historical repair;
+* mass backfill;
+* deploy production;
+* final reconciliation;
+* MDR posting;
+* settlement accounting;
+* redesign QRIS clearing account.

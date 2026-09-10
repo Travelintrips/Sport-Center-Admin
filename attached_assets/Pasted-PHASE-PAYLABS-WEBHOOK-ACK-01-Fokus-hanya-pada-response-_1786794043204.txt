@@ -1,0 +1,92 @@
+PHASE PAYLABS-WEBHOOK-ACK-01
+
+Fokus hanya pada response balik merchant ke Paylabs untuk endpoint:
+
+POST /api/paylabs/webhook
+
+Paylabs menyampaikan bahwa sistem mereka tidak menerima response balik sesuai dokumentasi asynchronous notification.
+
+Audit dua arah secara terpisah:
+
+A. INBOUND
+Paylabs → Merchant
+- verify X-SIGNATURE menggunakan PAYLABS_SANDBOX_PUBLIC_KEY
+- fail closed jika invalid
+
+B. OUTBOUND ACK
+Merchant → Paylabs
+- setelah callback valid dan berhasil dipersist/finalize,
+  kirim response sesuai dokumentasi Paylabs
+
+Response wajib:
+
+HTTP 200
+
+Headers:
+Content-Type: application/json;charset=utf-8
+X-TIMESTAMP: timestamp response merchant
+X-PARTNER-ID: MERCHANT_ID_SANDBOX
+X-REQUEST-ID: requestId callback Paylabs
+X-SIGNATURE: signature response merchant
+
+Body:
+{
+  "merchantId": "<MERCHANT_ID_SANDBOX>",
+  "requestId": "<requestId callback Paylabs>",
+  "errCode": "0"
+}
+
+Signature response merchant harus dibuat menggunakan:
+PAYLABS_SANDBOX_PRIVATE_KEY
+
+Jangan menggunakan public key untuk sign response.
+
+Canonical string response harus mengikuti aturan Paylabs:
+POST:<callback-path>:<sha256-minified-response-body>:<X-TIMESTAMP>
+
+Gunakan exact callback path:
+/api/paylabs/webhook
+
+Audit apakah implementation saat ini:
+1. return HTTP 400 saat signature inbound invalid;
+2. return HTTP 200 saat valid;
+3. mengirim header X-TIMESTAMP;
+4. mengirim header X-SIGNATURE;
+5. mengirim X-PARTNER-ID;
+6. mengirim X-REQUEST-ID;
+7. body response hanya merchantId/requestId/errCode sesuai kontrak.
+
+Tambahkan log aman:
+
+[PAYLABS-ACK] inboundSignatureValid=true/false
+[PAYLABS-ACK] finalizeResult=success/already_confirmed/failed
+[PAYLABS-ACK] responseStatus=200
+[PAYLABS-ACK] responseSigned=true
+[PAYLABS-ACK] requestId=<safe>
+[PAYLABS-ACK] partnerId=010728
+
+Jangan log:
+- private key
+- public key
+- full signature
+
+Jika inbound signature masih invalid:
+jangan mengirim success ACK palsu.
+Tetap fail closed.
+
+Setelah PAYLABS_SANDBOX_PUBLIC_KEY yang benar dipasang:
+1. lakukan satu pembayaran sandbox baru;
+2. pastikan inbound signatureValid=true;
+3. finalizePayment berhasil;
+4. kirim ACK signed HTTP 200;
+5. cek Paylabs tidak retry callback lagi.
+
+Final report:
+- inbound verification result
+- ACK headers implemented yes/no
+- ACK body implemented yes/no
+- ACK signed with merchant private key yes/no
+- HTTP response code
+- retry callback observed yes/no
+
+Jangan ubah booking/payment business logic lain.

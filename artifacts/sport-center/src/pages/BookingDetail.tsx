@@ -53,6 +53,31 @@ const DEFAULT_QRIS_IMAGE = `${BASE}/uploads/qris-263226c1-c51d-4353-9165-cedaba3
 
 type PaymentMethod = "transfer" | "qris" | "paylabs";
 
+// "paylabs" is the gateway grouping row in admin settings, not a provider
+// payment method. The child methods determine whether the Paylabs option is
+// available to customers.
+const PAYLABS_CHILD_METHOD_IDS = new Set([
+  "qris",
+  "bri",
+  "bca",
+  "bni",
+  "mandiri",
+  "permata",
+  "cimb",
+  "btn",
+  "danamon",
+  "ovo",
+  "dana",
+  "shopeepay",
+  "linkaja",
+  "gopay",
+  "maybank",
+  "bsi",
+  "muamalat",
+  "sinarmas",
+  "ina",
+]);
+
 interface PaylabsPublicConfig {
   sandboxMode: boolean;
   configured: boolean;
@@ -104,7 +129,13 @@ export default function BookingDetail() {
     paylabsConfig?.paymentMethodsConfig?.some(
       (method) => method.id.trim().toLowerCase() === id && method.active,
     ) ?? false;
-  const hasPaylabs = isActiveAdminPaymentMethod("paylabs") && (paylabsConfig?.configured ?? false);
+  const hasActivePaylabsChildMethod =
+    paylabsConfig?.paymentMethodsConfig?.some((method) => {
+      const id = method.id.trim().toLowerCase();
+      return PAYLABS_CHILD_METHOD_IDS.has(id) && method.active;
+    }) ?? false;
+  const hasPaylabs =
+    hasActivePaylabsChildMethod && (paylabsConfig?.configured ?? false);
 
   const payDp = usePayBookingDp({
     mutation: {
@@ -191,19 +222,39 @@ export default function BookingDetail() {
     const paymentTotal = groupTotal > 0
       ? groupTotal
       : Number((booking as any).grandTotal ?? booking.totalPrice);
-    const isDpMode =
-      !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    // downPayment means a DP has been configured; isDpPaid means the admin
+    // has already confirmed a DP proof. The former must drive the first
+    // upload so a configured DP is not misclassified as full_payment.
+    const hasConfiguredDp = Number((booking as any).downPayment || 0) > 0;
+    const isDpMode = hasConfiguredDp || !!(booking as any).isDpPaid;
     const groupInfo = (booking as any).groupInfo as { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null;
     let detectedType = "full_payment";
 
     let detectedAmount: number = paymentTotal;
 
     if (isDpMode) {
-      const hasDpActive = bPayments.some(
+      const hasPendingDp = bPayments.some(
         (p: any) =>
-          p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
+          p.paymentType === "dp" && p.status === "pending",
       );
-      if (!hasDpActive) {
+      const hasConfirmedDp = bPayments.some(
+        (p: any) => p.paymentType === "dp" && p.status === "confirmed",
+      );
+      const dpAlreadyConfirmed = hasConfirmedDp || !!(booking as any).isDpPaid;
+
+      if (hasPendingDp && !dpAlreadyConfirmed) {
+        toast({
+          title: t("Bukti DP sedang diverifikasi", "DP proof is being verified"),
+          description: t(
+            "Tunggu konfirmasi admin sebelum mengupload bukti pelunasan.",
+            "Wait for admin confirmation before uploading the final payment proof.",
+          ),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!dpAlreadyConfirmed) {
         detectedType = "dp";
         detectedAmount = Number((booking as any).downPayment || 0);
       } else {
@@ -233,7 +284,7 @@ export default function BookingDetail() {
         throw new Error(err.error || "Upload gagal");
       }
 
-      const { url, objectPath } = await uploadResp.json();
+      const { url, objectPath, ocrScanToken, ocrScan } = await uploadResp.json();
       setUploadProgress("done");
 
       submitPayment.mutate({
@@ -242,6 +293,10 @@ export default function BookingDetail() {
           amount: detectedAmount,
           proofUrl: url ?? objectPath,
           paymentMethod: paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
+          paymentProvider: paymentMethod === "qris" ? "mandiri_direct" : undefined,
+          ...(paymentMethod === "qris" ? { paymentProvider: "mandiri_direct" as const } : {}),
+          ocrScanToken,
+          ocrScan,
           notes: notes || undefined,
           paymentType: detectedType as any,
         },
@@ -407,6 +462,19 @@ export default function BookingDetail() {
                   <div>{t("Harga sesi ini", "This session price")}</div>
                   <div>Rp {booking.totalPrice.toLocaleString("id-ID")}</div>
                 </div>
+                  {Array.isArray((booking as any).groupInfo?.additionalCharges) && (booking as any).groupInfo.additionalCharges.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+                      <div className="mb-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                        {t("Biaya tambahan (sekali untuk seluruh booking)", "Additional charges (once for the entire booking)")}
+                      </div>
+                      {(booking as any).groupInfo.additionalCharges.map((charge: any, index: number) => (
+                        <div key={index} className="flex justify-between text-xs text-amber-900 dark:text-amber-100">
+                          <span>{charge.name}</span>
+                          <span>Rp {Number(charge.amount).toLocaleString("id-ID")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 <div className="flex justify-between items-center text-sm text-muted-foreground">
                   <div>{t("Jumlah sesi", "Total sessions")}</div>
                   <div>{(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")}</div>
@@ -435,6 +503,19 @@ export default function BookingDetail() {
                 const ppnVal = hasPpn ? (gt - dppVal) : 0;
                 return (
                   <div className="space-y-1.5 w-full">
+                    {Array.isArray((booking as any).additionalCharges) && (booking as any).additionalCharges.length > 0 && (
+                      <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+                        <div className="mb-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                          {t("Biaya tambahan", "Additional charges")}
+                        </div>
+                        {(booking as any).additionalCharges.map((charge: any, index: number) => (
+                          <div key={index} className="flex justify-between text-xs text-amber-900 dark:text-amber-100">
+                            <span>{charge.name}</span>
+                            <span>Rp {Number(charge.amount).toLocaleString("id-ID")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {hasPpn && (
                       <>
                         <div className="flex justify-between items-center text-sm text-muted-foreground">
@@ -521,7 +602,7 @@ export default function BookingDetail() {
               <div className="flex items-start gap-3">
                 <PartyPopper size={22} className="text-purple-600 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,43% Diterapkan", "Event Booking — 21.43% Discount Applied")}</div>
+                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,4% Diterapkan", "Event Booking — 21.4% Discount Applied")}</div>
                   <div className="text-xs mt-0.5 text-purple-700">
                     {t("Harga fasilitas mendapat diskon khusus event.", "Facility price has been discounted for this event booking.")}
                   </div>
@@ -574,7 +655,7 @@ export default function BookingDetail() {
                   </div>
                 )}
                 {/* DP Info Banner */}
-                {(booking as any).isDpPaid && (() => {
+                {(Number((booking as any).downPayment || 0) > 0 || (booking as any).isDpPaid) && (() => {
                   const bPayments = ((booking as any).payments as any[]) ?? [];
                   const dpConfirmed = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "confirmed");
                   const dpPending = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "pending");
@@ -632,10 +713,11 @@ export default function BookingDetail() {
                         <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
+                        <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Siap Dibayar", "DP Ready for Payment")}</div>
                         <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
                           <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
-                          <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {remaining.toLocaleString("id-ID")}</span></div>
+                          <div>{t("Langkah berikutnya: upload bukti DP", "Next step: upload DP proof")}</div>
+                          <div>{t("Sisa setelah DP", "Remaining after DP")}: <span className="font-bold">Rp {remaining.toLocaleString("id-ID")}</span></div>
                         </div>
                       </div>
                     </div>
@@ -643,7 +725,7 @@ export default function BookingDetail() {
                 })()}
 
                 {/* DP Toggle (only if isDpPaid is false) */}
-                {!(booking as any).isDpPaid && !dpMode && !paymentMethod && (
+                {!(Number((booking as any).downPayment || 0) > 0 || (booking as any).isDpPaid) && !dpMode && !paymentMethod && (
                   <div className="flex items-center justify-between p-3 rounded-xl border border-dashed border-violet-300 dark:border-violet-700 bg-violet-50/50 dark:bg-violet-900/10">
                     <div className="text-sm text-muted-foreground">{t("Ingin bayar sebagian (DP)?", "Want to pay partially (DP)?")}</div>
                     <button
@@ -657,7 +739,7 @@ export default function BookingDetail() {
                 )}
 
                 {/* DP Input Mode */}
-                {dpMode && !(booking as any).isDpPaid && (
+                {dpMode && !(Number((booking as any).downPayment || 0) > 0 || (booking as any).isDpPaid) && (
                   <div className="space-y-3 p-4 rounded-xl border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("Bayar Down Payment", "Pay Down Payment")}</div>
@@ -742,6 +824,17 @@ export default function BookingDetail() {
                             </span>{" "}
                             <span className="text-xs text-muted-foreground font-normal">
                               {t("(upload bukti pelunasan)", "(upload payment proof)")}
+                            </span>{" "}
+                            {t("via:", "via:")}
+                          </>
+                        ) : Number((booking as any).downPayment || 0) > 0 ? (
+                          <>
+                            {t("Bayar DP", "Pay down payment")}{" "}
+                            <span className="text-primary text-base">
+                              Rp {Number((booking as any).downPayment).toLocaleString("id-ID")}
+                            </span>{" "}
+                            <span className="text-xs text-muted-foreground font-normal">
+                              {t("(upload bukti DP)", "(upload DP proof)")}
                             </span>{" "}
                             {t("via:", "via:")}
                           </>
@@ -1029,16 +1122,9 @@ export default function BookingDetail() {
                   </a>
                 </div>
 
-                {/* Reschedule + Tambah Waktu — only for confirmed */}
+                {/* Reschedule — only for confirmed */}
                 {booking.status === "confirmed" && (
                   <div className="border-t border-green-200 pt-4 mt-2 space-y-2">
-                    <Button
-                      variant="outline"
-                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
-                      onClick={() => setShowExtend(true)}
-                    >
-                      <Clock size={16} /> {t("Tambah Waktu", "Extend Time")}
-                    </Button>
                     <Button
                       variant="outline"
                       className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
@@ -1098,6 +1184,35 @@ export default function BookingDetail() {
                     )}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tambah waktu — available before payment and while awaiting confirmation */}
+          {["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) && (
+            <Card className="border-orange-200 bg-orange-50/50">
+              <CardContent className="p-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                    <Clock size={20} className="text-orange-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-orange-900">{t("Ingin tambah waktu bermain?", "Need more playing time?")}</h3>
+                    <p className="text-sm text-orange-700 mt-1">
+                      {t(
+                        "Ajukan tambahan durasi sebelum pembayaran. Perpanjangan akan dicek ketersediaannya dan disetujui admin.",
+                        "Request extra time before payment. Availability will be checked and an admin will review it."
+                      )}
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="w-full mt-3 border-orange-300 text-orange-700 hover:bg-orange-100 gap-2"
+                      onClick={() => setShowExtend(true)}
+                    >
+                      <Clock size={16} /> {t("Tambah Waktu Booking", "Extend Booking Time")}
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -1210,6 +1325,8 @@ function PaylabsPaymentSection({
     sandboxMode: boolean;
   } | null>(null);
   const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error" | "no_inquiry">("waiting");
+  const [syncing, setSyncing] = useState(false);
+  const [syncAttempts, setSyncAttempts] = useState(0);
 
   // ── Fetch fresh config every time this section is opened ─────────────────
   const [freshConfig, setFreshConfig] = useState<PaylabsPublicConfig | null>(null);
@@ -1220,8 +1337,11 @@ function PaylabsPaymentSection({
       .catch(() => {});
   }, [base]);
 
-  // ── Active methods — always from the freshly fetched config ──────────────
-  const activeMethods = (freshConfig?.paymentMethodsConfig ?? []).filter((m) => m.active);
+  // ── Active child methods — the "paylabs" row is only a grouping label ─────
+  const activeMethods = (freshConfig?.paymentMethodsConfig ?? []).filter((m) => {
+    const id = m.id.trim().toLowerCase();
+    return m.active && PAYLABS_CHILD_METHOD_IDS.has(id);
+  });
   const sandboxMode   = freshConfig?.sandboxMode ?? false;
 
   // Fallback while config is loading (show skeleton) or if no methods configured
@@ -1271,18 +1391,56 @@ function PaylabsPaymentSection({
         });
         if (!res.ok) return;
         const data = await res.json();
-        const localStatus = (data.local?.status ?? "").toUpperCase();
-        const paylabsStatus = String(data.paylabs?.status ?? data.paylabs?.tradeState ?? "").toUpperCase();
-        const isPaid = localStatus === "SUCCESS" || paylabsStatus === "SUCCESS" || paylabsStatus === "02" || paylabsStatus === "PAID";
-        if (isPaid) {
+        const localStatus = String(data.local?.status ?? "").toUpperCase();
+        const reconciliationOutcome = String(data.reconciliation?.outcome ?? "").toLowerCase();
+        const backendConfirmed =
+          localStatus === "SUCCESS" ||
+          reconciliationOutcome === "confirmed" ||
+          reconciliationOutcome === "already_confirmed";
+
+        // Paylabs can report a successful provider transaction before our
+        // internal booking/payment transaction commits. Do not show the
+        // customer a false success state based only on the provider response.
+        if (backendConfirmed) {
+          setSyncing(false);
           setPollStatus("paid");
           clearInterval(iv);
           onSuccess();
           toast({ title: t("Pembayaran Berhasil! 🎉", "Payment Successful! 🎉"), description: t("Booking Anda telah dikonfirmasi.", "Your booking has been confirmed.") });
         }
+        if (data.reconciliation && !backendConfirmed) {
+          const outcome = reconciliationOutcome;
+          const requiresManualReview = [
+            "transaction_not_found",
+            "booking_not_found",
+            "terminal_booking_manual_review",
+          ].includes(outcome);
+
+          // A database error can be transient (for example while the
+          // provider callback and the browser inquiry race). Keep the
+          // recovery loop alive instead of showing a destructive toast and
+          // leaving the customer with no way to retry.
+          if (!requiresManualReview) {
+            setSyncing(true);
+            setSyncAttempts((attempts) => {
+              const nextAttempts = attempts + 1;
+              if (nextAttempts >= 3) {
+                clearInterval(iv);
+                setSyncing(false);
+                setPollStatus("error");
+              }
+              return nextAttempts;
+            });
+          } else {
+            clearInterval(iv);
+            setSyncing(false);
+            setPollStatus("error");
+          }
+        }
         // Inquiry endpoint not supported for this merchant — stop polling (rely on webhook + manual refresh)
         if (data.inquiryNotSupported) {
           clearInterval(iv);
+          setSyncing(false);
           setPollStatus("no_inquiry");
         }
       } catch { /* ignore */ }
@@ -1371,7 +1529,7 @@ function PaylabsPaymentSection({
       )}
 
       {/* Payment result */}
-      {payment && !loading && pollStatus !== "paid" && (
+      {payment && !loading && (pollStatus === "waiting" || pollStatus === "no_inquiry") && (
         <div className="space-y-4">
           {/* QRIS */}
           {payment.qrContent && (
@@ -1434,7 +1592,15 @@ function PaylabsPaymentSection({
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-200">
             <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
             <div className="text-xs text-blue-700">
-              {t("Menunggu pembayaran... Halaman otomatis update setelah lunas.", "Waiting for payment... Page auto-updates once paid.")}
+              {syncing
+                ? t(
+                    "Pembayaran sudah terdeteksi, sedang menyinkronkan booking...",
+                    "Payment detected, synchronizing your booking...",
+                  )
+                : t(
+                    "Menunggu pembayaran... Halaman otomatis update setelah lunas.",
+                    "Waiting for payment... Page auto-updates once paid.",
+                  )}
             </div>
           </div>
         </div>
@@ -1448,6 +1614,23 @@ function PaylabsPaymentSection({
           </div>
           <div className="font-bold text-lg text-green-800">{t("Pembayaran Berhasil!", "Payment Successful!")}</div>
           <div className="text-sm text-green-700">{t("Booking Anda sedang dikonfirmasi...", "Your booking is being confirmed...")}</div>
+        </div>
+      )}
+
+      {pollStatus === "error" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-800 space-y-3">
+          <p>
+            {t(
+              "Pembayaran terdeteksi di Paylabs, tetapi status booking belum tersinkron. Jangan membayar ulang.",
+              "Payment was detected by Paylabs, but the booking status is not synced yet. Do not pay again.",
+            )}
+          </p>
+          <p className="text-xs text-amber-700/80">
+            {t(
+              "Sistem akan memproses ulang notifikasi Paylabs secara otomatis. Hubungi admin untuk pengecekan transaksi dan jangan melakukan pembayaran kedua.",
+              "The system will retry the Paylabs notification automatically. Contact the admin to verify the transaction and do not pay a second time.",
+            )}
+          </p>
         </div>
       )}
     </div>
@@ -1547,7 +1730,7 @@ function UploadProofForm({
         )}
 
         <input
-          ref={fileInputRef}
+          ref={fileInputRef as unknown as React.Ref<HTMLInputElement>}
           type="file"
           accept="image/jpeg,image/png,image/webp,application/pdf"
           className="hidden"

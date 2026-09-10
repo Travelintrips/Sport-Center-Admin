@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PaymentPaymentProvider } from './paymentPaymentProvider';
 import type { PaymentPaymentType } from './paymentPaymentType';
 import type { PaymentStatus } from './paymentStatus';
 
@@ -16,10 +17,24 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  /** @nullable */
+  paymentProvider?: PaymentPaymentProvider;
+  providerName: string;
+  providerId: string;
+  providerOrderId: string;
+  bankAccountId: string;
+  /** @nullable */
+  providerReference?: string | null;
+  /** @nullable */
+  merchantTradeNo?: string | null;
+  /** @nullable */
+  providerTradeNo?: string | null;
   paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;
+  /** @nullable */
+  paidAt?: string | null;
   /** @nullable */
   notes?: string | null;
   createdAt?: string;

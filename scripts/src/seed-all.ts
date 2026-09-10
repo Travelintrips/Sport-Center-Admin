@@ -2,7 +2,10 @@ import crypto from "crypto";
 import { db, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const SECRET = process.env.SESSION_SECRET || "sport-center-secret-key-2024";
+const SECRET = process.env.SESSION_SECRET ?? "";
+if (!SECRET) {
+  throw new Error("SESSION_SECRET is required; refusing to seed with a default secret.");
+}
 
 function hashPassword(password: string): string {
   return crypto.createHmac("sha256", SECRET).update(password).digest("hex");
@@ -40,9 +43,7 @@ async function main() {
   }
 
   // Seed facilities
-  const existingFacilities = await db.select().from(facilitiesTable).limit(1);
-  if (existingFacilities.length === 0) {
-    await db.insert(facilitiesTable).values([
+  const facilitySeed = [
       {
         name: "Lapangan Badminton A",
         category: "Badminton",
@@ -127,8 +128,13 @@ async function main() {
         capacity: 4,
         isActive: true,
       },
-    ]);
-    console.log("Facilities seeded (7 facilities)");
+    ];
+  const existingFacilities = await db.select({ name: facilitiesTable.name }).from(facilitiesTable);
+  const existingNames = new Set(existingFacilities.map((facility) => facility.name));
+  const missingFacilities = facilitySeed.filter((facility) => !existingNames.has(facility.name));
+  if (missingFacilities.length > 0) {
+    await db.insert(facilitiesTable).values(missingFacilities);
+    console.log(`Facilities seeded (${missingFacilities.length} missing facilities added)`);
   } else {
     console.log("Facilities already exist, skipping");
   }

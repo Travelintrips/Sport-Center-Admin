@@ -1,0 +1,330 @@
+# CF-SC-7D — COMPLETE READY PAYMENT MATRIX
+## DEV ROLLBACK-ONLY
+## ONLY SHAPES WITH CANONICAL CONFIG
+
+CURRENT VERIFIED STATE
+
+CF-SC-7C canonical finance config discovery completed.
+
+DEV canonical finance config:
+
+Company:
+CST / PT Cahaya Sejati Teknologi
+
+Settlement:
+Mandiri Direct
+one-business-day settlement
+
+Tax:
+PPN_OUT_11
+11%
+sport booking scope
+
+COA source:
+sport_center.coa_accounts
+
+Current readiness:
+
+READY_FOR_ROLLBACK_FIXTURE:
+- QRIS full_payment
+- QRIS DP
+- QRIS pelunasan
+- Group payment
+
+BLOCKED_CONFIG_MISSING:
+- Transfer Bank variants
+- Paylabs
+- unknown provider
+
+LEGACY_ONLY:
+- historical recovery
+
+DO NOT:
+- invent Transfer Bank config
+- invent Paylabs config
+- guess unknown provider
+- mutate PROD
+- cut over PROD
+- clean legacy objects
+- modify BizPortal yet
+
+OBJECTIVE
+
+Runtime-prove every currently READY payment shape using rollback-only
+DEV fixtures.
+
+============================================================
+PHASE 1 — ENVIRONMENT GATE
+============================================================
+
+Require:
+
+APP_ENV=development
+NODE_ENV!=production
+SUPABASE_DATABASE_URL_DEV verified
+SPORT_CENTER_FINANCE_MODE=central
+
+Fail closed otherwise.
+
+============================================================
+PHASE 2 — QRIS FULL CONTROL
+============================================================
+
+Re-run existing proven control:
+
+QRIS
+mandiri_direct
+full_payment
+
+Verify:
+
+finance event = 1
+central processing = 1
+accounting effect = 1
+balanced journal
+tax = 11%
+public.bank_mutations = 1
+sport_center.bank_mutations = 0
+settlement batch = 1
+canonical_bank_mutation_id populated
+legacy bank_mutation_id NULL
+retry returns same identities
+
+Rollback.
+
+============================================================
+PHASE 3 — QRIS DP
+============================================================
+
+Create controlled DEV DP fixture using canonical config only.
+
+Required:
+
+payment_type = dp
+
+One payment ID
+→ one finance event
+→ one accounting effect
+→ one public mutation
+→ one settlement batch
+
+No booking-level accounting.
+
+Tax and settlement use canonical configuration.
+
+Retry idempotent.
+
+Rollback.
+
+============================================================
+PHASE 4 — QRIS PELUNASAN
+============================================================
+
+Create pelunasan fixture tied to the same logical booking flow
+but using a DISTINCT payment ID.
+
+Required:
+
+DP payment ID != pelunasan payment ID
+
+Pelunasan:
+→ separate finance event
+→ separate accounting identity
+→ separate public mutation identity
+
+No collision by booking ID or order number.
+
+Retry idempotent.
+
+Rollback.
+
+============================================================
+PHASE 5 — DP + PELUNASAN COMBINED PROOF
+============================================================
+
+Create one controlled booking/group scenario:
+
+DP
++
+pelunasan
+
+Verify:
+
+2 canonical payments
+2 finance events
+2 accounting effects
+2 public mutations
+
+Total accounting amount across both payments
+must equal total confirmed payment amount.
+
+No duplicate booking accounting.
+
+Rollback.
+
+============================================================
+PHASE 6 — GROUP PAYMENT
+============================================================
+
+Create controlled group-payment fixture.
+
+Required identity remains payment-level.
+
+Verify:
+
+one group payment
+→ exactly one finance event
+→ exactly one financial effect
+
+Do NOT multiply accounting by number of bookings.
+
+Required:
+
+new accounting entry with source=sport_center_booking = 0
+
+No live call to:
+createPublicAccountingEntryForGroup()
+
+Public mutation uses:
+canonical_key = sport_center:payment:<paymentId>
+
+Rollback.
+
+============================================================
+PHASE 7 — CONCURRENCY
+============================================================
+
+For:
+
+QRIS DP
+QRIS pelunasan
+group payment
+
+attempt concurrent processing.
+
+Required:
+
+finance event duplicate = 0
+accounting duplicate = 0
+public mutation duplicate = 0
+settlement duplicate = 0
+SC mutation projection = 0
+
+============================================================
+PHASE 8 — CONFIG TRACE
+============================================================
+
+For every fixture print configuration actually resolved:
+
+company
+payment_method
+provider
+bank_account
+tax rule
+tax rate
+COA
+settlement config
+MDR
+effective date
+
+Required classification:
+CANONICAL_CONFIG
+
+No LEGACY_FALLBACK for PASS cases.
+
+============================================================
+PHASE 9 — ROLLBACK PROOF
+============================================================
+
+After every case:
+
+ROLLBACK confirmed.
+
+Final fixture-owned committed rows must be zero for:
+
+sport_payments
+outbox
+central_finance_processing
+public.sport_payments
+accounting_payments
+accounting_entries
+accounting_entry_lines
+public.bank_mutations
+payment_settlement_batches
+
+============================================================
+PHASE 10 — BLOCKED SHAPES REMAIN BLOCKED
+============================================================
+
+Do NOT create config for:
+
+Transfer Bank
+Paylabs
+unknown provider
+historical recovery
+
+Return their existing classifications unchanged.
+
+These are configuration/governance tasks, not test failures.
+
+============================================================
+PHASE 11 — QUALITY GATE
+============================================================
+
+Run:
+
+full workspace typecheck
+finance tests
+accounting integration
+settlement tests
+Sport Center boundary tests
+Paylabs existing tests
+API build
+git diff --check
+
+Required:
+
+typecheck = PASS / 0 errors
+finance suites blocked = 0
+
+============================================================
+FINAL REPORT
+============================================================
+
+QRIS FULL =
+QRIS DP =
+QRIS PELUNASAN =
+DP + PELUNASAN COMBINED =
+GROUP PAYMENT =
+
+PAYMENT IDS DISTINCT =
+BOOKING-LEVEL ACCOUNTING CREATED =
+
+PUBLIC MUTATION DUPLICATES =
+SC MUTATIONS CREATED =
+SETTLEMENT DUPLICATES =
+ACCOUNTING DUPLICATES =
+
+CONFIG SOURCE =
+CONCURRENCY =
+ROLLBACK PROOF =
+
+TRANSFER BANK =
+PAYLABS =
+UNKNOWN PROVIDER =
+HISTORICAL RECOVERY =
+
+TESTS =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+
+PROD WRITES = 0
+PROD CUTOVER = NO
+
+READY PAYMENT SHAPES PROVEN =
+BLOCKED CONFIG SHAPES =
+
+READY FOR PROD SHADOW MODE = YES/NO
+
+STOP.

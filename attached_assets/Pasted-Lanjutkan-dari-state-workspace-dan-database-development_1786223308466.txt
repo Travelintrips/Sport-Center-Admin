@@ -1,0 +1,330 @@
+Lanjutkan dari state workspace dan database development saat ini. Jangan ulang implementasi atau repair fixture yang sudah berhasil.
+
+Status terakhir:
+
+* Fixture repair development berhasil.
+* Strict counts:
+
+  * 22 payments
+  * 14 mutations
+  * 14 import rows
+* Friday fixture sudah dikoreksi.
+* Paylabs deterministic A sudah dikoreksi.
+* Evaluator date-mismatch bug sudah diperbaiki.
+* Unit test evaluator dan typecheck script sudah lulus.
+* Tidak ada production access.
+* Tidak ada final reconciliation/accounting posting.
+
+Task sekarang hanya:
+**RUN STRICT UAT HARNESS + PARITY VALIDATION + FINAL REPORT**
+
+## 1. SAFETY
+
+Tetap development-only.
+
+JANGAN:
+
+* mengubah fixture lagi kecuali harness membuktikan data masih salah;
+* persist reconciliation candidate;
+* final reconcile;
+* update settlement/payment status;
+* accounting posting;
+* deploy production;
+* run production migration.
+
+Harness harus SELECT + in-memory evaluation.
+
+## 2. STRICT PRE-FLIGHT
+
+Verifikasi ulang marker:
+
+`UAT_QRIS_202608`
+
+Expected:
+
+* 22 QRIS payments
+* 14 bank mutations
+* 14 import/provenance rows
+
+Jika berbeda, STOP dan laporkan.
+
+## 3. RUN ALL 14 CASES
+
+Jalankan strict evaluator untuk seluruh mutation UAT.
+
+Tampilkan:
+
+* mutation id
+* scenario
+* provider
+* bank account
+* expected settlement date
+* actual mutation date
+* payment IDs
+* gross
+* credit
+* deduction
+* effective rate
+* expected UAT MDR
+* status
+* reason
+
+Expected high-level outcome:
+
+Mandiri normal → MATCHED
+
+Paylabs normal → MATCHED
+
+Friday/weekend → MATCHED
+
+Saturday → MATCHED
+
+Sunday → MATCHED
+
+Holiday → MATCHED
+
+Unknown provider → REVIEW
+
+Amount mismatch → REVIEW
+
+Different account → MATCHED dan isolated
+
+Deterministic A → MATCHED
+
+Deterministic B → MATCHED
+
+Ambiguous A → REVIEW
+
+Ambiguous B → REVIEW
+
+Rounding → MATCHED
+
+## 4. VERIFY FRIDAY FIX
+
+Pastikan:
+
+paid/business date:
+`2026-08-07`
+
+holiday:
+`2026-08-10`
+
+expected settlement:
+`2026-08-11`
+
+mutation:
+`2026-08-11`
+
+Expected:
+`MATCHED`
+
+Jika tidak MATCHED, klasifikasikan apakah:
+
+* DATA ISSUE
+* ENGINE ISSUE
+* CONFIG ISSUE
+
+Jangan langsung patch.
+
+## 5. VERIFY PAYLABS DETERMINISTIC A
+
+Expected:
+
+Gross:
+`Rp350.000`
+
+MDR UAT:
+`0.7%`
+
+Deduction:
+`Rp2.450`
+
+Credit:
+`Rp347.550`
+
+Expected:
+`MATCHED`
+
+Pastikan deterministic reference partition tetap digunakan.
+
+## 6. PURE ENGINE VS EXISTING MATCHER PARITY
+
+Untuk seluruh 14 mutation jalankan:
+
+A. strict/pure QRIS evaluator
+B. existing `bankMatcher.ts` QRIS path
+
+Bandingkan:
+
+* provider
+* bank account
+* payment IDs
+* gross
+* credit
+* deduction
+* rate
+* expected date
+* status
+* reason
+
+Buat tabel:
+
+| Mutation | Scenario | Pure | Existing Matcher | Same? |
+
+Target:
+**14/14 parity**
+
+Jika mismatch, jangan nyatakan staging ready.
+
+## 7. NON-QRIS REGRESSION
+
+Karena `bankMatcher.ts` diubah agar memakai strict evaluator untuk QRIS:
+
+jalankan test/regression minimum bahwa jalur non-QRIS tetap menggunakan legacy matcher dan tidak berubah behavior secara material.
+
+Minimal test:
+
+* bank transfer/payment non-QRIS candidate existing
+* expense/invoice candidate jika test fixture tersedia
+
+Tujuan:
+QRIS hardening tidak merusak matcher non-QRIS.
+
+## 8. HARD BOUNDARY ASSERTIONS
+
+Pastikan automated assertions untuk:
+
+* provider boundary
+* bank account boundary
+* settlement date boundary
+* unknown provider → REVIEW
+* negative deduction → REVIEW
+* MDR mismatch → REVIEW
+* deterministic partition
+* ambiguous partition
+* holiday/weekend
+* rounding tolerance
+
+Laporkan pass/fail.
+
+## 9. IDEMPOTENCY
+
+Run harness dua kali.
+
+Pastikan hasil identik:
+
+* payment IDs
+* status
+* reason
+* gross
+* deduction
+* rate
+
+Dan pastikan:
+
+* candidate persistence count tidak berubah
+* qris_settlements tidak bertambah
+* journal count tidak bertambah
+
+## 10. NO-PERSISTENCE ASSERTION
+
+Sebelum dan sesudah harness, bandingkan count:
+
+* qris candidate persisted rows
+* qris_settlements
+* qris_settlement_items
+* reconciliation matches
+* accounting entries
+
+Expected:
+tidak berubah.
+
+## 11. SCENARIO MATRIX
+
+Buat final:
+
+| Scenario               | Expected         | Actual | PASS/FAIL |
+| ---------------------- | ---------------- | ------ | --------- |
+| Mandiri normal         | MATCHED          |        |           |
+| Paylabs normal         | MATCHED          |        |           |
+| Friday/weekend         | MATCHED          |        |           |
+| Saturday               | MATCHED          |        |           |
+| Sunday                 | MATCHED          |        |           |
+| Holiday                | MATCHED          |        |           |
+| Unknown provider       | REVIEW           |        |           |
+| Amount mismatch        | REVIEW           |        |           |
+| Different bank account | MATCHED isolated |        |           |
+| Deterministic A        | MATCHED          |        |           |
+| Deterministic B        | MATCHED          |        |           |
+| Ambiguous A            | REVIEW           |        |           |
+| Ambiguous B            | REVIEW           |        |           |
+| Rounding               | MATCHED          |        |           |
+
+## 12. TEST / TYPECHECK / BUILD
+
+Jalankan:
+
+* relevant QRIS unit tests
+* matcher tests
+* UAT harness tests
+* API typecheck
+* API build
+* scripts typecheck if modified
+
+Pisahkan:
+
+* patch-related failures
+* pre-existing failures
+
+## 13. FINAL DECISION
+
+Berikan hanya salah satu:
+
+`READY_FOR_STAGING_RECONCILIATION`
+
+atau
+
+`NEEDS_FIX_BEFORE_STAGING`
+
+READY hanya jika:
+
+* strict preflight valid
+* Friday PASS
+* Paylabs deterministic A PASS
+* all scenario groups pass
+* 14/14 matcher parity
+* no false positives
+* no engine-caused false negatives
+* no persistence
+* non-QRIS regression passes
+* tests/typecheck/build pass
+
+## 14. FINAL REPORT
+
+Laporkan:
+
+### A. Fixture repair confirmation
+
+### B. 14-case result table
+
+### C. Scenario pass rate
+
+### D. Pure vs existing matcher parity
+
+### E. Hard boundary validation
+
+### F. Non-QRIS regression
+
+### G. Idempotency/no-persistence
+
+### H. Tests/typecheck/build
+
+### I. Remaining risks
+
+### J. Final decision
+
+Tetap ingat:
+
+* 0.3% Mandiri dan 0.7% Paylabs adalah UAT fixture only
+* belum boleh dianggap production contract
+* jangan commit/push/deploy production tanpa instruksi eksplisit

@@ -1,0 +1,614 @@
+# RESOLVE SPORT CENTER BANK ACCOUNT REFERENCE
+
+## + Canonical Bank Mapping + Resume Controlled Repair Payment 13/14
+
+Lanjutkan dari state workspace saat ini.
+
+Status terakhir:
+
+`MANUAL_REVIEW_REQUIRED`
+
+karena terdapat mismatch semantic pada rekening:
+
+Source Sport Center payment 13/14:
+
+`bank_account_id = 1640006707220`
+
+Canonical public account:
+
+`public.company_bank_accounts.id = 2`
+
+Account number:
+
+`1234567890`
+
+COA:
+
+`1-1020-CST`
+
+Masalah:
+
+`public.sport_payments.bank_account_id`
+
+adalah FK integer ke:
+
+`public.company_bank_accounts.id`
+
+Jadi nilai source:
+
+`1640006707220`
+
+tidak boleh langsung ditulis ke mirror.
+
+Tujuan task:
+
+1. menentukan apa sebenarnya arti `1640006707220`;
+2. menemukan apakah sudah ada canonical mapping;
+3. jika terbukti merepresentasikan rekening settlement CST, membuat explicit source→canonical mapping;
+4. jika tidak terbukti, berhenti;
+5. hanya jika mapping deterministic, lanjutkan controlled repair payment 13/14.
+
+---
+
+# 1. SAFETY
+
+Development only.
+
+Jangan:
+
+* menebak bahwa `1640006707220 = bank_account_id 2`;
+* memetakan hanya karena keduanya Mandiri;
+* memetakan berdasarkan COA saja;
+* menggunakan fallback account;
+* mengubah production;
+* final reconcile;
+* MDR posting;
+* settlement posting;
+* mengubah GL amount;
+* mass backfill.
+
+Jika evidence tidak cukup:
+
+STOP:
+
+`BANK_ACCOUNT_MAPPING_REQUIRES_APPROVAL`
+
+---
+
+# 2. AUDIT SOURCE FIELD SEMANTICS
+
+Audit exact schema dan code yang mengisi:
+
+`sport_center.sport_payments.bank_account_id`
+
+Cari:
+
+* column type;
+* source route;
+* provider config;
+* payment creation code;
+* manual QRIS path;
+* Paylabs path;
+* admin confirmation;
+* booking/payment config.
+
+Jawab:
+
+Apakah `1640006707220` sebenarnya:
+
+* nomor rekening bank;
+* internal Sport Center account ID;
+* merchant ID;
+* provider account ID;
+* QRIS merchant identifier;
+* virtual account;
+* legacy external reference;
+* value config lain.
+
+Jangan menyimpulkan dari nama field saja.
+
+---
+
+# 3. SEARCH ALL REFERENCES
+
+Cari seluruh penggunaan literal:
+
+`1640006707220`
+
+pada:
+
+* database development;
+* environment/config;
+* migration;
+* payment settings;
+* QRIS settings;
+* provider configs;
+* bank settings;
+* merchant configs.
+
+Read-only first.
+
+Tampilkan:
+
+| Source | Field | Value context | Meaning |
+| ------ | ----- | ------------- | ------- |
+
+Jangan tampilkan secret.
+
+---
+
+# 4. AUDIT PUBLIC CANONICAL BANK ACCOUNT
+
+Audit:
+
+`public.company_bank_accounts.id = 2`
+
+Tampilkan:
+
+* company_id
+* bank name
+* account number masked
+* account name
+* currency
+* status
+* COA mapping
+* provider/settlement config references
+* effective date/config if available.
+
+Confirm:
+
+`company_id = 1 / CST`
+
+Do not assume source ref matches this account yet.
+
+---
+
+# 5. CHECK SETTLEMENT CONFIG
+
+Audit effective payment settlement config for:
+
+company 1
++
+provider `mandiri_direct`
+
+and if relevant:
++
+provider `paylabs`.
+
+Determine canonical:
+
+`company + provider + effective date → public bank account ID`
+
+For payment 13/14 date:
+
+`2026-08-09`
+
+If configuration deterministically resolves to:
+
+`bank_account_id = 2`
+
+record this as one evidence source.
+
+But settlement config alone does not prove source value `1640006707220` is literally the same bank account.
+
+Distinguish:
+
+`source reference`
+
+vs
+
+`canonical settlement account`.
+
+---
+
+# 6. SOURCE/CANONICAL MAPPING MODEL
+
+If source field is external/reference semantic, do not overload it as canonical FK.
+
+Use or create additive mapping:
+
+`sport_center.bank_account_source_mappings`
+
+or existing equivalent.
+
+Minimal:
+
+* id
+* company_id
+* source_system
+* source_account_ref
+* canonical_bank_account_id
+* provider nullable
+* effective_from
+* effective_until
+* is_active
+* evidence_source
+* evidence_reference
+* notes
+* created_at
+* updated_at
+
+Canonical FK:
+
+`canonical_bank_account_id`
+→ `public.company_bank_accounts.id`
+
+---
+
+# 7. MAPPING EVIDENCE POLICY
+
+Allow mapping only if deterministic.
+
+Possible evidence:
+
+1. explicit Sport Center config says source ref points to account;
+2. provider settlement config points to same canonical account;
+3. historical/config record explicitly stores both source ref and real account;
+4. approved business mapping;
+5. reliable payment/bank settings table.
+
+Do NOT use:
+
+* same bank name;
+* same company;
+* same COA only;
+* same provider only;
+* amount/date coincidence.
+
+---
+
+# 8. IF `1640006707220` IS NOT A BANK ACCOUNT
+
+If audit shows value is actually:
+
+* merchant ID;
+* provider ID;
+* QRIS merchant number;
+* external processor reference;
+
+then:
+
+do NOT map it to `company_bank_accounts`.
+
+Instead report:
+
+`SOURCE_FIELD_SEMANTIC_MISMATCH`
+
+and recommend separating fields, for example:
+
+* `source_bank_account_ref`
+* `merchant_account_id`
+* `provider_account_ref`
+
+Do not rewrite historical source blindly.
+
+---
+
+# 9. IF MAPPING IS DETERMINISTIC
+
+If evidence proves:
+
+source ref:
+`1640006707220`
+
+for:
+company 1 / CST
+provider mandiri_direct
+
+maps to:
+
+`public.company_bank_accounts.id = 2`
+
+then create development mapping idempotently.
+
+Example semantic:
+
+`company_id = 1`
+
+`source_system = sport_center`
+
+`source_account_ref = 1640006707220`
+
+`provider = mandiri_direct`
+
+`canonical_bank_account_id = 2`
+
+`effective_from <= 2026-08-09`
+
+Evidence must be recorded.
+
+Before insert:
+
+* check existing mapping;
+* check overlap;
+* check conflict.
+
+If conflict:
+STOP:
+`BANK_ACCOUNT_MAPPING_CONFLICT`
+
+---
+
+# 10. BANK ACCOUNT RESOLVER
+
+Update/enforce canonical resolver:
+
+`resolveCanonicalBankAccount(...)`
+
+Input:
+
+* company_id
+* provider
+* source account reference
+* effective date
+
+Output:
+
+* canonicalBankAccountId
+* evidenceSource
+* evidenceReference
+* deterministic
+* reason
+
+Expected for payment 13/14 only if mapping valid:
+
+`canonicalBankAccountId = 2`
+
+---
+
+# 11. DO NOT REWRITE SOURCE SEMANTIC
+
+Do not replace:
+
+`sport_center.sport_payments.bank_account_id = 1640006707220`
+
+unless schema migration explicitly redefines the field safely.
+
+Prefer preserving source value and resolving canonical account separately.
+
+If source schema name is misleading, propose additive:
+
+`canonical_bank_account_id`
+
+or:
+
+`source_bank_account_ref`
+
+Do not destructive-rename in this task.
+
+---
+
+# 12. DRY-RUN PAYMENT 13 AFTER MAPPING
+
+If resolver deterministic:
+
+Payment 13:
+
+source reference:
+`1640006707220`
+
+canonical public bank account:
+`2`
+
+Dry-run mirror target:
+
+* source_payment_id = 13
+* company_id = 1
+* bank_account_id = 2
+* QRIS
+* mandiri_direct
+* entry_id = 9
+
+Accounting metadata:
+
+* bank_account_id = 2 if schema uses canonical FK.
+
+Do not change GL amount/account mapping.
+
+---
+
+# 13. DRY-RUN PAYMENT 14
+
+Same:
+
+source reference:
+`1640006707220`
+
+canonical:
+`2`
+
+Mirror:
+
+* source_payment_id = 14
+* company_id = 1
+* bank_account_id = 2
+* entry_id = 10
+
+No duplicate mirror/accounting.
+
+---
+
+# 14. CHECK ACCOUNTING ENTRY SEMANTICS
+
+Audit whether:
+
+`public.accounting_entries.bank_account_id`
+
+if present, is also canonical FK.
+
+If yes:
+use `2`.
+
+Do not store source account reference in integer FK.
+
+If accounting stores COA/account metadata differently, use existing canonical convention.
+
+---
+
+# 15. CONTROLLED REPAIR GATE
+
+Only resume Phase B if all true:
+
+* source account meaning understood;
+* canonical bank mapping deterministic;
+* company 1 CST valid;
+* facility ownership valid;
+* mirror target unambiguous;
+* entry 9/10 unique;
+* GL balanced;
+* tax repair safe.
+
+Otherwise stop.
+
+---
+
+# 16. RESUME CONTROLLED REPAIR — ONLY IF SAFE
+
+If gate passes, execute the previous Phase B repair only for:
+
+* payment 13
+* payment 14
+* mirror 8
+* mirror 9
+* entry 9
+* entry 10
+* missing public payment tax lines
+
+Use:
+
+`public bank_account_id = 2`
+
+not source literal.
+
+Do not expand scope.
+
+---
+
+# 17. POST-REPAIR AUDIT
+
+Verify:
+
+Payment 13:
+source
+→ canonical account mapping
+→ mirror bank_account_id 2
+→ entry 9
+→ balanced GL
+→ tax line
+
+Payment 14:
+same with entry 10.
+
+Source reference must remain traceable.
+
+---
+
+# 18. IDEMPOTENCY
+
+Second dry-run:
+
+Expected:
+`ALREADY_COMPLETE`
+
+No duplicate:
+
+* mapping
+* mirror
+* accounting entry
+* tax line
+
+---
+
+# 19. TESTS
+
+Add/maintain tests:
+
+### Mapping
+
+* deterministic source→canonical mapping
+* no mapping → review
+* conflicting mapping → stop
+* provider/effective-date aware mapping
+
+### Semantic safety
+
+* source external ref not written into canonical integer FK
+
+### Payment 13/14
+
+* canonical bank account resolves to 2
+
+### Mirror/accounting
+
+* canonical FK used
+* source reference preserved separately
+
+Run:
+
+* typecheck libs
+* API typecheck
+* scripts typecheck
+* API build
+* relevant tests
+* git diff --check
+
+---
+
+# 20. FINAL REPORT
+
+Return:
+
+## A. What is `1640006707220`?
+
+Exact semantic.
+
+## B. Evidence
+
+## C. Canonical account
+
+## D. Mapping created/reused
+
+## E. Resolver result
+
+## F. Payment 13 repair status
+
+## G. Payment 14 repair status
+
+## H. Mirror canonical bank account
+
+## I. Accounting canonical bank account
+
+## J. Source reference preservation
+
+## K. GL/tax invariants
+
+## L. Idempotency
+
+## M. Tests/build/runtime
+
+## N. Final status
+
+Use one:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+`BANK_ACCOUNT_MAPPING_REQUIRES_APPROVAL`
+
+`BANK_ACCOUNT_MAPPING_CONFLICT`
+
+`SOURCE_FIELD_SEMANTIC_MISMATCH`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# HARD SAFETY
+
+Do not:
+
+* guess mapping
+* write source literal into canonical integer FK
+* change balanced GL
+* production deploy
+* final QRIS reconciliation
+* MDR posting
+* settlement posting
+* mass backfill

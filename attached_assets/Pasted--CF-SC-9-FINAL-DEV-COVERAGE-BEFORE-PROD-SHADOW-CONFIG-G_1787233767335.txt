@@ -1,0 +1,313 @@
+# CF-SC-9 — FINAL DEV COVERAGE BEFORE PROD SHADOW
+## CONFIG GAPS + CROSS-CLIENT CONCURRENCY
+## DEV ONLY — NO PROD WRITE
+
+CURRENT VERIFIED STATE
+
+Central Finance Sport Center DEV is proven for:
+
+- QRIS full payment
+- QRIS DP
+- QRIS pelunasan
+- group payment
+
+End-to-end path:
+
+payment_confirmed
+→ central processing
+→ accounting
+→ tax
+→ public.bank_mutations
+→ payment_settlement_batches
+
+Verified:
+
+- booking-level accounting = 0
+- sport_center.bank_mutations created = 0
+- sport_center.bank_reconciliation_matches created = 0
+- canonical_bank_mutation_id populated
+- legacy bank_mutation_id NULL
+- retry idempotent
+- MDR/net from canonical config
+- rollback confirmed
+
+Quality:
+- API typecheck PASS
+- scripts typecheck PASS
+- API build PASS
+- git diff --check PASS
+
+Remaining unproven:
+
+- Transfer Bank
+- Paylabs
+- unknown provider
+- historical recovery
+- true cross-client concurrency
+
+DO NOT:
+- invent finance config
+- write PROD
+- cut over PROD
+- clean legacy objects
+- call real Paylabs
+- send WhatsApp
+
+============================================================
+1. TRANSFER BANK CONFIG GAP
+============================================================
+
+Audit actual DEV canonical configuration.
+
+Determine exactly what is missing for Transfer Bank:
+
+- company
+- active bank account
+- payment method mapping
+- provider identity if required
+- settlement rule
+- tax rule
+- revenue/PPN/clearing COA
+- effective date
+
+Classify:
+
+READY_WITH_EXISTING_CONFIG
+or
+OWNER_CONFIG_REQUIRED
+
+If OWNER_CONFIG_REQUIRED:
+report exact missing fields.
+
+Do NOT seed fake config.
+
+============================================================
+2. PAYLABS CONFIG GAP
+============================================================
+
+Audit existing Paylabs canonical provider/business configuration.
+
+Do NOT expose secrets.
+
+Determine whether Central Finance has enough non-secret config for:
+
+- provider identity
+- company
+- settlement account
+- settlement timing
+- MDR/provider fee
+- tax
+- COA mappings
+
+Classify:
+
+READY_WITH_EXISTING_CONFIG
+or
+OWNER_CONFIG_REQUIRED
+
+Do not create fake Paylabs finance config.
+
+============================================================
+3. UNKNOWN PROVIDER POLICY
+============================================================
+
+Freeze policy.
+
+For provider=unknown:
+
+Central Finance must not guess provider.
+
+Allowed outcomes:
+
+A. deterministic evidence resolves provider
+   → RECOVERABLE
+
+B. evidence insufficient
+   → MANUAL_REVIEW_PROVIDER
+
+For B require:
+- accounting writes = 0
+- public mutation = 0
+- settlement = 0
+
+Add tests.
+
+============================================================
+4. HISTORICAL RECOVERY / ADOPTION
+============================================================
+
+Build rollback-only DEV synthetic cases:
+
+A. confirmed payment + valid existing posted accounting
+   → ALREADY_POSTED_ADOPT
+   → no second accounting effect
+
+B. confirmed payment + no accounting + complete current config
+   → RECOVERABLE
+   → exactly one accounting effect
+
+C. confirmed payment + no accounting + incomplete/ambiguous config
+   → MANUAL_REVIEW_CONFIG
+   → zero partial finance writes
+
+Do not rewrite already-posted historical entries.
+
+============================================================
+5. TRUE CROSS-CLIENT CONCURRENCY
+============================================================
+
+Do not use parallel queries on one PostgreSQL client.
+
+Use at least two independent DEV DB clients/connections.
+
+Race the same canonical payment/event through:
+
+- finance processing claim
+- accounting posting
+- public mutation creation
+- settlement creation
+
+Required final effect:
+
+central processing identity = 1
+accounting effect = 1
+public mutation = 1
+settlement batch = 1
+
+Duplicates = 0
+
+One client may win; the other must safely adopt/re-read/conflict.
+
+Rollback fixture safely after proof.
+
+============================================================
+6. DP / PELUNASAN CONCURRENCY
+============================================================
+
+Use separate payment IDs under same logical booking.
+
+Race DP and pelunasan processing concurrently.
+
+Required:
+
+2 payment identities
+2 finance events
+2 accounting effects
+2 public mutations
+2 settlement batches
+
+No collision through booking/order identity.
+
+============================================================
+7. GROUP PAYMENT CONCURRENCY
+============================================================
+
+Race duplicate processing of same group payment.
+
+Required:
+
+one payment-level effect only
+
+No multiplication by group booking count.
+
+============================================================
+8. CONFIG SOURCE REPORT
+============================================================
+
+For each supported method report:
+
+payment_method
+provider
+company
+bank
+tax
+COA
+settlement
+MDR
+
+Classify each field:
+
+CANONICAL
+MISSING
+AMBIGUOUS
+LEGACY_FALLBACK
+
+No PASS case may depend silently on LEGACY_FALLBACK.
+
+============================================================
+9. TESTS
+============================================================
+
+Add/execute:
+
+- true two-client concurrency tests
+- unknown-provider tests
+- historical adoption/recovery tests
+- Transfer Bank config tests if config exists
+- Paylabs finance-config tests if config exists
+
+All finance suites must reach assertions.
+
+============================================================
+10. QUALITY GATE
+============================================================
+
+Run:
+
+pnpm run typecheck
+API build
+scripts typecheck
+finance tests
+settlement tests
+accounting integration
+boundary tests
+Paylabs tests
+git diff --check
+
+Required:
+
+typecheck = PASS / 0 errors
+blocked finance suites = 0
+
+============================================================
+FINAL REPORT
+============================================================
+
+TRANSFER BANK =
+TRANSFER BANK MISSING CONFIG =
+
+PAYLABS =
+PAYLABS MISSING CONFIG =
+
+UNKNOWN PROVIDER POLICY =
+HISTORICAL ADOPTION =
+HISTORICAL RECOVERY =
+
+TRUE CROSS-CLIENT CONCURRENCY =
+DP/PELUNASAN CONCURRENCY =
+GROUP CONCURRENCY =
+
+ACCOUNTING DUPLICATES =
+PUBLIC MUTATION DUPLICATES =
+SETTLEMENT DUPLICATES =
+SC MUTATIONS CREATED =
+
+CONFIG SOURCE MATRIX =
+
+TESTS =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+
+PROD WRITES = 0
+PROD CUTOVER = NO
+
+READY FOR PROD SHADOW MODE = YES/NO
+READY FOR CONTROLLED CUTOVER = NO
+READY FOR LEGACY CLEANUP = NO
+
+OWNER CONFIG DECISIONS REQUIRED =
+
+BLOCKERS =
+
+STOP.

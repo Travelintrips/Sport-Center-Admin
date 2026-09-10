@@ -10,4 +10,6 @@ import type { GymMembershipUpdateStatus } from './gymMembershipUpdateStatus';
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+  startDate?: Date;
+  endDate?: Date;
 }

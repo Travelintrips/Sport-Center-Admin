@@ -1,0 +1,578 @@
+FINAL PRODUCTION READ-ONLY AUDIT RUNNER
+SPORT CENTER — NO DATA MUTATION
+
+STATUS YANG SUDAH VERIFIED:
+
+- Production deployment = PASS
+- Production Secret Manager = PASS
+- Production database connection = PASS
+- search_path fix = ACTIVE
+- Payment mirror = VERIFIED
+- Scheduler = HEALTHY
+- Health = HTTP 200
+- Typecheck = PASS
+- Build = PASS
+
+JANGAN mengulang deployment.
+JANGAN mengulang audit DEV.
+
+Satu-satunya pekerjaan sekarang:
+
+PRODUCTION TRANSACTION INTEGRITY AUDIT — READ ONLY
+
+==================================================
+1. CREATE SAFE AUDIT CONNECTION
+==================================================
+
+Gunakan production database credential melalui existing official Secret Manager loader.
+
+JANGAN membuat credential baru.
+
+JANGAN menyimpan credential ke file.
+
+JANGAN print credential.
+
+JANGAN print database URL.
+
+Connection audit harus dipaksa READ ONLY.
+
+Ideal:
+
+BEGIN READ ONLY TRANSACTION
+
+atau gunakan database role/connection yang memiliki privilege read-only.
+
+Jika database connection yang tersedia tidak dapat dijamin read-only:
+
+→ JANGAN menjalankan audit transaksi.
+→ report BLOCKED — READ-ONLY DB ACCESS NOT GUARANTEED.
+
+Jangan menggunakan application write connection untuk audit jika tidak dapat dipastikan read-only.
+
+==================================================
+2. VERIFY DATABASE IDENTITY
+==================================================
+
+Sebelum query transaksi:
+
+verifikasi:
+
+- host/project identity
+- database name
+- schema
+- environment
+- search_path
+
+Pastikan:
+
+PRODUCTION DATABASE = VERIFIED
+
+search_path menggunakan schema yang benar.
+
+Jangan lanjut jika database identity ambiguous.
+
+==================================================
+3. AUDIT INVENTORY
+==================================================
+
+Audit read-only seluruh tabel yang berhubungan dengan:
+
+BOOKING
+PAYMENT
+COMPANY BILLING
+GROUP
+EVENT
+RECURRING
+RESCHEDULE
+REFUND
+EXPENSE
+INVOICE
+TAX
+QRIS
+SETTLEMENT
+RECONCILIATION
+ACCOUNTING
+CENTRAL FINANCE
+AUDIT LOG
+
+Gunakan schema metadata terlebih dahulu.
+
+Jangan mengubah schema.
+
+==================================================
+4. BOOKING LIFECYCLE
+==================================================
+
+Cari production rows:
+
+- completed tanpa check-in
+- completed sebelum endTime
+- future booking completed
+- cancelled → completed
+- pending reschedule → completed
+- duplicate completion
+- duplicate check-in
+- check-in cancelled booking
+- old schedule completed setelah reschedule
+
+Contract:
+
+CONFIRMED
++
+CHECK-IN
++
+SESSION END PASSED
+=
+COMPLETED
+
+Payment paid != completed.
+
+Corporate invoice paid != completed.
+
+Group payment != completed.
+
+==================================================
+5. PAYMENT INTEGRITY
+==================================================
+
+Cross-check:
+
+bookings
+↔ payments
+↔ payment identity
+↔ payment outbox
+↔ accounting
+
+Cari:
+
+- payment tanpa booking
+- duplicate payment
+- duplicate payment identity
+- DP/final collision
+- amount mismatch
+- paid payment tanpa expected posting
+- accounting posting tanpa source payment
+
+==================================================
+6. CENTRAL FINANCE
+==================================================
+
+CRITICAL.
+
+Audit:
+
+Sport Center transaction
+→ payment
+→ canonical accounting
+→ Central Finance
+
+Cari:
+
+- duplicate payment_id
+- duplicate correlation_id
+- duplicate journal
+- orphan journal
+- missing expected posting
+- amount mismatch
+- company mismatch
+- account mismatch
+- debit/credit imbalance
+
+Expected:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL POSTING
+
+TOTAL DEBIT = TOTAL CREDIT
+
+JANGAN:
+
+- delete journal
+- create journal
+- force balance
+- rewrite historical accounting
+- run accounting repair
+
+==================================================
+7. CORPORATE BILLING
+==================================================
+
+Audit:
+
+company
+→ authorized customer
+→ corporate booking
+→ monthly invoice
+→ payment
+
+Cari:
+
+- unauthorized company linkage
+- arbitrary companyCustomerId
+- duplicate invoice
+- booking linked to multiple invoices
+- invoice without booking
+- paid invoice without payment
+- future booking completed because invoice paid
+
+==================================================
+8. GROUP
+==================================================
+
+Audit:
+
+- group membership
+- group merge
+- individual booking
+- group payment
+- group invoice
+
+Cari:
+
+- orphan membership
+- duplicate membership
+- missing booking
+- booking lost from group
+- duplicate group payment
+- group payment causing completion
+
+==================================================
+9. EVENT
+==================================================
+
+Audit all production event bookings.
+
+Expected:
+
+NORMAL PRICE
+→ 21.4% DISCOUNT
+→ FINAL PRICE
+
+Example:
+
+100000
+→ 21400
+→ 78600
+
+Cari transactions affected by old:
+
+3 / 14
+
+JANGAN mengubah historical rows.
+
+Jika ditemukan:
+
+hitung financial impact.
+
+Classification:
+
+HISTORICAL
+or
+REAL DATA ANOMALY
+
+==================================================
+10. RECURRING
+==================================================
+
+Cari:
+
+- past date
+- duplicate date
+- invalid date
+- blocked schedule conflict
+- operating hours violation
+- booking conflict
+- corporate approval bypass
+- lifecycle propagation antar session
+
+Setiap session harus independent.
+
+==================================================
+11. RESCHEDULE
+==================================================
+
+Audit:
+
+original schedule
+replacement schedule
+request
+approval
+history
+
+Cari:
+
+- old slot active
+- new slot conflict
+- pending request completed
+- duplicate reschedule
+- missing history
+- old schedule check-in setelah replacement
+
+==================================================
+12. REFUND
+==================================================
+
+Cari:
+
+- refund without payment
+- duplicate refund
+- refund > original payment
+- refunded booking active
+- missing accounting reversal
+
+==================================================
+13. EXPENSE
+==================================================
+
+Audit:
+
+expense
+→ approval
+→ payment
+→ Central Finance
+
+Cari:
+
+- paid expense tanpa posting
+- duplicate posting
+- wrong vendor
+- wrong company
+- wrong account
+- PPN mismatch
+
+==================================================
+14. QRIS / SETTLEMENT
+==================================================
+
+Audit:
+
+payment
+→ QRIS
+→ settlement
+→ bank mutation
+→ reconciliation
+
+Cari:
+
+- duplicate settlement
+- duplicate reconciliation
+- amount mismatch
+- MDR mismatch
+- settlement date mismatch
+- source identity mismatch
+- orphan settlement
+
+==================================================
+15. TAX / INVOICE
+==================================================
+
+Verify:
+
+hargaDasar = hargaIncludePPN / 1.11
+
+dpp = hargaDasar × durasi
+
+dppNilaiLain = dpp × 11/12
+
+ppn = dppNilaiLain × 12%
+
+total = dpp + ppn
+
+Verify:
+
+TOTAL = DPP + PPN
+
+Invoice should expose:
+
+DPP
+DPP Nilai Lain
+PPN 12%
+TOTAL
+
+Do not rewrite historical invoices.
+
+==================================================
+16. DOCUMENTS
+==================================================
+
+Audit references to:
+
+Invoice
+SPP
+Kwitansi
+Lampiran
+Booking documentation
+
+Ensure documents are presentation only.
+
+No document template may mutate:
+
+booking
+payment
+tax
+accounting
+
+==================================================
+17. WHATSAPP
+==================================================
+
+Audit approval linkage:
+
+booking
+→ WhatsApp
+→ payment proof
+→ approval
+
+Cari:
+
+- expired token reuse
+- replay
+- cross-booking access
+- cross-company access
+- unauthorized approval
+- completion bypass
+
+==================================================
+18. CROSS-ENTITY RECONCILIATION
+==================================================
+
+Cross-check:
+
+BOOKING
+↔ PAYMENT
+↔ INVOICE
+↔ EXPENSE
+↔ JOURNAL
+↔ SETTLEMENT
+↔ RECONCILIATION
+↔ CENTRAL FINANCE
+
+Find:
+
+- orphan
+- duplicate
+- mismatch
+- missing linkage
+
+==================================================
+19. ANOMALY CLASSIFICATION
+==================================================
+
+For every anomaly:
+
+ID
+ENTITY
+EXPECTED
+ACTUAL
+SEVERITY
+FINANCIAL IMPACT
+CLASSIFICATION
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+Do not treat NULL as automatically invalid.
+
+==================================================
+20. SOURCE FIX
+==================================================
+
+If anomaly is caused by current source:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ REPUBLISH
+→ RE-AUDIT
+
+Do not modify production data merely to hide a source bug.
+
+==================================================
+21. DATA REMEDIATION
+==================================================
+
+DO NOT mutate production automatically.
+
+If anomaly is deterministic and clearly incorrect:
+
+prepare a remediation plan.
+
+Only execute if the existing authorized production remediation mechanism explicitly supports safe, transactional, audited correction.
+
+Never:
+
+DELETE historical journal
+FORCE accounting balance
+RECREATE settlement
+DUPLICATE posting
+REWRITE historical invoice
+
+Ambiguous anomaly:
+
+BLOCKED DATA REMEDIATION.
+
+==================================================
+22. FINAL VERIFICATION
+==================================================
+
+After source fixes:
+
+- tests
+- typecheck
+- build
+- production health
+- production readiness
+- production runtime identity
+- production DB identity
+
+If source changed:
+→ REPUBLISH
+→ verify active deployment
+→ rerun affected audit.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+If all clean:
+
+PRODUCTION DATA AUDIT = PASS
+CENTRAL FINANCE = SAFE
+BOOKING LIFECYCLE = PASS
+PAYMENT INTEGRITY = PASS
+CORPORATE BILLING = PASS
+GROUP = PASS
+EVENT = PASS
+RECURRING = PASS
+RESCHEDULE = PASS
+REFUND = PASS
+EXPENSE = PASS
+SETTLEMENT = PASS
+TAX = PASS
+
+If anomaly:
+
+CLASSIFY
+→ FIX SOURCE if applicable
+→ TEST
+→ REPUBLISH
+→ RE-AUDIT
+
+If data remediation is ambiguous:
+
+BLOCKED — DATA REMEDIATION
+
+DO NOT claim Production Audit PASS without actual production query evidence.
+
+DO NOT use DEV as a substitute.
+
+DO NOT mutate production data.
+
+DO NOT ask for confirmation.

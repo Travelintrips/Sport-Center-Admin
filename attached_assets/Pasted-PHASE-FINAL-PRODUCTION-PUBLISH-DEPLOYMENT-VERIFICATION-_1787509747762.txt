@@ -1,0 +1,313 @@
+PHASE — FINAL PRODUCTION PUBLISH & DEPLOYMENT VERIFICATION
+
+OBJECTIVE:
+Resolve the ONLY remaining blocker:
+
+DEPLOYMENT_RELATIONSHIP = UNVERIFIED
+
+Everything else is already PASS:
+
+- Production schema = PASS
+- Production migration = PASS
+- Auditor SELECT grants = PASS
+- Production read-only audit = PASS
+- transaction_read_only = on
+- mutation queries = 0
+- skipped queries = 0
+- ROLLBACK = PASS
+- HTTPS runtime = PASS
+- API tests = 19 suites / 120 tests
+- API typecheck = PASS
+- API build = PASS
+- Frontend build = PASS
+- git diff --check = PASS
+- WhatsApp DEV fail-closed = PASS
+- Accounting = PASS
+- Central Finance = UNCHANGED
+- No historical financial mutation
+
+DO NOT repeat the database migration.
+
+============================================================
+1. FREEZE CURRENT STATE
+============================================================
+
+Record:
+
+- current git commit
+- git status
+- current production domain
+- current Replit deployment configuration
+
+Production domain:
+
+https://sc.travelintrips.co.id
+
+Do not change:
+
+- database
+- schema
+- secrets
+- DNS
+- payment configuration
+- Central Finance
+- WhatsApp production configuration
+
+============================================================
+2. VERIFY PRODUCTION CONFIGURATION
+============================================================
+
+Confirm the existing Production deployment configuration:
+
+- build command
+- run command
+- NODE_ENV
+- PORT
+- deployment type
+- custom domain
+
+Do not redesign configuration.
+
+Reuse the current working Production configuration.
+
+============================================================
+3. PUBLISH CURRENT VERIFIED BUILD
+============================================================
+
+The ONLY allowed change in this phase is:
+
+PUBLISH/REDEPLOY THE CURRENT VERIFIED SPORT CENTER BUILD THROUGH THE
+OFFICIAL REPLIT PRODUCTION DEPLOYMENT MECHANISM.
+
+Do NOT:
+
+- create a second application
+- create a new domain
+- change DNS
+- change secrets
+- change database
+- modify source code solely to manipulate deployment metadata
+
+Use the existing Production deployment target.
+
+If the platform requires an explicit Publish/Deploy action to make:
+
+isDeployed=true
+
+and:
+
+hasSuccessfulBuild=true
+
+perform that official action.
+
+Before publishing verify the working tree contains the intended current code.
+
+============================================================
+4. VERIFY DEPLOYMENT
+============================================================
+
+After publishing, verify deployment metadata again.
+
+Expected:
+
+isDeployed = true
+hasSuccessfulBuild = true
+
+If available:
+
+primaryUrl is populated.
+
+Record:
+
+- deployment ID
+- deployment type
+- deployment status
+- build status
+- revision/build ID
+- deployment timestamp
+- primary URL
+
+Do not expose secrets.
+
+============================================================
+5. VERIFY CUSTOM DOMAIN
+============================================================
+
+Verify:
+
+https://sc.travelintrips.co.id
+
+is attached to the newly/currently published Production deployment.
+
+Prove:
+
+custom domain
+→ Replit deployment
+→ current Production revision
+
+Do not rely on HTTP 200 alone.
+
+Compare runtime/build/revision identity where available.
+
+============================================================
+6. HTTPS SMOKE TEST
+============================================================
+
+Run:
+
+GET /
+GET /health
+GET /api/health
+GET /api/facilities
+GET /api/promos
+GET /api/settings
+GET /api/auth/me
+
+Expected:
+
+200 for public endpoints.
+
+401 for unauthenticated /api/auth/me.
+
+Do not weaken authentication.
+
+============================================================
+7. PRODUCTION DATABASE SAFETY
+============================================================
+
+Do NOT run any write query.
+
+The previous Production migration and audit already passed.
+
+Only perform a lightweight final read-only verification if required.
+
+Use:
+
+sport_center_production_auditor
+
+BEGIN;
+SET TRANSACTION READ ONLY;
+SHOW transaction_read_only;
+
+Expected:
+
+on
+
+Then:
+
+ROLLBACK;
+
+No mutation queries.
+
+============================================================
+8. VERIFY CENTRAL FINANCE
+============================================================
+
+No mutation.
+
+Confirm:
+
+Central Finance = UNCHANGED
+
+Do not post or backfill anything.
+
+============================================================
+9. VERIFY WHATSAPP
+============================================================
+
+Do not send WhatsApp.
+
+Confirm DEV fail-closed behavior remains implemented.
+
+No provider /send call.
+
+============================================================
+10. RUN REGRESSION VERIFICATION
+============================================================
+
+Run:
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run build
+
+pnpm --filter @workspace/scripts run typecheck
+
+git diff --check
+
+============================================================
+11. UPDATE FINAL CLOSURE REPORT
+============================================================
+
+Update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+Record:
+
+- deployment action
+- deployment ID
+- build status
+- deployment status
+- primary URL
+- custom domain mapping
+- runtime verification
+- HTTPS verification
+- database audit verification
+- accounting
+- Central Finance
+- WhatsApp safety
+- tests
+- typecheck
+- build
+- git diff check
+
+============================================================
+12. FINAL VERDICT
+============================================================
+
+If deployment relationship is now conclusively proven:
+
+DEPLOYMENT_RELATIONSHIP = PROVEN
+
+and:
+
+Production runtime = PASS
+Production database = PASS
+Production audit = PASS
+Accounting = PASS
+Central Finance = UNCHANGED
+Payment = PASS
+Corporate = PASS
+Event = PASS
+Check-in = PASS
+Usage proof = PASS
+Reschedule = PASS
+Security = PASS
+Tests = PASS
+Typecheck = PASS
+Build = PASS
+git diff --check = PASS
+
+then declare:
+
+PROJECT STATUS = FINALIZED
+
+Otherwise:
+
+PROJECT STATUS = NOT FINALIZED
+
+and state the exact remaining blocker.
+
+CRITICAL:
+
+Do not modify financial data.
+Do not rerun migration unnecessarily.
+Do not change DNS.
+Do not change secrets.
+Do not send WhatsApp.
+Do not weaken authentication.
+Do not modify Central Finance.
+Do not fabricate deployment evidence.

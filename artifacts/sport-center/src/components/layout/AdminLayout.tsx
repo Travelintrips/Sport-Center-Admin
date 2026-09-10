@@ -36,6 +36,7 @@ import {
   XCircle,
   AlertTriangle,
   CreditCard,
+  WalletCards,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -49,6 +50,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/bookings", label: "Pemesanan", icon: CalendarDays },
+      { href: "/admin/events", label: "Event", icon: CalendarDays },
       { href: "/admin/wa-bookings", label: "WA Booking", icon: MessageSquare },
       { href: "/admin/wa-ai", label: "AI WA Assistant", icon: Bot },
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
@@ -94,6 +96,7 @@ const NAV_GROUPS = [
       { href: "/admin/data-connections", label: "Data Connections", icon: Activity },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },
       { href: "/admin/paylabs", label: "Paylabs Payment Gateway", icon: CreditCard },
+      { href: "/admin/payment-settlement", label: "Rekening & Settlement", icon: WalletCards },
     ],
   },
 ];

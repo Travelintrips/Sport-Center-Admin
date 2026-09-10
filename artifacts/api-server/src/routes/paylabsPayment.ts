@@ -8,8 +8,8 @@
  * GET  /api/paylabs/config              — public config (sandbox mode, active methods)
  */
 
-import { Router } from "express";
-import { randomUUID } from "crypto";
+import { Router, type Response } from "express";
+import { createHash, randomUUID } from "crypto";
 import { db, bookingsTable, paymentsTable, bookingHistoryTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
@@ -18,7 +18,13 @@ import { authMiddleware, adminMiddleware } from "../lib/auth";
 import {
   loadPaylabsConfigFromDb,
   getPaylabsConfig,
+  getPaylabsSignatureTrace,
+  getPaylabsKeyOwnershipTrace,
+  isPrivateKeyValid,
   normalizePaylabsPublicKey,
+  createPaylabsSignature,
+  createPaylabsTimestamp,
+  paylabsEndpointFromNotifyUrl,
   verifyPaylabsSignature,
   createQris,
   createVa,
@@ -31,8 +37,105 @@ import {
 import { notifyPaymentConfirmed } from "../lib/notifications";
 import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
+import {
+  isTerminalBookingStatus,
+  resolvePaylabsPaidAt,
+  resolvePaylabsProviderReference,
+} from "../lib/paymentProvider";
+import {
+  shouldRecoverSuccessfulPaylabsTransaction,
+  shouldSkipPaylabsInquiry,
+} from "../lib/paylabsRecovery";
+import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
+import { requirePaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
+const PAYLABS_WEBHOOK_PATH = "/api/paylabs/webhook";
+
+type PaylabsAckFinalizeResult = "success" | "already_confirmed" | "failed";
+
+/**
+ * Send the signed acknowledgement required by Paylabs v4.8.1.
+ *
+ * The response is deliberately built from the exact three fields Paylabs
+ * expects. Its signature uses the merchant private key selected by the active
+ * environment (sandbox or production); the Paylabs public key is only used
+ * for inbound webhook verification.
+ */
+function sendPaylabsAck(
+  res: Response,
+  cfg: Awaited<ReturnType<typeof loadPaylabsConfigFromDb>>,
+  requestId: string,
+  finalizeResult: PaylabsAckFinalizeResult,
+): void {
+  const timestamp = createPaylabsTimestamp();
+  const ackBody = {
+    merchantId: cfg.merchantId,
+    requestId,
+    errCode: "0",
+  };
+  const ackBodyStr = JSON.stringify(ackBody);
+
+  let signature: string;
+  try {
+    if (!cfg.merchantId || !cfg.privateKey) {
+      throw new Error("Paylabs ACK signing credentials are not configured");
+    }
+    signature = createPaylabsSignature(
+      cfg.privateKey,
+      timestamp,
+      ackBodyStr,
+      PAYLABS_WEBHOOK_PATH,
+    );
+  } catch (err) {
+    logger.error(
+      {
+        sandboxMode: cfg.sandboxMode,
+        environment: cfg.environment,
+        requestId,
+        partnerId: cfg.merchantId || "(missing)",
+        hasMerchantId: Boolean(cfg.merchantId),
+        hasPrivateKey: Boolean(cfg.privateKey),
+        inboundSignatureValid: true,
+        finalizeResult,
+        responseStatus: 503,
+        responseSigned: false,
+        error: String(err).slice(0, 500),
+      },
+      "[PAYLABS-ACK] unable to sign response",
+    );
+    res.status(503).json({
+      errCode: "CONFIGURATION_ERROR",
+      errMsg: "ack_signature_not_configured",
+    });
+    return;
+  }
+
+  res.set({
+    "Content-Type": "application/json;charset=utf-8",
+    "X-TIMESTAMP": timestamp,
+    "X-PARTNER-ID": cfg.merchantId,
+    "X-REQUEST-ID": requestId,
+    "X-SIGNATURE": signature,
+  });
+
+  logger.info(
+    {
+      inboundSignatureValid: true,
+      finalizeResult,
+      responseStatus: 200,
+      responseSigned: true,
+      requestId,
+      partnerId: cfg.merchantId,
+      sandboxMode: cfg.sandboxMode,
+      environment: cfg.environment,
+    },
+    "[PAYLABS-ACK] response sent",
+  );
+
+  // Send the exact signed JSON bytes; do not add errMsg or other fields.
+  res.status(200).send(ackBodyStr);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +167,8 @@ async function ensureTransactionsTable() {
   await db.execute(sql.raw(`
     ALTER TABLE sport_center.paylabs_transactions
       ADD COLUMN IF NOT EXISTS provider_status TEXT,
-      ADD COLUMN IF NOT EXISTS notify_url TEXT
+      ADD COLUMN IF NOT EXISTS notify_url TEXT,
+      ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ
   `));
 }
 
@@ -88,10 +192,12 @@ interface FinalizePaymentOptions {
   reason?:         string;
   adminId?:        number;
   rawNotification?: Record<string, unknown>;
+  paidAt?: Date;
+  providerReference?: string | null;
 }
 
 interface FinalizePaymentResult {
-  outcome: "confirmed" | "already_confirmed" | "transaction_not_found" | "booking_not_found" | "error";
+  outcome: "confirmed" | "already_confirmed" | "terminal_booking_manual_review" | "transaction_not_found" | "booking_not_found" | "error";
   bookingId?:    number;
   paymentId?:    number;
   transactionId?: number;
@@ -113,17 +219,149 @@ function resolvePaylabsPaymentMethod(rawMethod?: string, rawChannel?: string): s
   return rawMethod ?? rawChannel ?? "Transfer Bank";
 }
 
+/**
+ * Return the customer-facing Paylabs method name that was configured by the
+ * admin. The transaction table stores the stable provider code (for example
+ * "bri"), while sport_payments.payment_method is also used directly by the
+ * admin booking table and accounting UI. Keeping the configured name here
+ * prevents that UI from losing the selected VA bank.
+ *
+ * The fallback map is intentionally kept for older environments where the
+ * settings row predates paymentMethodsConfig.
+ */
+async function resolveStoredPaylabsPaymentMethod(tx: any, rawMethod?: string): Promise<string> {
+  const raw = String(rawMethod ?? "").trim();
+  const normalized = raw.toLowerCase();
+
+  try {
+    const [settings] = await tx
+      .select({ paymentMethodsConfig: paylabsSettingsTable.paymentMethodsConfig })
+      .from(paylabsSettingsTable)
+      .limit(1);
+    const configured = Array.isArray(settings?.paymentMethodsConfig)
+      ? settings.paymentMethodsConfig as Array<{ id?: unknown; name?: unknown }>
+      : [];
+    const configuredMethod = configured.find(
+      (method) => String(method?.id ?? "").trim().toLowerCase() === normalized
+        && typeof method?.name === "string"
+        && method.name.trim(),
+    );
+    if (typeof configuredMethod?.name === "string" && configuredMethod.name.trim()) {
+      return configuredMethod.name.trim();
+    }
+  } catch (err) {
+    logger.warn({ err, rawMethod: raw }, "[paylabs] unable to load payment method label");
+  }
+
+  const fallbackLabels: Record<string, string> = {
+    qris: "Paylabs - QRIS",
+    bri: "Paylabs - BRI Virtual Account",
+    bca: "Paylabs - BCA Virtual Account",
+    bni: "Paylabs - BNI VA",
+    mandiri: "Paylabs - Mandiri VA",
+    permata: "Paylabs - Permata VA",
+    cimb: "Paylabs - CIMB VA",
+    btn: "Paylabs - BTN VA",
+    danamon: "Paylabs - Danamon VA",
+    maybank: "Paylabs - Maybank VA",
+    bsi: "Paylabs - BSI VA",
+    muamalat: "Paylabs - Muamalat Virtual Account",
+    sinarmas: "Paylabs - Sinarmas VA",
+    ina: "Paylabs - INA VA",
+  };
+  return fallbackLabels[normalized] ?? resolvePaylabsPaymentMethod(raw);
+}
+
+async function findExistingPaylabsPayment(
+  tx: any,
+  merchantTradeNo: string,
+  paylabsTradeNo: string,
+): Promise<{ id: number; booking_id: number; payment_method: string | null; status: string | null } | undefined> {
+  const providerOrderId = createPaymentProviderOrderId("paylabs", merchantTradeNo);
+  const identityClauses = [
+    sql`merchant_trade_no = ${merchantTradeNo}`,
+    sql`provider_order_id = ${providerOrderId}`,
+  ];
+  if (paylabsTradeNo.trim()) {
+    identityClauses.push(
+      sql`provider_trade_no = ${paylabsTradeNo}`,
+      sql`proof_url = ${`paylabs:${paylabsTradeNo}`}`,
+    );
+  }
+  const rows = await tx.execute(sql`
+    SELECT id, booking_id, payment_method, status
+    FROM sport_center.sport_payments
+    WHERE ${sql.join(identityClauses, sql` OR `)}
+    ORDER BY id
+    LIMIT 1
+  `);
+  return ((rows as any).rows?.[0] ?? (rows as any)[0]) as
+    | { id: number; booking_id: number; payment_method: string | null; status: string | null }
+    | undefined;
+}
+
+async function insertCanonicalPaylabsPayment(
+  tx: any,
+  booking: any,
+  txRow: any,
+  opts: FinalizePaymentOptions,
+  canonicalPaidAt: Date,
+): Promise<{ id: number; paymentMethod: string }> {
+  const merchantTradeNo = opts.merchantTradeNo;
+  const paylabsTradeNo = opts.paylabsTradeNo.trim();
+  const resolvedMethod = await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? ""));
+  const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
+  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+    throw new Error(`Invalid Paylabs payment amount for ${merchantTradeNo}`);
+  }
+  const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "paylabs", canonicalPaidAt, {
+    explicitCompanyId: booking.payerType === "company" ? booking.companyCustomerId : null,
+    effectiveDate: paymentEffectiveDate(canonicalPaidAt),
+  });
+  const [insertedPayment] = await tx.insert(paymentsTable).values({
+    bookingId: booking.id,
+    amount: String(amountPaid),
+    proofUrl: `paylabs:${paylabsTradeNo}`,
+    notes: `Auto-confirmed via Paylabs ${opts.source} (${merchantTradeNo}) | reason: ${opts.reason ?? "payment_notification"}`,
+    paymentMethod: resolvedMethod,
+    paymentProvider: "paylabs",
+    providerName: normalizeProviderName("paylabs"),
+    providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
+    providerId: requirePaymentProviderId("paylabs", paylabsTradeNo || opts.providerReference || merchantTradeNo),
+    providerOrderId: createPaymentProviderOrderId("paylabs", merchantTradeNo),
+    merchantTradeNo,
+    providerTradeNo: paylabsTradeNo || null,
+    companyId: paymentEnrichment.companyId,
+    bankAccountId: paymentEnrichment.bankAccountId,
+    mdrRate: "0",
+    mdrAmount: "0",
+    settlementStatus: "unsettled",
+    expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+    grossTaxInclusive: true,
+    status: "confirmed",
+    paymentType: "full_payment",
+    confirmedAt: canonicalPaidAt,
+    paidAt: canonicalPaidAt,
+  } as any).returning({ id: paymentsTable.id });
+
+  if (!insertedPayment?.id) {
+    throw new Error(`Paylabs payment insert returned no id for ${merchantTradeNo}`);
+  }
+  return { id: Number(insertedPayment.id), paymentMethod: resolvedMethod };
+}
+
 async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePaymentResult> {
   const {
     merchantTradeNo, paylabsTradeNo, providerStatus,
-    source, requestId, reason, adminId, rawNotification,
+    source, requestId, reason, adminId, rawNotification, paidAt,
   } = opts;
 
   try {
     return await db.transaction(async (tx: any) => {
       // Exact merchantTradeNo lookup is the only entry point into the relation.
       const txRows = await tx.execute(sql`
-        SELECT id, booking_id, order_number, status, amount, payment_method, paylabs_trade_no
+        SELECT id, booking_id, order_number, status, amount, payment_method,
+               paylabs_trade_no, merchant_trade_no, paid_at
         FROM sport_center.paylabs_transactions
         WHERE merchant_trade_no = ${merchantTradeNo}
         LIMIT 1
@@ -162,26 +400,156 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         throw new Error(`Booking ${bookingId} not found for payment transaction ${transactionId}`);
       }
 
+      // Lock the parent row before changing the booking or inserting the
+      // payment mirror. The Paylabs transaction table intentionally keeps a
+      // nullable/unconstrained booking_id for legacy recovery, so the
+      // payment FK is the last line of defence. Locking here prevents an
+      // admin delete or another cleanup transaction from making the relation
+      // disappear between the read above and the payment insert.
+      const lockedBookingRows = await tx.execute(sql`
+        SELECT id
+        FROM sport_center.sport_bookings
+        WHERE id = ${bookingId}
+        FOR UPDATE
+      `);
+      const lockedBooking = (lockedBookingRows as any).rows?.[0] ?? (lockedBookingRows as any)[0];
+      if (!lockedBooking) {
+        throw new Error(`Booking ${bookingId} disappeared during Paylabs finalization`);
+      }
+
       logger.info(
         { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
         "[paylabs] booking found",
       );
 
       if (previousPaymentStatus === "SUCCESS") {
-        const paymentProof = `paylabs:${paylabsTradeNo || String(txRow.paylabs_trade_no ?? "")}`;
-        const [existingPayment] = await tx
-          .select({ id: paymentsTable.id })
-          .from(paymentsTable)
-          .where(eq(paymentsTable.proofUrl, paymentProof))
-          .limit(1);
+        const existingBookingStatus = String(booking.status ?? "");
+        const existingPayment = await findExistingPaylabsPayment(
+          tx,
+          merchantTradeNo,
+          paylabsTradeNo || String(txRow.paylabs_trade_no ?? ""),
+        );
+        if (existingPayment && Number(existingPayment.booking_id) !== bookingId) {
+          throw new Error(
+            `Paylabs payment identity ${merchantTradeNo} belongs to booking ${existingPayment.booking_id}, not ${bookingId}`,
+          );
+        }
+        if (isTerminalBookingStatus(existingBookingStatus) && !existingPayment) {
+          return {
+            outcome: "terminal_booking_manual_review" as const,
+            bookingId,
+            transactionId,
+            orderNumber: String(txRow.order_number),
+            previousPaymentStatus,
+            previousBookingStatus: existingBookingStatus,
+          };
+        }
+
+        const canonicalPaidAt = opts.paidAt
+          ?? (txRow.paid_at ? new Date(String(txRow.paid_at)) : new Date());
+        if (Number.isNaN(canonicalPaidAt.getTime())) {
+          throw new Error(`Invalid Paylabs paid_at for ${merchantTradeNo}`);
+        }
+        if (existingBookingStatus !== "confirmed" && !isTerminalBookingStatus(existingBookingStatus)) {
+          await tx
+            .update(bookingsTable)
+            .set({ status: "confirmed", paidAt: canonicalPaidAt, updatedAt: new Date() })
+            .where(eq(bookingsTable.id, bookingId));
+        }
+
+        if (!existingPayment) {
+          const repairedPayment = await insertCanonicalPaylabsPayment(
+            tx,
+            booking,
+            txRow,
+            opts,
+            canonicalPaidAt,
+          );
+          await tx.insert(bookingHistoryTable).values({
+            bookingId,
+            fromStatus: existingBookingStatus || null,
+            toStatus: "confirmed",
+            changedBy: opts.source === "paylabs_manual_reconciliation" && adminId ? adminId : null,
+            changedByName: opts.source === "paylabs_manual_reconciliation"
+              ? `admin:${adminId ?? "system"}`
+              : "paylabs-recovery",
+            note: `Paylabs canonical payment repaired after local SUCCESS. merchantTradeNo=${merchantTradeNo} | prevBookingStatus=${existingBookingStatus}`,
+          } as any);
+          return {
+            outcome: "confirmed" as const,
+            bookingId,
+            paymentId: repairedPayment.id,
+            transactionId,
+            orderNumber: String(txRow.order_number),
+            previousPaymentStatus,
+            previousBookingStatus: existingBookingStatus,
+            paymentMethod: repairedPayment.paymentMethod,
+          };
+        }
+
+        if (existingPayment.status !== "confirmed") {
+          await tx.execute(sql`
+            UPDATE sport_center.sport_payments
+            SET status = 'confirmed',
+                confirmed_at = COALESCE(confirmed_at, ${canonicalPaidAt}),
+                paid_at = COALESCE(paid_at, ${canonicalPaidAt}),
+                updated_at = NOW()
+            WHERE id = ${Number(existingPayment.id)}
+          `);
+        }
+        if (existingBookingStatus !== "confirmed" && !isTerminalBookingStatus(existingBookingStatus)) {
+          await tx.insert(bookingHistoryTable).values({
+            bookingId,
+            fromStatus: existingBookingStatus || null,
+            toStatus: "confirmed",
+            changedBy: opts.source === "paylabs_manual_reconciliation" && adminId ? adminId : null,
+            changedByName: opts.source === "paylabs_manual_reconciliation"
+              ? `admin:${adminId ?? "system"}`
+              : "paylabs-recovery",
+            note: `Paylabs booking status repaired from local SUCCESS. merchantTradeNo=${merchantTradeNo} | prevBookingStatus=${existingBookingStatus}`,
+          } as any);
+        }
         return {
           outcome: "already_confirmed" as const,
           bookingId,
-          paymentId: existingPayment?.id,
+          paymentId: existingPayment.id ? Number(existingPayment.id) : undefined,
           transactionId,
           orderNumber: String(txRow.order_number),
           previousPaymentStatus,
           previousBookingStatus: String(booking.status ?? ""),
+          paymentMethod: existingPayment.payment_method
+            ? String(existingPayment.payment_method)
+            : await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? "")),
+        };
+      }
+
+      const previousBookingStatus = String(booking.status ?? "");
+      if (isTerminalBookingStatus(previousBookingStatus)) {
+        const rawNotificationJson = rawNotification ? JSON.stringify(rawNotification) : null;
+        await tx.execute(sql`
+          UPDATE sport_center.paylabs_transactions
+             SET provider_status = ${providerStatus},
+                 raw_notification = ${rawNotificationJson}::jsonb,
+                 updated_at = NOW()
+           WHERE id = ${transactionId}
+        `);
+        logger.warn(
+          {
+            merchantTradeNo,
+            booking_id: bookingId,
+            transaction_id: transactionId,
+            bookingStatus: previousBookingStatus,
+            requestId,
+          },
+          "[paylabs] successful callback requires manual review because booking is terminal",
+        );
+        return {
+          outcome: "terminal_booking_manual_review" as const,
+          bookingId,
+          transactionId,
+          orderNumber: String(txRow.order_number),
+          previousPaymentStatus,
+          previousBookingStatus,
         };
       }
 
@@ -191,17 +559,39 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         SET status           = 'SUCCESS',
             provider_status  = ${providerStatus},
             paylabs_trade_no = ${paylabsTradeNo},
+            paid_at          = COALESCE(paid_at, ${paidAt ?? new Date()}),
             raw_notification = ${rawNotificationJson}::jsonb,
             updated_at       = NOW()
         WHERE id = ${transactionId}
           AND status != 'SUCCESS'
       `);
 
-      const previousBookingStatus = String(booking.status ?? "");
+      if (isTerminalBookingStatus(previousBookingStatus)) {
+        await tx.insert(bookingHistoryTable).values({
+          bookingId,
+          fromStatus: previousBookingStatus || null,
+          toStatus: previousBookingStatus,
+          changedByName: "paylabs-webhook",
+          note: `Paylabs sukses ditahan untuk manual review karena booking berstatus terminal. merchantTradeNo=${merchantTradeNo}`,
+        } as any);
+        logger.warn(
+          { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, bookingStatus: previousBookingStatus },
+          "[paylabs] successful payment requires manual review for terminal booking",
+        );
+        return {
+          outcome: "terminal_booking_manual_review" as const,
+          bookingId,
+          transactionId,
+          orderNumber: String(booking.orderNumber),
+          previousPaymentStatus,
+          previousBookingStatus,
+        };
+      }
+      const canonicalPaidAt = opts.paidAt ?? new Date();
       if (previousBookingStatus !== "confirmed") {
         await tx
           .update(bookingsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
+          .set({ status: "confirmed", paidAt: canonicalPaidAt, updatedAt: new Date() })
           .where(eq(bookingsTable.id, bookingId));
       }
 
@@ -211,14 +601,37 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       );
 
       const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
+      const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "paylabs", canonicalPaidAt, {
+        // The booking relation is authoritative; this explicit context is
+        // only a fallback for company bookings whose relation is still being
+        // finalized during the provider callback.
+        explicitCompanyId: booking.payerType === "company" ? booking.companyCustomerId : null,
+        effectiveDate: paymentEffectiveDate(canonicalPaidAt),
+      });
       const [insertedPayment] = await tx.insert(paymentsTable).values({
         bookingId,
         amount     : String(amountPaid),
         proofUrl   : `paylabs:${paylabsTradeNo}`,
         notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
-        paymentMethod: resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
+        paymentMethod: await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? "")),
+        paymentProvider: "paylabs",
+        providerName: normalizeProviderName("paylabs"),
+        providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
+        providerId: requirePaymentProviderId("paylabs", paylabsTradeNo || opts.providerReference || merchantTradeNo),
+         providerOrderId: createPaymentProviderOrderId("paylabs", merchantTradeNo),
+        merchantTradeNo,
+        providerTradeNo: paylabsTradeNo || null,
+        companyId: paymentEnrichment.companyId,
+        bankAccountId: paymentEnrichment.bankAccountId,
+         mdrRate: "0",
+         mdrAmount: "0",
+         settlementStatus: "unsettled",
+        expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+         grossTaxInclusive: true,
         status     : "confirmed",
         paymentType: "full_payment",
+        confirmedAt: canonicalPaidAt,
+        paidAt: canonicalPaidAt,
       } as any).returning({ id: paymentsTable.id });
 
       const auditNote = [
@@ -248,7 +661,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         "[paylabs] commit success",
       );
 
-      const resolvedMethod = resolvePaylabsPaymentMethod(String(txRow.payment_method ?? ""));
+      const resolvedMethod = await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? ""));
 
       return {
         outcome: "confirmed" as const,
@@ -264,6 +677,12 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
   } catch (err: any) {
     return { outcome: "error", error: String(err?.message ?? err) };
   }
+}
+
+function isCommittedPaymentOutcome(
+  outcome: FinalizePaymentResult["outcome"] | undefined,
+): boolean {
+  return outcome === "confirmed" || outcome === "already_confirmed";
 }
 
 // ─── GET /api/paylabs/config ──────────────────────────────────────────────────
@@ -486,10 +905,17 @@ router.post("/paylabs/webhook", async (req, res) => {
   const timestamp   = String(req.headers["x-timestamp"]  ?? "");
   const signature   = String(req.headers["x-signature"]  ?? "");
   const partnerId   = String(req.headers["x-partner-id"] ?? "");
-  const rawBody     = (req as any).rawBody
-    ? ((req as any).rawBody as Buffer).toString("utf8")
-    : JSON.stringify(req.body);
+  // The signature must be calculated from the original HTTP bytes captured by
+  // express.json(). Never fall back to JSON.stringify(req.body): that loses the
+  // provider's whitespace/key representation and is not the callback Paylabs
+  // signed.
+  const rawBodyBuffer = (req as any).rawBody;
+  const hasOriginalRawBody = Buffer.isBuffer(rawBodyBuffer);
+  const rawBody     = hasOriginalRawBody
+    ? (rawBodyBuffer as Buffer).toString("utf8")
+    : "";
   const body              = req.body as Record<string, unknown>;
+  const callbackMerchantId = String(body.merchantId ?? "");
   const merchantTradeNo   = String(body.merchantTradeNo ?? body.merchant_trade_no ?? "");
   const rawProviderStatus = String(
     body.tradeStatus ??
@@ -503,10 +929,12 @@ router.post("/paylabs/webhook", async (req, res) => {
   const paylabsTradeNo    = String(body.paylabsTradeNo ?? body.platformTradeNo ?? body.tradeNo ?? "");
   let transactionId: number | null = null;
   let bookingId: number | null = null;
+  let signatureEndpoint = "/api/paylabs/webhook";
+  let notifyUrlForTrace = "";
 
   try {
     const txRows = await db.execute(sql`
-      SELECT id, booking_id
+      SELECT id, booking_id, notify_url
       FROM sport_center.paylabs_transactions
       WHERE merchant_trade_no = ${merchantTradeNo}
       LIMIT 1
@@ -514,6 +942,8 @@ router.post("/paylabs/webhook", async (req, res) => {
     const txRow = (txRows as any).rows?.[0] ?? (txRows as any)[0];
     transactionId = txRow ? Number(txRow.id) : null;
     bookingId = txRow?.booking_id ? Number(txRow.booking_id) : null;
+    notifyUrlForTrace = String(txRow?.notify_url ?? "").split(/[?#]/, 1)[0];
+    signatureEndpoint = paylabsEndpointFromNotifyUrl(txRow?.notify_url);
   } catch {
     // finalizePayment performs the authoritative lookup inside its transaction.
   }
@@ -544,68 +974,256 @@ router.post("/paylabs/webhook", async (req, res) => {
   const normalizedPublicKey = cfg.paylabsPublicKey
     ? normalizePaylabsPublicKey(cfg.paylabsPublicKey)
     : "";
-
-  // ── Phase 6: signature verification ─────────────────────────────────────────
-  const isMockMode = process.env.PAYLABS_MOCK === "true" && process.env.NODE_ENV !== "production";
-
-  if (isMockMode) {
-    wlog("signature result", {
-      hasPublicKey      : false,
-      hasSignature      : Boolean(signature),
-      hasTimestamp      : Boolean(timestamp),
-      hasPartnerId      : Boolean(partnerId),
-      verificationResult: "SKIPPED_MOCK_MODE",
-    });
-  } else if (normalizedPublicKey) {
-    const valid = verifyPaylabsSignature(normalizedPublicKey, timestamp, rawBody, signature);
-    const verificationResult = valid ? "VALID" : "INVALID";
-    wlog("signature result", {
-      hasPublicKey      : true,
-      hasSignature      : Boolean(signature),
-      hasTimestamp      : Boolean(timestamp),
-      hasPartnerId      : Boolean(partnerId),
-      verificationResult,
-    });
-    if (!valid) {
-      // Persist raw_notification even on rejection so we can distinguish
-      // "webhook never arrived" (raw_notification=null) from "webhook arrived
-      // but rejected" (raw_notification has content, status stays PENDING).
-      try {
-        await ensureTransactionsTable();
-        await db.execute(sql`
-          UPDATE sport_center.paylabs_transactions
-          SET raw_notification = ${JSON.stringify({ _rejected: true, _reason: "SIGNATURE_INVALID", body, timestamp, partnerId })}::jsonb,
-              updated_at       = NOW()
-          WHERE merchant_trade_no = ${merchantTradeNo}
-        `);
-      } catch { /* best-effort — don't block the response */ }
-      res.status(200).json({ errCode: "SIGNATURE_INVALID" });
-      return;
-    }
-  } else {
-    // FAIL CLOSED — no Paylabs public key configured, cannot verify webhook authenticity.
-    // Real Paylabs webhooks must be rejected; only PAYLABS_MOCK=true bypasses this.
-    wlog("signature result", {
-      hasPublicKey      : false,
-      hasSignature      : Boolean(signature),
-      hasTimestamp      : Boolean(timestamp),
-      hasPartnerId      : Boolean(partnerId),
-      verificationResult: "PUBLIC_KEY_NOT_CONFIGURED",
-      result            : "PUBLIC_KEY_NOT_CONFIGURED",
-    });
-    // Persist raw_notification so we know a webhook arrived (even if no public key)
+  const publicKeyValid = Boolean(normalizedPublicKey);
+  const privateKeyValid = isPrivateKeyValid(cfg.privateKey);
+  const signatureTrace = getPaylabsSignatureTrace(
+    timestamp,
+    rawBody,
+    signatureEndpoint,
+    "POST",
+  );
+  const runtimeEnvironment = cfg.environment ?? (cfg.sandboxMode ? "SANDBOX" : "PROD");
+  const keyOwnershipTrace = getPaylabsKeyOwnershipTrace(cfg);
+  const notifyPath = paylabsEndpointFromNotifyUrl(notifyUrlForTrace);
+  const pathMatch = notifyPath === signatureEndpoint;
+  const forensicBase = {
+    headerRequestId: requestId,
+    bodyRequestId: body.requestId ?? null,
+    timestampHeader: timestamp,
+    partnerId,
+    rawBodyAvailable: hasOriginalRawBody,
+    rawBodyLength: rawBodyBuffer?.length ?? 0,
+    rawBodyHash: hasOriginalRawBody
+      ? createHash("sha256").update(rawBodyBuffer as Buffer).digest("hex")
+      : null,
+    minifiedBodyLength: signatureTrace.minifiedBodyLength,
+    bodyHashUsedByVerifier: signatureTrace.bodyHash,
+    storedNotifyUrl: notifyUrlForTrace || null,
+    endpointUsedForSignature: signatureEndpoint,
+    pathMatch,
+    timestampUsedForSignature: timestamp,
+    timestampExactMatch: timestamp === String(req.headers["x-timestamp"] ?? ""),
+    canonicalString: signatureTrace.stringToVerify,
+    canonicalStringLength: signatureTrace.stringToVerify.length,
+    signatureCharacterLength: signature.length,
+    decodedSignatureByteLength: signature
+      ? Buffer.from(signature, "base64").length
+      : 0,
+    configuredPublicKeyFingerprint: keyOwnershipTrace.configuredPaylabsPublicKeyFingerprint,
+    merchantDerivedPublicKeyFingerprint: keyOwnershipTrace.merchantDerivedPublicKeyFingerprint,
+    sameKey: keyOwnershipTrace.sameKey,
+    receivedAt: new Date().toISOString(),
+  };
+  const persistForensic = async (result: {
+    signatureValid: boolean;
+    verificationReason: string;
+    notification?: Record<string, unknown>;
+  }) => {
     try {
       await ensureTransactionsTable();
       await db.execute(sql`
         UPDATE sport_center.paylabs_transactions
-        SET raw_notification = ${JSON.stringify({ _rejected: true, _reason: "PUBLIC_KEY_NOT_CONFIGURED", body })}::jsonb,
-            updated_at       = NOW()
+        SET raw_notification = ${JSON.stringify({
+          ...(result.notification ?? body),
+          _forensic: {
+            ...forensicBase,
+            signatureValid: result.signatureValid,
+            verificationReason: result.verificationReason,
+          },
+        })}::jsonb,
+            updated_at = NOW()
         WHERE merchant_trade_no = ${merchantTradeNo}
       `);
-    } catch { /* best-effort */ }
-    res.status(200).json({ errCode: "CONFIGURATION_ERROR", errMsg: "signature_required" });
+    } catch (err) {
+      logger.warn(
+        { err, merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] forensic trace persistence failed",
+      );
+    }
+  };
+  // Paylabs identifies the merchant in the header. Require the header to
+  // match the credential pair selected by the active mode; if the callback
+  // body also includes merchantId, it must agree too.
+  const merchantMatch = Boolean(
+    cfg.merchantId &&
+    partnerId === cfg.merchantId &&
+    (!callbackMerchantId || callbackMerchantId === cfg.merchantId),
+  );
+
+  wlog("signature trace", {
+    paylabsMode: runtimeEnvironment,
+    merchantMatch,
+    method: "POST",
+    endpointPath: signatureEndpoint,
+    notifyUrl: notifyUrlForTrace || "(not found)",
+    notifyPath,
+    verificationPath: signatureEndpoint,
+    pathMatch,
+    timestampFromHeader: timestamp,
+    bodyHash: signatureTrace.bodyHash,
+    minifiedBodyLength: signatureTrace.minifiedBodyLength,
+    canonicalString: signatureTrace.stringToVerify,
+    originalUrlPath: String(req.originalUrl ?? "").split("?", 1)[0],
+    requestPath: req.path,
+    signatureLength: signature.length,
+    rawBodyLength: rawBody.length,
+    publicKeyValid,
+    ...keyOwnershipTrace,
+    runtimeMode: process.env.NODE_ENV ?? "unknown",
+    merchantEnvSelected: runtimeEnvironment,
+    merchantId: cfg.merchantId || "(missing)",
+    merchantIdSource: cfg.merchantIdSource ?? "NONE",
+    privateKeySource: cfg.privateKeySource ?? "NONE",
+    publicKeySource: cfg.publicKeySource ?? "NONE",
+    privateKeyValid,
+    hasOriginalRawBody,
+  });
+
+  // ── Phase 6: signature verification ─────────────────────────────────────────
+  if (!merchantMatch) {
+    await persistForensic({
+      signatureValid: false,
+      verificationReason: "ENVIRONMENT_MISMATCH",
+      notification: { _rejected: true, _reason: "ENVIRONMENT_MISMATCH", body, timestamp, partnerId },
+    });
+    wlog("signature result", {
+      paylabsMode: runtimeEnvironment,
+      merchantMatch,
+      method: "POST",
+      endpointPath: signatureEndpoint,
+      timestampFromHeader: timestamp,
+      bodyHash: signatureTrace.bodyHash,
+      publicKeyValid,
+      signatureValid: false,
+      hasPublicKey: publicKeyValid,
+      hasSignature: Boolean(signature),
+      hasTimestamp: Boolean(timestamp),
+      hasPartnerId: Boolean(partnerId),
+      verificationResult: "ENVIRONMENT_MISMATCH",
+    });
+    logger.info(
+      {
+        inboundSignatureValid: false,
+        finalizeResult: "failed",
+        responseStatus: 400,
+        responseSigned: false,
+        requestId,
+        partnerId,
+      },
+      "[PAYLABS-ACK] inbound signature rejected",
+    );
+    res.status(400).json({ errCode: "ENVIRONMENT_MISMATCH" });
     return;
   }
+
+  if (normalizedPublicKey) {
+    const valid = hasOriginalRawBody && verifyPaylabsSignature(
+        normalizedPublicKey,
+        timestamp,
+        rawBody,
+        signature,
+        signatureEndpoint,
+      );
+    const verificationResult = valid ? "VALID" : "INVALID";
+    wlog("signature result", {
+      paylabsMode: runtimeEnvironment,
+      merchantMatch,
+      method: "POST",
+      endpointPath: signatureEndpoint,
+      timestampFromHeader: timestamp,
+      bodyHash: signatureTrace.bodyHash,
+      publicKeyValid,
+      signatureValid: valid,
+      hasPublicKey      : true,
+      hasSignature      : Boolean(signature),
+      hasTimestamp      : Boolean(timestamp),
+      hasPartnerId      : Boolean(partnerId),
+      hasOriginalRawBody,
+      verificationResult,
+    });
+    if (!valid) {
+      logger.info(
+        {
+          inboundSignatureValid: false,
+          finalizeResult: "failed",
+          responseStatus: 400,
+          responseSigned: false,
+          requestId,
+          partnerId,
+        },
+        "[PAYLABS-ACK] inbound signature rejected",
+      );
+      // Persist raw_notification even on rejection so we can distinguish
+      // "webhook never arrived" (raw_notification=null) from "webhook arrived
+      // but rejected" (raw_notification has content, status stays PENDING).
+      await persistForensic({
+        signatureValid: false,
+        verificationReason: "SIGNATURE_INVALID",
+        notification: { _rejected: true, _reason: "SIGNATURE_INVALID", body, timestamp, partnerId },
+      });
+      // Paylabs retries notifications when the merchant response is not
+      // successful. Returning 200 here would acknowledge a callback that we
+      // deliberately rejected and would prevent recovery after the key or
+      // signature configuration is corrected.
+      res.status(400).json({ errCode: "SIGNATURE_INVALID" });
+      return;
+    }
+  } else {
+    // FAIL CLOSED — no Paylabs public key configured, cannot verify webhook authenticity.
+    // There is no mock bypass: real callbacks must always be authenticated.
+    wlog("signature result", {
+      paylabsMode: runtimeEnvironment,
+      merchantMatch,
+      method: "POST",
+      endpointPath: signatureEndpoint,
+      timestampFromHeader: timestamp,
+      bodyHash: signatureTrace.bodyHash,
+      publicKeyValid,
+      signatureValid: false,
+      hasPublicKey      : false,
+      hasSignature      : Boolean(signature),
+      hasTimestamp      : Boolean(timestamp),
+      hasPartnerId      : Boolean(partnerId),
+      hasOriginalRawBody,
+      verificationResult: cfg.paylabsPublicKey.trim()
+        ? "PUBLIC_KEY_INVALID"
+        : "PUBLIC_KEY_NOT_CONFIGURED",
+      result            : cfg.paylabsPublicKey.trim()
+        ? "PUBLIC_KEY_INVALID"
+        : "PUBLIC_KEY_NOT_CONFIGURED",
+    });
+    logger.info(
+      {
+        inboundSignatureValid: false,
+        finalizeResult: "failed",
+        responseStatus: 503,
+        responseSigned: false,
+        requestId,
+        partnerId,
+      },
+      "[PAYLABS-ACK] inbound signature could not be verified",
+    );
+    // Persist raw_notification so we know a webhook arrived (even if no public key)
+    await persistForensic({
+      signatureValid: false,
+      verificationReason: cfg.paylabsPublicKey.trim()
+        ? "PUBLIC_KEY_INVALID"
+        : "PUBLIC_KEY_NOT_CONFIGURED",
+      notification: { _rejected: true, _reason: "PUBLIC_KEY_NOT_CONFIGURED", body },
+    });
+    // A missing verification key is a merchant configuration failure. Use a
+    // non-2xx response so Paylabs can retry after the key is configured.
+    res.status(503).json({
+      errCode: "CONFIGURATION_ERROR",
+      errMsg: cfg.paylabsPublicKey.trim() ? "public_key_invalid" : "signature_required",
+    });
+    return;
+  }
+
+  await persistForensic({
+    signatureValid: true,
+    verificationReason: "VALID",
+  });
 
   // ── Phase 4: centralised status mapper ──────────────────────────────────────
   const internalStatus = mapPaylabsStatus(rawProviderStatus);
@@ -622,22 +1240,37 @@ router.post("/paylabs/webhook", async (req, res) => {
     // Non-success provider states are recorded without finalizing the booking.
     try {
       await ensureTransactionsTable();
-      await db.execute(sql.raw(`
+      await db.execute(sql`
         UPDATE sport_center.paylabs_transactions
-        SET provider_status  = '${rawProviderStatus.replace(/'/g, "''")}',
-            paylabs_trade_no = '${paylabsTradeNo.replace(/'/g, "''")}',
-            raw_notification = '${JSON.stringify(body).replace(/'/g, "''")}',
-            updated_at       = NOW()
-        WHERE merchant_trade_no = '${merchantTradeNo.replace(/'/g, "''")}'
-      `));
+        SET provider_status   = ${rawProviderStatus},
+            paylabs_trade_no  = ${paylabsTradeNo},
+            raw_notification  = ${JSON.stringify(body)}::jsonb,
+            updated_at        = NOW()
+        WHERE merchant_trade_no = ${merchantTradeNo}
+      `);
     } catch (err) {
       logger.warn(
         { err, merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
         "[paylabs] non-success status persistence failed",
       );
+      // Do not acknowledge a notification that was not persisted. Paylabs'
+      // documented retry policy is the recovery mechanism for this case.
+      logger.info(
+        {
+          inboundSignatureValid: true,
+          finalizeResult: "failed",
+          responseStatus: 500,
+          responseSigned: false,
+          requestId,
+          partnerId,
+        },
+        "[PAYLABS-ACK] notification persistence failed",
+      );
+      res.status(500).json({ errCode: "PERSISTENCE_ERROR", errMsg: "notification_not_persisted" });
+      return;
     }
     wlog("acknowledgement sent", { isPaid: false, internalStatus });
-    res.status(200).json({ errCode: "0", errMsg: "received" });
+    sendPaylabsAck(res, cfg, requestId, "success");
     return;
   }
 
@@ -649,6 +1282,8 @@ router.post("/paylabs/webhook", async (req, res) => {
     source          : "webhook",
     requestId,
     rawNotification : body,
+    paidAt: resolvePaylabsPaidAt(body, new Date()),
+    providerReference: resolvePaylabsProviderReference(body, paylabsTradeNo),
   });
 
   transactionId = result.transactionId ?? null;
@@ -664,6 +1299,35 @@ router.post("/paylabs/webhook", async (req, res) => {
 
   if (result.outcome === "error") {
     logger.error({ requestId, merchantTradeNo, error: result.error }, "[paylabs:webhook] finalization error");
+  }
+
+  // A successful provider notification is not complete until the local
+  // payment and booking transaction commits. Returning 200 for these outcomes
+  // would stop Paylabs' retry policy while the booking remains unpaid locally.
+  // Terminal bookings are different: the callback was safely recorded and
+  // must be handled by an administrator rather than retried indefinitely.
+  const retryableOutcomes = new Set<FinalizePaymentResult["outcome"]>([
+    "error",
+    "transaction_not_found",
+    "booking_not_found",
+  ]);
+  if (retryableOutcomes.has(result.outcome)) {
+    logger.info(
+      {
+        inboundSignatureValid: true,
+        finalizeResult: "failed",
+        responseStatus: 500,
+        responseSigned: false,
+        requestId,
+        partnerId,
+      },
+      "[PAYLABS-ACK] finalization failed; success ACK withheld",
+    );
+    res.status(500).json({
+      errCode: "FINALIZATION_ERROR",
+      errMsg: result.error ?? result.outcome,
+    });
+    return;
   }
 
   if ((result.outcome === "confirmed" || result.outcome === "already_confirmed") && result.bookingId) {
@@ -693,7 +1357,7 @@ router.post("/paylabs/webhook", async (req, res) => {
         }).catch(() => {});
 
         // Jurnal akuntansi — wajib untuk semua pembayaran Paylabs
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
         const { dpp, ppnAmount } = extractBookingDpp(bk);
         postConfirmedPaymentAccounting({
           bookingId: bk.id,
@@ -710,7 +1374,12 @@ router.post("/paylabs/webhook", async (req, res) => {
   }
 
   wlog("acknowledgement sent", { outcome: result.outcome });
-  res.status(200).json({ errCode: "0", errMsg: result.outcome });
+  sendPaylabsAck(
+    res,
+    cfg,
+    requestId,
+    result.outcome === "already_confirmed" ? "already_confirmed" : "success",
+  );
 });
 
 // ─── POST /api/paylabs/reconcile (admin, Phase 8) ────────────────────────────
@@ -781,6 +1450,8 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
     source          : "paylabs_manual_reconciliation",
     reason          : reason ?? "sandbox callback synchronization failure",
     adminId         : adminUser?.id,
+    paidAt          : new Date(),
+    providerReference: String(txRow.paylabs_trade_no ?? "") || null,
   });
 
   logger.info(
@@ -843,12 +1514,68 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
     const local = (rows as any).rows?.[0] ?? (rows as any)[0];
 
     const localStatus = String(local?.status ?? "").toUpperCase();
-    const terminalStatuses = ["SUCCESS", "PAID", "FAILED", "CANCELLED", "EXPIRED"];
-    if (terminalStatuses.includes(localStatus)) {
+    if (shouldSkipPaylabsInquiry(localStatus)) {
       return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true });
     }
 
-    const paylabsRes = await statusInquiry(tradeNo);
+    // A prior webhook or data sync may have committed the Paylabs transaction
+    // as SUCCESS while booking/payment mirror work was interrupted. Recover by
+    // exact merchantTradeNo; do not call the provider again or create a new
+    // payment order.
+    let localBookingStatus = "";
+    const localBookingId = Number(local?.booking_id);
+    if (Number.isInteger(localBookingId) && localBookingId > 0) {
+      const bookingRows = await db.execute(sql`
+        SELECT status
+        FROM sport_center.sport_bookings
+        WHERE id = ${localBookingId}
+        LIMIT 1
+      `);
+      const localBooking = (bookingRows as any).rows?.[0] ?? (bookingRows as any)[0];
+      localBookingStatus = String(localBooking?.status ?? "");
+    }
+    if (shouldRecoverSuccessfulPaylabsTransaction(localStatus, localBookingStatus)) {
+      const recoveryResult = await finalizePayment({
+        merchantTradeNo: tradeNo,
+        paylabsTradeNo: String(local?.paylabs_trade_no ?? ""),
+        providerStatus: String(local?.provider_status ?? "02"),
+        source: "paylabs_manual_reconciliation",
+        reason: "automatic local SUCCESS synchronization recovery",
+        paidAt: local?.paid_at ? new Date(String(local.paid_at)) : new Date(),
+        providerReference: String(local?.paylabs_trade_no ?? "") || null,
+      });
+      const refreshedRows = await db.execute(sql`
+        SELECT *
+        FROM sport_center.paylabs_transactions
+        WHERE merchant_trade_no = ${tradeNo}
+        LIMIT 1
+      `);
+      const recoveredLocal = (refreshedRows as any).rows?.[0] ?? (refreshedRows as any)[0] ?? local;
+      return res.json({
+        local: recoveredLocal,
+        paylabs: null,
+        paylabsOk: false,
+        inquirySkipped: true,
+        reconciliation: {
+          outcome: recoveryResult.outcome,
+          bookingId: recoveryResult.bookingId,
+          error: recoveryResult.error,
+        },
+      });
+    }
+
+    // Use the same database-backed credentials as create-payment.  Calling
+    // statusInquiry() without cfg silently fell back to env credentials, which
+    // is usually empty when Paylabs settings are maintained in the admin UI.
+    const cfg = await loadPaylabsConfigFromDb();
+    const resolvedMethod = resolvePaymentMethod(String(local?.payment_method ?? ""));
+    const inquiryPaymentType =
+      resolvedMethod.type === "qris"
+        ? "QRIS"
+        : resolvedMethod.type === "va" || resolvedMethod.type === "ewallet"
+          ? resolvedMethod.code
+          : String(local?.payment_method ?? "VA");
+    const paylabsRes = await statusInquiry(tradeNo, inquiryPaymentType, cfg);
 
     const urlNotFound = !paylabsRes.ok && (
       String(paylabsRes.errMsg ?? "").toLowerCase().includes("url not found") ||
@@ -858,7 +1585,102 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
       return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true, inquiryNotSupported: true });
     }
 
-    return res.json({ local: local ?? null, paylabs: paylabsRes.data, paylabsOk: paylabsRes.ok });
+    const providerData = paylabsRes.data as Record<string, unknown>;
+    const rawProviderStatus = String(
+      providerData.status ??
+      providerData.tradeStatus ??
+      providerData.tradeState ??
+      providerData.paymentStatus ??
+      providerData.orderStatus ??
+      providerData.resultStatus ??
+      "",
+    );
+    const internalStatus = mapPaylabsStatus(rawProviderStatus);
+
+    // Inquiry is a recovery path for a missed/ rejected webhook.  A successful
+    // status must be committed server-side, not merely shown optimistically in
+    // the browser, otherwise the booking remains pending after a refresh.
+    let reconciliation: FinalizePaymentResult | undefined;
+    if (paylabsRes.ok && internalStatus === "SUCCESS") {
+      const paylabsTradeNo = String(
+        providerData.platformTradeNo ??
+        providerData.paylabsTradeNo ??
+        providerData.tradeNo ??
+        local?.paylabs_trade_no ??
+        "",
+      );
+      reconciliation = await finalizePayment({
+        merchantTradeNo: tradeNo,
+        paylabsTradeNo,
+        providerStatus: rawProviderStatus || "02",
+        source: "paylabs_manual_reconciliation",
+        reason: "automatic status inquiry recovery",
+        paidAt: resolvePaylabsPaidAt(providerData, new Date()),
+        providerReference: resolvePaylabsProviderReference(providerData, paylabsTradeNo),
+      });
+
+      // Keep automatic inquiry recovery aligned with webhook/manual
+      // reconciliation. The payment row is committed atomically above; the
+      // accounting journal is posted idempotently after the transaction.
+      if (isCommittedPaymentOutcome(reconciliation.outcome) && reconciliation.bookingId) {
+        const recoveredBookingId = reconciliation.bookingId;
+        const recoveredPaymentId = reconciliation.paymentId;
+        db.select().from(bookingsTable)
+          .where(eq(bookingsTable.id, recoveredBookingId))
+          .limit(1)
+          .then((rows) => {
+            const bk = rows[0];
+            if (!bk) return;
+            const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+            const { dpp, ppnAmount } = extractBookingDpp(bk);
+            postConfirmedPaymentAccounting({
+              bookingId: bk.id,
+              orderNumber: bk.orderNumber ?? "",
+              dpp,
+              ppnAmount,
+              facilityId: bk.facilityId,
+              journalDate: today,
+              paymentMethod: reconciliation?.paymentMethod ?? "Transfer Bank",
+              paymentId: recoveredPaymentId,
+            }).catch((accountingErr) =>
+              logAccountingError({
+                operation: "postConfirmedPaymentAccounting:autoInquiryRecovery",
+                orderNumber: bk.orderNumber ?? "",
+                bookingId: bk.id,
+                error: accountingErr,
+              }),
+            );
+          })
+          .catch(() => {});
+      }
+    }
+
+    // finalizePayment runs in a separate transaction from this inquiry. Re-read
+    // the transaction after reconciliation so the browser receives the
+    // committed SUCCESS state instead of the stale PENDING row loaded above.
+    let committedLocal = local ?? null;
+    if (reconciliation && isCommittedPaymentOutcome(reconciliation.outcome)) {
+      const refreshedRows = await db.execute(sql`
+        SELECT *
+        FROM sport_center.paylabs_transactions
+        WHERE merchant_trade_no = ${tradeNo}
+        LIMIT 1
+      `);
+      committedLocal = (refreshedRows as any).rows?.[0] ?? (refreshedRows as any)[0] ?? committedLocal;
+    }
+
+    return res.json({
+      local: committedLocal,
+      paylabs: paylabsRes.data,
+      paylabsOk: paylabsRes.ok,
+      reconciliation: reconciliation
+        ? {
+            outcome: reconciliation.outcome,
+            bookingId: reconciliation.bookingId,
+            error: reconciliation.error,
+          }
+        : undefined,
+    });
   } catch (err) {
     logger.error({ err }, "[paylabs] status inquiry error");
     return res.status(500).json({ error: "Status inquiry failed" });

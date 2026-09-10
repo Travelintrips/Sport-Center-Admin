@@ -1,0 +1,337 @@
+SPORT CENTER — VERIFY AND, IF SAFE, MIGRATE PRODUCTION PROJECT
+FROM sc-sport-center TO sport-center-506306
+
+IMPORTANT:
+Jangan langsung mengganti project ID.
+
+Lakukan audit terlebih dahulu dan hanya lakukan perubahan jika evidence membuktikan
+sport-center-506306 adalah project Production yang benar.
+
+Tidak boleh menyentuh:
+- Production transaction data
+- payments
+- invoices
+- journals
+- journal lines
+- settlement
+- reconciliation
+- Central Finance
+- historical financial data
+
+Tidak boleh melakukan migration database.
+Tidak boleh melakukan backfill.
+Tidak boleh melakukan repair data.
+
+==================================================
+PHASE 1 — AUDIT CURRENT PRODUCTION CONFIG
+==================================================
+
+Inventaris seluruh referensi:
+
+sc-sport-center
+
+Cari di:
+
+- cloudbuild.yaml
+- gae-deploy/app.yaml
+- deployment scripts
+- Secret Manager loader
+- bootstrap configuration
+- GCP configuration
+- runtime configuration
+- service account
+- storage resolver
+- database resolver
+- worker configuration
+- payment configuration
+- domain configuration
+
+Catat setiap penggunaan.
+
+==================================================
+PHASE 2 — AUDIT sport-center-506306
+==================================================
+
+Project:
+
+sport-center-506306
+
+Project number:
+
+398772007342
+
+Read-only audit seluruh resource yang dapat diverifikasi:
+
+- App Engine
+- Cloud Build
+- Secret Manager
+- service accounts
+- IAM
+- Cloud Run
+- domain mappings
+- certificates
+- storage
+- APIs
+- deployment history
+
+Jangan membuat resource.
+
+Jangan deploy.
+
+Jangan mengubah IAM.
+
+Jangan mengubah secret.
+
+==================================================
+PHASE 3 — CRITICAL APP ENGINE CHECK
+==================================================
+
+Verifikasi apakah:
+
+sport-center-506306
+
+memiliki App Engine application.
+
+Jika:
+
+App Engine = NOT FOUND
+
+JANGAN MIGRATE.
+
+Report:
+
+SPORT_CENTER_506306_APP_ENGINE = NOT_FOUND
+MIGRATION = BLOCKED
+
+Jangan membuat App Engine application otomatis.
+
+==================================================
+PHASE 4 — PRODUCTION DOMAIN
+==================================================
+
+Verifikasi apakah:
+
+sc.travelintrips.co.id
+
+terhubung ke:
+
+sport-center-506306
+
+melalui domain mapping / DNS / deployment evidence.
+
+Jangan hanya menggunakan HTTP 200 sebagai bukti.
+
+Cari evidence GCP yang sebenarnya.
+
+==================================================
+PHASE 5 — SECRET MANAGER
+==================================================
+
+Verifikasi apakah project:
+
+sport-center-506306
+
+memiliki secret yang dibutuhkan Production.
+
+Expected application secret:
+
+sport-center
+
+Juga audit seluruh secret reference Production tanpa mencetak payload.
+
+Jangan mengubah secret value.
+
+Jika secret Production berada di project lain:
+
+catat cross-project dependency.
+
+==================================================
+PHASE 6 — SERVICE ACCOUNT
+==================================================
+
+Cari service account Production yang sebenarnya.
+
+Bandingkan:
+
+CURRENT EXPECTED:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+versus:
+
+sport-center-506306 service account.
+
+Jangan mengganti service account hanya karena project ID berbeda.
+
+==================================================
+PHASE 7 — DATABASE
+==================================================
+
+JANGAN connect atau mutate database.
+
+Audit konfigurasi resolver saja.
+
+Tentukan apakah Production database credential/secret yang digunakan aplikasi
+akan tetap menunjuk ke database yang sama jika project configuration berubah.
+
+PENTING:
+
+Changing GCP project ≠ changing Supabase database.
+
+Jangan mengubah database URL.
+
+==================================================
+PHASE 8 — STORAGE
+==================================================
+
+Audit storage resolver.
+
+Pastikan perubahan project tidak menyebabkan:
+
+Production
+→ DEV storage
+
+atau
+
+Production
+→ wrong bucket.
+
+Jangan melakukan migration object.
+
+==================================================
+PHASE 9 — CENTRAL FINANCE SAFETY
+==================================================
+
+Pastikan project migration tidak mengubah:
+
+SPORT_CENTER_FINANCE_MODE
+payment accounting
+outbox
+journal posting
+settlement
+reconciliation
+Central Finance worker
+
+Jangan mengubah finance mode.
+
+==================================================
+PHASE 10 — DECISION ENGINE
+==================================================
+
+ONLY IF ALL ARE TRUE:
+
+1. sport-center-506306 is confirmed as actual Production project
+2. Production domain evidence matches
+3. Production deployment evidence matches
+4. App Engine exists OR approved deployment architecture supports another runtime
+5. Production Secret Manager dependencies are available
+6. Runtime service account can be correctly configured
+7. Database remains the same Production database
+8. Production storage remains correct
+9. Central Finance architecture remains unchanged
+10. No production data migration is required
+
+THEN:
+
+MIGRATION MAY PROCEED.
+
+Otherwise:
+
+DO NOT MIGRATE.
+
+==================================================
+PHASE 11 — IF MIGRATION IS SAFE
+==================================================
+
+Only then update configuration references:
+
+sc-sport-center
+→ sport-center-506306
+
+BUT ONLY where the reference is proven to mean GCP Production project.
+
+Do NOT blindly global replace.
+
+Do NOT replace:
+
+- database project references
+- documentation historical references
+- unrelated tenant/company IDs
+- service account names
+- Secret IDs
+- Supabase project identifiers
+- URLs
+- domain names
+
+unless evidence proves they must change.
+
+==================================================
+PHASE 12 — VALIDATION
+==================================================
+
+After safe configuration changes:
+
+- full typecheck
+- full tests
+- full build
+- git diff --check
+- inspect deployment config
+- inspect secret resolver
+- inspect database resolver
+- inspect storage resolver
+- inspect finance mode
+- inspect worker mode
+
+Do NOT deploy Production automatically unless existing deployment procedure
+explicitly proves this is the approved Production target.
+
+==================================================
+PHASE 13 — IF NOT SAFE
+==================================================
+
+Do not change anything.
+
+Report:
+
+MIGRATION = BLOCKED
+
+with exact reason.
+
+Examples:
+
+APP_ENGINE_NOT_FOUND
+DOMAIN_NOT_MATCHED
+SECRET_DEPENDENCY_MISSING
+RUNTIME_IDENTITY_UNRESOLVED
+PRODUCTION_PROJECT_NOT_CONFIRMED
+DATABASE_DEPENDENCY_CONFLICT
+STORAGE_DEPENDENCY_CONFLICT
+CENTRAL_FINANCE_RISK
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Return exactly one:
+
+A.
+SPORT-CENTER-506306 CONFIRMED PRODUCTION
+MIGRATION SAFE
+CHANGES APPLIED
+TESTS PASS
+
+or:
+
+B.
+SPORT-CENTER-506306 NOT CONFIRMED
+NO CHANGES MADE
+
+or:
+
+C.
+MIGRATION BLOCKED
+<exact blocker>
+
+Do not ask for confirmation.
+Continue all safe read-only investigation automatically.
+Do not touch Production transaction or Central Finance data.

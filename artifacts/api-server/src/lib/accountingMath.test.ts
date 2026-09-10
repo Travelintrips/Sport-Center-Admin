@@ -2,11 +2,13 @@ import { jest } from "@jest/globals";
 
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
+const mockUpdate = jest.fn();
 
 jest.unstable_mockModule("@workspace/db", () => ({
   db: {
     select: mockSelect,
     insert: mockInsert,
+    update: mockUpdate,
   },
   accountingJournalsTable: {
     id: "id",
@@ -16,6 +18,7 @@ jest.unstable_mockModule("@workspace/db", () => ({
   },
   accountingJournalLinesTable: {},
   taxTransactionsTable: {},
+  paymentsTable: {},
 }));
 
 jest.unstable_mockModule("drizzle-orm", () => ({
@@ -48,6 +51,11 @@ function insertResult(returningRows: unknown[] = []) {
 describe("confirmed booking payment accounting", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUpdate.mockReturnValue({
+      set: () => ({
+        where: jest.fn().mockResolvedValue([]),
+      }),
+    });
   });
 
   it("extracts DPP from an inclusive-PPN price", () => {
@@ -99,6 +107,7 @@ describe("confirmed booking payment accounting", () => {
     expect(journalValues).toHaveLength(1);
     expect(journalValues[0]).toMatchObject({
       paymentId: 15,
+    status: "posted",
       debitAmount: "200000",
       creditRevenueAmount: "180180",
       creditPpnAmount: "19820",

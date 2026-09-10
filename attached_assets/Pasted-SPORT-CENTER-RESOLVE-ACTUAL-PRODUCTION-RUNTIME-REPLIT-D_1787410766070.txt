@@ -1,0 +1,240 @@
+SPORT CENTER — RESOLVE ACTUAL PRODUCTION RUNTIME
+REPLIT DOMAIN IS THE PRODUCTION ENTRYPOINT
+
+IMPORTANT:
+
+Confirmed:
+
+sc.travelintrips.co.id
+→ Hostinger DNS
+→ Replit deployment
+
+Therefore DO NOT use public domain response as evidence of App Engine/GCP runtime.
+
+DO NOT migrate GCP project.
+DO NOT create App Engine.
+DO NOT change Secret Manager.
+DO NOT change database.
+DO NOT change Central Finance.
+DO NOT deploy.
+
+==================================================
+PHASE 1 — IDENTIFY REPLIT PRODUCTION DEPLOYMENT
+==================================================
+
+Audit Replit deployment metadata using the official available deployment API/tooling.
+
+Find:
+
+- deployment ID
+- deployment type
+- deployment status
+- deployment URL
+- deployment timestamp
+- active deployment
+- production environment
+- published revision
+- runtime service
+- deployment configuration
+
+Determine whether:
+
+sc.travelintrips.co.id
+
+points to this Replit Production deployment.
+
+==================================================
+PHASE 2 — IDENTIFY PRODUCTION ENVIRONMENT
+==================================================
+
+Determine:
+
+PRODUCTION = true/false
+
+and distinguish:
+
+DEV
+PREVIEW
+PRODUCTION
+
+Do not use development URL as production evidence.
+
+==================================================
+PHASE 3 — PRODUCTION SECRETS
+==================================================
+
+Audit the Production deployment's configured secret/environment names only.
+
+DO NOT print values.
+
+Determine whether Production currently uses:
+
+GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD
+
+or another official production bootstrap mechanism.
+
+Also identify:
+
+- production database resolver
+- production Supabase URL source
+- production storage source
+- session secret source
+
+DO NOT expose credentials.
+
+==================================================
+PHASE 4 — GCP SECRET MANAGER
+==================================================
+
+If Production Replit deployment loads GCP Secret Manager:
+
+trace the official loader.
+
+Determine:
+
+GCP project ID source
+Secret ID source
+credential source
+runtime identity/principal
+
+Do NOT assume:
+
+sc-sport-center
+
+is correct merely because old app.yaml contains it.
+
+Use actual runtime configuration as higher-priority evidence.
+
+==================================================
+PHASE 5 — DATABASE
+==================================================
+
+Determine which database Production runtime actually connects to.
+
+DO NOT query transaction data.
+
+DO NOT print DATABASE_URL.
+
+Only classify:
+
+PRODUCTION DATABASE = DEV / PROD / UNKNOWN
+
+and provide safe identity evidence such as:
+
+host/project identifier with secrets redacted.
+
+==================================================
+PHASE 6 — STORAGE
+==================================================
+
+Determine actual Production storage:
+
+- Supabase Storage
+- Replit Object Storage
+- other
+
+Verify it is not DEV storage.
+
+No object mutation.
+
+==================================================
+PHASE 7 — DEPLOYMENT CONFIGURATION
+==================================================
+
+Compare:
+
+current Replit Production deployment
+
+against:
+
+gae-deploy/app.yaml
+cloudbuild.yaml
+
+Determine whether GAE configuration is:
+
+ACTIVE
+LEGACY
+UNUSED
+PLANNED
+UNKNOWN
+
+Do NOT modify it.
+
+==================================================
+PHASE 8 — CRITICAL DECISION
+==================================================
+
+If Replit Production is the actual production runtime:
+
+then:
+
+PRODUCTION RUNTIME = REPLIT
+GCP APP ENGINE = NOT PRODUCTION RUNTIME
+
+Do NOT attempt to verify App Engine runtime identity for transaction audit.
+
+Instead verify the actual Replit Production runtime identity and its Secret Manager access path.
+
+==================================================
+PHASE 9 — PRODUCTION AUDIT GATE
+==================================================
+
+After actual Replit Production identity is confirmed:
+
+determine whether a safe read-only database connection is available.
+
+If no read-only connection:
+
+PRODUCTION TRANSACTION AUDIT = BLOCKED
+
+Do not use write-capable application connection.
+
+==================================================
+FINAL REPORT
+==================================================
+
+Return:
+
+PRODUCTION DOMAIN:
+sc.travelintrips.co.id
+
+DOMAIN TARGET:
+Replit
+
+ACTUAL PRODUCTION RUNTIME:
+Replit / GAE / Cloud Run / Unknown
+
+ACTIVE DEPLOYMENT:
+...
+
+PRODUCTION DATABASE:
+PROD / DEV / UNKNOWN
+
+PRODUCTION STORAGE:
+...
+
+PRODUCTION SECRET SOURCE:
+...
+
+GCP PROJECT:
+...
+
+GCP APP ENGINE:
+ACTIVE / LEGACY / UNUSED / UNKNOWN
+
+RUNTIME IDENTITY:
+CONFIRMED / UNVERIFIED
+
+READ-ONLY DB:
+PASS / BLOCKED
+
+PRODUCTION TRANSACTION AUDIT:
+PASS / BLOCKED
+
+Do not mutate anything.
+Do not deploy.
+Do not migrate.
+Do not change GCP project.
+Do not change secrets.
+Do not touch Central Finance.
+Do not ask for confirmation.

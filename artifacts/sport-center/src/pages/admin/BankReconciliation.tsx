@@ -432,23 +432,42 @@ function resolveProofUrl(url: string | null | undefined): string | null {
 function MatchCandidateRow({
   match,
   onApprove,
+  onRepair,
   isPending,
 }: {
   match: any;
   onApprove: (matchId: number) => void;
+  onRepair: () => void;
   isPending: boolean;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [ocr, setOcr] = useState<{ name?: string; amount?: number; date?: string; raw?: string } | null>(
-    match.ocrName || match.ocrAmount || match.ocrDate
-      ? { name: match.ocrName, amount: match.ocrAmount, date: match.ocrDate, raw: match.ocrRaw }
+  const [ocr, setOcr] = useState<{
+    name?: string;
+    amount?: number;
+    date?: string;
+    raw?: string;
+    paymentMethod?: string | null;
+    confidence?: number;
+    autoUpdated?: boolean;
+  } | null>(
+    match.ocrName || match.ocrAmount || match.ocrDate || match.ocrData?.paymentMethodDetection
+      ? {
+          name: match.ocrName,
+          amount: match.ocrAmount,
+          date: match.ocrDate,
+          raw: match.ocrRaw,
+          paymentMethod: match.ocrData?.paymentMethodDetection?.paymentMethod ?? match.paymentMethod,
+          confidence: match.ocrData?.paymentMethodDetection?.confidence,
+        }
       : null
   );
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [repairLoading, setRepairLoading] = useState(false);
   const { toast } = useToast();
 
   const proofUrl = resolveProofUrl(match.proofUrl);
+  const isGymQrisReview = String(match.matchReason ?? "").includes("GYM_QRIS_METADATA_REVIEW");
 
   const handleScanOcr = async () => {
     if (!proofUrl) return;
@@ -462,12 +481,49 @@ function MatchCandidateRow({
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error ?? "Gagal scan OCR");
-      setOcr({ name: data.ocrName, amount: data.ocrAmount, date: data.ocrDate, raw: data.ocrRaw });
-      toast({ title: "Scan OCR selesai" });
+      setOcr({
+        name: data.ocrName,
+        amount: data.ocrAmount,
+        date: data.ocrDate,
+        raw: data.ocrRaw,
+        paymentMethod: data.paymentMethod,
+        confidence: data.paymentMethodDetection?.confidence,
+        autoUpdated: data.paymentMethodAutoUpdated,
+      });
+      toast({
+        title: data.paymentMethodAutoUpdated
+          ? `Metode otomatis diubah ke ${data.paymentMethod}`
+          : "Scan OCR selesai",
+      });
     } catch (e: any) {
       setOcrError(e.message);
     } finally {
       setOcrLoading(false);
+    }
+  };
+
+  const handleRepairQris = async () => {
+    setRepairLoading(true);
+    try {
+      const resp = await fetch(`${API_BASE}/payments/${match.candidateId}/repair-qris`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? "Gagal memperbaiki payment QRIS");
+      toast({
+        title: "Payment QRIS diperbaiki",
+        description: "Metadata, jurnal internal, dan mirror public sudah disinkronkan.",
+      });
+      onRepair();
+    } catch (e: any) {
+      toast({
+        title: "Repair QRIS belum berhasil",
+        description: e.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRepairLoading(false);
     }
   };
 
@@ -614,6 +670,28 @@ function MatchCandidateRow({
             {match.orderIdMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">✓ Order ID</span>}
             {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
           </div>
+          {match.candidateType === "payment" && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Metode: {match.paymentMethod || "—"}
+              </span>
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Provider: {match.providerName || "—"}
+              </span>
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Company ID: {match.companyId ?? "—"}
+              </span>
+              {match.reconciliationReady ? (
+                <span className="px-1.5 py-0.5 rounded border border-green-200 bg-green-50 text-green-700">
+                  ✓ Syarat payment terpenuhi
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">
+                  Kurang: {(match.reconciliationMissing ?? []).join(", ")}
+                </span>
+              )}
+            </div>
+          )}
           <ScoreBreakdown reason={match.matchReason} totalScore={match.matchScore} />
 
           {/* OCR Results */}
@@ -638,6 +716,18 @@ function MatchCandidateRow({
                 <div className="flex gap-1.5 items-center">
                   <span className="text-[10px] font-medium text-amber-600 w-12 shrink-0">Tanggal:</span>
                   <span className="text-[10px] text-amber-800 font-semibold">{ocr.date}</span>
+                </div>
+              )}
+              {ocr.paymentMethod && (
+                <div className="flex gap-1.5 items-center pt-1 border-t border-amber-200">
+                  <span className="text-[10px] font-medium text-amber-600 w-24 shrink-0">Metode otomatis:</span>
+                  <span className="text-[10px] text-amber-900 font-bold">
+                    {ocr.paymentMethod}
+                    {ocr.confidence != null ? ` (${Math.round(ocr.confidence * 100)}%)` : ""}
+                  </span>
+                  {ocr.autoUpdated && (
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-green-100 text-green-700">Diperbarui</span>
+                  )}
                 </div>
               )}
             </div>
@@ -667,11 +757,24 @@ function MatchCandidateRow({
             </div>
           )}
         </div>
-        {match.status === "candidate" && (
-          <Button size="sm" className="shrink-0 h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending}>
-            <CheckCircle2 size={12} /> Pilih
-          </Button>
-        )}
+        <div className="shrink-0 flex flex-col gap-1 items-end">
+          {isGymQrisReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] gap-1 border-violet-300 text-violet-700 hover:bg-violet-50"
+              onClick={handleRepairQris}
+              disabled={repairLoading || isPending}
+            >
+              {repairLoading ? "Repair..." : "Repair QRIS + jurnal"}
+            </Button>
+          )}
+          {match.status === "candidate" && (
+            <Button size="sm" className="h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending || repairLoading}>
+              <CheckCircle2 size={12} /> Pilih
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Lightbox */}
@@ -1136,6 +1239,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                       const { sheetId, sheetName } = getSheetContext();
                       approveMutation.mutate({ mutationId: mutation.id, data: { matchId, sheetId, sheetName } });
                     }}
+                    onRepair={() => matchesQuery.refetch()}
                     isPending={isPending}
                   />
                 ))}
@@ -1233,6 +1337,24 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                           ))}
                         </tbody>
                       </table>
+                      {journalLines[0]?.paymentId && (
+                        <div className="border-t bg-slate-50/70 px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                            Snapshot Payment saat Posting
+                          </p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                            <span>Payment #{journalLines[0].paymentId}</span>
+                            <span>Metode: {journalLines[0].paymentMethod ?? "—"}</span>
+                            <span>Provider: {journalLines[0].providerName ?? "—"}</span>
+                            <span>Company ID: {journalLines[0].paymentCompanyId ?? "—"}</span>
+                            <span>Bank Account: {journalLines[0].paymentBankAccountId ?? "—"}</span>
+                            <span>Expected Settlement: {journalLines[0].paymentExpectedSettlementDate ?? "—"}</span>
+                            {journalLines[0].providerOrderId && (
+                              <span>Provider Order: {journalLines[0].providerOrderId}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Inline Edit Form */}
                       {editingCOA && (
@@ -2319,6 +2441,12 @@ export default function AdminBankReconciliation() {
   const [importResult, setImportResult] = useState<any>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [bulkPosting, setBulkPosting] = useState(false);
+  const [bulkOcrScanning, setBulkOcrScanning] = useState(false);
+  const [bulkOcrProgress, setBulkOcrProgress] = useState<{
+    processed: number;
+    updated: number;
+    failed: number;
+  } | null>(null);
 
   const handleBulkPostJournal = async () => {
     setBulkPosting(true);
@@ -2334,6 +2462,60 @@ export default function AdminBankReconciliation() {
       toast({ title: e.message, variant: "destructive" });
     } finally {
       setBulkPosting(false);
+    }
+  };
+
+  const handleBulkOcrScan = async () => {
+    if (!window.confirm(
+      "Scan ulang semua bukti payment yang tersimpan? Hanya hasil OCR dengan confidence minimal 85% yang akan mengubah metode pembayaran."
+    )) return;
+
+    setBulkOcrScanning(true);
+    setBulkOcrProgress({ processed: 0, updated: 0, failed: 0 });
+    let cursor = 0;
+    let hasMore = true;
+    let processed = 0;
+    let updated = 0;
+    let failed = 0;
+    let accountingReviewRequired = 0;
+
+    try {
+      while (hasMore) {
+        const response = await fetch(`${API_BASE}/bank-reconciliation/scan-ocr-bulk`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ cursor, batchSize: 5 }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "Gagal bulk scan OCR");
+
+        processed += Number(result.processed ?? 0);
+        updated += Number(result.updated ?? 0);
+        failed += Number(result.failed ?? 0);
+        accountingReviewRequired += Number(result.accountingReviewRequired ?? 0);
+        setBulkOcrProgress({ processed, updated, failed });
+
+        hasMore = Boolean(result.hasMore);
+        const nextCursor = Number(result.nextCursor ?? cursor);
+        if (hasMore && nextCursor <= cursor) {
+          throw new Error("Bulk scan berhenti karena cursor tidak maju");
+        }
+        cursor = nextCursor;
+      }
+
+      toast({
+        title: `✅ Bulk OCR selesai: ${updated} metode diperbarui`,
+        description: `${processed} bukti diproses · ${failed} gagal · ${accountingReviewRequired} perlu review accounting`,
+      });
+    } catch (error: any) {
+      toast({
+        title: error?.message ?? "Bulk scan OCR gagal",
+        description: `${processed} bukti sudah diproses sebelum proses berhenti`,
+        variant: "destructive",
+      });
+    } finally {
+      setBulkOcrScanning(false);
+      setBulkOcrProgress(null);
     }
   };
 
@@ -2420,6 +2602,19 @@ export default function AdminBankReconciliation() {
             >
               <Zap size={14} />
               {runMatchingMutation.isPending ? "Memproses..." : "Jalankan Matching"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+              onClick={handleBulkOcrScan}
+              disabled={bulkOcrScanning}
+              title="Scan ulang seluruh bukti payment yang tersimpan"
+            >
+              <RefreshCw size={14} className={bulkOcrScanning ? "animate-spin" : ""} />
+              {bulkOcrScanning
+                ? `OCR ${bulkOcrProgress?.processed ?? 0} diproses...`
+                : "Scan OCR Semua Payment"}
             </Button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
             <Button size="sm" className="gap-2" onClick={() => fileRef.current?.click()} disabled={importing}>

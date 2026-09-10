@@ -1,0 +1,908 @@
+# FIX QRIS RECONCILIATION DATA ENRICHMENT
+
+## Sport Center Payment + CST Mirror + Google Sheet Bank Mutation
+
+Perbaiki pipeline data QRIS agar strict reconciliation matcher yang sudah lulus UAT dapat bekerja pada transaksi aktual.
+
+**JANGAN melonggarkan strict matcher.**
+
+Masalah yang ditemukan pada data aktual:
+
+### Payment QRIS
+
+Payment ID:
+`3`
+
+Paid date:
+`2026-08-09`
+
+Amount:
+`Rp100.000`
+
+Data:
+
+`company_id = NULL`
+
+`bank_account_id = NULL`
+
+`provider_code = unknown`
+
+`settlement_date = NULL`
+
+### Bank mutation
+
+Mutation ID:
+`96`
+
+Mutation date:
+`2026-08-10`
+
+Credit:
+`Rp923.420`
+
+Data:
+
+`company_id = 1`
+
+`bank_account_id = NULL`
+
+`provider_name = NULL`
+
+`source = google_sheet`
+
+`source_classification = actual_bank_mutation`
+
+Candidate saat ini:
+
+`REVIEW`
+
+karena company/bank account/provider tidak cukup untuk deterministic matching.
+
+Tujuan task ini adalah mencari **akar penyebab field tersebut tidak terisi**, kemudian memperbaiki pipeline enrichment secara backward-compatible.
+
+---
+
+# 1. SAFETY
+
+Jangan:
+
+* membuat `NULL` sebagai wildcard;
+* melonggarkan provider boundary;
+* melonggarkan bank-account boundary;
+* menghapus company boundary;
+* melakukan arbitrary amount matching;
+* final reconciliation;
+* accounting posting;
+* mengubah jurnal;
+* deploy production;
+* mass-update historical data tanpa dry-run;
+* menebak provider hanya dari nama bank/rekening.
+
+Strict QRIS matcher yang sudah lulus UAT harus dipertahankan.
+
+---
+
+# 2. AUDIT END-TO-END DATA FLOW
+
+Audit alur aktual:
+
+```text
+SPORT CENTER
+payment created
+↓
+canonical payment
+↓
+CST mirror
+↓
+public.sport_payments
+↓
+QRIS candidate engine
+```
+
+dan:
+
+```text
+BANK / GOOGLE SHEET
+mutation
+↓
+Google Sheet import/sync
+↓
+bank_mutations
+↓
+mutation enrichment
+↓
+QRIS candidate engine
+```
+
+Temukan exact file/function/table yang menyebabkan:
+
+* `company_id`
+* `bank_account_id`
+* `payment_provider/provider_code`
+
+hilang atau tidak dipopulasi.
+
+Jangan patch sebelum root cause ditemukan.
+
+---
+
+# 3. PAYMENT — COMPANY_ID
+
+Audit mengapa QRIS payment:
+
+`payment ID 3`
+
+memiliki:
+
+`company_id = NULL`.
+
+Tentukan source of truth company.
+
+Prioritas:
+
+1. booking/facility/venue ownership;
+2. Sport Center company configuration;
+3. merchant/store mapping;
+4. explicit company ID pada payment creation.
+
+Jangan infer company berdasarkan nominal atau mutation.
+
+Untuk payment baru, `company_id` harus ditentukan secara deterministic ketika payment dibuat atau ketika mirror CST dibuat.
+
+Target:
+
+```text
+QRIS payment
+→ booking/facility
+→ company
+→ company_id
+```
+
+Jika company dapat diketahui dari booking/facility, gunakan relasi tersebut sebagai canonical source.
+
+---
+
+# 4. PAYMENT — BANK_ACCOUNT_ID
+
+Audit mengapa payment QRIS tidak mempunyai:
+
+`bank_account_id`.
+
+`bank_account_id` di sini berarti:
+
+**rekening tujuan settlement provider untuk payment tersebut.**
+
+Bukan rekening customer.
+
+Mapping ideal:
+
+```text
+company
++
+payment_provider
++
+effective date
+→ settlement bank account
+```
+
+Contoh:
+
+```text
+company 1
++ mandiri_direct
+→ rekening settlement Mandiri company 1
+```
+
+atau:
+
+```text
+company 1
++ paylabs
+→ rekening settlement Paylabs company 1
+```
+
+Gunakan provider settlement rule/config existing jika sudah tersedia.
+
+Jangan hardcode database ID rekening di source code.
+
+---
+
+# 5. PAYMENT PROVIDER
+
+Untuk payment baru, canonical provider harus berasal dari upstream Sport Center:
+
+`mandiri_direct`
+
+`paylabs`
+
+atau:
+
+`unknown`.
+
+Rules:
+
+### Mandiri Direct
+
+Jika payment dibuat melalui jalur QRIS Mandiri Direct:
+
+`payment_provider = mandiri_direct`
+
+### Paylabs
+
+Jika payment sukses melalui Paylabs:
+
+`payment_provider = paylabs`
+
+### Unknown
+
+Hanya jika evidence benar-benar tidak tersedia:
+
+`payment_provider = unknown`
+
+Jangan infer:
+
+`QRIS = mandiri_direct`.
+
+---
+
+# 6. VERIFY SPORT CENTER → CST MIRROR
+
+Audit mirror:
+
+`sport_center.sport_payments`
+
+→
+
+`public.sport_payments`
+
+Pastikan field berikut termirror:
+
+* company_id
+* bank_account_id
+* payment_provider
+* provider_code
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* gross amount
+
+Jika schema destination belum memiliki field yang dibutuhkan, lakukan migration additive/backward-compatible.
+
+Jangan DROP existing column.
+
+---
+
+# 7. CANONICAL PROVIDER FIELD
+
+Audit apakah CST sekarang mempunyai dua field:
+
+`payment_provider`
+
+dan:
+
+`provider_code`.
+
+Jika keduanya ada, tentukan canonical relationship.
+
+Contoh acceptable:
+
+```text
+payment_provider = source canonical field
+
+provider_code = reconciliation normalized representation
+```
+
+atau satukan jika architecture memungkinkan tanpa breaking change.
+
+Yang penting:
+
+jangan sampai:
+
+```text
+payment_provider = paylabs
+
+provider_code = unknown
+```
+
+untuk payment yang sama.
+
+Tambahkan consistency validation/test.
+
+---
+
+# 8. GOOGLE SHEET MUTATION — BANK ACCOUNT
+
+Audit importer Google Sheet.
+
+Mutation ID:
+
+`96`
+
+memiliki:
+
+`bank_account_id = NULL`.
+
+Cari bagaimana sheet/import source menentukan rekening.
+
+Gunakan deterministic source seperti:
+
+* sheet configuration;
+* spreadsheet ID;
+* worksheet/tab;
+* import source mapping;
+* configured bank account;
+* explicit account identifier pada statement.
+
+Ideal:
+
+```text
+Google Sheet source
+→ configured bank account
+→ bank_account_id
+```
+
+Jika satu sheet merepresentasikan satu rekening, buat mapping:
+
+```text
+source/import configuration
+→ bank_account_id
+```
+
+Jangan infer rekening berdasarkan nominal transaksi.
+
+---
+
+# 9. GOOGLE SHEET MUTATION — COMPANY
+
+Mutation sudah memiliki:
+
+`company_id = 1`.
+
+Audit sumbernya.
+
+Pastikan mapping company dan bank account konsisten:
+
+```text
+source
+→ company_id
+→ bank_account_id
+```
+
+Bank account yang dipilih harus memang dimiliki/diotorisasi oleh company tersebut.
+
+Tambahkan validation agar konfigurasi invalid tidak diam-diam menghasilkan mutation.
+
+---
+
+# 10. MUTATION PROVIDER DETECTION
+
+Mutation ID 96 memiliki:
+
+`provider_name = NULL`.
+
+Jangan langsung menganggap mutation tersebut Mandiri hanya karena rekening bank adalah Mandiri.
+
+Paylabs juga bisa settle ke rekening Mandiri.
+
+Provider detection boleh menggunakan evidence:
+
+1. explicit provider reference;
+2. settlement reference;
+3. provider batch reference;
+4. deterministic mutation-description pattern;
+5. import source/provider mapping jika source memang provider-specific;
+6. manual reviewed classification.
+
+Simpan:
+
+`provider_name`
+
+dan:
+
+`provider_detection_source`.
+
+Jika evidence tidak cukup:
+
+provider tetap:
+
+`unknown`
+
+dan matcher menghasilkan REVIEW.
+
+---
+
+# 11. DESCRIPTION PATTERN
+
+Audit description aktual mutation seperti:
+
+`7177632488799999999111111111111QRTRAVELI ...`
+
+Jangan membuat regex provider berdasarkan satu sample.
+
+Ambil beberapa mutation QRIS dari source yang sama dan lihat apakah terdapat pattern deterministic.
+
+Jika pattern belum terbukti:
+
+jangan auto-classify provider.
+
+Laporkan sebagai:
+
+`PROVIDER_EVIDENCE_INSUFFICIENT`.
+
+---
+
+# 12. IMPORTANT — PAYMENT DATE VS SETTLEMENT DATE
+
+Jangan menganggap payment 9 Agustus harus memiliki mutation 9 Agustus.
+
+Gunakan:
+
+```text
+paid_at
+→ Asia/Jakarta
+→ provider settlement rule
+→ business calendar
+→ expected_settlement_date
+```
+
+Payment tanggal 9 Agustus boleh settle pada business day berikutnya sesuai provider rule.
+
+Jadi jangan memperbaiki masalah ini dengan generic:
+
+`mutation_date = payment_date`.
+
+---
+
+# 13. IMPORTANT — BATCH SETTLEMENT
+
+Mutation:
+
+`Rp923.420`
+
+tidak harus cocok dengan satu payment.
+
+Settlement QRIS dapat berupa:
+
+```text
+Payment A
++ Payment B
++ Payment C
++ ...
+= Gross batch
+
+Gross batch
+- observed provider deduction
+= actual bank credit
+```
+
+Candidate engine harus tetap menggunakan natural batch.
+
+Jangan mengubah matcher menjadi:
+
+`payment amount = mutation amount`.
+
+---
+
+# 14. CHECK MISSING PAYMENTS
+
+Ini sangat penting.
+
+Mutation aktual:
+
+`Rp923.420`
+
+sedangkan payment yang ditemukan hanya:
+
+`Rp100.000`.
+
+Audit apakah semua QRIS payment yang seharusnya membentuk settlement tersebut sudah masuk ke CST.
+
+Bandingkan:
+
+Sport Center source
+
+vs
+
+CST mirror
+
+untuk periode:
+
+`2026-08-09`
+
+dan settlement terkait:
+
+`2026-08-10`
+
+atau expected business settlement date aktual.
+
+Buat reconciliation-of-input report:
+
+| Metric             | Sport Center | CST |
+| ------------------ | -----------: | --: |
+| QRIS payment count |              |     |
+| Gross QRIS         |              |     |
+| Mandiri Direct     |              |     |
+| Paylabs            |              |     |
+| Unknown            |              |     |
+
+Jika count/gross berbeda:
+
+temukan missing payment IDs.
+
+Jangan lanjut menyalahkan reconciliation matcher sebelum mirror completeness tervalidasi.
+
+---
+
+# 15. PAYMENT MIRROR COMPLETENESS CHECK
+
+Tambahkan diagnostic/read-only mechanism untuk membandingkan:
+
+```text
+Sport Center payment source
+vs
+CST payment mirror
+```
+
+Minimal berdasarkan:
+
+* payment ID/source ID;
+* booking ID;
+* amount;
+* paid_at;
+* provider;
+* company.
+
+Tujuan:
+
+mendeteksi payment yang gagal dimirror sebelum settlement reconciliation berjalan.
+
+---
+
+# 16. NEW PAYMENT BEHAVIOR
+
+Setelah fix, payment QRIS baru harus masuk CST dengan minimal:
+
+```text
+company_id = NOT NULL
+bank_account_id = NOT NULL
+provider_code = mandiri_direct/paylabs/unknown
+paid_at = NOT NULL
+amount > 0
+```
+
+Untuk provider `unknown`, bank account masih boleh ditentukan jika settlement account memang diketahui secara deterministic.
+
+Tetapi provider unknown tetap tidak boleh auto-MATCH.
+
+---
+
+# 17. NEW MUTATION BEHAVIOR
+
+Mutation bank baru dari configured Google Sheet source harus memiliki minimal:
+
+```text
+company_id = NOT NULL
+bank_account_id = NOT NULL
+source_classification = actual_bank_mutation
+source provenance = populated
+credit_amount > 0 untuk incoming settlement
+```
+
+Provider boleh unknown jika evidence belum tersedia.
+
+---
+
+# 18. HISTORICAL DATA — DRY RUN FIRST
+
+Setelah pipeline baru benar, audit historical rows yang memiliki:
+
+```text
+company_id IS NULL
+OR bank_account_id IS NULL
+OR provider unknown/NULL
+```
+
+Buat backfill classifier.
+
+Kategori:
+
+```text
+SAFE_COMPANY_BACKFILL
+SAFE_BANK_ACCOUNT_BACKFILL
+SAFE_PROVIDER_BACKFILL
+AMBIGUOUS
+NO_EVIDENCE
+```
+
+Jalankan:
+
+`DRY RUN ONLY`.
+
+Jangan apply historical backfill tanpa approval.
+
+---
+
+# 19. BACKFILL SAFETY
+
+Company boleh dibackfill hanya jika deterministic dari:
+
+* booking;
+* facility;
+* venue;
+* merchant/store mapping.
+
+Bank account boleh dibackfill hanya jika deterministic dari:
+
+* company;
+* provider;
+* effective settlement rule;
+* import source mapping.
+
+Provider boleh dibackfill hanya dari strong evidence.
+
+Jangan:
+
+```text
+all QRIS → mandiri_direct
+```
+
+Jangan:
+
+```text
+all mutation in Mandiri account → mandiri_direct
+```
+
+---
+
+# 20. SPECIFIC DIAGNOSTIC FOR CURRENT CASE
+
+Setelah implementasi pipeline fix, lakukan read-only diagnostic khusus:
+
+Payment:
+
+`ID 3`
+
+Mutation:
+
+`ID 96`
+
+Jawab:
+
+### Payment
+
+* company yang seharusnya?
+* bagaimana company dibuktikan?
+* settlement account yang seharusnya?
+* bagaimana account dibuktikan?
+* provider dapat ditentukan atau tetap unknown?
+* apakah ada payment lain yang seharusnya berada dalam batch yang sama?
+
+### Mutation
+
+* company?
+* bank account?
+* provider evidence?
+* actual credit?
+* expected settlement date?
+* import provenance?
+
+JANGAN memaksa kedua record menjadi MATCHED.
+
+Tujuan diagnosis adalah menentukan apakah memang secara bisnis mereka satu settlement.
+
+---
+
+# 21. RE-RUN CANDIDATE DRY-RUN
+
+Setelah pipeline diperbaiki:
+
+jalankan strict candidate engine secara:
+
+`READ-ONLY / IN-MEMORY`.
+
+Jangan persist.
+
+Untuk mutation ID 96 tampilkan:
+
+```text
+company
+bank account
+provider
+expected settlement date
+candidate payment count
+candidate payment IDs
+gross batch
+bank credit
+observed deduction
+effective deduction rate
+status
+reason
+```
+
+Jika data masih tidak cukup:
+
+`REVIEW`
+
+adalah hasil yang benar.
+
+Jangan mengubah engine agar menghasilkan MATCHED.
+
+---
+
+# 22. TESTS
+
+Tambahkan test minimal:
+
+### Payment creation
+
+Mandiri QRIS
+→ company populated
+→ settlement account populated
+→ provider mandiri_direct.
+
+### Paylabs
+
+→ company populated
+→ settlement account populated
+→ provider paylabs.
+
+### CST mirror
+
+Canonical dimensions tidak hilang.
+
+### Google Sheet import
+
+Configured sheet
+→ company + bank account populated.
+
+### Unknown provider
+
+→ REVIEW.
+
+### Missing bank account
+
+→ REVIEW.
+
+### Missing company
+
+→ REVIEW.
+
+### Mirror completeness
+
+Missing source payment terdeteksi.
+
+### Historical backfill
+
+Ambiguous record tidak diubah.
+
+---
+
+# 23. DO NOT CHANGE STRICT MATCHER
+
+Acceptance criteria penting:
+
+Strict matcher tetap membutuhkan:
+
+```text
+company_id
++
+bank_account_id
++
+provider
++
+expected settlement date
++
+natural batch
++
+actual bank mutation
+```
+
+Jangan mengubah:
+
+`NULL = wildcard`.
+
+Jangan fallback ke generic nominal matching untuk QRIS.
+
+---
+
+# 24. OUTPUT
+
+Setelah selesai, laporkan:
+
+## A. Root cause
+
+Kenapa payment kehilangan:
+
+* company
+* bank account
+* provider.
+
+Kenapa mutation kehilangan:
+
+* bank account
+* provider.
+
+## B. Files changed
+
+## C. Payment pipeline fix
+
+## D. CST mirror fix
+
+## E. Google Sheet mutation enrichment fix
+
+## F. Provider detection behavior
+
+## G. Mirror completeness report
+
+Khusus 9–10 Agustus.
+
+## H. Historical dry-run
+
+Count:
+
+* safe company
+* safe bank account
+* safe provider
+* ambiguous
+* no evidence.
+
+## I. Current case
+
+Payment ID 3 vs Mutation ID 96.
+
+Apakah sekarang:
+
+* MATCHED
+* REVIEW
+* UNMATCHED
+
+dan kenapa.
+
+## J. Tests/typecheck/build
+
+## K. Remaining risks
+
+## L. Production readiness
+
+Jangan commit/push/deploy production tanpa approval.
+
+Jangan apply historical backfill.
+
+Jangan final reconcile.
+
+Jangan accounting post.
+
+---
+
+# FINAL GOAL
+
+Perbaiki **data sebelum matcher**, bukan melemahkan matcher.
+
+Target pipeline:
+
+```text
+SPORT CENTER
+      ↓
+QRIS payment
+company_id
+bank_account_id
+provider
+paid_at
+gross
+      ↓
+CST mirror
+      ↓
+strict candidate engine
+                ↑
+GOOGLE SHEET
+      ↓
+actual mutation
+company_id
+bank_account_id
+provider evidence
+credit
+provenance
+```
+
+Setelah kedua sisi memiliki dimensi yang benar, baru strict matcher menentukan apakah settlement benar-benar cocok.

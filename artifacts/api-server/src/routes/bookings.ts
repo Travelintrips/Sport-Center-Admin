@@ -1,8 +1,11 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
+import { checkSlotAvailable, closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
+import { checkInBooking, completeBooking, hasBookingSessionEnded } from "../lib/bookingLifecycle";
+import { calculateEventDiscount } from "../lib/bookingPricing";
 
 import {
   notifyBookingCreated,
@@ -24,9 +27,49 @@ import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
+import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
+import {
+  FINAL_BANK_MATCH_STATUSES,
+  getReconciledPaymentIds,
+  isPaymentSettledAndMatched,
+} from "../lib/paymentReconciliationEligibility";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+const AP_MULTIGUNA_HOURLY_PRICE = 300000;
+
+const PAYLABS_METHOD_LABELS: Record<string, string> = {
+  qris: "Paylabs - QRIS",
+  bri: "Paylabs - BRI Virtual Account",
+  bca: "Paylabs - BCA Virtual Account",
+  bni: "Paylabs - BNI VA",
+  mandiri: "Paylabs - Mandiri VA",
+  permata: "Paylabs - Permata VA",
+  cimb: "Paylabs - CIMB VA",
+  btn: "Paylabs - BTN VA",
+  danamon: "Paylabs - Danamon VA",
+  maybank: "Paylabs - Maybank VA",
+  bsi: "Paylabs - BSI VA",
+  muamalat: "Paylabs - Muamalat Virtual Account",
+  sinarmas: "Paylabs - Sinarmas VA",
+  ina: "Paylabs - INA VA",
+};
+
+function resolvePaylabsDisplayLabel(
+  rawMethod: unknown,
+  configuredMethods: Array<{ id?: unknown; name?: unknown }>,
+): string | undefined {
+  const code = String(rawMethod ?? "").trim().toLowerCase();
+  if (!code) return undefined;
+  const configured = configuredMethods.find(
+    (method) =>
+      String(method.id ?? "").trim().toLowerCase() === code &&
+      typeof method.name === "string" &&
+      method.name.trim(),
+  );
+  return configured?.name?.toString().trim() || PAYLABS_METHOD_LABELS[code];
+}
 
 // Helper: kirim rekap hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -41,6 +84,51 @@ function triggerRekapIfToday(bookingDate: string): void {
 }
 
 const router = Router();
+
+function isMultigunaFacility(facility: { name?: string | null; category?: string | null }): boolean {
+  const normalized = `${facility.name ?? ""} ${facility.category ?? ""}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return normalized.includes("multiguna");
+}
+
+function isGymFacility(facility: {
+  name?: string | null;
+  category?: string | null;
+  bookingMode?: string | null;
+}): boolean {
+  return (
+    facility.bookingMode === "walk_in" ||
+    /gym|fitness/i.test(facility.name ?? "") ||
+    /gym|fitness/i.test(facility.category ?? "")
+  );
+}
+
+function getApDiscount(basePrice: number, setting: {
+  discountPercentage?: number | null;
+  discountAmount?: number | null;
+}, isMultiguna: boolean, durationHours: number): { amount: number; percentage: number; finalPrice: number } {
+  if (isMultiguna) {
+    const finalPrice = Math.min(basePrice, AP_MULTIGUNA_HOURLY_PRICE * durationHours);
+    const amount = Math.max(0, basePrice - finalPrice);
+    return {
+      amount,
+      finalPrice,
+      percentage: basePrice > 0 ? Number(((amount / basePrice) * 100).toFixed(2)) : 0,
+    };
+  }
+
+  const fixedAmount = Number(setting.discountAmount ?? 0);
+  const percentage = Number(setting.discountPercentage ?? 0);
+  const amount = fixedAmount > 0
+    ? Math.min(Math.round(fixedAmount), Math.max(0, basePrice))
+    : Math.min(Math.round((basePrice * percentage) / 100), Math.max(0, basePrice));
+  return {
+    amount,
+    finalPrice: Math.max(0, basePrice - amount),
+    percentage: basePrice > 0 ? Number(((amount / basePrice) * 100).toFixed(2)) : 0,
+  };
+}
 
 // ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
 router.post("/bookings/track-payer-selection", async (req, res) => {
@@ -65,26 +153,6 @@ router.post("/bookings/track-payer-selection", async (req, res) => {
   }
 });
 
-async function generateOrderNumber(): Promise<string> {
-  // Advisory lock (bigint namespace) serializes order number generation across concurrent requests
-  await db.execute(sql`SELECT pg_advisory_lock(42001)`);
-  try {
-    const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-    let maxNum = 0;
-    for (const row of rows) {
-      const match = row.orderNumber.match(/^SC-(\d+)$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > maxNum) maxNum = n;
-      }
-    }
-    const next = maxNum + 1;
-    return `SC-${String(next).padStart(4, "0")}`;
-  } finally {
-    await db.execute(sql`SELECT pg_advisory_unlock(42001)`);
-  }
-}
-
 function addHours(time: string, hours: number): string {
   const [h, m] = time.split(":").map(Number);
   const totalMinutes = h * 60 + (m || 0) + hours * 60;
@@ -97,25 +165,46 @@ async function getBookingWithPayment(id: number) {
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-  const allPayments = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id));
+  const groupBookingIds = booking.groupRef
+    ? (await db.select({ id: bookingsTable.id }).from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef))).map((row) => row.id)
+    : [id];
+  const allPayments = await db.select().from(paymentsTable)
+    .where(inArray(paymentsTable.bookingId, groupBookingIds));
   allPayments.sort((a, b) => a.id - b.id);
   const payment =
     allPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
     allPayments[allPayments.length - 1] ??
     null;
+  const allocations = booking.groupRef
+    ? await db.select().from(paymentAllocationsTable)
+      .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
+    : [];
 
   // Jika booking bagian dari grup recurring, ambil info grup
-  let groupInfo: { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null = null;
+  let groupInfo: {
+    groupTotalPayment: number;
+    groupSessionCount: number;
+    groupRef: string;
+    additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+  } | null = null;
   if (booking.groupRef) {
     const [group] = await db.select().from(bookingGroupsTable)
       .where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1);
-    const groupBookings = await db.select({ id: bookingsTable.id })
+    const groupBookings = await db.select({
+      id: bookingsTable.id,
+      additionalCharges: bookingsTable.additionalCharges,
+    })
       .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
     if (group) {
+      const groupCharges = groupBookings
+        .map((row) => normalizeAdditionalCharges(row.additionalCharges))
+        .find((charges) => charges.length > 0) ?? [];
       groupInfo = {
         groupRef: booking.groupRef,
         groupTotalPayment: Number(group.totalPayment),
         groupSessionCount: groupBookings.length,
+        additionalCharges: groupCharges,
       };
     }
   }
@@ -129,6 +218,7 @@ async function getBookingWithPayment(id: number) {
   return {
     ...rest,
     idCardNumber: null,
+    additionalCharges: normalizeAdditionalCharges(booking.additionalCharges),
     totalPrice: Number(booking.totalPrice),
     discountAmount: Number(booking.discountAmount),
     basePrice: booking.basePrice == null ? null : Number(booking.basePrice),
@@ -145,6 +235,10 @@ async function getBookingWithPayment(id: number) {
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    paymentAllocations: allocations.map((allocation) => ({
+      ...allocation,
+      amount: Number(allocation.amount),
+    })),
     remainingAmount: (() => {
       const total = payableTotal;
 
@@ -175,7 +269,142 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       : [];
 
     const bookingIds = bookings.map((b) => b.id);
+    const groupRefs = [
+      ...new Set(
+        bookings
+          .map((b) => b.groupRef)
+          .filter((groupRef): groupRef is string => Boolean(groupRef)),
+      ),
+    ];
+    const groupChargeRows = groupRefs.length > 0
+      ? await db
+        .select({
+          groupRef: bookingsTable.groupRef,
+          additionalCharges: bookingsTable.additionalCharges,
+        })
+        .from(bookingsTable)
+        .where(inArray(bookingsTable.groupRef, groupRefs))
+      : [];
+    const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
+    for (const row of groupChargeRows) {
+      if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
+      const charges = normalizeAdditionalCharges(row.additionalCharges);
+      if (charges.length > 0) groupAdditionalCharges.set(row.groupRef, charges);
+    }
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
+    const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
+    let reconciledPaymentIds = new Set<number>();
+    if (paymentIds.length > 0) {
+      const reconciledMutations = await db
+        .select({
+          paymentId: bankMutationsTable.matchedPaymentId,
+          orderId: bankMutationsTable.matchedOrderId,
+        })
+        .from(bankMutationsTable)
+        .where(and(
+          or(
+            inArray(bankMutationsTable.matchedPaymentId, paymentIds),
+            inArray(bankMutationsTable.matchedOrderId, bookingIds),
+          ),
+          inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
+        ));
+      reconciledPaymentIds = getReconciledPaymentIds(
+        allPayments,
+        bookings,
+        reconciledMutations,
+      );
+    }
+    const membershipPaymentIds = [
+      ...new Set(
+        bookings
+          .map((booking) => booking.membershipPaymentId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const membershipIds = [
+      ...new Set(
+        bookings
+          .filter(
+            (booking) =>
+              booking.source === "gym_membership_payment" ||
+              booking.source === "gym_membership",
+          )
+          .map((booking) => booking.membershipId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const membershipPayments =
+      membershipPaymentIds.length > 0 || membershipIds.length > 0
+        ? await db
+            .select()
+            .from(membershipPaymentsTable)
+            .where(
+              or(
+                ...(membershipPaymentIds.length > 0
+                  ? [inArray(membershipPaymentsTable.id, membershipPaymentIds)]
+                  : []),
+                ...(membershipIds.length > 0
+                  ? [inArray(membershipPaymentsTable.membershipId, membershipIds)]
+                  : []),
+              ),
+            )
+            .orderBy(desc(membershipPaymentsTable.id))
+        : [];
+    const membershipPaymentById = new Map(
+      membershipPayments.map((payment) => [payment.id, payment]),
+    );
+    const latestMembershipPaymentByMembership = new Map<number, (typeof membershipPayments)[number]>();
+    const membershipPaymentsByMembership = new Map<
+      number,
+      (typeof membershipPayments)[number][]
+    >();
+    for (const payment of membershipPayments) {
+      if (!latestMembershipPaymentByMembership.has(payment.membershipId)) {
+        latestMembershipPaymentByMembership.set(payment.membershipId, payment);
+      }
+      const paymentsForMembership =
+        membershipPaymentsByMembership.get(payment.membershipId) ?? [];
+      paymentsForMembership.push(payment);
+      membershipPaymentsByMembership.set(payment.membershipId, paymentsForMembership);
+    }
+
+    // Legacy Paylabs rows may have been inserted with only the provider code
+    // ("bni", "bri", etc.). Resolve that code from the original transaction
+    // for the admin list so old bookings show the selected VA bank too.
+    const paylabsMethodByBookingId = new Map<number, string>();
+    if (bookingIds.length > 0) {
+      try {
+        const txRows = await db.execute(sql`
+          SELECT DISTINCT ON (booking_id) booking_id, payment_method
+          FROM sport_center.paylabs_transactions
+          WHERE booking_id IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})
+          ORDER BY booking_id, created_at DESC
+        `);
+        const rows = (txRows as any).rows ?? txRows;
+        for (const row of rows as Array<{ booking_id?: unknown; payment_method?: unknown }>) {
+          if (row.booking_id != null && row.payment_method != null) {
+            paylabsMethodByBookingId.set(Number(row.booking_id), String(row.payment_method));
+          }
+        }
+      } catch (err) {
+        // The transaction table is created lazily for older databases. The
+        // booking list must remain available while that table is unavailable.
+        req.log.warn({ err }, "Paylabs transaction lookup skipped for booking list");
+      }
+    }
+
+    let paylabsLabels: Array<{ id?: unknown; name?: unknown }> = [];
+    try {
+      const [paylabsSettings] = await db
+        .select({ paymentMethodsConfig: paylabsSettingsTable.paymentMethodsConfig })
+        .from(paylabsSettingsTable)
+        .limit(1);
+      paylabsLabels = Array.isArray(paylabsSettings?.paymentMethodsConfig)
+        ? paylabsSettings.paymentMethodsConfig as Array<{ id?: unknown; name?: unknown }>
+        : [];
+    } catch (err) {
+      req.log.warn({ err }, "Paylabs method label lookup skipped for booking list");
+    }
 
     // Ambil companyName dari usersTable untuk booking perusahaan
     const companyCustomerIds = [...new Set(bookings.map((b) => b.companyCustomerId).filter((id): id is number => id != null))];
@@ -198,10 +427,76 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const result = bookings.map((b) => {
       const facility = facilities.find((f) => f.id === b.facilityId);
       const bPayments = paymentsByBookingId[b.id] ?? [];
+      const membershipPayment =
+        (b.membershipPaymentId != null
+          ? membershipPaymentById.get(b.membershipPaymentId)
+          : undefined) ??
+        (b.membershipId != null
+          ? membershipPaymentsByMembership
+              .get(b.membershipId)
+              ?.find(
+                (payment) =>
+                  payment.periodStart <= b.bookingDate &&
+                  b.bookingDate < payment.periodEnd,
+              ) ??
+            latestMembershipPaymentByMembership.get(b.membershipId)
+          : undefined);
       const payment =
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
         null;
+      const transactionPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
+      const paymentMethodCode = String(payment?.paymentMethod ?? "").trim().toLowerCase();
+      const configuredPaymentCode = paylabsLabels.some((method) =>
+        String(method.id ?? "").trim().toLowerCase() === paymentMethodCode,
+      );
+      const isPaylabsQrisPayment = payment?.paymentProvider === "paylabs" &&
+        (paymentMethodCode === "qris" || paymentMethodCode === "paylabs - qris");
+      const isDirectQrisPayment = payment?.paymentProvider === "mandiri_direct" &&
+        paymentMethodCode === "qris";
+      // Some older Paylabs finalization paths wrote the selected provider code
+      // directly to sport_payments without leaving a usable transaction lookup
+      // in the list query. Prefer the transaction code, then use the stored
+      // code when it matches a configured Paylabs method. A QRIS Direct payment
+      // can still have a historical Paylabs transaction row, but that row must
+      // not overwrite the corrected QRIS Direct label.
+      const canUsePaylabsLegacyLabel = !isDirectQrisPayment &&
+        (payment?.paymentProvider === "paylabs" || configuredPaymentCode || Boolean(transactionPaylabsCode));
+      const legacyPaylabsCode = canUsePaylabsLegacyLabel
+        ? (transactionPaylabsCode
+          ?? (isPaylabsQrisPayment ? "qris" : undefined)
+          ?? (configuredPaymentCode ? paymentMethodCode : undefined))
+        : undefined;
+      const selectedPaylabsLabel = legacyPaylabsCode
+        ? resolvePaylabsDisplayLabel(legacyPaylabsCode, paylabsLabels)
+        : undefined;
+      const paymentForResponse = payment && selectedPaylabsLabel &&
+        canUsePaylabsLegacyLabel
+        ? { ...payment, paymentMethod: selectedPaylabsLabel }
+        : payment;
+      const paymentsForResponse = bPayments.map((p) => {
+        const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
+        const isPaylabsQris = p.paymentProvider === "paylabs" &&
+          (paymentCode === "qris" || paymentCode === "paylabs - qris");
+        const isDirectQris = p.paymentProvider === "mandiri_direct" && paymentCode === "qris";
+        const isPaylabsPayment = p.paymentProvider === "paylabs"
+          || paymentCode === transactionPaylabsCode
+          || paylabsLabels.some((method) =>
+            String(method.id ?? "").trim().toLowerCase() === paymentCode,
+          );
+        const label = isPaylabsPayment && !isDirectQris
+          ? resolvePaylabsDisplayLabel(isPaylabsQris ? "qris" : paymentCode, paylabsLabels)
+          : undefined;
+        return {
+          ...p,
+          paymentMethod: label ?? p.paymentMethod,
+          amount: Number(p.amount),
+          isBankReconciled: isPaymentSettledAndMatched(
+            p,
+            reconciledPaymentIds.has(p.id),
+          ),
+        };
+      });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       return {
@@ -217,12 +512,28 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         dpp: b.dpp == null ? null : Number(b.dpp),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+        additionalCharges: normalizeAdditionalCharges(b.additionalCharges),
+        groupAdditionalCharges: b.groupRef
+          ? (groupAdditionalCharges.get(b.groupRef) ?? [])
+          : [],
         downPayment: dpAmt,
         isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
-        payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
-        payments: bPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+         payment: paymentForResponse
+           ? {
+               ...paymentForResponse,
+               amount: Number(paymentForResponse.amount),
+               isBankReconciled: isPaymentSettledAndMatched(
+                 paymentForResponse,
+                 reconciledPaymentIds.has(paymentForResponse.id),
+               ),
+             }
+           : null,
+        payments: paymentsForResponse,
+        membershipPayment: membershipPayment
+          ? { ...membershipPayment, amount: Number(membershipPayment.amount) }
+          : null,
         remainingAmount: (() => {
           const confirmedDp = bPayments
             .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
@@ -278,17 +589,44 @@ function getNowMinutesWIB(): number {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
+const OPERATIONAL_BOOKING_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "admin_booking",
+  "staff",
+]);
+
+function isOperationalBookingRole(role: string | null | undefined): boolean {
+  return !!role && OPERATIONAL_BOOKING_ROLES.has(role);
+}
+
+function canSubmitAdditionalCharges(role: string | null | undefined): boolean {
+  return role === "customer" || isOperationalBookingRole(role);
+}
+
+function getRequestRole(req: { headers: { authorization?: string } }): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  return verifyToken(authHeader.slice(7))?.role ?? null;
+}
+
 router.post("/bookings", async (req, res) => {
   // Declared outside try so the catch block can release the advisory lock on error
   let slotLockKey: { fId: number; dInt: number } | null = null;
   try {
     const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+    try {
+      additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+      return;
+    }
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const bookingSource: string = req.body.source || "";
     const rawBookingType = req.body.bookingType;
     const bookingType: "regular" | "event" = rawBookingType === "event" ? "event" : "regular";
     const isEvent = bookingType === "event";
-    const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
     let { startTime, durationHours } = req.body;
 
     // Deteksi user yang sedang login (opsional — tidak wajib)
@@ -307,6 +645,10 @@ router.post("/bookings", async (req, res) => {
     }
     // Deteksi apakah request berasal dari admin (role selain customer)
     const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
+    if (additionalCharges.length > 0 && !canSubmitAdditionalCharges(loggedInRole)) {
+      res.status(401).json({ error: "Login sebagai customer atau operator diperlukan untuk menambahkan biaya tambahan" });
+      return;
+    }
 
     // Deteksi apakah company customer dengan tagihan bulanan
     // Prioritas 1: explicit companyCustomerId di body — HANYA boleh dari admin
@@ -406,10 +748,7 @@ router.post("/bookings", async (req, res) => {
 
     // Legacy Gym records may still have booking_mode = time_slot. Gym access
     // is per visit, so identify it by name/category as a safe fallback.
-    const isGymFacility =
-      /gym|fitness/i.test(facility.name ?? "") ||
-      /gym|fitness/i.test(facility.category ?? "");
-    const isWalkIn = facility.bookingMode === "walk_in" || isGymFacility;
+    const isWalkIn = isGymFacility(facility);
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
@@ -428,9 +767,16 @@ router.post("/bookings", async (req, res) => {
         res.status(400).json({ error: "startTime and durationHours required" });
         return;
       }
+      const parsedDurationHours = Number(durationHours);
+      if (!Number.isInteger(parsedDurationHours) || parsedDurationHours < 1) {
+        res.status(400).json({ error: "durationHours harus berupa bilangan bulat minimal 1 jam" });
+        return;
+      }
+      durationHours = parsedDurationHours;
 
-      // Validate slot is not in the past (dilewati untuk admin/operator)
-      if (!isAdminRequest) {
+      // Operational accounts may record bookings retroactively. Regular
+      // customers must still book only future dates and time slots.
+      if (!isOperationalBookingRole(loggedInRole)) {
         const todayWIB = getTodayWIB();
         if (bookingDate < todayWIB) {
           res.status(400).json({ error: "Tidak dapat booking tanggal yang sudah lewat" });
@@ -448,11 +794,12 @@ router.post("/bookings", async (req, res) => {
 
       // Validate within operating hours
       const openMin = timeToMinutesLocal(facility.openTime);
-      const closeMin = timeToMinutesLocal(facility.closeTime);
+      const effectiveCloseTime = getEffectiveCloseTime(facility);
+      const closeMin = closeTimeToMinutes(effectiveCloseTime);
       const startMin = timeToMinutesLocal(startTime);
       const endMin = startMin + durationHours * 60;
       if (startMin < openMin || endMin > closeMin) {
-        res.status(400).json({ error: `Booking harus dalam jam operasional ${facility.openTime}–${facility.closeTime}` });
+        res.status(400).json({ error: `Booking harus dalam jam operasional ${facility.openTime}–${effectiveCloseTime}` });
         return;
       }
 
@@ -499,8 +846,16 @@ router.post("/bookings", async (req, res) => {
         const [apSetting] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
-        if (apSetting && apSetting.discountPercentage > 0) {
-          apAutoDiscountAmount = Math.round((basePrice * apSetting.discountPercentage) / 100);
+        if (apSetting && (Number(apSetting.discountAmount ?? 0) > 0 || apSetting.discountPercentage > 0)) {
+          // AP Multiguna memakai harga khusus Rp300.000/jam, bukan diskon
+          // persentase umum AP. Ini juga harus berlaku pada auto-verifikasi;
+          // booking yang auto-verified tidak akan melewati endpoint /verify.
+          apAutoDiscountAmount = getApDiscount(
+            basePrice,
+            apSetting,
+            isMultigunaFacility(facility),
+            durationHours,
+          ).amount;
           apAutoVerified = true;
         } else {
           // Member valid tapi diskon nonaktif → tetap auto-verified
@@ -510,16 +865,16 @@ router.post("/bookings", async (req, res) => {
     }
 
     // ── Diskon Event 21,4% ───────────────────────────────────────────────────
-    const eventDiscountAmountCalc = isEvent ? Math.round(basePrice * EVENT_DISCOUNT_RATE) : 0;
+    const eventDiscountAmountCalc = isEvent ? calculateEventDiscount(basePrice) : 0;
 
     const discount = isAp
       ? apAutoDiscountAmount
       : isEvent
         ? eventDiscountAmountCalc
         : Math.min(Number(discountAmount) || 0, basePrice);
-    const totalPrice = basePrice - discount;
+    const totalPrice = basePrice - discount + additionalChargesTotal(additionalCharges);
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-    const orderNumber = await generateOrderNumber();
+    const orderNumber = await generateBookingOrderNumber();
 
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
     const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
@@ -613,6 +968,7 @@ router.post("/bookings", async (req, res) => {
       dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+      additionalCharges,
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
 
@@ -824,6 +1180,7 @@ router.post("/bookings", async (req, res) => {
       dpp: booking.dpp == null ? null : Number(booking.dpp),
       ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
       grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+      additionalCharges: normalizeAdditionalCharges(booking.additionalCharges),
       facilityName: facility.name,
       facilityCategory: facility.category,
       payment: null,
@@ -885,21 +1242,74 @@ async function checkSlotConflict(
   });
 }
 
+function recurringScheduleError(
+  facility: typeof facilitiesTable.$inferSelect,
+  bookingDate: string,
+  startTime: string,
+  durationHours: number,
+  options: { allowPastSchedule?: boolean } = {},
+): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bookingDate))) return "Tanggal booking tidak valid";
+  const parsedDate = new Date(`${bookingDate}T00:00:00+07:00`);
+  if (Number.isNaN(parsedDate.getTime())) return "Tanggal booking tidak valid";
+  const today = todayWIB();
+  if (!options.allowPastSchedule && bookingDate < today) return "Tanggal booking sudah lewat";
+  if (!/^\d{2}:\d{2}$/.test(String(startTime))) return "Jam mulai tidak valid";
+
+  const startMin = timeToMinutes(startTime);
+  const openMin = timeToMinutes(facility.openTime);
+  const closeMin = closeTimeToMinutes(getEffectiveCloseTime(facility));
+  if (startMin < openMin || startMin >= 24 * 60) return "Jam mulai tidak valid";
+  if (!Number.isInteger(durationHours) || durationHours < 1) return "Durasi booking minimal 1 jam";
+  if (startMin + durationHours * 60 > closeMin) {
+    return `Booking harus dalam jam operasional ${facility.openTime}–${getEffectiveCloseTime(facility)}`;
+  }
+  if (!options.allowPastSchedule && bookingDate === today) {
+    const nowWib = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+    if (startMin <= nowWib.getHours() * 60 + nowWib.getMinutes()) return "Slot hari ini sudah lewat";
+  }
+  return null;
+}
+
 // POST /bookings/recurring/check
 router.post("/bookings/recurring/check", async (req, res) => {
   try {
     const { facilityId, startDate, startTime, durationHours, repeatType, repeatCount } = req.body;
+    let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+    try {
+      additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+      return;
+    }
+    const allowPastSchedule = isOperationalBookingRole(getRequestRole(req));
+    if (additionalCharges.length > 0 && !canSubmitAdditionalCharges(getRequestRole(req))) {
+      res.status(401).json({ error: "Login sebagai customer atau operator diperlukan untuk menambahkan biaya tambahan" });
+      return;
+    }
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
 
+    const scheduleError = recurringScheduleError(
+      facility,
+      String(startDate),
+      String(startTime),
+      Number(durationHours),
+      { allowPastSchedule },
+    );
+    if (scheduleError) {
+      res.json({ dates: [{ date: String(startDate), available: false, reason: scheduleError }], pricePerSession: 0, validCount: 0, totalPrice: 0 });
+      return;
+    }
     const endTime = addHours(startTime, durationHours);
     const dates = generateRecurringDates(startDate, repeatType, repeatCount);
 
     const results = await Promise.all(
       dates.map(async (date) => {
         const conflict = await checkSlotConflict(Number(facilityId), date, startTime, endTime);
-        return { date, available: !conflict, reason: conflict ? "Slot already booked" : null };
+        const available = !conflict && await checkSlotAvailable(Number(facilityId), date, startTime, durationHours);
+        return { date, available, reason: available ? null : "Slot tidak tersedia atau terblokir" };
       })
     );
 
@@ -910,7 +1320,7 @@ router.post("/bookings/recurring/check", async (req, res) => {
       dates: results,
       pricePerSession,
       validCount,
-      totalPrice: pricePerSession * validCount,
+      totalPrice: pricePerSession * validCount + (validCount > 0 ? additionalChargesTotal(additionalCharges) : 0),
     });
   } catch (err) {
     req.log.error({ err }, "Check recurring error");
@@ -924,22 +1334,33 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+
+      downPaymentAmount,
+
       // AP2 / customer type
+
 
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
       // AP2 employee fields (optional)
       customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
       bookingType: rawBookingTypeR,
+      additionalCharges: rawAdditionalCharges,
       // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
       groupRef: externalGroupRefRaw,
     } = req.body;
     const externalGroupRef: string | null = externalGroupRefRaw
       ? String(externalGroupRefRaw).trim().slice(0, 64) || null
       : null;
+    let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+    try {
+      additionalCharges = normalizeAdditionalCharges(rawAdditionalCharges);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+      return;
+    }
     const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
     const isEventR = bookingTypeR === "event";
-    const EVENT_DISCOUNT_RATE_R = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const customerType: "umum" | "angkasa_pura" = rawCustomerType === "angkasa_pura" ? "angkasa_pura" : "umum";
     const idCardNumber: string | null = customerType === "angkasa_pura"
@@ -1007,10 +1428,28 @@ router.post("/bookings/recurring", async (req, res) => {
     const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
+    const uniqueDates = [...new Set(dates.map((date) => String(date)))];
+    if (uniqueDates.length !== dates.length) {
+      res.status(400).json({ error: "Tanggal recurring tidak boleh duplikat" });
+      return;
+    }
+    const scheduleErrors = uniqueDates
+      .map((date) => recurringScheduleError(
+        facility,
+        date,
+        String(startTime),
+        Number(durationHours),
+        { allowPastSchedule: isOperationalBookingRole(loggedInRole) },
+      ))
+      .filter(Boolean);
+    if (scheduleErrors.length > 0) {
+      res.status(400).json({ error: scheduleErrors[0] });
+      return;
+    }
     const basePrice = Number(facility.pricePerHour) * durationHours;
 
     // ── Diskon Event 21,4% (recurring) ──────────────────────────────────────
-    const eventDiscountAmountCalcR = isEventR ? Math.round(basePrice * EVENT_DISCOUNT_RATE_R) : 0;
+    const eventDiscountAmountCalcR = isEventR ? calculateEventDiscount(basePrice) : 0;
 
     // ── Auto-verifikasi & diskon member AP2 (recurring) ─────────────────────
     let apAutoVerifiedR = false;
@@ -1023,8 +1462,13 @@ router.post("/bookings/recurring", async (req, res) => {
         const [apSettingR] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
-        if (apSettingR && apSettingR.discountPercentage > 0) {
-          apAutoDiscountAmountR = Math.round((basePrice * apSettingR.discountPercentage) / 100);
+        if (apSettingR && (Number(apSettingR.discountAmount ?? 0) > 0 || apSettingR.discountPercentage > 0)) {
+          apAutoDiscountAmountR = getApDiscount(
+            basePrice,
+            apSettingR,
+            isMultigunaFacility(facility),
+            durationHours,
+          ).amount;
           apAutoVerifiedR = true;
         } else {
           apAutoVerifiedR = true;
@@ -1037,7 +1481,39 @@ router.post("/bookings/recurring", async (req, res) => {
       : isEventR
         ? eventDiscountAmountCalcR
         : Math.min(Number(discountAmountPerSession) || 0, basePrice);
-    const totalPrice = basePrice - discount;
+    const baseSessionPrice = Math.max(0, basePrice - discount);
+    const additionalChargeAmount = additionalChargesTotal(additionalCharges);
+    const requestedDownPayment =
+      downPaymentAmount == null || downPaymentAmount === ""
+        ? null
+        : Number(downPaymentAmount);
+    if (
+      requestedDownPayment != null &&
+      (!Number.isFinite(requestedDownPayment) || requestedDownPayment <= 0)
+    ) {
+      res.status(400).json({ error: "Jumlah DP tidak valid" });
+      return;
+    }
+
+    // DP recurring adalah DP untuk seluruh grup, bukan untuk satu sesi.
+    // Hitung total projected semua tanggal sebelum insert agar DP seperti
+    // Rp100.000 tetap valid untuk 4 sesi @ Rp80.000 (total Rp320.000).
+    const taxByDate = new Map<string, Awaited<ReturnType<typeof calculateTax>>>();
+    let projectedGrandTotal = additionalChargeAmount;
+    for (const bookingDate of dates) {
+      const taxCalc = await calculateTax(baseSessionPrice, "sport_booking", bookingDate);
+      taxByDate.set(bookingDate, taxCalc);
+      projectedGrandTotal += baseSessionPrice;
+    }
+    if (
+      requestedDownPayment != null &&
+      requestedDownPayment >= projectedGrandTotal
+    ) {
+      res.status(400).json({
+        error: `DP grup (${requestedDownPayment}) harus lebih kecil dari total seluruh sesi (${projectedGrandTotal})`,
+      });
+      return;
+    }
 
     const created: any[] = [];
     const skipped: string[] = [];
@@ -1053,8 +1529,15 @@ router.post("/bookings/recurring", async (req, res) => {
         continue;
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
-      const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-      const orderNumber = await generateOrderNumber();
+      // A recurring booking is one payment group. Additional charges belong
+      // to the first session that is actually created, not every session.
+      const isFirstCreatedSession = created.length === 0;
+      const sessionAdditionalCharges = isFirstCreatedSession ? additionalCharges : [];
+      const sessionTotalPrice = baseSessionPrice + additionalChargesTotal(sessionAdditionalCharges);
+      const taxCalc = isFirstCreatedSession
+        ? await calculateTax(sessionTotalPrice, "sport_booking", bookingDate)
+        : taxByDate.get(bookingDate)!;
+      const orderNumber = await generateBookingOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
         customerId: effectiveCustomerId,
@@ -1067,7 +1550,7 @@ router.post("/bookings/recurring", async (req, res) => {
         startTime,
         endTime,
         durationHours,
-        totalPrice: String(totalPrice),
+        totalPrice: String(sessionTotalPrice),
         promoCode: isAp || isEventR ? null : (promoCode || null),
         discountAmount: String(discount),
         apDiscountAmount: isAp ? String(apAutoDiscountAmountR) : "0",
@@ -1082,6 +1565,16 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        additionalCharges: sessionAdditionalCharges,
+        ...(requestedDownPayment != null
+          ? {
+              // downPayment is the configured amount, not proof that the DP
+              // has already been paid. isDpPaid becomes true only after an
+              // admin confirms a payment with paymentType="dp".
+              downPayment: String(requestedDownPayment),
+              isDpPaid: false,
+            }
+          : {}),
         ...(isCompanyPayer ? {
           payerType: "company",
           companyCustomerId: verifiedCompanyCustomerId as number,
@@ -1090,7 +1583,7 @@ router.post("/bookings/recurring", async (req, res) => {
           paymentRequiredNow: false,
           paymentDeadline: null,
           billingStatus: "unbilled",
-          status: "confirmed",
+          status: companyBillingUser?.requirePerBookingApproval ? "waiting_confirmation" : "confirmed",
         } : {}),
       }).returning();
       // Release advisory lock untuk tanggal ini setelah INSERT berhasil
@@ -1108,6 +1601,7 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: booking.dpp == null ? null : Number(booking.dpp),
         ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
         grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+        additionalCharges: normalizeAdditionalCharges(booking.additionalCharges),
         facilityName: facility.name,
         facilityCategory: facility.category,
         payment: null,
@@ -1346,13 +1840,24 @@ router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
       return;
     }
     const orderNumber = booking.orderNumber;
-    await db.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
-    await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    await db.transaction(async (tx) => {
+      await tx.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
+      await tx.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    });
     // Hapus juga dari BizPortal agar data tetap sinkron
     deleteBookingFromBizportal(orderNumber).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Delete booking error");
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE")) {
+      res.status(409).json({
+        code: "BOOKING_HAS_POSTED_ACCOUNTING",
+        error:
+          "Booking sudah memiliki jurnal keuangan dan tidak boleh dihapus permanen. Gunakan Batalkan Booking atau Kembalikan Dana agar jurnal pembalik tercatat.",
+      });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1391,10 +1896,20 @@ router.patch("/bookings/:id/dp", async (req, res) => {
       return;
     }
 
-    // Hanya simpan nominal DP — isDpPaid baru di-set true saat pembayaran DP dikonfirmasi admin
-    await db.update(bookingsTable)
-      .set({ downPayment: String(dp), isDpPaid: false })
-      .where(eq(bookingsTable.id, id));
+    // Hanya simpan nominal DP — isDpPaid baru di-set true saat pembayaran DP
+    // dikonfirmasi admin. Untuk recurring/group booking, DP adalah nominal
+    // grup, jadi semua sesi harus membawa konfigurasi yang sama. Sebelumnya
+    // hanya sesi yang sedang dibuka yang ter-update, sehingga sesi pertama
+    // bisa mendeteksi DP sementara sesi lain mengirim full_payment.
+    if (booking.groupRef) {
+      await db.update(bookingsTable)
+        .set({ downPayment: String(dp), isDpPaid: false, updatedAt: new Date() })
+        .where(eq(bookingsTable.groupRef, booking.groupRef));
+    } else {
+      await db.update(bookingsTable)
+        .set({ downPayment: String(dp), isDpPaid: false, updatedAt: new Date() })
+        .where(eq(bookingsTable.id, id));
+    }
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
     const remaining = grandTotal - dp;
@@ -1427,6 +1942,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     const { status, adminNotes } = req.body;
+    const hasAdditionalChargesUpdate = Object.prototype.hasOwnProperty.call(req.body, "additionalCharges");
 
     const validStatuses = ["pending_payment", "paid", "confirmed", "completed", "cancelled", "refunded"];
     if (status && !validStatuses.includes(status)) {
@@ -1434,12 +1950,135 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       return;
     }
 
+    const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!beforeUpdate) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
     const updateData: Record<string, unknown> = {};
-    if (status) updateData.status = status;
+    if (status && status !== "completed") updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
-    const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
-    await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
+    if (hasAdditionalChargesUpdate && beforeUpdate.groupRef) {
+      let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+      try {
+        additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+        return;
+      }
+
+      const groupBookings = await db
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, beforeUpdate.groupRef));
+      const groupBookingIds = groupBookings.map((row) => row.id);
+      const groupPayments = groupBookingIds.length > 0
+        ? await db.select({ id: paymentsTable.id })
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, groupBookingIds))
+        : [];
+      if (groupPayments.length > 0) {
+        res.status(409).json({ error: "Biaya tambahan tidak dapat diubah setelah ada pembayaran pada booking grup." });
+        return;
+      }
+      if (groupBookings.some((row) => !["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(row.status))) {
+        res.status(409).json({ error: "Biaya tambahan hanya dapat diubah sebelum booking grup dibayar atau dikonfirmasi." });
+        return;
+      }
+
+      // A recurring/cart booking has one charge list for the whole group.
+      // Store it on the edited session and clear sibling rows so the amount
+      // remains visible without being counted more than once.
+      for (const row of groupBookings) {
+        const rowCharges = row.id === id ? additionalCharges : [];
+        const oldChargeTotal = additionalChargesTotal(normalizeAdditionalCharges(row.additionalCharges));
+        const baseSessionPrice = row.basePrice != null
+          ? Math.max(0, Number(row.basePrice) - Number(row.discountAmount ?? 0))
+          : Math.max(0, Number(row.totalPrice) - oldChargeTotal);
+        const totalPrice = baseSessionPrice + additionalChargesTotal(rowCharges);
+        const taxCalc = await calculateTax(totalPrice, "sport_booking", row.bookingDate);
+
+        await reverseTaxTransaction(row.id, row.orderNumber, row.bookingDate);
+        await db.update(bookingsTable).set({
+          additionalCharges: rowCharges,
+          totalPrice: String(totalPrice),
+          ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+          dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
+          ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+          grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+          updatedAt: new Date(),
+        }).where(eq(bookingsTable.id, row.id));
+        if (taxCalc.taxCode) {
+          await recordTaxTransaction("booking", row.id, row.orderNumber, taxCalc, row.bookingDate);
+        }
+      }
+
+      const updatedGroupRows = await db
+        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, beforeUpdate.groupRef));
+      const groupTotal = updatedGroupRows.reduce(
+        (sum, row) => sum + Number(row.grandTotal ?? row.totalPrice),
+        0,
+      );
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
+        .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef));
+    } else if (hasAdditionalChargesUpdate) {
+      let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+      try {
+        additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+        return;
+      }
+
+      const existingPayments = await db
+        .select({ id: paymentsTable.id })
+        .from(paymentsTable)
+        .where(eq(paymentsTable.bookingId, id))
+        .limit(1);
+      if (existingPayments.length > 0) {
+        res.status(409).json({ error: "Biaya tambahan tidak dapat diubah setelah ada pembayaran." });
+        return;
+      }
+      if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(beforeUpdate.status)) {
+        res.status(409).json({ error: "Biaya tambahan hanya dapat diubah sebelum booking dibayar atau dikonfirmasi." });
+        return;
+      }
+
+       const oldChargeTotal = additionalChargesTotal(normalizeAdditionalCharges(beforeUpdate.additionalCharges));
+       const basePrice = beforeUpdate.basePrice == null
+         ? Math.max(0, Number(beforeUpdate.totalPrice) - oldChargeTotal)
+         : Number(beforeUpdate.basePrice);
+       const discount = Number(beforeUpdate.discountAmount ?? 0);
+       const totalPrice = Math.max(0, basePrice - discount) + additionalChargesTotal(additionalCharges);
+      const taxCalc = await calculateTax(totalPrice, "sport_booking", beforeUpdate.bookingDate);
+
+       await reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, beforeUpdate.bookingDate);
+      updateData.additionalCharges = additionalCharges;
+      updateData.totalPrice = String(totalPrice);
+      updateData.ppnRate = taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null;
+      updateData.dpp = taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null;
+      updateData.ppnAmount = taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null;
+      updateData.grandTotal = taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null;
+       if (taxCalc.taxCode) {
+         await recordTaxTransaction("booking", beforeUpdate.id, beforeUpdate.orderNumber, taxCalc, beforeUpdate.bookingDate);
+       }
+    }
+
+    if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {
+      const completion = await completeBooking(id, getUserFromReq(req));
+      if (!completion.ok) {
+        res.status(400).json({ error: completion.reason });
+        return;
+      }
+    }
+    if (Object.keys(updateData).length > 0) {
+      await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
+    }
     const result = await getBookingWithPayment(id);
     if (!result) { res.status(404).json({ error: "Not found" }); return; }
 
@@ -1529,25 +2168,420 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// Koreksi tanggal administratif: tidak mengubah nominal maupun status.
+// Tanggal pembayaran disimpan pada payment dan booking agar seluruh tampilan
+// memakai tanggal pembayaran yang sama.
+router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "ID booking tidak valid" });
+      return;
+    }
+
+    const bookingDate =
+      req.body?.bookingDate === undefined ? undefined : String(req.body.bookingDate);
+    const paymentDate =
+      req.body?.paymentDate === undefined || req.body?.paymentDate === null || req.body?.paymentDate === ""
+        ? undefined
+        : String(req.body.paymentDate);
+    const startTime =
+      req.body?.startTime === undefined ? undefined : String(req.body.startTime);
+    const endTime =
+      req.body?.endTime === undefined ? undefined : String(req.body.endTime);
+
+    const validateDate = (value: string | undefined, label: string) => {
+      if (value === undefined) return null;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${label} tidak valid`;
+      const [year, month, day] = value.split("-").map(Number);
+      const calendarDate = new Date(Date.UTC(year, month - 1, day));
+      if (
+        Number.isNaN(calendarDate.getTime()) ||
+        calendarDate.getUTCFullYear() !== year ||
+        calendarDate.getUTCMonth() !== month - 1 ||
+        calendarDate.getUTCDate() !== day
+      ) {
+        return `${label} tidak valid`;
+      }
+      return null;
+    };
+    const validateTime = (value: string | undefined, label: string) => {
+      if (value === undefined) return null;
+      if (!/^\d{2}:\d{2}$/.test(value)) return `${label} tidak valid`;
+      const [hour, minute] = value.split(":").map(Number);
+      if (hour > 23 || minute > 59) return `${label} tidak valid`;
+      return null;
+    };
+    const dateError =
+      validateDate(bookingDate, "Tanggal booking") ??
+      validateDate(paymentDate, "Tanggal pembayaran") ??
+      validateTime(startTime, "Jam mulai") ??
+      validateTime(endTime, "Jam selesai");
+    if (dateError) {
+      res.status(400).json({ error: dateError });
+      return;
+    }
+    if (startTime !== undefined && endTime !== undefined && startTime >= endTime) {
+      res.status(400).json({ error: "Jam selesai harus lebih besar dari jam mulai" });
+      return;
+    }
+    if (bookingDate === undefined && paymentDate === undefined && startTime === undefined && endTime === undefined) {
+      res.status(400).json({ error: "Tidak ada tanggal atau jam yang diubah" });
+      return;
+    }
+
+    const [before] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!before) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+    const [membershipPayment] =
+      before.membershipPaymentId != null
+        ? await db
+            .select()
+            .from(membershipPaymentsTable)
+            .where(eq(membershipPaymentsTable.id, before.membershipPaymentId))
+            .limit(1)
+        : [];
+    const isMembershipPaymentBooking =
+      before.source === "gym_membership_payment" || before.membershipPaymentId != null;
+    const nextStartTime = startTime ?? before.startTime;
+    const nextEndTime = endTime ?? before.endTime;
+    if ((startTime !== undefined || endTime !== undefined) && nextStartTime >= nextEndTime) {
+      res.status(400).json({ error: "Jam selesai harus lebih besar dari jam mulai" });
+      return;
+    }
+
+    const [facility] = await db
+      .select()
+      .from(facilitiesTable)
+      .where(eq(facilitiesTable.id, before.facilityId))
+      .limit(1);
+    if (!facility) {
+      res.status(404).json({ error: "Fasilitas booking tidak ditemukan" });
+      return;
+    }
+
+    // Gym/walk-in tidak memakai slot jam. Booking lama mungkin masih
+    // menyimpan 06:00–07:00, tetapi tanggalnya tetap boleh dikoreksi tanpa
+    // dibandingkan dengan interval booking lain.
+    if (
+      bookingDate !== undefined &&
+      bookingDate !== before.bookingDate &&
+      !isGymFacility(facility)
+    ) {
+      const conflict = await checkSlotConflict(
+        before.facilityId,
+        bookingDate,
+        before.startTime,
+        before.endTime,
+      );
+      if (conflict) {
+        res.status(409).json({ error: "Tanggal baru bentrok dengan booking lain pada jam yang sama" });
+        return;
+      }
+    }
+    // Koreksi tanggal administratif adalah perbaikan data historis untuk admin.
+    // Jangan menerapkan aturan ketersediaan di sini: tanggal baru boleh
+    // bertepatan dengan booking lain karena slot tersebut bukan booking baru.
+
+    const updated = await db.transaction(async (tx) => {
+      const [payment] = await tx
+        .select()
+        .from(paymentsTable)
+        .where(eq(paymentsTable.bookingId, id))
+        .orderBy(desc(paymentsTable.createdAt))
+        .limit(1);
+
+      const linkedMembershipPayment =
+        membershipPayment ??
+        (isMembershipPaymentBooking && before.membershipId != null
+          ? (
+              await tx
+                .select()
+                .from(membershipPaymentsTable)
+                .where(eq(membershipPaymentsTable.membershipId, before.membershipId))
+                .orderBy(desc(membershipPaymentsTable.id))
+                .limit(1)
+            )[0]
+          : undefined);
+
+      if (paymentDate !== undefined && !payment && !linkedMembershipPayment) {
+        throw new Error("PAYMENT_NOT_FOUND");
+      }
+
+      if (paymentDate !== undefined) {
+        // TEMPORARY CORRECTION MODE: during the approved historical correction
+        // window, allow this admin transaction to update the canonical payment
+        // date without rewriting posted public accounting evidence. The setting
+        // is transaction-local and automatically returns to "off" afterward.
+        await tx.execute(sql`
+          SELECT set_config(
+            'sport_center.allow_posted_payment_metadata_correction',
+            'on',
+            true
+          )
+        `);
+        // Re-resolving a confirmed payment can also repair stale settlement
+        // metadata on its internal posted journal. Permit only that existing
+        // metadata allow-list for this transaction; financial values, journal
+        // lines, status, and dates remain immutable in the database guard.
+        await tx.execute(sql`
+          SELECT set_config(
+            'sport_center.allow_posted_accounting_metadata_correction',
+            'on',
+            true
+          )
+        `);
+      }
+
+      const paymentTimestamp = paymentDate
+        ? new Date(`${paymentDate}T12:00:00+07:00`)
+        : undefined;
+      if (paymentTimestamp && Number.isNaN(paymentTimestamp.getTime())) {
+        throw new Error("PAYMENT_DATE_INVALID");
+      }
+      const durationHours = Math.round(
+        (timeToMinutes(nextEndTime) - timeToMinutes(nextStartTime)) / 60,
+      );
+      const membershipPaymentDateField =
+        linkedMembershipPayment?.status === "confirmed" ||
+        linkedMembershipPayment?.confirmedAt != null
+          ? "confirmedAt"
+          : "submittedAt";
+      const [booking] = await tx
+        .update(bookingsTable)
+        .set({
+          ...(bookingDate !== undefined ? { bookingDate } : {}),
+          ...(startTime !== undefined ? { startTime } : {}),
+          ...(endTime !== undefined ? { endTime } : {}),
+          ...(startTime !== undefined || endTime !== undefined ? { durationHours } : {}),
+          ...(paymentTimestamp &&
+          (payment != null || linkedMembershipPayment?.status === "confirmed" || before.paidAt != null)
+            ? { paidAt: paymentTimestamp }
+            : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(bookingsTable.id, id))
+        .returning();
+
+      if (payment && paymentTimestamp) {
+        await tx
+          .update(paymentsTable)
+          .set({
+            paidAt: paymentTimestamp,
+            confirmedAt: paymentTimestamp,
+            updatedAt: new Date(),
+          })
+          .where(eq(paymentsTable.id, payment.id));
+      }
+      if (linkedMembershipPayment && paymentTimestamp) {
+        await tx
+          .update(membershipPaymentsTable)
+          .set({
+            ...(membershipPaymentDateField === "confirmedAt"
+              ? { confirmedAt: paymentTimestamp }
+              : { submittedAt: paymentTimestamp }),
+            updatedAt: new Date(),
+          })
+          .where(eq(membershipPaymentsTable.id, linkedMembershipPayment.id));
+      }
+      return {
+        booking,
+        payment: paymentTimestamp
+          ? payment
+            ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp }
+            : undefined
+          : payment,
+        membershipPayment:
+          paymentTimestamp && linkedMembershipPayment
+            ? {
+                ...linkedMembershipPayment,
+                ...(membershipPaymentDateField === "confirmedAt"
+                  ? { confirmedAt: paymentTimestamp }
+                  : { submittedAt: paymentTimestamp }),
+              }
+            : linkedMembershipPayment,
+        paymentDate: paymentTimestamp ?? before.paidAt ?? null,
+      };
+    });
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "BOOKING_DATES_UPDATED",
+      entity: "booking",
+      entityId: id,
+      before: {
+        bookingDate: before.bookingDate,
+        paymentDate: before.paidAt ?? membershipPayment?.confirmedAt ?? membershipPayment?.submittedAt,
+        paymentConfirmedAt: before.paidAt ?? membershipPayment?.confirmedAt,
+        startTime: before.startTime,
+        endTime: before.endTime,
+      },
+      after: {
+        bookingDate: updated.booking.bookingDate,
+        paymentDate:
+          updated.payment?.paidAt ??
+          updated.membershipPayment?.confirmedAt ??
+          updated.membershipPayment?.submittedAt ??
+          before.paidAt,
+        paymentConfirmedAt: updated.payment?.confirmedAt ?? updated.membershipPayment?.confirmedAt ?? before.paidAt,
+        startTime: updated.booking.startTime,
+        endTime: updated.booking.endTime,
+      },
+      ...getClientInfo(req),
+    });
+
+    const result = await getBookingWithPayment(id);
+    res.json(result);
+  } catch (err: any) {
+    if (String(err?.message) === "PAYMENT_NOT_FOUND") {
+      res.status(400).json({ error: "Booking ini belum memiliki pembayaran yang dapat dikoreksi" });
+      return;
+    }
+    if (String(err?.message) === "PAYMENT_DATE_INVALID") {
+      res.status(400).json({ error: "Tanggal pembayaran tidak valid" });
+      return;
+    }
+    const message = `${String(err?.message ?? "")} ${String(err?.cause?.message ?? "")}`;
+    if (
+      message.includes("PUBLIC_PAYMENT_ACCOUNTING_ENTRY_MISSING") ||
+      message.includes("REVERSED_PUBLIC_ACCOUNTING_ENTRY_IS_IMMUTABLE") ||
+      message.includes("POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE")
+    ) {
+      res.status(409).json({
+        error:
+          "Tanggal pembayaran belum dapat dikoreksi karena jurnal akuntansi pembayaran ini belum lengkap atau sudah dikunci. Rekonsiliasi pembayaran terlebih dahulu, lalu coba kembali.",
+      });
+      return;
+    }
+    req.log.error({ err }, "Update booking dates error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /bookings/:id/fix-gym-people — koreksi jumlah orang dan harga walk-in Gym (admin)
+router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const numberOfPeople = Number(req.body?.numberOfPeople);
+    if (!Number.isInteger(numberOfPeople) || numberOfPeople < 1 || numberOfPeople > 20) {
+      res.status(400).json({ error: "Jumlah orang harus berupa bilangan bulat antara 1 dan 20" });
+      return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+    if (INACTIVE_STATUSES.includes(booking.status ?? "")) {
+      res.status(400).json({ error: "Booking yang sudah tidak aktif tidak dapat dikoreksi" });
+      return;
+    }
+
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId))
+      .limit(1);
+    if (!facility || (facility.category ?? "").toLowerCase() !== "fitness") {
+      res.status(400).json({ error: "Koreksi jumlah orang ini hanya untuk booking Gym/Fitness" });
+      return;
+    }
+
+    const unitPrice = Number(facility.pricePerHour);
+    const basePrice = unitPrice * numberOfPeople;
+    const discountAmount = 0;
+    const existingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+    const totalPrice = basePrice + additionalChargesTotal(existingAdditionalCharges);
+    const taxCalc = await calculateTax(totalPrice, "sport_booking", booking.bookingDate);
+
+    await db.update(bookingsTable).set({
+      numberOfPeople,
+      basePrice: String(basePrice),
+      discountAmount: String(discountAmount),
+      apDiscountAmount: String(discountAmount),
+      totalPrice: String(totalPrice),
+      dpp: String(taxCalc.dpp),
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      grandTotal: String(taxCalc.grandTotal),
+    }).where(eq(bookingsTable.id, id));
+
+    await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+    if (taxCalc.taxCode) {
+      await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+    }
+
+    if (booking.groupRef) {
+      const groupBookings = await db
+        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef));
+      const groupTotal = groupBookings.reduce(
+        (sum, item) => sum + (item.grandTotal != null ? Number(item.grandTotal) : Number(item.totalPrice)),
+        0,
+      );
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+
+    const [updatedBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, id))
+      .limit(1);
+    if (updatedBooking) {
+      syncBookingToBizportal({
+        booking: updatedBooking,
+        facilityName: facility.name,
+        facilityCategory: facility.category,
+      }).catch(() => {});
+    }
+
+    const { userId, userName, userRole } = getUserFromReq(req);
+    const { ipAddress, userAgent } = getClientInfo(req);
+    await logAudit({
+      userId,
+      userName,
+      userRole,
+      action: "ADMIN_FIXED_GYM_NUMBER_OF_PEOPLE",
+      entity: "booking",
+      entityId: id,
+      before: {
+        numberOfPeople: booking.numberOfPeople,
+        basePrice: Number(booking.basePrice ?? booking.totalPrice),
+        totalPrice: Number(booking.totalPrice),
+        grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+      },
+      after: {
+        numberOfPeople,
+        basePrice,
+        totalPrice,
+        grandTotal: taxCalc.grandTotal,
+      },
+      ipAddress,
+      userAgent,
+    });
+
+    const result = await getBookingWithPayment(id);
+    res.json({
+      success: true,
+      message: `Koreksi Gym berhasil. ${numberOfPeople} orang, total Rp ${taxCalc.grandTotal.toLocaleString("id-ID")}.`,
+      booking: result,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Fix Gym number of people error");
+    res.status(500).json({ error: "Gagal mengoreksi jumlah orang Gym" });
+  }
+});
+
 // POST /bookings/:id/check-in — tandai booking sudah check-in (admin)
 router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
-    if (booking.checkedInAt) { res.status(400).json({ error: "Booking sudah check-in" }); return; }
-    if (booking.status !== "confirmed") { res.status(400).json({ error: "Check-in hanya bisa dilakukan untuk booking yang sudah dikonfirmasi" }); return; }
-    const now = new Date();
-    const todayJKT = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-    if (booking.bookingDate !== todayJKT) { res.status(400).json({ error: "Check-in hanya bisa dilakukan pada hari H booking" }); return; }
-    await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, id));
-    await db.insert(bookingHistoryTable).values({
-      bookingId: id,
-      fromStatus: booking.status,
-      toStatus: booking.status,
-      changedByName: "admin",
-      note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
-    });
+    const checkIn = await checkInBooking(id, getUserFromReq(req));
+    if (!checkIn.ok) { res.status(400).json({ error: checkIn.reason }); return; }
     // Check-in selalu hari ini (divalidasi di atas) — trigger rekap otomatis
     triggerRekapIfToday(booking.bookingDate);
     const result = await getBookingWithPayment(id);
@@ -1564,15 +2598,20 @@ async function runApVerification(
   idCardNumber: string,
   opts: { verifiedByUserId?: number; ipAddress?: string; orderNumber?: string },
 ) {
+  const normalizedIdCardNumber = idCardNumber.trim().toUpperCase();
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
   if (!booking) return { notFound: true } as const;
 
-  if (booking.customerType !== "angkasa_pura" || booking.verificationStatus !== "pending") {
+  // A rejected booking can be tried again with a corrected or newly activated
+  // AP card. A verified booking remains immutable.
+  const canVerify = booking.customerType === "angkasa_pura"
+    && (booking.verificationStatus === "pending" || booking.verificationStatus === "rejected");
+  if (!canVerify) {
     await db.insert(verificationLogsTable).values({
       bookingId,
       orderNumber: opts.orderNumber ?? booking.orderNumber,
       verifiedByUserId: opts.verifiedByUserId ?? null,
-      idCardNumberInput: idCardNumber,
+      idCardNumberInput: normalizedIdCardNumber,
       status: "failed",
       notes: `Booking status: ${booking.verificationStatus} / type: ${booking.customerType}`,
       ipAddress: opts.ipAddress ?? null,
@@ -1583,24 +2622,28 @@ async function runApVerification(
     };
   }
 
-  if (booking.idCardNumber && booking.idCardNumber !== idCardNumber) {
+  // Pending bookings keep the original-card mismatch guard. After a
+  // rejection, allow the admin to correct a typo or replace an old card.
+  const isRetryAfterRejection = booking.verificationStatus === "rejected";
+  const savedIdCardNumber = booking.idCardNumber?.trim().toUpperCase();
+  if (!isRetryAfterRejection && savedIdCardNumber && savedIdCardNumber !== normalizedIdCardNumber) {
     await db.insert(verificationLogsTable).values({
       bookingId,
       orderNumber: opts.orderNumber ?? booking.orderNumber,
       verifiedByUserId: opts.verifiedByUserId ?? null,
-      idCardNumberInput: idCardNumber,
+      idCardNumberInput: normalizedIdCardNumber,
       status: "mismatch",
-      notes: `Expected: ${booking.idCardNumber}, got: ${idCardNumber}`,
+      notes: `Expected: ${savedIdCardNumber}, got: ${normalizedIdCardNumber}`,
       ipAddress: opts.ipAddress ?? null,
     });
     return {
       success: false, result: "mismatch" as const,
-      message: `ID Card hasil scan (${idCardNumber}) tidak cocok dengan data booking (${booking.idCardNumber}).`,
+      message: `ID Card hasil scan (${normalizedIdCardNumber}) tidak cocok dengan data booking (${savedIdCardNumber}).`,
     };
   }
 
   const [member] = await db.select().from(apMembersTable)
-    .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
+    .where(and(eq(apMembersTable.idCardNumber, normalizedIdCardNumber), eq(apMembersTable.isActive, true)))
     .limit(1);
 
   if (!member) {
@@ -1609,7 +2652,7 @@ async function runApVerification(
       bookingId,
       orderNumber: opts.orderNumber ?? booking.orderNumber,
       verifiedByUserId: opts.verifiedByUserId ?? null,
-      idCardNumberInput: idCardNumber,
+      idCardNumberInput: normalizedIdCardNumber,
       status: "failed",
       notes: "ID Card tidak ditemukan di database AP2",
       ipAddress: opts.ipAddress ?? null,
@@ -1620,36 +2663,86 @@ async function runApVerification(
     };
   }
 
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId))
+    .limit(1);
   const [setting] = await db.select().from(discountSettingsTable)
     .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
   const discountEnabled = !!setting && setting.isActive;
-  const discountPct = discountEnabled ? setting.discountPercentage : 0;
-  const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
-  const discountAmount = Math.round((basePrice * discountPct) / 100);
-  const finalPrice = basePrice - discountAmount;
+  const bookingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+  const bookingAdditionalChargesTotal = additionalChargesTotal(bookingAdditionalCharges);
+  const basePrice = booking.basePrice == null
+    ? Math.max(0, Number(booking.totalPrice) - bookingAdditionalChargesTotal)
+    : Number(booking.basePrice);
+  const durationHours = Math.max(1, Number(booking.durationHours) || 1);
+  const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
+  const isSpecialMultiguna = isMultigunaFacility(facility ?? {});
 
-  // Recalculate tax on finalPrice (tax is inclusive — grandTotal = finalPrice)
-  const finalTaxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+  let discountPct = 0;
+  let discountAmount = 0;
+  let finalPrice = basePrice;
+  if (discountEnabled) {
+    if (isSpecialMultiguna) {
+      // Harga khusus AP Multiguna: Rp300.000/jam (Rp350.000 → Rp300.000).
+      // Gunakan harga tetap agar hasil tidak menjadi Rp299.985 akibat pembulatan 14,29%.
+      finalPrice = Math.min(basePrice, specialMultigunaPrice);
+      discountAmount = Math.max(0, basePrice - finalPrice);
+      discountPct = basePrice > 0
+        ? Number(((discountAmount / basePrice) * 100).toFixed(2))
+        : 0;
+    } else {
+      const apDiscount = getApDiscount(basePrice, setting, false, durationHours);
+      discountPct = apDiscount.percentage;
+      discountAmount = apDiscount.amount;
+      finalPrice = apDiscount.finalPrice;
+    }
+  }
+  const finalTotal = finalPrice + bookingAdditionalChargesTotal;
+  const finalTaxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate ?? undefined);
 
   // Terapkan diskon ke booking utama
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
-    idCardNumber,
+    idCardNumber: normalizedIdCardNumber,
     apDiscountAmount: String(discountAmount),
     discountAmount: String(discountAmount),
-    totalPrice: String(finalPrice),
+    totalPrice: String(finalTotal),
+
+    ppnRate: finalTaxCalc.taxRate > 0 ? String(finalTaxCalc.taxRate) : null,
+    ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
     grandTotal: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.grandTotal) : null,
     dpp: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.dpp) : null,
-    ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
+
   }).where(eq(bookingsTable.id, bookingId));
+
+  // Booking awal dibuat dengan harga normal karena masih menunggu verifikasi.
+  // Balikkan jurnal pajak awal lalu catat ulang berdasarkan harga AP final.
+  await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+  if (finalTaxCalc.taxCode) {
+    await recordTaxTransaction("booking", booking.id, booking.orderNumber, finalTaxCalc, booking.bookingDate);
+  }
+
+  // Propagate the verified AP price to Bizportal as well.
+  const [verifiedBooking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.id, bookingId))
+    .limit(1);
+  if (verifiedBooking && facility) {
+    syncBookingToBizportal({
+      booking: verifiedBooking,
+      facilityName: facility.name,
+      facilityCategory: facility.category,
+    }).catch(() => {});
+  }
 
   await db.insert(verificationLogsTable).values({
     bookingId,
     orderNumber: opts.orderNumber ?? booking.orderNumber,
     verifiedByUserId: opts.verifiedByUserId ?? null,
-    idCardNumberInput: idCardNumber,
+    idCardNumberInput: normalizedIdCardNumber,
     status: "success",
-    notes: discountEnabled ? `Diskon ${discountPct}% (Rp ${discountAmount.toLocaleString("id-ID")})` : "Terverifikasi (diskon nonaktif)",
+    notes: discountEnabled
+      ? `${isSpecialMultiguna ? "Harga khusus AP Multiguna — " : ""}Diskon ${discountPct}% (Rp ${discountAmount.toLocaleString("id-ID")})`
+      : "Terverifikasi (diskon nonaktif)",
     ipAddress: opts.ipAddress ?? null,
   });
 
@@ -1670,20 +2763,32 @@ async function runApVerification(
       ));
 
     for (const sibling of siblings) {
-      const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
-      const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
-      const siblingFinal = siblingBase - siblingDiscount;
-      const siblingTaxCalc = await calculateTax(siblingFinal, "sport_booking", sibling.bookingDate ?? undefined);
+       const siblingAdditionalCharges = normalizeAdditionalCharges(sibling.additionalCharges);
+       const siblingAdditionalChargesTotal = additionalChargesTotal(siblingAdditionalCharges);
+       const siblingBase = sibling.basePrice == null
+         ? Math.max(0, Number(sibling.totalPrice) - siblingAdditionalChargesTotal)
+         : Number(sibling.basePrice);
+      const siblingDiscount = Number(setting?.discountAmount ?? 0) > 0
+        ? Math.min(Number(setting.discountAmount), siblingBase)
+        : Math.round((siblingBase * discountPct) / 100);
+       const siblingFinal = siblingBase - siblingDiscount;
+       const siblingFinalTotal = siblingFinal + siblingAdditionalChargesTotal;
+       const siblingTaxCalc = await calculateTax(siblingFinalTotal, "sport_booking", sibling.bookingDate ?? undefined);
+       await reverseTaxTransaction(sibling.id, sibling.orderNumber, sibling.bookingDate);
       await db.update(bookingsTable).set({
         verificationStatus: "verified",
         idCardNumber,
         apDiscountAmount: String(siblingDiscount),
         discountAmount: String(siblingDiscount),
-        totalPrice: String(siblingFinal),
+         totalPrice: String(siblingFinalTotal),
+         ppnRate: siblingTaxCalc.taxRate > 0 ? String(siblingTaxCalc.taxRate) : null,
         grandTotal: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.grandTotal) : null,
         dpp: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.dpp) : null,
         ppnAmount: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.taxAmount) : null,
       }).where(eq(bookingsTable.id, sibling.id));
+       if (siblingTaxCalc.taxCode) {
+         await recordTaxTransaction("booking", sibling.id, sibling.orderNumber, siblingTaxCalc, sibling.bookingDate);
+       }
       groupUpdatedCount++;
     }
 
@@ -1700,17 +2805,164 @@ async function runApVerification(
   return {
     success: true, result: "verified" as const,
     message: discountEnabled
-      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+
+      ? `Verifikasi berhasil. ${isSpecialMultiguna ? "Harga khusus AP Multiguna diterapkan. " : `Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. `}Harga akhir Rp ${finalTotal.toLocaleString("id-ID")}.`
+
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
     discountPercentage: discountPct,
     discountAmount,
-    finalPrice,
+    finalPrice: finalTotal,
     memberName: member.name,
     bookingId,
     groupUpdatedCount,
   };
 }
+
+// POST /bookings/:id/fix-discount — admin menerapkan harga AP secara manual
+// tanpa mengubah status verifikasi ID Card.
+router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+    if (booking.customerType !== "angkasa_pura") {
+      res.status(400).json({ error: "Fix diskon hanya tersedia untuk customer Angkasa Pura" });
+      return;
+    }
+    if (["cancelled", "expired", "refunded"].includes(booking.status)) {
+      res.status(400).json({ error: "Booking yang sudah tidak aktif tidak dapat diberi diskon" });
+      return;
+    }
+
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId))
+      .limit(1);
+    if (!facility) {
+      res.status(404).json({ error: "Fasilitas tidak ditemukan" });
+      return;
+    }
+
+    const [setting] = await db.select().from(discountSettingsTable)
+      .where(eq(discountSettingsTable.customerType, "angkasa_pura"))
+      .limit(1);
+    const durationHours = Math.max(1, Number(booking.durationHours) || 1);
+    const bookingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+    const bookingAdditionalChargesTotal = additionalChargesTotal(bookingAdditionalCharges);
+    const basePrice = booking.basePrice == null
+      ? Number(facility.pricePerHour) * durationHours
+      : Number(booking.basePrice);
+    const isSpecialMultiguna = isMultigunaFacility(facility);
+    const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
+
+    // Override admin mengikuti kebijakan AP: Multiguna Rp300.000/jam,
+    // fasilitas lain 20% (atau angka yang tersimpan di pengaturan AP).
+    let discountPercentage = 20;
+    let discountAmount = 0;
+    let finalPrice = basePrice;
+    if (isSpecialMultiguna) {
+      finalPrice = Math.min(basePrice, specialMultigunaPrice);
+      discountAmount = Math.max(0, basePrice - finalPrice);
+      discountPercentage = basePrice > 0
+        ? Number(((discountAmount / basePrice) * 100).toFixed(2))
+        : 0;
+    } else {
+      const apDiscount = getApDiscount(
+        basePrice,
+        setting ?? { discountPercentage: 20, discountAmount: null },
+        false,
+        durationHours,
+      );
+      discountAmount = apDiscount.amount;
+      finalPrice = apDiscount.finalPrice;
+      discountPercentage = apDiscount.percentage;
+    }
+
+    const finalTotal = finalPrice + bookingAdditionalChargesTotal;
+    const taxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate);
+    await db.update(bookingsTable).set({
+      apDiscountAmount: String(discountAmount),
+      discountAmount: String(discountAmount),
+      totalPrice: String(finalTotal),
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+    }).where(eq(bookingsTable.id, id));
+
+    await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+    if (taxCalc.taxCode) {
+      await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+    }
+
+    // Keep a recurring/cart group total in sync when one session is corrected.
+    if (booking.groupRef) {
+      const groupBookings = await db
+        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef));
+      const groupTotal = groupBookings.reduce(
+        (sum, item) => sum + (item.grandTotal != null ? Number(item.grandTotal) : Number(item.totalPrice)),
+        0,
+      );
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+
+    const [updatedBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, id))
+      .limit(1);
+    if (updatedBooking) {
+      syncBookingToBizportal({
+        booking: updatedBooking,
+        facilityName: facility.name,
+        facilityCategory: facility.category,
+      }).catch(() => {});
+    }
+
+    const { userId, userName, userRole } = getUserFromReq(req);
+    const { ipAddress, userAgent } = getClientInfo(req);
+    await logAudit({
+      userId,
+      userName,
+      userRole,
+      action: "ADMIN_FIXED_AP_DISCOUNT",
+      entity: "booking",
+      entityId: id,
+      before: {
+        totalPrice: Number(booking.totalPrice),
+        grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+        verificationStatus: booking.verificationStatus,
+      },
+      after: {
+        totalPrice: finalTotal,
+        grandTotal: taxCalc.grandTotal,
+        apDiscountAmount: discountAmount,
+        verificationStatus: booking.verificationStatus,
+        discountPercentage,
+      },
+      ipAddress,
+      userAgent,
+    });
+
+    const result = await getBookingWithPayment(id);
+    res.json({
+      success: true,
+      manual: true,
+      message: `Fix diskon berhasil. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}. Status verifikasi ID tetap '${booking.verificationStatus}'.`,
+      discountPercentage,
+      discountAmount,
+      finalPrice,
+      booking: result,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Fix AP discount error");
+    res.status(500).json({ error: "Gagal menerapkan fix diskon" });
+  }
+});
 
 // POST /bookings/:id/verify — verifikasi ID Card Angkasa Pura & terapkan diskon (admin)
 router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
@@ -1757,9 +3009,10 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
       .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
     const discountEnabled = !!setting && setting.isActive;
     const discountPct = discountEnabled ? setting.discountPercentage : 0;
+    const fixedDiscountAmount = discountEnabled ? Number(setting?.discountAmount ?? 0) : 0;
 
-    if (!discountEnabled || discountPct <= 0) {
-      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau 0%" });
+    if (!discountEnabled || (discountPct <= 0 && fixedDiscountAmount <= 0)) {
+      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau belum diatur" });
       return;
     }
 
@@ -1767,10 +3020,17 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
     const details: { orderNumber: string; before: number; after: number; discount: number }[] = [];
 
     for (const booking of allBookings) {
-      const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
-      const discountAmount = Math.round((basePrice * discountPct) / 100);
+      const bookingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+      const bookingAdditionalChargesTotal = additionalChargesTotal(bookingAdditionalCharges);
+      const basePrice = booking.basePrice == null
+        ? Math.max(0, Number(booking.totalPrice) - bookingAdditionalChargesTotal)
+        : Number(booking.basePrice);
+      const discountAmount = fixedDiscountAmount > 0
+        ? Math.min(fixedDiscountAmount, basePrice)
+        : Math.round((basePrice * discountPct) / 100);
       const finalPrice = basePrice - discountAmount;
-      const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+      const finalTotal = finalPrice + bookingAdditionalChargesTotal;
+      const taxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate ?? undefined);
 
       const before = Number(booking.grandTotal ?? booking.totalPrice);
 
@@ -1778,16 +3038,22 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
         verificationStatus: "verified",
         apDiscountAmount: String(discountAmount),
         discountAmount: String(discountAmount),
-        totalPrice: String(finalPrice),
+        totalPrice: String(finalTotal),
+        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       }).where(eq(bookingsTable.id, booking.id));
 
+      await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+      if (taxCalc.taxCode) {
+        await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+      }
+
       details.push({
         orderNumber: booking.orderNumber,
         before,
-        after: taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalPrice,
+        after: taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalTotal,
         discount: discountAmount,
       });
       updatedCount++;

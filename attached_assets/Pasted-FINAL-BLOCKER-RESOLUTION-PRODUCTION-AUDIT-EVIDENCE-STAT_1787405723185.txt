@@ -1,0 +1,286 @@
+FINAL BLOCKER RESOLUTION — PRODUCTION AUDIT EVIDENCE
+
+STATUS SAAT INI:
+
+Production deployment = PASS
+Production Secret Manager = PASS
+Production DB connection = PASS
+search_path fix = ACTIVE
+Payment mirror = VERIFIED
+Scheduler = HEALTHY
+Health = 200
+Build/typecheck = PASS
+
+REMAINING BLOCKERS:
+
+1. Actual App Engine runtime identity belum CONFIRMED
+2. Production Supabase database belum memiliki audit connection yang secara teknis READ-ONLY
+
+JANGAN mengulang DEV audit.
+JANGAN menggunakan DEV sebagai PROD.
+JANGAN mengubah production transaction data.
+
+==================================================
+PHASE 1 — RUNTIME IDENTITY
+==================================================
+
+Gunakan GCP live metadata.
+
+Project:
+
+sc-sport-center
+
+Service:
+
+default
+
+Cari active version yang menerima traffic.
+
+Verifikasi:
+
+gcloud app versions describe VERSION_ID \
+  --service=default \
+  --project=sc-sport-center \
+  --format='value(serviceAccount)'
+
+Expected:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+IMPORTANT:
+
+Configured app.yaml ≠ confirmed runtime identity.
+
+Jika gcloud tidak memiliki authenticated account:
+
+→ jangan mengarang hasil.
+→ status tetap UNVERIFIED.
+→ report external GCP authentication blocker.
+
+Jangan memasukkan credential production ke source code.
+
+==================================================
+PHASE 2 — READ-ONLY DATABASE AUDIT ACCESS
+==================================================
+
+Cari apakah Supabase Production menyediakan salah satu mekanisme berikut:
+
+A. Dedicated read-only PostgreSQL role
+B. Dedicated read-only database user
+C. Transaction-level READ ONLY connection
+D. Supabase database role dengan SELECT-only privileges
+E. Existing production audit runner yang benar-benar menggunakan read-only connection
+
+PREFER:
+
+Dedicated read-only role/user.
+
+Jika menggunakan transaction-level:
+
+BEGIN READ ONLY;
+
+pastikan PostgreSQL benar-benar menolak:
+
+INSERT
+UPDATE
+DELETE
+DDL
+
+dalam session tersebut.
+
+==================================================
+PHASE 3 — DO NOT USE APPLICATION WRITE CONNECTION
+==================================================
+
+Jika production database credential yang tersedia adalah service-role/application connection dan tidak dapat dipastikan read-only:
+
+JANGAN menggunakan connection tersebut untuk audit.
+
+Status:
+
+PRODUCTION READ-ONLY DATABASE ACCESS = BLOCKED
+
+Jangan mengubah application credential hanya demi audit.
+
+==================================================
+PHASE 4 — SAFE READ-ONLY PROBE
+==================================================
+
+Jika dedicated read-only connection tersedia:
+
+verifikasi:
+
+SELECT current_database();
+SELECT current_schema();
+SELECT current_setting('search_path');
+
+Kemudian test capability secara aman.
+
+Jangan melakukan mutation test terhadap production.
+
+Buktikan role/privilege melalui metadata:
+
+current_user
+role attributes
+information_schema
+pg_catalog
+
+Pastikan role tidak mempunyai kemampuan write pada schema/tabel yang diaudit.
+
+==================================================
+PHASE 5 — PRODUCTION AUDIT
+==================================================
+
+HANYA jika:
+
+RUNTIME IDENTITY = CONFIRMED
+AND
+READ-ONLY DATABASE ACCESS = VERIFIED
+
+jalankan FULL PRODUCTION TRANSACTION AUDIT:
+
+1. Booking lifecycle
+2. Payment
+3. DP/final payment
+4. Corporate billing
+5. Group
+6. Event 21.4%
+7. Recurring
+8. Reschedule
+9. Refund
+10. Expense
+11. Invoice/tax
+12. QRIS
+13. Settlement
+14. Reconciliation
+15. Central Finance
+16. Duplicate journals
+17. Debit/credit balance
+18. Company isolation
+19. WhatsApp approval linkage
+
+==================================================
+PHASE 6 — CENTRAL FINANCE
+==================================================
+
+Verify:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL POSTING
+
+Cari:
+
+- duplicate payment_id
+- duplicate correlation ID
+- duplicate journal
+- orphan journal
+- missing posting
+- amount mismatch
+- debit/credit imbalance
+
+JANGAN:
+
+- create journal
+- delete journal
+- force balance
+- repair historical accounting
+- alter settlement
+- alter reconciliation
+
+==================================================
+PHASE 7 — BOOKING COMPLETION
+==================================================
+
+Cari:
+
+completed without check-in
+completed before endTime
+future completed
+cancelled completed
+pending reschedule completed
+duplicate completion
+
+Contract:
+
+CONFIRMED
++
+CHECK-IN
++
+SESSION END
+=
+COMPLETED
+
+Payment/invoice paid ≠ completed.
+
+==================================================
+PHASE 8 — ANOMALY CLASSIFICATION
+==================================================
+
+Setiap anomaly:
+
+ID
+ENTITY
+EXPECTED
+ACTUAL
+SEVERITY
+FINANCIAL IMPACT
+CLASSIFICATION
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+==================================================
+PHASE 9 — SOURCE FIX
+==================================================
+
+Jika ditemukan source bug:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ REPUBLISH
+→ RE-AUDIT
+
+Jika data anomaly:
+
+JANGAN langsung mutate.
+
+Jika ambiguous:
+
+BLOCKED DATA REMEDIATION.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Jika runtime identity belum dapat diverifikasi:
+
+PRODUCTION AUDIT = BLOCKED — RUNTIME IDENTITY
+
+Jika runtime identity PASS tetapi read-only DB access belum tersedia:
+
+PRODUCTION AUDIT = BLOCKED — READ-ONLY DB ACCESS
+
+Jika kedua gate PASS:
+
+jalankan full audit sampai selesai.
+
+Jika audit bersih:
+
+PRODUCTION TRANSACTION AUDIT = PASS
+CENTRAL FINANCE = SAFE
+
+JANGAN menyatakan PASS tanpa evidence.
+
+JANGAN menggunakan DEV sebagai pengganti.
+
+JANGAN melakukan mutation production.
+
+JANGAN meminta konfirmasi.

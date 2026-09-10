@@ -1,0 +1,606 @@
+PRODUCTION TRANSACTION INTEGRITY AUDIT
+READ-ONLY ONLY — CONTINUE NOW
+
+The production read-only safety gate has PASSED.
+
+Verified:
+
+PRODUCTION_READ_ONLY_AUDIT = PASS
+transaction_read_only = on
+database = postgres
+database_user = sport_center_production_auditor
+server_port = 5432
+mutationQueries = 0
+
+Available audit scope:
+
+sport_center.sport_bookings
+sport_center.sport_payments
+sport_center.booking_history
+sport_center.payment_accounting_outbox
+sport_center.company_invoices
+sport_center.company_invoice_items
+sport_center.accounting_journals
+sport_center.accounting_journal_lines
+sport_center.bank_mutations
+sport_center.bank_reconciliation_matches
+sport_center.tax_transactions
+
+public.accounting_entries = NOT PRESENT
+public.accounting_entry_lines = NOT PRESENT
+
+==================================================
+CRITICAL SAFETY
+==================================================
+
+READ-ONLY ONLY.
+
+Every audit session must use:
+
+BEGIN;
+SET TRANSACTION READ ONLY;
+SHOW transaction_read_only;
+
+Continue only when:
+
+transaction_read_only = on
+
+Every session must end with:
+
+ROLLBACK;
+
+Do NOT:
+
+- INSERT
+- UPDATE
+- DELETE
+- UPSERT
+- ALTER
+- CREATE
+- DROP
+- TRUNCATE
+- GRANT
+- REVOKE
+- VACUUM
+- ANALYZE
+- retry workers
+- requeue outbox
+- approve reconciliation
+- modify payments
+- modify bookings
+- modify invoices
+- modify accounting
+- modify settlement
+- modify tax
+- modify Central Finance
+
+No remediation during this phase.
+
+==================================================
+PHASE 1 — BASELINE COUNTS
+==================================================
+
+Record exact current counts for:
+
+sport_center.sport_bookings
+sport_center.sport_payments
+sport_center.booking_history
+sport_center.company_invoices
+sport_center.company_invoice_items
+sport_center.accounting_journals
+sport_center.accounting_journal_lines
+sport_center.bank_mutations
+sport_center.bank_reconciliation_matches
+sport_center.tax_transactions
+sport_center.payment_accounting_outbox
+
+Do not modify anything.
+
+==================================================
+PHASE 2 — BOOKING LIFECYCLE
+==================================================
+
+Audit all completed bookings.
+
+Find:
+
+1. completed without checked_in_at
+2. completed without completed_at
+3. completed where session end is in the future
+4. completed without authoritative completion history
+5. terminal bookings with inconsistent history
+6. cancelled/expired/rejected/refunded bookings incorrectly completed
+7. bookings with invalid lifecycle transitions
+8. duplicate lifecycle terminal events
+9. booking status versus booking_history inconsistencies
+
+For every anomaly provide:
+
+booking_id
+status
+booking date
+start/end time
+checked_in_at presence
+completed_at presence
+authoritative history evidence
+classification
+
+Do NOT change any record.
+
+==================================================
+PHASE 3 — PAYMENT INTEGRITY
+==================================================
+
+Audit:
+
+1. duplicate booking_id + payment_type
+2. duplicate payment reference
+3. duplicate transaction/reference identifiers
+4. multiple confirmed payments for one logical payment
+5. payment amount inconsistencies
+6. confirmed/completed bookings without confirmed payment
+7. payments without booking
+8. payments linked to cancelled/expired/rejected bookings
+9. payment status/history inconsistencies
+10. DP versus final payment semantic differences
+
+Do NOT assume duplicate rows are technical duplicates.
+
+Classify each case:
+
+SAFE_DETERMINISTIC
+REVIEW
+LEGACY
+CORPORATE_BILLING
+PAYMENT_PENDING
+MISSING_PAYMENT
+UNKNOWN
+
+Do not modify payments.
+
+==================================================
+PHASE 4 — CORPORATE BILLING
+==================================================
+
+Audit:
+
+company_invoices
+company_invoice_items
+corporate bookings
+
+Check:
+
+- duplicate invoice numbers
+- orphan invoice items
+- invoice item without booking
+- booking billed more than once
+- booking missing from expected invoice
+- billed booking with inconsistent billing status
+- invoice totals versus item totals
+- invoice payment status consistency
+
+Do not alter invoices.
+
+==================================================
+PHASE 5 — GROUP BOOKINGS
+==================================================
+
+Audit:
+
+- duplicate group references
+- booking pointing to missing group
+- group containing missing booking
+- group membership inconsistency
+- payment propagation anomalies
+- group total versus constituent booking totals
+
+Do not merge or modify groups.
+
+==================================================
+PHASE 6 — EVENT BOOKINGS
+==================================================
+
+Audit Event bookings specifically.
+
+Verify:
+
+- regular Event pricing
+- recurring Event pricing
+- 21.4% discount calculation
+- integer-safe calculation
+- stored amount versus expected amount
+- discount amount
+- total amount
+- duration
+- event booking type
+- anomalies between regular and recurring
+
+Do not rewrite historical amounts.
+
+If historical values cannot be reconstructed deterministically:
+
+classification = REVIEW
+
+==================================================
+PHASE 7 — RECURRING BOOKINGS
+==================================================
+
+Audit:
+
+- generated dates
+- invalid dates
+- past dates
+- operating hours
+- closing-time violations
+- duration
+- overlaps/conflicts
+- approval state
+- corporate approval
+- cancelled recurring instances
+- lifecycle consistency between parent and generated bookings
+
+Do not modify recurring records.
+
+==================================================
+PHASE 8 — RESCHEDULE
+==================================================
+
+Audit:
+
+- pending requests
+- approved requests
+- rejected requests
+- booking/history consistency
+- reschedule after completion
+- multiple reschedule requests
+- inconsistent old/new schedule
+- status synchronization
+
+Do not approve/reject/delete requests.
+
+==================================================
+PHASE 9 — CHECK-IN
+==================================================
+
+Audit:
+
+- completed without check-in
+- check-in before allowed time
+- check-in after session end
+- duplicate check-in
+- check-in for cancelled/expired booking
+- check-in/history mismatch
+
+Do not create historical check-in records.
+
+==================================================
+PHASE 10 — REFUND
+==================================================
+
+Determine whether refund structures exist.
+
+If no refund table exists:
+
+REFUND = NO REFUND TABLE FOUND
+
+Do not create one.
+
+If refund data exists, audit only.
+
+==================================================
+PHASE 11 — EXPENSE
+==================================================
+
+Audit sport_expenses if present:
+
+- status transitions
+- duplicate expense numbers
+- paid without approval
+- accounting linkage
+- amount integrity
+- orphan records
+
+Do not modify expenses.
+
+==================================================
+PHASE 12 — TAX / INVOICE
+==================================================
+
+Audit tax_transactions.
+
+Check:
+
+- tax code
+- rate
+- DPP
+- DPP Nilai Lain
+- PPN
+- total
+- booking/payment/invoice linkage
+- duplicate tax transaction
+- historical consistency
+
+Do not rewrite historical tax.
+
+Expected configured PPN:
+
+PPN_OUT_11
+rate 11.00
+
+Flag deviations for REVIEW.
+
+==================================================
+PHASE 13 — QRIS / SETTLEMENT
+==================================================
+
+Audit:
+
+bank_mutations
+bank_reconciliation_matches
+payment settlement structures if available
+
+Check:
+
+- settlement identity
+- candidate identity
+- duplicate candidate
+- bank mutation linkage
+- payment-to-settlement linkage
+- settlement-to-bank linkage
+- amount
+- date
+- MDR
+- expected settlement
+- approved/reconciled state
+- orphan records
+- duplicate settlement
+
+IMPORTANT:
+
+Do NOT approve candidate rows.
+
+Do NOT change bank mutations.
+
+Do NOT change reconciliation.
+
+==================================================
+PHASE 14 — RECONCILIATION SCHEMA CONFLICT
+==================================================
+
+Explicitly inspect:
+
+sport_center.bank_reconciliation_matches
+
+Determine whether candidate_source exists.
+
+Also inspect public.bank_reconciliation_matches ONLY if accessible and
+without assuming it is canonical.
+
+Compare schemas read-only.
+
+Do NOT migrate schema.
+
+Do NOT copy rows.
+
+Do NOT swap canonical source.
+
+Report:
+
+SPORT_CENTER_SCHEMA
+PUBLIC_SCHEMA
+COLUMN_DIFFERENCES
+SOURCE_IDENTITY_STATUS
+
+==================================================
+PHASE 15 — PAYMENT ACCOUNTING OUTBOX
+==================================================
+
+Audit:
+
+posted
+processing
+failed
+
+For every processing/failed record determine:
+
+- payment identity
+- correlation ID
+- idempotency key
+- journal linkage
+- journal lines
+- existing accounting evidence
+- retry safety
+- duplicate accounting risk
+
+Do NOT retry.
+
+Do NOT requeue.
+
+Do NOT mark failed as posted.
+
+Do NOT create journals.
+
+==================================================
+PHASE 16 — ACCOUNTING
+==================================================
+
+Audit:
+
+accounting_journals
+accounting_journal_lines
+
+Check:
+
+- debit/credit balance
+- orphan lines
+- journal without lines
+- duplicate journal reference
+- duplicate payment accounting
+- payment-to-journal linkage
+- journal status
+- accounting date
+- amount integrity
+
+IMPORTANT:
+
+public.accounting_entries and public.accounting_entry_lines are absent.
+
+Do NOT infer that accounting is missing merely because those tables are absent.
+
+Use the actual sport_center accounting tables as canonical candidates and
+report architecture evidence separately.
+
+==================================================
+PHASE 17 — CENTRAL FINANCE
+==================================================
+
+Audit read-only:
+
+central_finance_processing
+
+if present.
+
+Check:
+
+- unexpected rows
+- duplicate processing
+- orphan processing
+- processing state
+- linkage to Sport Center accounting
+
+Do not change finance mode.
+
+Do not create Central Finance records.
+
+==================================================
+PHASE 18 — CROSS-ENTITY INTEGRITY
+==================================================
+
+Cross-check:
+
+BOOKING
+→ PAYMENT
+→ CORPORATE INVOICE
+→ TAX
+→ ACCOUNTING
+→ OUTBOX
+→ BANK
+→ RECONCILIATION
+→ SETTLEMENT
+
+Find:
+
+- orphan references
+- duplicate references
+- amount mismatches
+- status mismatches
+- missing expected relationships
+- contradictory financial state
+
+Do not infer missing transactions.
+
+==================================================
+PHASE 19 — FINANCIAL BALANCE
+==================================================
+
+Verify:
+
+SUM(debits) = SUM(credits)
+
+at:
+
+- journal level
+- journal-line level
+
+Also check:
+
+- no orphan journal lines
+- no duplicate accounting entries
+- no unexplained accounting outbox duplicates
+
+Do not alter anything.
+
+==================================================
+PHASE 20 — FINAL FINGERPRINT
+==================================================
+
+At the beginning record counts.
+
+At the end record the same counts.
+
+Compare.
+
+Expected:
+
+NO COUNT CHANGES
+
+If any count changes:
+
+STOP and report immediately.
+
+Also verify:
+
+transaction_read_only = on
+
+and final transaction:
+
+ROLLBACK
+
+==================================================
+FINAL REPORT
+==================================================
+
+Produce:
+
+1. Executive summary
+2. Baseline counts
+3. Final counts
+4. Fingerprint
+5. Booking lifecycle findings
+6. Payment findings
+7. Corporate billing findings
+8. Group findings
+9. Event findings
+10. Recurring findings
+11. Reschedule findings
+12. Check-in findings
+13. Refund findings
+14. Expense findings
+15. Tax findings
+16. QRIS findings
+17. Settlement findings
+18. Reconciliation findings
+19. Outbox findings
+20. Accounting findings
+21. Central Finance findings
+22. Cross-entity findings
+23. Safe deterministic fixes, if any
+24. Review-required records
+25. Unknown/blocked records
+26. Financial impact assessment
+27. Data mutation proof
+
+Classification must use:
+
+PASS
+ANOMALY
+REVIEW
+UNKNOWN
+BLOCKED
+NOT APPLICABLE
+
+Do NOT automatically repair any anomaly.
+
+==================================================
+MANDATORY FINAL
+==================================================
+
+PRODUCTION DATABASE = PASS
+READ-ONLY = PASS
+PRODUCTION DATA MUTATION = NONE
+
+If anomalies exist:
+
+REMEDIATION = REVIEW ONLY
+
+Do not make production changes.

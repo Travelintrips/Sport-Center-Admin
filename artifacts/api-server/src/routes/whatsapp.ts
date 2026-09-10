@@ -2,8 +2,8 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
-import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
-import { eq, and, desc, isNotNull, inArray, or, lt, gt, sql } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
+import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import { getBaseUrl } from "../lib/appUrl";
 import {
@@ -43,6 +43,14 @@ import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accoun
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
+import {
+  checkInBooking,
+  completeBooking,
+  isBookingConfirmableStatus,
+} from "../lib/bookingLifecycle";
+import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
 import { uploadProofWithFallback } from "./storage";
@@ -53,7 +61,14 @@ import {
   detectIntent,
 } from "../services/aiSportCenterService";
 import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
+import {
+  paymentMethodMatchesOcr,
+  scanPaymentProof,
+  storedPaymentProofOcr,
+} from "../lib/paymentProofOcr";
+import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 
 const router = Router();
 
@@ -160,19 +175,6 @@ async function generateCustomerCode(): Promise<string> {
   return `SC-CUST-${String(maxNum + 1).padStart(6, "0")}`;
 }
 
-async function generateOrderNumber(): Promise<string> {
-  const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-  let maxNum = 0;
-  for (const row of rows) {
-    const match = row.orderNumber.match(/^SC-(\d+)$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxNum) maxNum = n;
-    }
-  }
-  return `SC-${String(maxNum + 1).padStart(4, "0")}`;
-}
-
 async function checkConflict(facilityId: number, bookingDate: string, startTime: string, endTime: string): Promise<boolean> {
   const existing = await db.select().from(bookingsTable)
     .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, bookingDate)));
@@ -190,7 +192,18 @@ async function getBookingFull(id: number) {
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-  const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
+  const groupBookingIds = booking.groupRef
+    ? (await db.select({ id: bookingsTable.id }).from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef))).map((row) => row.id)
+    : [id];
+  const groupPayments = await db.select().from(paymentsTable)
+    .where(inArray(paymentsTable.bookingId, groupBookingIds))
+    .orderBy(desc(paymentsTable.createdAt));
+  const payment = groupPayments[0] ?? null;
+  const paymentAllocations = booking.groupRef
+    ? await db.select().from(paymentAllocationsTable)
+      .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
+    : [];
   return {
     ...booking,
     totalPrice: Number(booking.totalPrice),
@@ -204,6 +217,11 @@ async function getBookingFull(id: number) {
     facilityName: facility?.name ?? "",
     facilityCategory: facility?.category ?? "",
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
+    payments: groupPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    paymentAllocations: paymentAllocations.map((allocation) => ({
+      ...allocation,
+      amount: Number(allocation.amount),
+    })),
   };
 }
 
@@ -316,6 +334,7 @@ router.post("/wa/customer/register", async (req, res) => {
     // Cek duplikat nomor
     const [existing] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
       .from(usersTable).where(eq(usersTable.phone, cleanedPhone)).limit(1);
+    let createdPayment: typeof paymentsTable.$inferSelect | undefined;
     if (existing) {
       res.status(409).json({
         error: "Nomor WhatsApp sudah terdaftar",
@@ -340,7 +359,7 @@ router.post("/wa/customer/register", async (req, res) => {
     }
 
     // Password random untuk WA users
-    const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+    const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
 
     const [user] = await db.insert(usersTable).values({
       name: name.trim(),
@@ -423,7 +442,7 @@ router.post("/wa/register/:token", async (req, res) => {
       const [emailConflict] = await db.select({ id: usersTable.id }).from(usersTable)
         .where(eq(usersTable.email, baseEmail)).limit(1);
       const finalEmail = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : baseEmail;
-      const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+       const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
 
       const [user] = await db.insert(usersTable).values({
         name: name.trim(),
@@ -629,6 +648,7 @@ async function sendWAReply(phone: string, message: string): Promise<void> {
     console.warn("[wa] sendWAReply: FONNTE_TOKEN kosong atau phone kosong", { phone, hasToken: !!FONNTE_TOKEN });
     return;
   }
+  if (!allowWhatsAppProviderSend()) return;
   try {
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
@@ -683,7 +703,7 @@ router.post("/wa/booking", async (req, res) => {
     const totalPrice = Number(facility.pricePerHour) * Number(durationHours);
     // Hitung PPN — mengikuti effective_date backward-compat rule
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-    const orderNumber = await generateOrderNumber();
+    const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     const [booking] = await db.insert(bookingsTable).values({
@@ -882,9 +902,24 @@ router.post("/wa/action/:token", async (req, res) => {
 
     switch (tokenRow.action) {
       case "approve_payment": {
-        const [payment] = await db.select().from(paymentsTable)
+        if (!isBookingConfirmableStatus(booking.status)) {
+          res.status(409).json({
+            error: `Booking dengan status ${booking.status} tidak dapat dikonfirmasi melalui WhatsApp.`,
+          });
+          return;
+        }
+        let [payment] = await db.select().from(paymentsTable)
           .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
         if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
+        const ocrScan = storedPaymentProofOcr(payment);
+        if (paymentMethodMatchesOcr(payment.paymentMethod, ocrScan) === false) {
+          res.status(422).json({
+            error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${ocrScan?.paymentMethod}.`,
+            code: "PAYMENT_METHOD_PROOF_MISMATCH",
+          });
+          return;
+        }
+        payment = await ensurePaymentBankAccount(payment, booking);
 
         await consumeWaToken(req.params.token);
 
@@ -988,61 +1023,18 @@ router.post("/wa/action/:token", async (req, res) => {
       }
 
       case "checkin": {
-        if (booking.status !== "confirmed") {
-          res.status(400).json({ error: "Check-in hanya bisa untuk booking yang sudah dikonfirmasi" }); return;
-        }
-
-        const nowJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-        if (booking.bookingDate !== nowJKT) {
-          res.status(400).json({ error: "Check-in hanya bisa pada hari H booking" }); return;
-        }
-
+        const checkIn = await checkInBooking(booking.id, { userName: "staff (WhatsApp)" });
+        if (!checkIn.ok) { res.status(400).json({ error: checkIn.reason }); return; }
         await consumeWaToken(req.params.token);
-
-        const now = new Date();
-        await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now })
-          .where(eq(bookingsTable.id, booking.id));
-        await db.insert(bookingHistoryTable).values({
-          bookingId: booking.id, fromStatus: booking.status, toStatus: booking.status,
-          changedByName: "staff (WhatsApp)",
-          note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
-        });
-
-        await logAudit({
-          action: "wa_checkin",
-          entity: "booking",
-          entityId: booking.id,
-          after: { checkedInAt: now.toISOString() },
-          userName: "staff (WhatsApp)",
-        });
 
         res.json({ success: true, message: `Customer ${booking.customerName} berhasil check-in.` });
         break;
       }
 
       case "finish": {
-        if (!["confirmed"].includes(booking.status)) {
-          res.status(400).json({ error: "Booking belum dalam status yang bisa diselesaikan" }); return;
-        }
-
+        const completion = await completeBooking(booking.id, { userName: "staff (WhatsApp)" });
+        if (!completion.ok) { res.status(400).json({ error: completion.reason }); return; }
         await consumeWaToken(req.params.token);
-
-        const now = new Date();
-        await db.update(bookingsTable).set({ status: "completed", completedAt: now, updatedAt: now })
-          .where(eq(bookingsTable.id, booking.id));
-        await db.insert(bookingHistoryTable).values({
-          bookingId: booking.id, fromStatus: booking.status, toStatus: "completed",
-          changedByName: "staff (WhatsApp)", note: "Sesi selesai via WhatsApp",
-        });
-
-        await logAudit({
-          action: "wa_finish",
-          entity: "booking",
-          entityId: booking.id,
-          before: { status: booking.status },
-          after: { status: "completed" },
-          userName: "staff (WhatsApp)",
-        });
 
         res.json({ success: true, message: "Sesi selesai. Booking ditandai completed." });
         break;
@@ -1119,8 +1111,10 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     }
 
     let proofUrl: string | undefined = req.body?.proofUrl;
+    let proofOcr = null;
     if (req.file) {
       proofUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
+      proofOcr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
     }
     if (!proofUrl) { res.status(400).json({ error: "Tidak ada bukti yang diupload" }); return; }
 
@@ -1132,21 +1126,97 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
-    // Upsert payment record
-    const [existing] = await db.select().from(paymentsTable)
-      .where(eq(paymentsTable.bookingId, bookingId)).limit(1);
+    const groupBookings = booking.groupRef
+      ? await db.select({
+          id: bookingsTable.id,
+          totalPrice: bookingsTable.totalPrice,
+          grandTotal: bookingsTable.grandTotal,
+        }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
+      : [{
+          id: booking.id,
+          totalPrice: booking.totalPrice,
+          grandTotal: booking.grandTotal,
+        }];
+    const groupBookingIds = groupBookings.map((row) => row.id);
+    const [bookingGroup] = booking.groupRef
+      ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+        .limit(1)
+      : [];
+    const payableTotal = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
+    const groupPayments = await db.select().from(paymentsTable)
+      .where(inArray(paymentsTable.bookingId, groupBookingIds))
+      .orderBy(desc(paymentsTable.createdAt));
+    // A confirmed DP is historical and must remain untouched; a new proof is
+    // the next payment event. Only a pending proof may be replaced.
+    const [existing] = groupPayments.filter((candidate) =>
+      candidate.status === "pending" || candidate.status === "waiting_confirmation",
+    );
+    const detectedQris = proofOcr?.paymentMethod === "QRIS";
+    // WhatsApp is only the submission/notification channel. It is not a payment
+    // method, so keep the accounting label as the actual bank transfer method.
+    const resolvedPaymentMethod = detectedQris ? "QRIS" : "Transfer Bank";
+    const resolvedProvider = detectedQris ? "mandiri_direct" : "unknown";
+    let createdPayment: typeof paymentsTable.$inferSelect | undefined;
 
     if (existing) {
-      await db.update(paymentsTable).set({ proofUrl, status: "pending", updatedAt: new Date() })
-        .where(eq(paymentsTable.bookingId, bookingId));
-    } else {
-      await db.insert(paymentsTable).values({
-        bookingId,
-        amount: String(Number(booking.totalPrice)),
+      const paymentBooking = groupBookings.find((member) => member.id === existing.bookingId) ?? booking;
+      await ensurePaymentBankAccount(existing, paymentBooking as typeof booking);
+      const ocrMethodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr);
+      await db.update(paymentsTable).set({
         proofUrl,
-        paymentMethod: "Transfer Bank (WhatsApp)",
+        paymentMethod: resolvedPaymentMethod,
+        paymentProvider: resolvedProvider,
+        ocrName: proofOcr?.name ?? null,
+        ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+        ocrDate: proofOcr?.date ?? null,
+        ocrRaw: proofOcr?.rawText ?? null,
+        ocrData: proofOcr ? {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          signals: proofOcr.signals,
+          engine: proofOcr.engine,
+          scannedAt: proofOcr.scannedAt,
+          methodMatch: ocrMethodMatch,
+        } : null,
         status: "pending",
-      });
+        updatedAt: new Date(),
+      })
+        .where(eq(paymentsTable.id, existing.id));
+    } else {
+      const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, resolvedProvider, new Date());
+      [createdPayment] = await db.insert(paymentsTable).values({
+        bookingId,
+        amount: String(payableTotal),
+        proofUrl,
+        paymentMethod: resolvedPaymentMethod,
+        paymentProvider: resolvedProvider,
+        providerName: normalizeProviderName(resolvedProvider),
+        providerId: createPaymentProviderId(resolvedProvider, `wa-${bookingId}`),
+        providerOrderId: createPaymentProviderOrderId(resolvedProvider, `wa-order-${bookingId}`),
+        companyId: paymentEnrichment.companyId,
+        bankAccountId: paymentEnrichment.bankAccountId,
+        expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+        paidAt: paymentEnrichment.paidAt,
+        ocrName: proofOcr?.name ?? null,
+        ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+        ocrDate: proofOcr?.date ?? null,
+        ocrRaw: proofOcr?.rawText ?? null,
+        ocrData: proofOcr ? {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          signals: proofOcr.signals,
+          engine: proofOcr.engine,
+          scannedAt: proofOcr.scannedAt,
+          methodMatch: paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr),
+        } : null,
+        status: "pending",
+      }).returning();
+    }
+    const allocationPaymentId = existing?.id ?? createdPayment?.id;
+    if (booking.groupRef && allocationPaymentId) {
+      await insertGroupPaymentAllocations(allocationPaymentId, groupBookings, payableTotal);
     }
 
     await db.update(bookingsTable).set({ status: "waiting_confirmation", updatedAt: new Date() })
@@ -1156,6 +1226,27 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       bookingId, fromStatus: booking.status, toStatus: "waiting_confirmation",
       changedByName: booking.customerName, note: "Bukti pembayaran diupload via WhatsApp",
     });
+
+    if (booking.groupRef) {
+      const siblings = await db.select().from(bookingsTable).where(and(
+        eq(bookingsTable.groupRef, booking.groupRef),
+        ne(bookingsTable.id, bookingId),
+      ));
+      for (const sibling of siblings) {
+        if (INACTIVE_STATUSES.includes(sibling.status)) continue;
+        await db.update(bookingsTable).set({
+          status: "waiting_confirmation",
+          updatedAt: new Date(),
+        }).where(eq(bookingsTable.id, sibling.id));
+        await db.insert(bookingHistoryTable).values({
+          bookingId: sibling.id,
+          fromStatus: sibling.status,
+          toStatus: "waiting_confirmation",
+          changedByName: booking.customerName,
+          note: `Bukti pembayaran diupload via WhatsApp (grup ${booking.groupRef})`,
+        });
+      }
+    }
 
     // Create single review token for admin (shows proof + approve/reject buttons in one page)
     const reviewToken = await createWaToken(bookingId, "review_payment", 7);
@@ -1235,9 +1326,24 @@ router.post("/wa/review/:token", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
     if (action === "approve") {
-      const [payment] = await db.select().from(paymentsTable)
+      if (!isBookingConfirmableStatus(booking.status)) {
+        res.status(409).json({
+          error: `Booking dengan status ${booking.status} tidak dapat dikonfirmasi melalui WhatsApp.`,
+        });
+        return;
+      }
+      let [payment] = await db.select().from(paymentsTable)
         .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
       if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
+      const ocrScan = storedPaymentProofOcr(payment);
+      if (paymentMethodMatchesOcr(payment.paymentMethod, ocrScan) === false) {
+        res.status(422).json({
+          error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${ocrScan?.paymentMethod}.`,
+          code: "PAYMENT_METHOD_PROOF_MISMATCH",
+        });
+        return;
+      }
+      payment = await ensurePaymentBankAccount(payment, booking);
 
       await consumeWaToken(req.params.token);
 
@@ -1334,8 +1440,30 @@ router.post("/wa/review/:token", async (req, res) => {
       res.json({ success: true, message: "Pembayaran ditolak. Customer diminta upload ulang." });
     }
   } catch (err) {
-    console.error("[wa/review] error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const errorCode = err instanceof Error ? err.message : String(err);
+    logger.error({ errorCode, token: req.params.token }, "[wa/review] action gagal");
+
+    // Keep configuration/data validation failures actionable for the admin.
+    // Do not expose raw database/provider errors to the public review link.
+    if (errorCode === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED") {
+      res.status(422).json({
+        error: "Rekening penerima Sport Center belum dikonfigurasi. Isi rekening penerimaan di Pengaturan Pembayaran lalu coba lagi.",
+        code: errorCode,
+      });
+      return;
+    }
+    if (errorCode.startsWith("PAYMENT_BANK_ACCOUNT_REQUIRED:")) {
+      res.status(422).json({
+        error: "Data rekening penerima pada pembayaran belum lengkap. Lengkapi Pengaturan Pembayaran lalu upload ulang bukti.",
+        code: "PAYMENT_BANK_ACCOUNT_REQUIRED",
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: "Konfirmasi pembayaran gagal diproses. Silakan coba lagi atau hubungi administrator.",
+      code: "WA_REVIEW_FAILED",
+    });
   }
 });
 
@@ -1343,6 +1471,7 @@ router.post("/wa/review/:token", async (req, res) => {
 
 async function sendWAMsg(phone: string, message: string): Promise<void> {
   if (!phone) return;
+  if (!allowWhatsAppProviderSend()) return;
   // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
   const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
@@ -1629,17 +1758,30 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
-  if (existingPay) {
+  let paymentForConfirmation = existingPay
+    ? await ensurePaymentBankAccount(existingPay, booking)
+    : null;
+  if (paymentForConfirmation) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
+    const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
     const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
+      paymentProvider: "unknown",
+      providerName: normalizeProviderName("unknown"),
+      providerId: createPaymentProviderId("unknown", `wa-admin-${booking.id}`),
+      providerOrderId: createPaymentProviderOrderId("unknown", `wa-admin-order-${booking.id}`),
+      companyId: paymentEnrichment.companyId,
+      bankAccountId: paymentEnrichment.bankAccountId,
+      expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+      paidAt: paymentEnrichment.paidAt,
       status: "confirmed",
       confirmedAt: new Date(),
     }).returning();
+    paymentForConfirmation = createdPayment;
   }
 
   await db.update(bookingsTable)
@@ -1815,15 +1957,26 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
-  let paymentForAccounting = existingPay;
-  if (existingPay) {
+  let paymentForAccounting = existingPay
+    ? await ensurePaymentBankAccount(existingPay, booking)
+    : null;
+  if (paymentForAccounting) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
+    const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
     const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
+      paymentProvider: "unknown",
+      providerName: normalizeProviderName("unknown"),
+      providerId: createPaymentProviderId("unknown", `wa-admin-${booking.id}`),
+      providerOrderId: createPaymentProviderOrderId("unknown", `wa-admin-order-${booking.id}`),
+      companyId: paymentEnrichment.companyId,
+      bankAccountId: paymentEnrichment.bankAccountId,
+      expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+      paidAt: paymentEnrichment.paidAt,
       status: "confirmed",
       confirmedAt: new Date(),
     }).returning();
@@ -1879,7 +2032,7 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
 
   const _paidToday = new Date().toISOString().split("T")[0];
   const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
-  const _paidPaymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
+  const _paidPaymentMethod = paymentForAccounting?.paymentMethod ?? "Transfer Bank";
   postConfirmedPaymentAccounting({
     bookingId: booking.id,
     orderNumber: booking.orderNumber,
@@ -2627,7 +2780,7 @@ async function ensureCustomer(phone: string, name: string): Promise<{ id: number
     .where(eq(usersTable.email, finalEmail)).limit(1);
 
   const email = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : finalEmail;
-  const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+  const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
 
   const [user] = await db.insert(usersTable).values({
     name: name.trim(),
@@ -2764,7 +2917,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
   // ── 9. Hitung PPN ──────────────────────────────────────────────────────────
   const taxCalc = await calculateTax(totalPrice, "sport_booking", session.bookingDate);
   const grandTotal = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-  const orderNumber = await generateOrderNumber();
+  const orderNumber = await generateBookingOrderNumber();
 
   // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
   const [booking] = await db.insert(bookingsTable).values({

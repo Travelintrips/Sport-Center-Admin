@@ -1,0 +1,377 @@
+# FIX BEFORE STAGING — QRIS UAT FIXTURE + EXISTING MATCHER HARDENING
+
+Lakukan perbaikan minimum berdasarkan hasil UAT.
+
+Tujuan:
+
+1. memperbaiki fixture UAT yang salah;
+2. membuat existing QRIS matcher mengikuti boundary strict evaluator;
+3. menambahkan repeatable no-persistence UAT harness;
+4. mengulang UAT.
+
+JANGAN mengaktifkan final reconciliation.
+JANGAN accounting posting.
+JANGAN deploy production.
+
+---
+
+# 1. FIX UAT MARKER CONSISTENCY
+
+Pre-flight strict sebelumnya membaca 0 payment dan 0 mutation karena marker tidak konsisten.
+
+Audit seluruh fixture:
+
+`UAT_QRIS_202608`
+
+Pastikan payment dan mutation memiliki marker yang sama dan query UAT dapat mengambil semuanya secara deterministic.
+
+Marker harus tersedia pada field/metadata yang benar-benar queryable.
+
+Jangan mengandalkan description text jika dedicated metadata tersedia.
+
+Setelah fix, strict pre-flight harus menemukan:
+
+* 22 QRIS payments
+* 14 bank mutations
+
+atau exact count fixture terbaru jika ada perubahan yang terdokumentasi.
+
+---
+
+# 2. FIX FRIDAY FIXTURE
+
+Fixture Friday:
+
+Expected settlement:
+`2026-08-11`
+
+karena:
+
+* Friday 2026-08-07
+* weekend 8–9 Aug
+* Monday 2026-08-10 = UAT holiday
+* next business day = Tuesday 2026-08-11
+
+Mutation UAT untuk Friday harus menggunakan:
+
+`2026-08-11`
+
+Jangan mengubah business calendar logic.
+
+Ini DATA FIXTURE correction.
+
+---
+
+# 3. FIX PAYLABS DETERMINISTIC PARTITION A
+
+Fixture:
+
+Gross:
+`Rp350.000`
+
+Expected UAT Paylabs MDR:
+`0.007`
+
+Expected deduction:
+`Rp2.450`
+
+Expected bank credit:
+`Rp347.550`
+
+Perbaiki fixture mutation A agar sesuai dengan UAT rate 0,7%.
+
+Jangan mengubah Paylabs UAT config menjadi 0,3%.
+
+Partition A dan B harus tetap memiliki deterministic reference berbeda.
+
+---
+
+# 4. HARDEN EXISTING QRIS MATCHER
+
+Audit:
+
+`bankMatcher.ts`
+
+dan jalur matcher QRIS existing.
+
+Untuk QRIS, automatic candidate matching wajib menggunakan hard boundaries:
+
+`company_id`
++
+`bank_account_id`
++
+`payment_provider`
++
+`expected_settlement_date`
+
+Configured MDR/tolerance digunakan sebagai validation layer.
+
+Jangan hanya menggunakan nominal + tanggal generik.
+
+## Provider
+
+Mandiri Direct tidak boleh match Paylabs.
+
+Paylabs tidak boleh match Mandiri Direct.
+
+Unknown provider:
+`REVIEW`
+
+## Bank account
+
+NULL tidak boleh menjadi wildcard.
+
+Different account:
+tidak boleh cross-match.
+
+## Settlement date
+
+Gunakan business-day-aware expected settlement date/rule snapshot.
+
+Jangan menggunakan generic calendar ±1 day jika QRIS provider rule tersedia.
+
+## MDR
+
+Observed:
+
+`gross - bank credit`
+
+Bandingkan dengan effective-dated expected MDR + tolerance.
+
+Rate saja tidak boleh membuat MATCHED jika provider/account/date tidak valid.
+
+---
+
+# 5. DO NOT DUPLICATE PURE ENGINE
+
+Jika `qrisCandidateEngine` sudah memiliki strict rules, reuse/helper-extract logic bila memungkinkan.
+
+Jangan membuat dua definisi berbeda untuk:
+
+* provider normalization;
+* business-date matching;
+* deduction validation;
+* ambiguity detection.
+
+Target:
+existing matcher dan pure evaluator menghasilkan decision yang konsisten.
+
+---
+
+# 6. AMBIGUOUS PARTITION
+
+Existing matcher tidak boleh arbitrary subset-match.
+
+Jika same:
+
+company
+
+* account
+* provider
+* settlement date
+
+memiliki multiple settlement dan tidak ada deterministic reference:
+
+`REVIEW`
+
+Reason:
+
+`AMBIGUOUS_PAYMENT_PARTITION`
+
+---
+
+# 7. NEGATIVE DEDUCTION
+
+Jika:
+
+`bank credit > gross`
+
+jangan MATCH.
+
+Gunakan:
+
+`NEGATIVE_OBSERVED_DEDUCTION`
+
+atau equivalent review reason.
+
+---
+
+# 8. PROVIDER PROVENANCE
+
+Provider mutation tidak boleh diinfer hanya dari bank name/account.
+
+Gunakan auditable evidence:
+
+* provider reference;
+* settlement reference;
+* provider batch reference;
+* mutation description marker;
+* manual reviewed classification.
+
+Simpan detection source bila model existing mendukungnya.
+
+---
+
+# 9. AUTOMATED UAT HARNESS
+
+Tambahkan repeatable automated harness/test untuk marker:
+
+`UAT_QRIS_202608`
+
+Harness harus:
+
+* development-only;
+* read-only/in-memory;
+* tidak persist candidate;
+* tidak reconcile;
+* tidak posting journal.
+
+Validasi scenario:
+
+1. Mandiri normal MATCHED
+2. Paylabs normal MATCHED
+3. Friday/weekend MATCHED
+4. Saturday MATCHED
+5. Sunday MATCHED
+6. Holiday MATCHED
+7. Unknown provider REVIEW
+8. Amount mismatch REVIEW
+9. Different account isolated
+10. Deterministic A MATCHED
+11. Deterministic B MATCHED
+12. Ambiguous A REVIEW
+13. Ambiguous B REVIEW
+14. Rounding MATCHED
+
+Expected scenario pass rate setelah fixture fix:
+
+`10/10 scenario groups PASS`
+
+---
+
+# 10. EXISTING MATCHER VS PURE ENGINE COMPARISON
+
+Untuk seluruh 14 mutation UAT, jalankan:
+
+A. pure evaluator
+B. existing matcher
+
+Bandingkan:
+
+* provider
+* payment IDs
+* gross
+* deduction
+* effective rate
+* status
+* reason.
+
+Target:
+
+Decision parity untuk semua QRIS UAT cases.
+
+Jika berbeda:
+laporkan exact mismatch sebelum staging.
+
+---
+
+# 11. TESTS
+
+Tambahkan automated tests khusus untuk:
+
+* provider hard boundary;
+* bank account hard boundary;
+* expected settlement hard boundary;
+* unknown provider;
+* negative deduction;
+* MDR mismatch;
+* deterministic partition;
+* ambiguous partition;
+* holiday/weekend;
+* rounding tolerance.
+
+Jalankan typecheck/build/test.
+
+---
+
+# 12. NO PRODUCTION RATE ASSUMPTION
+
+UAT rates tetap:
+
+Mandiri:
+`0.003`
+
+Paylabs:
+`0.007`
+
+Hanya untuk fixture.
+
+Jangan menyebut sebagai production contract.
+
+Jangan memindahkan angka ini menjadi production default.
+
+---
+
+# 13. OUTPUT
+
+Berikan laporan:
+
+## A. Fixture fixes
+
+* marker
+* Friday
+* Paylabs partition A
+
+## B. Matcher changes
+
+File/function exact.
+
+## C. Hard boundaries implemented
+
+## D. Pure vs existing matcher parity
+
+Tabel:
+
+| Mutation | Pure Engine | Existing Matcher | Same? |
+| -------- | ----------- | ---------------- | ----- |
+
+## E. UAT rerun
+
+Tampilkan semua 14 cases.
+
+## F. Scenario pass rate
+
+## G. Tests/typecheck/build
+
+## H. Remaining risks
+
+## I. Final decision
+
+Berikan salah satu:
+
+`READY_FOR_STAGING_RECONCILIATION`
+
+atau:
+
+`NEEDS_FIX_BEFORE_STAGING`
+
+---
+
+# ACCEPTANCE CRITERIA
+
+Staging baru boleh dinyatakan ready jika:
+
+1. Strict pre-flight membaca seluruh fixture.
+2. Friday fixture MATCHED.
+3. Paylabs deterministic A MATCHED.
+4. Provider separation hard boundary.
+5. Bank account hard boundary.
+6. Settlement date hard boundary.
+7. MDR validation aktif.
+8. Ambiguous partition tetap REVIEW.
+9. Unknown tetap REVIEW.
+10. Pure engine dan existing matcher parity.
+11. Automated UAT harness pass.
+12. Tidak ada final reconciliation/accounting posting otomatis.
+
+Jangan commit/push/deploy production tanpa instruksi eksplisit.

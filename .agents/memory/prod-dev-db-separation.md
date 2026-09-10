@@ -28,6 +28,14 @@ deployment still carried the old value (the dev URL).
 **Why this matters:** changing a production-scoped secret has NO effect on a
 running deployment until you redeploy. Always re-publish after changing prod env.
 
+## Cross-environment schema audits
+
+The development workflow only receives development-scope variables. A read-only
+DEV-versus-PROD schema audit therefore cannot connect to both databases from the
+normal DEV shell unless a separate production-scoped runner is used. Do not
+copy the production connection URL into the development scope just to run an
+audit; that weakens the isolation boundary.
+
 ## Dev Supabase project credentials are dead — both scopes point at prod DB
 The dev Supabase project (ref `xssrf...`) DB password in `SUPABASE_DATABASE_URL_DEV`
 is invalid (auth fails → Supabase PgBouncer trips `(ECIRCUITBREAKER) too many
@@ -48,3 +56,23 @@ Compare a row-count fingerprint of each DB (connect with `pg` via
 `createRequire('/home/runner/workspace/scripts/package.json')` inside code
 execution) against what the live API returns. The cleanest signal: log in to the
 production API as admin and `GET /api/bookings` — the count matches exactly one DB.
+
+## Current enforcement
+
+Development runtime and migrations require `SUPABASE_DATABASE_URL_DEV`;
+production runtime and migrations require `SUPABASE_DATABASE_URL`. The old
+`DATABASE_URL` fallback and `ALLOW_DEV_ON_PROD_DB` override are not valid for
+the application path. Auxiliary accounting, health, payment-enrichment, and
+BizPortal pools follow the same environment selection.
+
+The Replit database pane may report that no production database exists because
+this project’s live data is in the external Supabase production database. For
+production data operations, use the production-scoped Supabase connection
+through a controlled runner and verify the target rows before mutating.
+
+**Why:** A fallback in a helper can silently bypass the primary database
+boundary even when the main startup log shows the correct database.
+
+**How to apply:** Keep all new direct PostgreSQL pools environment-selected in
+the same way as the primary DB module, and re-publish after production
+configuration changes so the deployment receives production-scoped values.

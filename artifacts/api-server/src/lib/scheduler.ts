@@ -1,14 +1,16 @@
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, waDailyUsageSnapshotsTable, gymMembershipsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
-import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder, notifyWaDailyUsageList } from "./notifications";
+import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
 import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
-import { bulkPushPaymentsToBizportal } from "./bizportalSync";
+import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePaymentSyncErrorCache } from "./bizportalSync";
+import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
+import { completeBooking } from "./bookingLifecycle";
 
 function getAppUrl(): string {
   if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
@@ -31,8 +33,6 @@ function getTomorrowWIB(): string {
 function getTodayWIB(): string {
   return getWIBNow().toISOString().split("T")[0];
 }
-
-let dailyUsageListInFlight = false;
 
 async function expireOverdueMemberships(): Promise<void> {
   try {
@@ -277,96 +277,6 @@ async function sendDayOfReminder(): Promise<void> {
   }
 }
 
-/**
- * Publishes the current operational list for today. Unlike the customer
- * reminder above, this intentionally includes both confirmed and completed
- * bookings: completed bookings still belong in the day's usage record.
- *
- * It runs every scheduler tick rather than only at 07:00 so bookings
- * confirmed later in the day are not silently omitted from the admin group.
- */
-async function syncDailyUsageList(): Promise<void> {
-  if (dailyUsageListInFlight) return;
-  dailyUsageListInFlight = true;
-
-  try {
-    const today = getTodayWIB();
-    const bookings = await db
-      .select()
-      .from(bookingsTable)
-      .where(
-        and(
-          eq(bookingsTable.bookingDate, today),
-          or(eq(bookingsTable.status, "confirmed"), eq(bookingsTable.status, "completed")),
-        ),
-      );
-
-    if (!bookings.length) return;
-
-    const facilities = await db
-      .select({ id: facilitiesTable.id, name: facilitiesTable.name })
-      .from(facilitiesTable);
-    const facilityMap = new Map(facilities.map((facility) => [facility.id, facility.name]));
-
-    const usageBookings = bookings
-      .map((booking) => ({
-        facilityName: facilityMap.get(booking.facilityId) ?? `Fasilitas #${booking.facilityId}`,
-        customerName: booking.customerName,
-        bookingDate: booking.bookingDate,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        bookingType: booking.activityType ?? (booking.source === "whatsapp" ? "WhatsApp" : "Online"),
-        numberOfPeople: booking.numberOfPeople,
-        checkedIn: Boolean(booking.checkedInAt),
-        orderNumber: booking.orderNumber,
-        status: booking.status,
-      }))
-      .sort((a, b) =>
-        a.facilityName.localeCompare(b.facilityName) ||
-        a.startTime.localeCompare(b.startTime) ||
-        a.orderNumber.localeCompare(b.orderNumber),
-      );
-
-    const fingerprint = usageBookings
-      .map((booking) => [
-        booking.orderNumber,
-        booking.facilityName,
-        booking.customerName,
-        booking.startTime,
-        booking.endTime,
-        booking.bookingType,
-        booking.numberOfPeople ?? "",
-        booking.checkedIn ? "checked-in" : "not-checked-in",
-        booking.status,
-      ].join("|"))
-      .join("||");
-
-    const [previous] = await db
-      .select({ fingerprint: waDailyUsageSnapshotsTable.fingerprint })
-      .from(waDailyUsageSnapshotsTable)
-      .where(eq(waDailyUsageSnapshotsTable.usageDate, today))
-      .limit(1);
-
-    if (previous?.fingerprint === fingerprint) return;
-
-    await notifyWaDailyUsageList({ usageDate: today, bookings: usageBookings });
-
-    await db
-      .insert(waDailyUsageSnapshotsTable)
-      .values({ usageDate: today, fingerprint, sentAt: new Date() })
-      .onConflictDoUpdate({
-        target: waDailyUsageSnapshotsTable.usageDate,
-        set: { fingerprint, sentAt: new Date() },
-      });
-
-    console.log(`[scheduler] Daily usage list synced for ${today} (${bookings.length} booking(s))`);
-  } catch (err) {
-    console.error("[scheduler] syncDailyUsageList error:", err);
-  } finally {
-    dailyUsageListInFlight = false;
-  }
-}
-
 // Payment reminder: kirim 2 jam sebelum deadline (sekali saja per booking)
 async function sendPaymentReminder(): Promise<void> {
   try {
@@ -447,7 +357,11 @@ async function autoCompleteBookings(): Promise<void> {
     const confirmed = await db
       .select()
       .from(bookingsTable)
-      .where(and(eq(bookingsTable.status, "confirmed"), lte(bookingsTable.bookingDate, todayWIB)));
+      .where(and(
+        eq(bookingsTable.status, "confirmed"),
+        lte(bookingsTable.bookingDate, todayWIB),
+        isNotNull(bookingsTable.checkedInAt),
+      ));
 
     for (const booking of confirmed) {
       const isPastDay = booking.bookingDate < todayWIB;
@@ -455,12 +369,13 @@ async function autoCompleteBookings(): Promise<void> {
       const endMinutes = endH * 60 + endM;
 
       // Selesaikan jika: hari sudah lewat, ATAU hari ini & jam sudah lewat
-      if (isPastDay || nowMinutes >= endMinutes) {
-        await db
-          .update(bookingsTable)
-          .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
-          .where(eq(bookingsTable.id, booking.id));
-        logger.info(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
+      if ((isPastDay || nowMinutes >= endMinutes) && booking.checkedInAt) {
+        const completion = await completeBooking(booking.id, { userName: "scheduler", userRole: "system" });
+        if (completion.ok) {
+          logger.info(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
+        } else {
+          logger.info(`[scheduler] Booking ${booking.orderNumber} was not completed: ${completion.reason}`);
+        }
       }
     }
   } catch (err) {
@@ -560,8 +475,13 @@ export function startScheduler(): void {
   expireOverdueMemberships();
   expireOverdueBookings();
   autoCompleteBookings();
-  syncDailyUsageList();
   checkConnections();
+  processPaymentAccountingOutbox().catch((err) =>
+    logger.error({ err }, "[scheduler] Initial payment accounting outbox processing failed"),
+  );
+  processCentralFinance().catch((err) =>
+    logger.error({ err }, "[scheduler] Initial central finance processing failed"),
+  );
 
   // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
@@ -571,15 +491,32 @@ export function startScheduler(): void {
     await sendPaymentReminder();
     await sendReminderH1();
     await sendDayOfReminder();
-    await syncDailyUsageList();
     await runNightlyBankAudit();
     await sendDailyRekap();
     await sendNightlyRekap();
     await checkConnections();
+    try {
+      const result = await processPaymentAccountingOutbox();
+      if (result.claimed > 0) {
+        logger.info(result, "[scheduler] Payment accounting outbox processed");
+      }
+    } catch (err) {
+      logger.error({ err }, "[scheduler] Payment accounting outbox processing failed");
+    }
+    try {
+      const result = await processCentralFinance();
+      if (result.claimed > 0) {
+        logger.info(result, "[scheduler] Central Finance events processed");
+      }
+    } catch (err) {
+      logger.error({ err }, "[scheduler] Central Finance processing failed");
+    }
   }, 5 * 60 * 1000);
 
-  // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced
+  // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced.
+  // Also prune the error-dedup cache so stale entries don't accumulate in memory.
   setInterval(async () => {
+    prunePaymentSyncErrorCache();
     try {
       const result = await bulkPushPaymentsToBizportal();
       if (result.pushed > 0) {

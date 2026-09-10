@@ -2,7 +2,8 @@
  * Paylabs Payment Gateway — API v4.8.1 client
  *
  * Signing algorithm (v4.8.1):
- *   minifiedBody = JSON.stringify(body) stripped of \n\r\t
+ *   minifiedBody = JSON.stringify(body) with null-valued object fields omitted,
+ *                  then stripped of \n\r\t
  *   bodyHash     = lowercase( SHA256Hex( minifiedBody ) )
  *   stringToSign = "POST:" + endpoint + ":" + bodyHash + ":" + X-TIMESTAMP
  *   X-SIGNATURE  = Base64( SHA256withRSA( stringToSign, merchantPrivateKey ) )
@@ -30,6 +31,10 @@ export interface PaylabsConfig {
   paylabsPublicKey: string;
   baseUrl: string;
   debugMode: boolean;
+  environment?: "SANDBOX" | "PROD";
+  merchantIdSource?: "ENV" | "NONE";
+  privateKeySource?: "ENV" | "NONE";
+  publicKeySource?: "ENV" | "NONE";
 }
 
 // ─── Store ID helper ──────────────────────────────────────────────────────────
@@ -56,21 +61,33 @@ export function normalizeOptionalPaylabsStoreId(value?: string | null): string |
   return normalized;
 }
 
-/** Env-var only fallback (used when DB is unavailable) */
-export function getPaylabsConfig(): PaylabsConfig {
-  const sandboxMode = process.env.PAYLABS_SANDBOX_MODE !== "false";
-
+function getPaylabsEnvironmentCredentials(sandboxMode: boolean) {
+  const environment: PaylabsConfig["environment"] = sandboxMode ? "SANDBOX" : "PROD";
   const merchantId = sandboxMode
-    ? (process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
-    : (process.env.PAYLABS_PROD_MERCHANT_ID    || "");
-
+    ? (process.env.MERCHANT_ID_SANDBOX || "")
+    : (process.env.MERCHANT_ID_PROD || "");
   const privateKey = sandboxMode
     ? (process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
-    : (process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
-
+    : (process.env.PAYLABS_PROD_PRIVATE_KEY || "");
   const paylabsPublicKey = sandboxMode
-    ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
-    : (process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
+    ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY || "")
+    : (process.env.PAYLABS_PROD_PUBLIC_KEY || "");
+
+  return {
+    environment,
+    merchantId,
+    privateKey,
+    paylabsPublicKey,
+    merchantIdSource: merchantId ? "ENV" as const : "NONE" as const,
+    privateKeySource: privateKey ? "ENV" as const : "NONE" as const,
+    publicKeySource: paylabsPublicKey ? "ENV" as const : "NONE" as const,
+  };
+}
+
+/** Resolve credentials only from the selected environment's exact env names. */
+export function getPaylabsConfig(): PaylabsConfig {
+  const sandboxMode = process.env.PAYLABS_SANDBOX_MODE !== "false";
+  const credentials = getPaylabsEnvironmentCredentials(sandboxMode);
 
   let storeId: string | undefined;
   try {
@@ -83,15 +100,20 @@ export function getPaylabsConfig(): PaylabsConfig {
   return {
     sandboxMode,
     storeId,
-    merchantId,
-    privateKey,
-    paylabsPublicKey,
+    ...credentials,
     baseUrl: sandboxMode ? SANDBOX_BASE : PROD_BASE,
     debugMode: false,
   };
 }
 
-/** Load Paylabs config from DB (paylabs_settings table), fall back to env vars */
+/**
+ * Load Paylabs non-credential settings from DB.
+ *
+ * Merchant IDs and both key pairs are always resolved from the selected
+ * environment's exact env names. DB-stored credentials are intentionally not
+ * used for signing or verification because they can silently select the wrong
+ * sandbox/production pair.
+ */
 export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
   try {
     const { db, paylabsSettingsTable } = await import("@workspace/db");
@@ -99,20 +121,7 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
     if (!row) return getPaylabsConfig();
 
     const sandboxMode = row.sandboxMode;
-    // DB takes priority over env vars — admin panel is the source of truth.
-    // Env vars serve as seed/fallback only when the DB field is null/undefined.
-    // EXCEPTION: paylabsPublicKey — if DB is explicitly "" (empty string, not null),
-    // skip env var fallback. This lets admin disable signature verification for sandbox
-    // testing without touching secrets. Use ?? (null-coalescing) instead of ||.
-    const merchantId = sandboxMode
-      ? (row.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
-      : (row.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
-    const privateKey = sandboxMode
-      ? (row.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
-      : (row.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
-    const paylabsPublicKey = sandboxMode
-      ? (row.sandboxPublicKey  ?? process.env.PAYLABS_SANDBOX_PUBLIC_KEY  ?? "")
-      : (row.prodPublicKey     ?? process.env.PAYLABS_PROD_PUBLIC_KEY     ?? "");
+    const credentials = getPaylabsEnvironmentCredentials(sandboxMode);
     let storeId: string | undefined;
     try {
       storeId = normalizeOptionalPaylabsStoreId(row.storeId ?? process.env.PAYLABS_STORE_ID);
@@ -124,9 +133,7 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
     return {
       sandboxMode,
       storeId,
-      merchantId,
-      privateKey,
-      paylabsPublicKey,
+      ...credentials,
       baseUrl: sandboxMode ? SANDBOX_BASE : PROD_BASE,
       debugMode: row.debugMode,
     };
@@ -142,7 +149,7 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
  * ISO 8601 timestamp with milliseconds and +07:00 offset (WIB)
  * Required format per Paylabs v4.8.1 docs: 2022-09-16T16:58:47.964+07:00
  */
-function makeTimestamp(): string {
+export function createPaylabsTimestamp(): string {
   // Build a WIB (+07:00) ISO string
   const now = new Date();
   const wibOffset = 7 * 60; // minutes
@@ -266,6 +273,59 @@ export function normalizePaylabsPublicKey(raw: string): string {
   return pem;
 }
 
+export interface PaylabsKeyOwnershipTrace {
+  merchantDerivedPublicKeyFingerprint: string | null;
+  configuredPaylabsPublicKeyFingerprint: string | null;
+  sameKey: boolean | null;
+}
+
+function publicKeyFingerprint(key: crypto.KeyObject): string {
+  const der = key.export({ type: "spki", format: "der" });
+  return crypto.createHash("sha256").update(der).digest("hex");
+}
+
+/**
+ * Safe ownership diagnostic for the two intentionally different key roles:
+ * - merchant private key → derived merchant public key
+ * - configured Paylabs public key → provider verification key
+ *
+ * Only SHA-256 fingerprints are returned. Raw key material never leaves this
+ * function and is not suitable for signature verification decisions.
+ */
+export function getPaylabsKeyOwnershipTrace(config: Pick<PaylabsConfig, "privateKey" | "paylabsPublicKey">): PaylabsKeyOwnershipTrace {
+  let merchantDerivedPublicKeyFingerprint: string | null = null;
+  let configuredPaylabsPublicKeyFingerprint: string | null = null;
+
+  try {
+    const privatePem = normalizePaylabsPrivateKey(config.privateKey);
+    const merchantPrivateKey = crypto.createPrivateKey({ key: privatePem, format: "pem" });
+    merchantDerivedPublicKeyFingerprint = publicKeyFingerprint(crypto.createPublicKey(merchantPrivateKey));
+  } catch {
+    // Keep the diagnostic non-throwing; the existing key-validity checks remain
+    // responsible for rejecting malformed signing/verifying keys.
+  }
+
+  try {
+    const paylabsPublicPem = normalizePaylabsPublicKey(config.paylabsPublicKey);
+    if (paylabsPublicPem) {
+      configuredPaylabsPublicKeyFingerprint = publicKeyFingerprint(
+        crypto.createPublicKey({ key: paylabsPublicPem, format: "pem" }),
+      );
+    }
+  } catch {
+    // normalizePaylabsPublicKey already rejects malformed keys.
+  }
+
+  return {
+    merchantDerivedPublicKeyFingerprint,
+    configuredPaylabsPublicKeyFingerprint,
+    sameKey:
+      merchantDerivedPublicKeyFingerprint && configuredPaylabsPublicKeyFingerprint
+        ? merchantDerivedPublicKeyFingerprint === configuredPaylabsPublicKeyFingerprint
+        : null,
+  };
+}
+
 /**
  * Build the canonical string-to-sign per Paylabs v4.8.1:
  *   POST:<endpoint>:<lowercase(sha256hex(minifiedBody))>:<timestamp>
@@ -284,19 +344,46 @@ function buildStringToSign(
   return `${method}:${endpoint}:${bodyHash}:${timestamp}`;
 }
 
-/** Minify JSON body — strip \n \r \t per Paylabs spec */
-function minifyBody(body: string): string {
-  return body.replace(/[\n\r\t]/g, "");
+/**
+ * Paylabs excludes JSON object fields whose value is null from the signature
+ * input. Undefined fields are already omitted by JSON.stringify, but null
+ * fields need an explicit recursive cleanup. Array values are preserved
+ * because removing an array item would change its meaning and ordering.
+ */
+function omitNullObjectFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(omitNullObjectFields);
+  }
+  if (value !== null && typeof value === "object") {
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (child !== null) cleaned[key] = omitNullObjectFields(child);
+    }
+    return cleaned;
+  }
+  return value;
 }
 
-function sign(
+/** Build the exact JSON representation hashed by Paylabs. */
+export function minifyPaylabsBody(body: string): string {
+  try {
+    return JSON.stringify(omitNullObjectFields(JSON.parse(body)));
+  } catch {
+    // The request and webhook are JSON by contract. Keep a defensive fallback
+    // so malformed input still fails signature verification rather than
+    // throwing before the handler can return a controlled response.
+    return body.replace(/[\n\r\t]/g, "");
+  }
+}
+
+export function createPaylabsSignature(
   privateKeyPem: string,
   timestamp: string,
   bodyStr: string,
   endpoint: string,
   method = "POST",
 ): string {
-  const minified     = minifyBody(bodyStr);
+  const minified     = minifyPaylabsBody(bodyStr);
   const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
 
   const doSign = (key: crypto.KeyObject): string => {
@@ -364,7 +451,7 @@ export function verifyPaylabsSignature(
 ): boolean {
   try {
     const pem          = normaliseKey(paylabsPublicKeyPem, "PUBLIC");
-    const minified     = minifyBody(bodyStr);
+    const minified     = minifyPaylabsBody(bodyStr);
     const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
     const v = crypto.createVerify("RSA-SHA256");
     v.update(stringToSign, "utf8");
@@ -372,6 +459,44 @@ export function verifyPaylabsSignature(
   } catch (err) {
     logger.warn({ err }, "[paylabs] signature verification error");
     return false;
+  }
+}
+
+export function getPaylabsSignatureTrace(
+  timestamp: string,
+  bodyStr: string,
+  endpoint = "/api/paylabs/webhook",
+  method = "POST",
+): { bodyHash: string; minifiedBodyLength: number; stringToVerify: string } {
+  const minified = minifyPaylabsBody(bodyStr);
+  const bodyHash = crypto
+    .createHash("sha256")
+    .update(minified, "utf8")
+    .digest("hex")
+    .toLowerCase();
+  return {
+    bodyHash,
+    minifiedBodyLength: minified.length,
+    stringToVerify: `${method}:${endpoint}:${bodyHash}:${timestamp}`,
+  };
+}
+
+/**
+ * Return the path component used as EndpointUrl in Paylabs signatures.
+ * Paylabs signs the path from notifyUrl, not the full callback URL and not
+ * the query string. Stored notifyUrl is authoritative for webhook retries.
+ */
+export function paylabsEndpointFromNotifyUrl(notifyUrl?: string | null): string {
+  const raw = String(notifyUrl ?? "").trim();
+  if (!raw) return "/api/paylabs/webhook";
+
+  try {
+    const pathname = new URL(raw).pathname;
+    return pathname || "/";
+  } catch {
+    const pathOnly = raw.split(/[?#]/, 1)[0] ?? "";
+    if (!pathOnly) return "/api/paylabs/webhook";
+    return pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
   }
 }
 
@@ -403,17 +528,17 @@ export async function callPaylabs<T = Record<string, unknown>>(
   }
 
   const bodyStr   = JSON.stringify(body);
-  const timestamp = makeTimestamp();
+  const timestamp = createPaylabsTimestamp();
   const url       = `${config.baseUrl}${endpoint}`;
 
   // Build the string-to-sign so we can log it for diagnostics
-  const minifiedForLog = minifyBody(bodyStr);
+  const minifiedForLog = minifyPaylabsBody(bodyStr);
   const bodyHashForLog = crypto.createHash("sha256").update(minifiedForLog, "utf8").digest("hex").toLowerCase();
   const stringToSignForLog = `POST:${endpoint}:${bodyHashForLog}:${timestamp}`;
 
   let signature: string;
   try {
-    signature = sign(config.privateKey, timestamp, bodyStr, endpoint);
+    signature = createPaylabsSignature(config.privateKey, timestamp, bodyStr, endpoint);
   } catch (keyErr) {
     const msg = String(keyErr);
     logger.error(
@@ -627,14 +752,35 @@ export function createEwallet(req: CreateEwalletRequest, cfg?: PaylabsConfig) {
   }, cfg);
 }
 
-export function statusInquiry(merchantTradeNo: string, cfg?: PaylabsConfig) {
+/**
+ * Query the current order status.
+ *
+ * Paylabs v4.8.1 documents the VA inquiry endpoint as:
+ *   POST /payment/v2.3/va/query
+ * The old /payment/v2.3/va/inquiry path is not a v4.8.1 endpoint and returns
+ * "URL not found" in the sandbox.  The same request shape is used by the
+ * channel-specific query endpoints for QRIS and e-wallets.
+ */
+export function statusInquiry(
+  merchantTradeNo: string,
+  paymentType = "VA",
+  cfg?: PaylabsConfig,
+) {
   const config = cfg ?? getPaylabsConfig();
-  // v4.8.1 endpoint: POST /payment/v2.3/va/inquiry (try va inquiry; fallback in route)
-  return callPaylabs("/payment/v2.3/va/inquiry", {
+  const normalizedPaymentType = paymentType.trim().toUpperCase();
+  const endpoint =
+    normalizedPaymentType === "QRIS"
+      ? "/payment/v2.3/qris/query"
+      : ["OVO", "DANA", "SHOPEEPAY", "LINKAJA", "GOPAY"].includes(normalizedPaymentType)
+        ? "/payment/v2.3/ewallet/query"
+        : "/payment/v2.3/va/query";
+
+  return callPaylabs(endpoint, {
     requestId      : `inq-${merchantTradeNo}-${Date.now()}`,
     merchantId     : config.merchantId,
     ...(config.storeId ? { storeId: config.storeId } : {}),
     merchantTradeNo,
+    paymentType,
   }, cfg);
 }
 

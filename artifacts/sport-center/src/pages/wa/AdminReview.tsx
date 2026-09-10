@@ -25,6 +25,14 @@ interface ReviewData {
       proofUrl: string | null;
       confirmedAt: string | null;
       amount: number;
+      paymentMethod?: string | null;
+      ocrData?: {
+        paymentMethod?: string;
+        confidence?: number;
+        signals?: string[];
+        methodMatch?: boolean | null;
+        engine?: string;
+      } | null;
     } | null;
   };
   expiresAt: string | null;
@@ -239,6 +247,26 @@ export default function WaAdminReview() {
               <div className="text-center py-6">
                 <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-2" />
                 <p className="text-sm text-red-500 font-medium">Bukti pembayaran belum diupload</p>
+              </div>
+            )}
+            {b.payment?.ocrData?.engine === "tesseract" && b.payment.ocrData.paymentMethod && (
+              <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                b.payment.ocrData.methodMatch === false
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              }`}>
+                <div className="font-bold">
+                  OCR mendeteksi {b.payment.ocrData.paymentMethod}
+                  {b.payment.ocrData.confidence
+                    ? ` (${Math.round(b.payment.ocrData.confidence * 100)}%)`
+                    : ""}
+                </div>
+                <div className="mt-0.5">
+                  Metode tersimpan: {b.payment.paymentMethod ?? "belum diisi"}
+                  {b.payment.ocrData.methodMatch === false
+                    ? " — tidak cocok, konfirmasi diblokir."
+                    : " — cocok."}
+                </div>
               </div>
             )}
           </CardContent>

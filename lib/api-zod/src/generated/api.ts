@@ -9,6 +9,42 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary List effective-dated facility ownership mappings
+ */
+export const ListFacilityCompanyMappingsQueryParams = zod.object({
+  "facilityId": zod.coerce.number().optional()
+})
+
+
+/**
+ * @summary Create an effective-dated facility ownership mapping
+ */
+export const CreateFacilityCompanyMappingBody = zod.object({
+  "facilityId": zod.number(),
+  "companyId": zod.number(),
+  "effectiveFrom": zod.coerce.date(),
+  "effectiveUntil": zod.coerce.date().nullish(),
+  "isActive": zod.boolean().optional(),
+  "source": zod.string().optional(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Deactivate or supersede an ownership mapping
+ */
+export const UpdateFacilityCompanyMappingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFacilityCompanyMappingBody = zod.object({
+  "isActive": zod.boolean().optional(),
+  "effectiveUntil": zod.coerce.date().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -389,6 +425,10 @@ export const ListBookingsResponseItem = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -397,9 +437,18 @@ export const ListBookingsResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -410,9 +459,18 @@ export const ListBookingsResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -439,7 +497,11 @@ export const CreateBookingBody = zod.object({
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional(),
   "notes": zod.string().optional(),
-  "vendorId": zod.number().nullish()
+  "vendorId": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional()
 })
 
 
@@ -456,7 +518,11 @@ export const CheckRecurringBookingBody = zod.object({
   "startTime": zod.string(),
   "durationHours": zod.number(),
   "repeatType": zod.enum(['weekly', 'monthly']),
-  "repeatCount": zod.number().min(1).max(checkRecurringBookingBodyRepeatCountMax)
+  "repeatCount": zod.number().min(1).max(checkRecurringBookingBodyRepeatCountMax),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional()
 })
 
 export const CheckRecurringBookingResponse = zod.object({
@@ -485,6 +551,11 @@ export const CreateRecurringBookingBody = zod.object({
   "repeatType": zod.enum(['weekly', 'monthly']),
   "repeatCount": zod.number(),
   "notes": zod.string().optional(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional(),
+  "downPaymentAmount": zod.number().optional().describe('Total down payment for the recurring payment group. Must be less than the group grand total.'),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional()
 })
@@ -529,6 +600,10 @@ export const GetBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -537,9 +612,18 @@ export const GetBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -550,9 +634,18 @@ export const GetBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -571,7 +664,11 @@ export const UpdateBookingParams = zod.object({
 
 export const UpdateBookingBody = zod.object({
   "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']).optional(),
-  "adminNotes": zod.string().optional()
+  "adminNotes": zod.string().optional(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional()
 })
 
 export const UpdateBookingResponse = zod.object({
@@ -606,6 +703,10 @@ export const UpdateBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -614,9 +715,18 @@ export const UpdateBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -627,9 +737,18 @@ export const UpdateBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -686,6 +805,10 @@ export const PayBookingDpResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -694,9 +817,18 @@ export const PayBookingDpResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -707,9 +839,18 @@ export const PayBookingDpResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -758,6 +899,10 @@ export const GetBookingByOrderResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -766,9 +911,18 @@ export const GetBookingByOrderResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -779,9 +933,18 @@ export const GetBookingByOrderResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -804,9 +967,18 @@ export const ListPaymentsResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -822,8 +994,12 @@ export const CreatePaymentBody = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().optional(),
   "paymentMethod": zod.enum(['Transfer Bank', 'QRIS']).optional(),
+  "paymentProvider": zod.enum(['mandiri_direct', 'paylabs', 'unknown']).optional(),
+  "providerOrderId": zod.string().optional(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "ocrScanToken": zod.string().optional(),
+  "ocrScan": zod.record(zod.string(), zod.unknown()).optional()
 })
 
 
@@ -837,6 +1013,7 @@ export const UpdatePaymentParams = zod.object({
 export const UpdatePaymentBody = zod.object({
   "status": zod.enum(['pending', 'confirmed', 'rejected']).optional(),
   "paymentMethod": zod.string().optional(),
+  "paymentProvider": zod.enum(['mandiri_direct', 'paylabs', 'unknown']).optional(),
   "notes": zod.string().optional()
 })
 
@@ -846,9 +1023,54 @@ export const UpdatePaymentResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update payment metadata only (method/provider) without financial side effects
+ */
+export const UpdatePaymentMetadataParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdatePaymentMetadataBody = zod.object({
+  "paymentMethod": zod.string().optional(),
+  "paymentProvider": zod.enum(['mandiri_direct']).optional()
+})
+
+export const UpdatePaymentMetadataResponse = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1359,6 +1581,10 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1367,9 +1593,18 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1380,9 +1615,18 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1468,6 +1712,10 @@ export const GetCompanyInvoiceResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1476,9 +1724,18 @@ export const GetCompanyInvoiceResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1489,9 +1746,18 @@ export const GetCompanyInvoiceResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1559,6 +1825,10 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1567,9 +1837,18 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1580,9 +1859,18 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1681,6 +1969,10 @@ export const GetDashboardResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1689,9 +1981,18 @@ export const GetDashboardResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1702,9 +2003,18 @@ export const GetDashboardResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -1824,6 +2134,33 @@ export const SubmitMembershipPaymentProofResponse = zod.object({
 
 
 /**
+ * @summary List payment history for a gym membership (admin)
+ */
+export const ListMembershipPaymentsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListMembershipPaymentsResponseItem = zod.object({
+  "id": zod.number(),
+  "membershipId": zod.number(),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "months": zod.number(),
+  "amount": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'confirmed', 'cancelled']),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
+  "submittedAt": zod.string().nullish(),
+  "confirmedAt": zod.string().nullish(),
+  "mutationKey": zod.string().nullish(),
+  "accountingRef": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const ListMembershipPaymentsResponse = zod.array(ListMembershipPaymentsResponseItem)
+
+
+/**
  * @summary Get membership detail
  */
 export const GetMembershipParams = zod.object({
@@ -1856,7 +2193,9 @@ export const UpdateMembershipParams = zod.object({
 
 export const UpdateMembershipBody = zod.object({
   "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "startDate": zod.coerce.date().optional(),
+  "endDate": zod.coerce.date().optional()
 })
 
 export const UpdateMembershipResponse = zod.object({
@@ -1958,6 +2297,7 @@ export const ListDiscountSettingsResponseItem = zod.object({
   "id": zod.number(),
   "customerType": zod.string(),
   "discountPercentage": zod.number(),
+  "discountAmount": zod.number().nullish(),
   "description": zod.string().nullish(),
   "isActive": zod.boolean()
 })
@@ -1975,13 +2315,14 @@ export const GetDiscountSettingResponse = zod.object({
   "id": zod.number(),
   "customerType": zod.string(),
   "discountPercentage": zod.number(),
+  "discountAmount": zod.number().nullish(),
   "description": zod.string().nullish(),
   "isActive": zod.boolean()
 })
 
 
 /**
- * @summary Update discount percentage and active state (admin)
+ * @summary Update discount percentage or fixed amount and active state (admin)
  */
 export const UpdateDiscountSettingParams = zod.object({
   "customerType": zod.coerce.string()
@@ -1990,10 +2331,13 @@ export const UpdateDiscountSettingParams = zod.object({
 export const updateDiscountSettingBodyDiscountPercentageMin = 0;
 export const updateDiscountSettingBodyDiscountPercentageMax = 100;
 
+export const updateDiscountSettingBodyDiscountAmountMin = 0;
+
 
 
 export const UpdateDiscountSettingBody = zod.object({
-  "discountPercentage": zod.number().min(updateDiscountSettingBodyDiscountPercentageMin).max(updateDiscountSettingBodyDiscountPercentageMax),
+  "discountPercentage": zod.number().min(updateDiscountSettingBodyDiscountPercentageMin).max(updateDiscountSettingBodyDiscountPercentageMax).optional(),
+  "discountAmount": zod.number().min(updateDiscountSettingBodyDiscountAmountMin).nullish(),
   "description": zod.string().optional(),
   "isActive": zod.boolean().optional()
 })
@@ -2002,6 +2346,7 @@ export const UpdateDiscountSettingResponse = zod.object({
   "id": zod.number(),
   "customerType": zod.string(),
   "discountPercentage": zod.number(),
+  "discountAmount": zod.number().nullish(),
   "description": zod.string().nullish(),
   "isActive": zod.boolean()
 })
@@ -2164,6 +2509,10 @@ export const CheckInBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -2172,9 +2521,18 @@ export const CheckInBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -2185,9 +2543,18 @@ export const CheckInBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -2283,6 +2650,10 @@ export const VerifyBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -2291,9 +2662,18 @@ export const VerifyBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -2304,9 +2684,18 @@ export const VerifyBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -2366,6 +2755,10 @@ export const VerifyBookingByOrderResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -2374,9 +2767,18 @@ export const VerifyBookingByOrderResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
@@ -2387,9 +2789,18 @@ export const VerifyBookingByOrderResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()

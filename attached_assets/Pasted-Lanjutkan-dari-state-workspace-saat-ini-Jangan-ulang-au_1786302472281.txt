@@ -1,0 +1,368 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang audit atau perubahan accounting pipeline yang sudah selesai.
+
+Status terakhir:
+
+* Canonical payment mirror → public accounting pipeline sudah diterapkan.
+* Legacy direct public accounting creation sudah dialihkan dari jalur konfirmasi.
+* Recovery existing accounting entry berdasarkan payment correlation sudah ditambahkan.
+* Duplicate accounting entry dicegah.
+* Internal Sport Center journal tetap dipertahankan.
+* Tax query `entity_id` sudah diperbaiki agar aman terhadap tipe text.
+* Focused tests: 7/7 PASS.
+* API build: PASS.
+* Runtime API sehat di port 8080.
+* Fallback `company_id = 1` yang tidak valid SUDAH DIHAPUS.
+* Payment 13/14 development masih mempunyai `company_id = NULL`.
+* Jangan mengisi company dengan tebakan.
+* Endpoint audit sebelumnya dipanggil dengan path salah dan menghasilkan 404; itu bukan runtime failure.
+
+Task sekarang hanya:
+
+1. resolve company ownership secara deterministic;
+2. verifikasi canonical accounting runtime;
+3. audit payment 13/14;
+4. final validation/report.
+
+# 1. COMPANY RESOLUTION — JANGAN MENEBak
+
+Untuk payment dengan `company_id = NULL`, telusuri secara deterministic:
+
+payment
+→ booking
+→ facility
+→ venue/location
+→ merchant/store
+→ company ownership.
+
+Cari exact relation/schema yang dapat membuktikan company.
+
+Allowed evidence:
+
+* booking.company_id jika ada;
+* facility.company_id;
+* venue/location.company_id;
+* merchant/store.company_id;
+* explicit validated mapping table;
+* existing canonical Sport Center company configuration.
+
+Jangan gunakan:
+
+* hardcoded company ID;
+* booking number pattern;
+* payment method;
+* bank account;
+* customer;
+* amount;
+* assumption bahwa semua Sport Center = company tertentu.
+
+Jika tidak ada deterministic evidence:
+
+tetap:
+
+`COMPANY_MISSING`
+
+dan jangan posting public accounting.
+
+# 2. RESOLVER HELPER
+
+Jika company resolution belum centralized, gunakan/helper existing seperti:
+
+`resolvePaymentCompany(...)`
+
+Return minimal:
+
+* company_id
+* evidence_source
+* evidence_reference
+* confidence/deterministic flag
+
+Example:
+
+`company_id = 24`
+`evidence_source = facility_company`
+`evidence_reference = facility_id:17`
+
+Jika ambiguous:
+
+return NULL.
+
+# 3. PAYMENT 13/14 DIAGNOSTIC
+
+Audit read-only:
+
+Payment 13
+Payment 14
+
+Tampilkan:
+
+* payment ID
+* booking ID
+* facility ID
+* venue/store ID jika ada
+* existing company_id
+* deterministic ownership evidence
+* resolved company_id atau NULL
+* payment_method
+* payment_provider
+* amount
+* paid_at
+* mirror row
+* accounting entry
+* GL lines
+* tax ledger
+
+Jangan UPDATE dulu.
+
+# 4. HISTORICAL REPAIR POLICY
+
+Jika payment 13/14 memiliki deterministic company evidence:
+
+buat repair mechanism yang:
+
+* idempotent;
+* explicit target;
+* development only;
+* tidak mass-backfill;
+* dapat dry-run;
+* mencatat evidence.
+
+Urutan repair:
+
+source payment company
+→ mirror company
+→ canonical accounting recovery
+→ tax linkage validation.
+
+Jangan repair jika evidence tidak deterministic.
+
+# 5. CANONICAL ACCOUNTING ENTRY
+
+Pastikan public accounting identity payment-level:
+
+`correlation_id = sc_payment_{payment_id}`
+
+atau existing canonical equivalent.
+
+Recovery existing entry harus:
+
+* menemukan entry lama berdasarkan payment correlation;
+* tidak membuat entry kedua;
+* memperbarui metadata canonical secara idempotent;
+* mempertahankan GL balance.
+
+Expected source semantic:
+
+`sport_center_payment`
+
+bukan booking-only identity jika payment-level accounting sudah menjadi contract baru.
+
+# 6. PAYMENT METHOD / PROVIDER METADATA
+
+Verifikasi accounting entry/payment accounting context menyimpan:
+
+* payment_method
+* payment_provider
+* source_payment_id
+* company_id
+* bank_account_id jika tersedia
+* payment_type
+
+QRIS Paylabs dan Mandiri harus dapat dibedakan secara audit.
+
+# 7. PUBLIC MIRROR
+
+Verifikasi payment 13/14 mirror:
+
+`sport_center.sport_payments.id`
+→ `public.sport_payments.source_payment_id`
+
+Pastikan:
+
+* amount sama;
+* payment_method sama;
+* payment_provider sama;
+* company sama;
+* bank account preserved;
+* paid_at preserved;
+* expected settlement preserved;
+* entry_id menunjuk accounting entry canonical.
+
+# 8. GL VALIDATION
+
+Untuk accounting entry canonical:
+
+* entry exists;
+* status correct;
+* GL lines exist;
+* SUM(debit) = SUM(credit);
+* payment gross sama dengan total entry;
+* PPN breakdown benar jika applicable.
+
+Jangan tandai accounting complete jika GL tidak balance.
+
+# 9. TAX VALIDATION
+
+Jika payment kena PPN:
+
+cek:
+
+`sport_center.tax_transactions.reference_id = payment_id`
+
+dan:
+
+`public.gl_tax_lines.accounting_entry_id = entry_id`
+
+Pastikan tax ledger tidak duplicate saat recovery rerun.
+
+# 10. INTERNAL JOURNAL
+
+Internal:
+
+`sport_center.accounting_journals`
+
+tetap boleh ada.
+
+Pastikan payment_id tersedia dan tidak duplicate.
+
+Jangan menghapus internal journal dalam task ini.
+
+# 11. AUDIT ENDPOINT
+
+Cari route audit yang benar.
+
+Jangan menebak URL.
+
+Inspect route registration dan gunakan exact endpoint.
+
+Pastikan diagnostic read-only dapat menerima:
+
+`source_payment_id`
+
+dan menghasilkan:
+
+source
+→ mirror
+→ accounting
+→ GL
+→ tax
+
+Jika endpoint belum tersedia, tambahkan hanya jika memang bagian dari patch existing dan tetap read-only.
+
+# 12. CURRENT QRIS DEBIT ACCOUNT
+
+Jawab eksplisit dari runtime/code:
+
+Saat QRIS confirmed, debit accounting sekarang ke:
+
+* Bank Mandiri langsung;
+* clearing/payment provider receivable;
+* account lain.
+
+Jangan redesign pada task ini.
+
+Jika langsung Bank sebelum settlement:
+
+laporkan:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+tanpa mengubah account mapping.
+
+# 13. TESTS
+
+Tambahkan/finalisasi test:
+
+### Company resolution
+
+* deterministic facility/company mapping
+* ambiguous company → NULL
+* no evidence → NULL
+* no hardcoded fallback
+
+### Recovery
+
+* existing entry reused
+* no duplicate entry
+* metadata upgraded
+* GL remains balanced
+* tax ledger not duplicated
+
+### Payment identity
+
+* DP and pelunasan same booking remain separate payment-level accounting events
+
+### Provider metadata
+
+* QRIS Mandiri
+* QRIS Paylabs
+* Transfer Bank
+
+# 14. VALIDATION
+
+Run:
+
+1. `pnpm run typecheck:libs`
+2. API typecheck
+3. API build
+4. focused accounting tests
+5. payment/provider tests
+6. `git diff --check`
+7. runtime health
+8. read-only payment audit
+
+Do not treat standalone port conflict as application failure.
+
+# 15. FINAL REPORT
+
+Provide:
+
+## A. Company resolution source
+
+## B. Payment 13/14 result
+
+For each:
+
+* company resolved?
+* evidence?
+* mirror complete?
+* accounting complete?
+* GL balanced?
+* tax complete?
+
+## C. Canonical accounting pipeline
+
+## D. Payment method/provider propagation
+
+## E. Existing entry recovery behavior
+
+## F. Internal journal status
+
+## G. Current QRIS debit account
+
+## H. Audit endpoint
+
+## I. Tests/typecheck/build
+
+## J. Remaining risks
+
+## K. Final status
+
+Use:
+
+`READY`
+
+or:
+
+`BLOCKED_BY_COMPANY_OWNERSHIP`
+
+# SAFETY
+
+Do not:
+
+* invent company ID;
+* mass backfill;
+* deploy production;
+* final QRIS reconciliation;
+* MDR posting;
+* accounting settlement posting;
+* redesign clearing vs bank account without approval.

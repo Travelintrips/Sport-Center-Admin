@@ -2,13 +2,16 @@ import { defineConfig } from "drizzle-kit";
 import path from "path";
 
 const rawUrl =
-  process.env.DATABASE_URL ||
-  process.env.SUPABASE_DATABASE_URL ||
-  process.env.SUPABASE_DATABASE_URL_DEV ||
-  process.env.PROD_DATABASE_URL;
+  process.env.NODE_ENV === "production"
+    ? process.env.SUPABASE_DATABASE_URL
+    : process.env.SUPABASE_DATABASE_URL_DEV;
 
 if (!rawUrl) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
+  throw new Error(
+    process.env.NODE_ENV === "production"
+      ? "SUPABASE_DATABASE_URL is required for production migrations"
+      : "SUPABASE_DATABASE_URL_DEV is required for development migrations",
+  );
 }
 
 const useSsl = /supabase\.(co|com|in)/.test(rawUrl);

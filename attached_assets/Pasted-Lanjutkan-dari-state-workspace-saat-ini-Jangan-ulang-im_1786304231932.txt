@@ -1,0 +1,325 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang implementation, migration, codegen, atau test yang sudah lulus.
+
+Status terakhir:
+
+* API typecheck PASS
+* API build PASS
+* development migration PASS
+* OpenAPI/codegen PASS
+* relevant/full tests 56/56 PASS
+* ownership resolver tests PASS
+* accounting/recovery tests PASS
+* strict QRIS UAT tidak dijalankan karena marker fixture tidak tersedia di active environment
+* jangan membuat/mengubah fixture hanya agar UAT pass
+* workflow `Start application` baru saja direstart
+* belum ada historical repair
+* belum ada mass backfill
+* belum ada production deployment
+
+Task sekarang hanya:
+
+1. verifikasi runtime health;
+2. jalankan read-only ownership audit facility 1/7;
+3. jalankan read-only dry-run payment 13/14;
+4. tentukan final ownership status.
+
+# 1. RUNTIME HEALTH
+
+Setelah restart:
+
+cek log startup.
+
+Pastikan:
+
+* server listening;
+* DB reachable;
+* tidak ada migration startup error;
+* tidak ada runtime error dari ownership mapping/audit route.
+
+Probe:
+
+`/health`
+`/readiness`
+`/api/health`
+
+Laporkan HTTP status.
+
+Jika standalone workflow bentrok port dengan combined workflow, gunakan combined workflow sebagai source of truth.
+
+# 2. VERIFY ACTIVE ENVIRONMENT
+
+Sebelum query payment/facility:
+
+laporkan sanitized:
+
+* APP_ENV/NODE_ENV
+* database host/project fingerprint
+* database/schema
+* apakah UAT marker tersedia
+
+Jangan tampilkan credential.
+
+Ini untuk memastikan payment 13/14 yang diaudit berasal dari environment yang benar.
+
+# 3. FACILITY 1 READ-ONLY AUDIT
+
+Audit:
+
+Facility 1 — Lapangan Badminton A
+
+Tampilkan:
+
+* facility ID
+* facility name
+* venue/location
+* merchant/store relation
+* booking/company relation
+* existing ownership mapping
+* effective ownership records
+* candidate company IDs
+* evidence source
+* deterministic/ambiguous/no evidence
+
+Jangan INSERT/UPDATE ownership.
+
+# 4. FACILITY 7 READ-ONLY AUDIT
+
+Lakukan hal yang sama untuk:
+
+Facility 7 — Meja Billiard.
+
+# 5. OWNERSHIP MODEL CHECK
+
+Jika ownership table/model baru sudah ada:
+
+verifikasi schema actual secara read-only:
+
+* facility_id
+* company_id
+* effective_from
+* effective_until
+* active/status
+* source
+* notes/audit metadata
+
+Pastikan tidak ada overlapping active mapping untuk tanggal yang sama.
+
+Jika belum ada mapping rows:
+
+laporkan:
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+Jangan membuat mapping tanpa company bisnis yang disetujui.
+
+# 6. PAYMENT 13 DRY-RUN
+
+Audit endpoint/read-only query:
+
+Payment 13
+
+Tampilkan:
+
+## Source payment
+
+* id
+* booking_id
+* facility_id
+* amount
+* payment_type
+* payment_method
+* payment_provider
+* company_id
+* bank_account_id
+* paid_at
+
+## Ownership resolution
+
+* resolved company_id atau NULL
+* evidence source
+* evidence reference
+* effective date
+* deterministic true/false
+* reason
+
+## Mirror
+
+* mirror id
+* source_payment_id
+* company
+* provider
+* bank account
+* entry_id
+* posting status
+
+## Accounting
+
+* entry id
+* correlation id
+* source/source_payment_id
+* existing company
+* payment method
+* payment provider
+* status
+
+## GL
+
+* total debit
+* total credit
+* balanced?
+
+## Tax
+
+* internal tax transaction
+* public GL tax line
+
+No write.
+
+# 7. PAYMENT 14 DRY-RUN
+
+Lakukan output yang sama untuk payment 14.
+
+# 8. LEGACY COMPANY MISMATCH
+
+Jika existing accounting entry company berbeda dari deterministic ownership:
+
+laporkan:
+
+`LEGACY_COMPANY_MISMATCH`
+
+Jangan mengubah entry.
+
+Jika ownership belum bisa ditentukan:
+
+legacy company tetap BUKAN evidence.
+
+# 9. DRY-RUN REPAIR PLAN
+
+Hanya jika company ownership deterministic.
+
+Generate plan untuk setiap payment:
+
+* source payment company
+* mirror source_payment_id/company/provider/account
+* accounting metadata upgrade
+* preserve correlation
+* preserve balanced GL
+* create missing public tax GL only if needed
+
+Tetapi jangan apply.
+
+Jika ownership tidak deterministic:
+
+repair plan status:
+
+`BLOCKED`.
+
+# 10. INTERNAL JOURNAL CHECK
+
+Pastikan:
+
+`sport_center.accounting_journals`
+
+untuk payment 13/14:
+
+* payment_id benar
+* tidak duplicate
+* balance/logical journal masih utuh
+
+Jangan modify.
+
+# 11. AUDIT ENDPOINT
+
+Gunakan exact route:
+
+`GET /api/admin/audit-sport-center-payment/:sourcePaymentId`
+
+Jika auth diperlukan, gunakan authenticated test/admin context yang tersedia.
+
+Jangan bypass finance middleware.
+
+Jika tidak bisa auth:
+gunakan equivalent direct read-only diagnostic service/query.
+
+# 12. CURRENT QRIS DEBIT ACCOUNT
+
+Konfirmasi kembali:
+
+QRIS confirmed saat ini debit ke:
+`Bank Mandiri CST / 1-1020-CST`
+
+atau account lain.
+
+Jangan redesign.
+
+Jika tetap direct Bank sebelum settlement:
+pertahankan:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`.
+
+# 13. VALIDATION SUMMARY
+
+Tidak perlu rerun seluruh test suite jika source tidak berubah setelah restart.
+
+Cukup pastikan:
+
+* runtime health
+* audit route/query works
+* no write
+* no duplicate side effect
+
+Jika source berubah selama diagnostic, rerun typecheck/build/tests yang relevan.
+
+# 14. FINAL STATUS
+
+Gunakan salah satu:
+
+`OWNERSHIP_READY_FOR_REPAIR_APPROVAL`
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+`BLOCKED_BY_AMBIGUOUS_OWNERSHIP`
+
+`ENVIRONMENT_MISMATCH`
+
+# 15. FINAL REPORT
+
+Berikan:
+
+## A. Runtime health
+
+## B. Active environment identity
+
+## C. Facility 1 ownership result
+
+## D. Facility 7 ownership result
+
+## E. Payment 13 dry-run
+
+## F. Payment 14 dry-run
+
+## G. Legacy company mismatch
+
+## H. Repair eligibility
+
+## I. Tax repair eligibility
+
+## J. Internal journal status
+
+## K. Current QRIS debit account
+
+## L. Remaining risks
+
+## M. Final status
+
+# SAFETY
+
+Jangan:
+
+* create ownership mapping tanpa approved company;
+* historical repair apply;
+* mass backfill;
+* production deploy;
+* final QRIS reconciliation;
+* MDR posting;
+* settlement accounting;
+* redesign QRIS clearing.

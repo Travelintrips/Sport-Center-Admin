@@ -1,0 +1,515 @@
+PHASE — FINAL PRODUCTION CLOSURE BLOCKER REMEDIATION
+DO NOT REPEAT PRODUCTION MIGRATION
+
+Current state:
+
+PRODUCTION DDL = PASS
+PRODUCTION FINANCIAL DATA MUTATION = NONE
+ACCOUNTING = PASS
+CENTRAL FINANCE = UNCHANGED
+18 TEST SUITES / 116 TESTS = PASS
+API TYPECHECK = PASS
+SCRIPTS TYPECHECK = PASS
+API BUILD = PASS
+FRONTEND BUILD = PASS
+HTTPS CUSTOM DOMAIN = PASS
+
+Production now contains the required:
+
+- corporate_subscription_status
+- corporate_subscriptions
+- corporate_occurrences
+- usage_proofs
+- occurrence/date unique index
+
+Existing:
+
+- reschedule_requests
+- Event columns on sport_bookings
+
+Financial counts remained unchanged.
+
+DO NOT RUN THE SAME MIGRATION AGAIN.
+
+There are exactly THREE remaining closure areas:
+
+1. Production auditor cannot see the newly migrated schema.
+2. Deployment metadata says isDeployed=false / hasSuccessfulBuild=false / primaryUrl empty
+   although HTTPS custom domain works.
+3. DEV scheduler has evidence that WhatsApp can queue real sends when WA_DRY_RUN is
+   not active.
+
+============================================================
+A. FIX PRODUCTION AUDITOR SCHEMA VISIBILITY
+============================================================
+
+Use the existing dedicated:
+
+sport_center_production_auditor
+
+DO NOT create another auditor role.
+
+DO NOT change application database credentials.
+
+DO NOT use the application pool.
+
+First determine why the auditor sees the old schema.
+
+Possible causes to distinguish:
+
+- auditor connects to a different database/project
+- connection is stale
+- schema/table privileges missing
+- migration was executed against a different endpoint
+- search_path mismatch
+- transaction snapshot issue
+- wrong Supabase project
+- table visibility/USAGE/SELECT grants missing
+
+DO NOT guess.
+
+Using the auditor connection, run only read-only checks:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+SELECT current_database();
+SELECT current_user;
+SELECT current_schema();
+
+Verify the target tables through:
+
+information_schema.tables
+information_schema.columns
+pg_catalog.pg_tables
+to_regclass('sport_center.corporate_subscriptions')
+to_regclass('sport_center.corporate_occurrences')
+to_regclass('sport_center.usage_proofs')
+
+Do NOT print credentials.
+
+Do NOT print connection strings.
+
+============================================================
+B. IF TABLES EXIST BUT AUDITOR CANNOT SEE THEM
+============================================================
+
+Determine whether the problem is privilege visibility.
+
+Verify:
+
+- schema USAGE
+- table SELECT
+- sequence privileges only if actually required
+- foreign-key referenced table visibility where relevant
+
+The auditor must remain:
+
+READ ONLY.
+
+It must NOT receive:
+
+INSERT
+UPDATE
+DELETE
+TRUNCATE
+CREATE
+ALTER
+DROP
+OWNER
+SUPERUSER
+
+If grants are missing, apply ONLY the minimum required:
+
+USAGE ON SCHEMA sport_center
+
+SELECT ON required audit tables
+
+Do not grant write privileges.
+
+Do not grant ALL PRIVILEGES.
+
+Do not grant ownership.
+
+Do not grant future default write privileges.
+
+After the grant, reconnect with the auditor and verify the new tables.
+
+Finish with:
+
+ROLLBACK;
+
+============================================================
+C. IF AUDITOR IS CONNECTING TO WRONG DATABASE
+============================================================
+
+Compare read-only identity between:
+
+Primary Production connection
+and
+Auditor connection
+
+Compare only:
+
+project/database identity
+server endpoint identity
+database name
+schema availability
+
+Do NOT expose credentials.
+
+If auditor points to the wrong Production database/project:
+
+STOP.
+
+Do not modify the wrong database.
+
+Document the exact mismatch.
+
+============================================================
+D. RE-VERIFY AUDITOR HANDSHAKE
+============================================================
+
+After fixing only the proven visibility issue:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Must be:
+
+on
+
+Verify:
+
+current_user =
+sport_center_production_auditor
+
+Verify:
+
+corporate_subscriptions = present
+corporate_occurrences = present
+usage_proofs = present
+
+Verify required columns/indexes.
+
+Run the existing production integrity audit again.
+
+Requirements:
+
+mutation queries = 0
+skipped queries = 0
+ROLLBACK = PASS
+
+============================================================
+E. DEPLOYMENT METADATA BLOCKER
+============================================================
+
+DO NOT assume isDeployed=false means the website is down.
+
+We already have:
+
+https://sc.travelintrips.co.id
+
+returning HTTPS successfully.
+
+Determine why deployment metadata reports:
+
+isDeployed=false
+hasSuccessfulBuild=false
+primaryUrl=""
+
+while the custom domain serves the application.
+
+Inspect the actual current Replit deployment configuration.
+
+Determine whether:
+
+1. custom domain points to an active Replit deployment
+2. domain points to an older deployment
+3. current deployment is not the deployment serving the domain
+4. deployment metadata API is stale
+5. deployment is unpublished despite an existing runtime
+6. deployment configuration changed after migration
+
+Do NOT republish blindly.
+
+Do NOT create another deployment.
+
+Do NOT change domain DNS.
+
+Do NOT change production secrets.
+
+The goal is to prove:
+
+CUSTOM DOMAIN
+→ ACTIVE PRODUCTION DEPLOYMENT
+→ CURRENT BUILD/REVISION
+
+If this cannot be proven through available deployment metadata, use HTTPS
+runtime evidence and explicitly classify the metadata discrepancy rather than
+fabricating PASS.
+
+============================================================
+F. HTTPS RUNTIME VERIFICATION
+============================================================
+
+Verify:
+
+https://sc.travelintrips.co.id/
+
+and existing health endpoints.
+
+Record:
+
+HTTP status
+redirect chain
+server/runtime headers where useful
+application health
+version/revision identifier if safely exposed
+
+Do not expose secrets.
+
+Verify:
+
+homepage
+facilities
+promos
+settings
+API health
+
+Protected endpoints returning 401 without credentials are expected.
+
+Do not weaken authentication.
+
+============================================================
+G. WHATSAPP SAFETY — HIGH PRIORITY
+============================================================
+
+The DEV workflow log showed that the scheduler can queue REAL WhatsApp sends
+when:
+
+WA_DRY_RUN
+
+is not enabled.
+
+This MUST be fail-closed.
+
+Do not send any real WhatsApp.
+
+Do not call:
+
+/send
+
+Do not trigger a real scheduler send.
+
+Do not use real recipients.
+
+Audit the WhatsApp dispatch path.
+
+Required behavior for DEV:
+
+If NODE_ENV is development/test:
+
+WA_DRY_RUN must default to TRUE unless an explicit safe controlled-send
+configuration exists.
+
+If dry-run is not active:
+
+the scheduler must refuse to enqueue/send real WhatsApp from DEV.
+
+The protection must exist server-side, not only in UI.
+
+Recommended contract:
+
+DEV/TEST
+→ DRY RUN REQUIRED
+→ no provider /send
+
+PRODUCTION
+→ existing production policy
+
+Do not alter Production WhatsApp credentials.
+
+Do not weaken Production messaging.
+
+Do not send test WhatsApp.
+
+Add regression tests proving:
+
+development + WA_DRY_RUN absent
+→ no real send
+
+development + WA_DRY_RUN=false
+→ fail closed
+
+development + dry-run
+→ simulated/logged dispatch only
+
+Production behavior must remain unchanged.
+
+============================================================
+H. TESTS
+============================================================
+
+Run:
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run build
+
+pnpm --filter @workspace/scripts run typecheck
+
+git diff --check
+
+Existing 18 suites / 116 tests must continue passing.
+
+Additional WhatsApp safety tests should pass.
+
+============================================================
+I. FINAL PRODUCTION READ-ONLY AUDIT
+============================================================
+
+Run using:
+
+sport_center_production_auditor
+
+Handshake:
+
+BEGIN;
+SET TRANSACTION READ ONLY;
+SHOW transaction_read_only;
+
+Must return:
+
+on
+
+Verify:
+
+- bookings
+- payments
+- corporate subscriptions
+- occurrences
+- usage proofs
+- invoices
+- invoice items
+- accounting journals
+- journal lines
+- tax
+- outbox
+- reconciliation
+- Central Finance boundary
+
+No mutations.
+
+ROLLBACK.
+
+============================================================
+J. FINANCIAL SAFETY
+============================================================
+
+Before/after verify:
+
+sport_bookings
+sport_payments
+company_invoices
+company_invoice_items
+accounting_journals
+accounting_journal_lines
+tax_transactions
+payment_accounting_outbox
+bank_reconciliation_matches
+
+No financial row count should change.
+
+Do not repair historical anomalies in this phase.
+
+Do not retry outbox.
+
+Do not approve reconciliation.
+
+Do not create journal entries.
+
+Do not create payments.
+
+============================================================
+K. FINAL REPORT
+============================================================
+
+Update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+Include:
+
+1. Production migration result
+2. Auditor visibility root cause
+3. Auditor privilege result
+4. Deployment metadata explanation
+5. HTTPS runtime evidence
+6. WhatsApp DEV safety remediation
+7. Tests
+8. Typecheck
+9. Build
+10. Accounting
+11. Central Finance
+12. Production mutation
+13. Final closure verdict
+
+============================================================
+FINAL VERDICT
+============================================================
+
+Only declare:
+
+PROJECT STATUS = FINALIZED
+
+when all of these are proven:
+
+Production schema = PASS
+Required DDL = PASS
+Auditor schema visibility = PASS
+Auditor role = PASS
+transaction_read_only = on
+ROLLBACK = PASS
+Production integrity audit = PASS
+HTTPS runtime = PASS
+Deployment/runtime relationship = PROVEN
+WhatsApp DEV safety = PASS
+Accounting = PASS
+Central Finance = UNCHANGED
+Payment integrity = PASS
+Corporate = PASS
+Event = PASS
+Check-in = PASS
+Usage proof = PASS
+Reschedule = PASS
+Tests = PASS
+Typecheck = PASS
+Build = PASS
+git diff --check = PASS
+Production financial mutation = NONE
+
+If deployment metadata remains inconsistent but runtime relationship is
+provably safe, document the metadata discrepancy explicitly.
+
+If any required technical condition cannot be proven:
+
+PROJECT STATUS = NOT FINALIZED
+
+Do not fabricate PASS.
+
+Do not repeat the 429 schema migration.
+
+Do not modify historical financial data.
+
+Do not send WhatsApp.
+
+Do not modify Central Finance.

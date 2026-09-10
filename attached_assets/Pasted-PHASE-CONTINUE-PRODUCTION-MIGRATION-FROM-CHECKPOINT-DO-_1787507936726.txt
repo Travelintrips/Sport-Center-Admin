@@ -1,0 +1,396 @@
+PHASE — CONTINUE PRODUCTION MIGRATION FROM CHECKPOINT
+DO NOT RESTART AUDIT
+DO NOT APPLY THE 429 FULL SCHEMA DIFF
+
+Previous work already completed:
+
+- Secret Manager access = PASS
+- API workflow = healthy
+- 18 suites / 116 tests = PASS
+- Production auditor access = PASS
+- role = sport_center_production_auditor
+- transaction_read_only = on
+- ROLLBACK = PASS
+- production read-only integrity audit = PASS
+- debit/credit balance = PASS
+- no skipped audit queries
+- Production financial data = NOT MUTATED
+
+Schema comparison found:
+
+DEV ↔ PROD = 429 differences
+
+IMPORTANT:
+DO NOT attempt to synchronize all 429 differences.
+
+The 429 differences contain unrelated/legacy/schema differences.
+Only isolate DDL required by the CURRENT Sport Center implementation.
+
+============================================================
+1. IDENTIFY REQUIRED PRODUCTION OBJECTS
+============================================================
+
+Compare the current implementation against Production schema.
+
+Only consider objects directly required by:
+
+A. Corporate Subscription
+
+- corporate_subscriptions
+- required subscription columns
+- required indexes
+- required constraints
+
+B. Corporate Occurrence
+
+- corporate_occurrences
+- required booking relation
+- subscription relation
+- unique subscription/date constraint
+- required indexes
+
+C. Usage Proof
+
+- usage_proofs
+- booking foreign key
+- uploaded_by
+- storage reference
+- timestamps
+- required indexes
+
+D. Event implementation
+
+Only include Event-specific columns/tables that are actually used by the
+current deployed code and are missing in Production.
+
+E. Reschedule
+
+Only include schema changes that are actually required by the current
+reschedule implementation and are missing in Production.
+
+DO NOT include unrelated DEV-only objects.
+
+============================================================
+2. DDL CLASSIFICATION
+============================================================
+
+For every missing object classify:
+
+REQUIRED_FOR_CURRENT_FEATURE
+NOT_REQUIRED
+LEGACY
+UNRELATED
+UNKNOWN
+
+Only:
+
+REQUIRED_FOR_CURRENT_FEATURE
+
+may proceed.
+
+============================================================
+3. MIGRATION SAFETY
+============================================================
+
+Allowed:
+
+CREATE TABLE
+ADD COLUMN
+CREATE INDEX
+ADD FOREIGN KEY
+ADD UNIQUE CONSTRAINT
+
+Only when proven required.
+
+Forbidden:
+
+DROP TABLE
+DROP COLUMN
+DELETE
+UPDATE historical rows
+payment rewrite
+invoice rewrite
+tax rewrite
+journal rewrite
+reconciliation rewrite
+Central Finance mutation
+
+No historical backfill.
+
+============================================================
+4. GENERATE EXACT MIGRATION
+============================================================
+
+Create one minimal additive Production migration.
+
+It must be:
+
+- idempotent
+- additive
+- backward-compatible
+- safe to rerun
+- no data mutation
+- no financial rewrite
+
+Before executing, print a SAFE DDL SUMMARY ONLY.
+
+Example:
+
+corporate_subscriptions → CREATE TABLE
+corporate_occurrences → CREATE TABLE
+usage_proofs → CREATE TABLE
+...
+
+Do NOT print secrets.
+
+Do NOT print database URLs.
+
+============================================================
+5. VERIFY PRODUCTION BEFORE APPLY
+============================================================
+
+Using the official Production migration mechanism, verify:
+
+- current user/context
+- target database
+- migration environment
+- migration file
+
+Do NOT use the application pool.
+
+Do NOT use DEV credentials.
+
+============================================================
+6. APPLY ONLY REQUIRED DDL
+============================================================
+
+Run only the isolated Sport Center feature migration.
+
+Do not synchronize the full 429 schema differences.
+
+Do not touch unrelated tables.
+
+============================================================
+7. POST-MIGRATION VERIFICATION
+============================================================
+
+Immediately verify Production schema read-only.
+
+Use:
+
+sport_center_production_auditor
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Must return:
+
+on
+
+Verify:
+
+- corporate_subscriptions exists
+- corporate_occurrences exists
+- usage_proofs exists
+- required columns exist
+- required indexes exist
+- required constraints exist
+
+Then:
+
+ROLLBACK;
+
+============================================================
+8. FINANCIAL SAFETY VERIFICATION
+============================================================
+
+Compare before/after:
+
+sport_bookings
+sport_payments
+company_invoices
+company_invoice_items
+accounting_journals
+accounting_journal_lines
+tax_transactions
+payment_accounting_outbox
+bank_reconciliation_matches
+
+Expected:
+
+NO DATA ROW CHANGES
+
+A schema migration must not alter historical financial records.
+
+============================================================
+9. DEPLOY CURRENT CODE
+============================================================
+
+Only after Production schema is compatible:
+
+deploy current application.
+
+Production domain:
+
+https://sc.travelintrips.co.id
+
+Verify actual HTTPS response.
+
+Check:
+
+homepage
+health
+facilities
+promos
+settings
+API health
+
+Do not rely solely on deployment metadata.
+
+============================================================
+10. FEATURE SMOKE VERIFICATION
+============================================================
+
+Do not create real Production financial transactions.
+
+Read-only/unauthenticated verification where possible:
+
+Corporate subscription routes exist
+Event routes exist
+usage proof routes exist
+reschedule routes exist
+
+Protected endpoints returning 401 without credentials is expected.
+
+Do not weaken authentication.
+
+============================================================
+11. FINAL PRODUCTION AUDIT
+============================================================
+
+Run the existing production read-only audit again.
+
+Requirements:
+
+role = sport_center_production_auditor
+
+transaction_read_only = on
+
+mutation queries = 0
+
+skipped audit queries = 0
+
+ROLLBACK = PASS
+
+Verify:
+
+- no orphan payments
+- no duplicate payment identity
+- no invoice mismatch
+- no unbalanced journals
+- no orphan journal lines
+- no tax corruption
+- no reconciliation mutation
+- no Central Finance mutation
+- no unexpected booking mutation
+
+============================================================
+12. TESTS
+============================================================
+
+Run:
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run build
+
+pnpm --filter @workspace/scripts run typecheck
+
+git diff --check
+
+Expected:
+
+18 suites / 116 tests or higher if new tests were added.
+
+============================================================
+13. FINAL REPORT
+============================================================
+
+Update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+Record:
+
+- 429 schema differences discovered
+- why full diff was NOT applied
+- exact required DDL
+- exact Production migration
+- migration result
+- schema verification
+- deployment result
+- HTTPS result
+- production audit result
+- accounting result
+- Central Finance result
+- financial row-count comparison
+- tests
+- typecheck
+- build
+- git diff check
+
+============================================================
+FINAL VERDICT
+============================================================
+
+Only declare:
+
+PROJECT STATUS = FINALIZED
+
+if all are PASS:
+
+Production schema = PASS
+Required migration = PASS
+Production deployment = PASS
+HTTPS = PASS
+Production read-only audit = PASS
+transaction_read_only = on
+auditor role = PASS
+ROLLBACK = PASS
+mutation queries = 0
+Accounting = PASS
+Central Finance = UNCHANGED
+Payment = PASS
+Corporate = PASS
+Event = PASS
+Check-in = PASS
+Usage proof = PASS
+Reschedule = PASS
+Security = PASS
+Tests = PASS
+Typecheck = PASS
+Build = PASS
+git diff --check = PASS
+
+Otherwise:
+
+PROJECT STATUS = NOT FINALIZED
+
+and state the exact remaining blocker.
+
+CRITICAL:
+
+DO NOT APPLY THE 429 DEV/PROD SCHEMA DIFF.
+DO NOT MAKE UNRELATED SCHEMA CHANGES.
+DO NOT MODIFY HISTORICAL FINANCIAL DATA.
+DO NOT CREATE PRODUCTION TEST BOOKINGS.
+DO NOT CREATE PRODUCTION TEST PAYMENTS.
+DO NOT CREATE PRODUCTION TEST EVENTS.
+DO NOT SEND WHATSAPP.
+DO NOT MODIFY CENTRAL FINANCE.
+DO NOT FABRICATE PASS.

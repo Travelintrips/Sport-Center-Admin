@@ -1,4 +1,17 @@
-import { db, companyDocumentTemplatesTable, companyDocumentSettingsTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
+
+import {
+  db,
+  companyDocumentTemplatesTable,
+  companyDocumentSettingsTable,
+  companyInvoicesTable,
+  companyInvoiceItemsTable,
+  bookingsTable,
+  usersTable,
+  facilitiesTable,
+  settingsTable,
+  documentFileTemplatesTable,
+} from "@workspace/db";
+
 import { eq, and, isNull } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
 import { generateDocumentNumber, deriveCompanyCode } from "./documentNumbering";
@@ -52,6 +65,26 @@ async function getSettings() {
     const [s] = await db.select().from(settingsTable).limit(1);
     return s;
   } catch { return null; }
+}
+
+async function getActiveFileTemplate(documentType: string, companyId: number | null): Promise<{ fileUrl: string; templateType: string } | null> {
+  try {
+    const rows = await db.select().from(documentFileTemplatesTable).where(
+      and(
+        eq(documentFileTemplatesTable.documentType, documentType),
+        eq(documentFileTemplatesTable.isActive, true),
+      )
+    ).limit(10);
+    // Company-specific takes priority over global
+    if (companyId != null) {
+      const match = rows.find((r) => r.companyId === companyId);
+      if (match) return { fileUrl: match.fileUrl, templateType: match.templateType };
+    }
+    const global = rows.find((r) => r.companyId == null);
+    return global ? { fileUrl: global.fileUrl, templateType: global.templateType } : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildDefaultKopHtml(vars: Record<string, string>): string {
@@ -115,6 +148,7 @@ function buildInvoiceTableHtml(items: any[]): string {
 </table>`;
 }
 
+
 function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false, bgTemplateUrl?: string | null, bgTemplateType?: string | null): string {
   const pageSize = paperStyle === "A4" ? "210mm 297mm" : "216mm 279mm";
 
@@ -138,6 +172,7 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
   const pageStyle = (hasBgImage || hasBgPdf)
     ? `background: #fff; max-width: 800px; margin: 24px auto; min-height: 1122px; position: relative; box-shadow: 0 1px 8px rgba(0,0,0,0.1); ${bgStyles}`
     : `background: #fff; max-width: 800px; margin: 24px auto; padding: 40px; box-shadow: 0 1px 8px rgba(0,0,0,0.1);`;
+
 
   return `<!DOCTYPE html>
 <html lang="id">
@@ -203,7 +238,13 @@ export async function renderDocument(params: {
   companyId?: number | null;
   printMode?: boolean;
   issueDocumentNumber?: boolean;
-}): Promise<{ html: string; templateId: number | null; documentNumber: string | null }> {
+}): Promise<{
+  html: string;
+  templateId: number | null;
+  documentNumber: string | null;
+  tplVars: Record<string, string>;
+  fileTemplateUrl: string | null;
+}> {
   const { documentType, entityId, companyId = null, printMode = false, issueDocumentNumber = false } = params;
   const tpl = await getTemplate(documentType, companyId);
   const settings = await getSettings();
@@ -421,6 +462,7 @@ export async function renderDocument(params: {
       ${footerHtml}`;
   }
 
+
   // Background template override (image/pdf as page background)
   let bgTemplateUrl: string | null | undefined = undefined;
   let bgTemplateType: string | null | undefined = undefined;
@@ -430,9 +472,10 @@ export async function renderDocument(params: {
     bgTemplateType = bgSettings?.bgTemplateType;
   } catch { /* fallback to no bg */ }
 
-  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl, bgTemplateType);
+  const fileTpl = await getActiveFileTemplate(documentType, companyId);
+  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl ?? fileTpl?.fileUrl ?? null, bgTemplateUrl ? bgTemplateType ?? null : fileTpl?.templateType ?? null);
 
-  return { html, templateId: tpl?.id ?? null, documentNumber };
+  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars, fileTemplateUrl: fileTpl?.fileUrl ?? null };
 }
 
 /**

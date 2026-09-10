@@ -2,21 +2,9 @@ import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
 
 const router = Router();
-
-async function generateOrderNumber(): Promise<string> {
-  const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-  let maxNum = 0;
-  for (const row of rows) {
-    const match = row.orderNumber.match(/^SC-(\d+)$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxNum) maxNum = n;
-    }
-  }
-  return `SC-${String(maxNum + 1).padStart(4, "0")}`;
-}
 
 router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
   try {
@@ -58,7 +46,7 @@ router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
 
     const durationHours = Number(duration);
     const totalPrice = Number(facility.pricePerHour) * durationHours;
-    const orderNumber = await generateOrderNumber();
+    const orderNumber = await generateBookingOrderNumber();
 
     const endDt = new Date(dt.getTime() + durationHours * 60 * 60 * 1000);
     const endHH = String(endDt.getHours()).padStart(2, "0");

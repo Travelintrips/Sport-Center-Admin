@@ -19,7 +19,13 @@
 
 import crypto from "crypto";
 import { describe, it, expect } from "vitest";
-import { normalizePaylabsPublicKey, verifyPaylabsSignature } from "./paylabs";
+import {
+  minifyPaylabsBody,
+  normalizePaylabsPublicKey,
+  paylabsEndpointFromNotifyUrl,
+  createPaylabsSignature,
+  verifyPaylabsSignature,
+} from "./paylabs";
 
 // ─── Key Fixture ──────────────────────────────────────────────────────────────
 // Generate a real RSA-2048 key pair for deterministic test signing
@@ -140,5 +146,64 @@ describe("verifyPaylabsSignature", () => {
     const normalized = normalizePaylabsPublicKey(flatPublicKey);
     const result = verifyPaylabsSignature(normalized, timestamp, rawBody, sig, endpoint);
     expect(result).toBe(true);
+  });
+
+  it("10b. Signature uses minified original body without reordering keys", () => {
+    const formattedBody = [
+      "{",
+      '  "status": "02",',
+      '  "merchantId": "010728",',
+      '  "optionalField": null',
+      "}",
+    ].join("\n");
+    const canonicalBody = minifyPaylabsBody(formattedBody);
+    expect(canonicalBody).toBe('{"status":"02","merchantId":"010728"}');
+
+    const sig = signForTest(TEST_PRIVATE_PEM, canonicalBody, timestamp, endpoint);
+    expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, formattedBody, sig, endpoint)).toBe(true);
+  });
+
+  it("11. Null-valued object fields are excluded from the signed body", () => {
+    const bodyWithNull = JSON.stringify({
+      merchantTradeNo: "TEST-001",
+      optionalField: null,
+      nested: { anotherOptionalField: null, value: "kept" },
+    });
+    const signedBody = JSON.stringify({
+      merchantTradeNo: "TEST-001",
+      nested: { value: "kept" },
+    });
+    expect(minifyPaylabsBody(bodyWithNull)).toBe(signedBody);
+
+    const sig = signForTest(TEST_PRIVATE_PEM, signedBody, timestamp, endpoint);
+    expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, bodyWithNull, sig, endpoint)).toBe(true);
+  });
+});
+
+describe("Paylabs signed acknowledgement", () => {
+  it("signs the exact merchantId/requestId/errCode response with the merchant private key", () => {
+    const endpoint = "/api/paylabs/webhook";
+    const timestamp = "2026-08-15T12:00:00.000+07:00";
+    const body = JSON.stringify({
+      merchantId: "010728",
+      requestId: "paylabs-callback-001",
+      errCode: "0",
+    });
+
+    const signature = createPaylabsSignature(TEST_PRIVATE_PEM, timestamp, body, endpoint);
+
+    expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, body, signature, endpoint)).toBe(true);
+    expect(Object.keys(JSON.parse(body))).toEqual(["merchantId", "requestId", "errCode"]);
+  });
+});
+
+describe("paylabsEndpointFromNotifyUrl", () => {
+  it("uses only the callback path and drops query parameters", () => {
+    expect(paylabsEndpointFromNotifyUrl("https://example.com/api/paylabs/webhook?x=1"))
+      .toBe("/api/paylabs/webhook");
+  });
+
+  it("falls back to the canonical webhook path", () => {
+    expect(paylabsEndpointFromNotifyUrl("")).toBe("/api/paylabs/webhook");
   });
 });

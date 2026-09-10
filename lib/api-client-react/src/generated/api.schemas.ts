@@ -178,6 +178,23 @@ export const BookingVerificationStatus = {
   rejected: 'rejected',
 } as const;
 
+export interface AdditionalCharge {
+  name: string;
+  amount: number;
+}
+
+/**
+ * @nullable
+ */
+export type PaymentPaymentProvider = typeof PaymentPaymentProvider[keyof typeof PaymentPaymentProvider] | null;
+
+
+export const PaymentPaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+  paylabs: 'paylabs',
+  unknown: 'unknown',
+} as const;
+
 export type PaymentPaymentType = typeof PaymentPaymentType[keyof typeof PaymentPaymentType];
 
 
@@ -204,10 +221,24 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  /** @nullable */
+  paymentProvider?: PaymentPaymentProvider;
+  providerName: string;
+  providerId: string;
+  providerOrderId: string;
+  bankAccountId: string;
+  /** @nullable */
+  providerReference?: string | null;
+  /** @nullable */
+  merchantTradeNo?: string | null;
+  /** @nullable */
+  providerTradeNo?: string | null;
   paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;
+  /** @nullable */
+  paidAt?: string | null;
   /** @nullable */
   notes?: string | null;
   createdAt?: string;
@@ -260,6 +291,7 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  additionalCharges: AdditionalCharge[];
   downPayment?: number;
   isDpPaid?: boolean;
   payment?: Payment | null;
@@ -292,6 +324,7 @@ export interface RecurringBookingCheckInput {
      * @maximum 52
      */
   repeatCount: number;
+  additionalCharges?: AdditionalCharge[];
 }
 
 export interface RecurringDateStatus {
@@ -335,6 +368,9 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  additionalCharges?: AdditionalCharge[];
+  /** Total down payment for the recurring payment group. Must be less than the group grand total. */
+  downPaymentAmount?: number;
   customerType?: RecurringBookingInputCustomerType;
   idCardNumber?: string;
 }
@@ -391,6 +427,7 @@ export interface BookingInput {
   idCardNumber?: string;
   notes?: string;
   vendorId?: number | null;
+  additionalCharges?: AdditionalCharge[];
 }
 
 export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof BookingUpdateStatus];
@@ -411,6 +448,7 @@ export const BookingUpdateStatus = {
 export interface BookingUpdate {
   status?: BookingUpdateStatus;
   adminNotes?: string;
+  additionalCharges?: AdditionalCharge[];
 }
 
 export type PaymentInputPaymentMethod = typeof PaymentInputPaymentMethod[keyof typeof PaymentInputPaymentMethod];
@@ -419,6 +457,15 @@ export type PaymentInputPaymentMethod = typeof PaymentInputPaymentMethod[keyof t
 export const PaymentInputPaymentMethod = {
   Transfer_Bank: 'Transfer Bank',
   QRIS: 'QRIS',
+} as const;
+
+export type PaymentInputPaymentProvider = typeof PaymentInputPaymentProvider[keyof typeof PaymentInputPaymentProvider];
+
+
+export const PaymentInputPaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+  paylabs: 'paylabs',
+  unknown: 'unknown',
 } as const;
 
 export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
@@ -430,13 +477,19 @@ export const PaymentInputPaymentType = {
   full_payment: 'full_payment',
 } as const;
 
+export type PaymentInputOcrScan = { [key: string]: unknown };
+
 export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
   paymentMethod?: PaymentInputPaymentMethod;
+  paymentProvider?: PaymentInputPaymentProvider;
+  providerOrderId?: string;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
+  ocrScanToken?: string;
+  ocrScan?: PaymentInputOcrScan;
 }
 
 export type PaymentUpdateStatus = typeof PaymentUpdateStatus[keyof typeof PaymentUpdateStatus];
@@ -448,10 +501,32 @@ export const PaymentUpdateStatus = {
   rejected: 'rejected',
 } as const;
 
+export type PaymentUpdatePaymentProvider = typeof PaymentUpdatePaymentProvider[keyof typeof PaymentUpdatePaymentProvider];
+
+
+export const PaymentUpdatePaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+  paylabs: 'paylabs',
+  unknown: 'unknown',
+} as const;
+
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
   paymentMethod?: string;
+  paymentProvider?: PaymentUpdatePaymentProvider;
   notes?: string;
+}
+
+export type PaymentMetadataUpdatePaymentProvider = typeof PaymentMetadataUpdatePaymentProvider[keyof typeof PaymentMetadataUpdatePaymentProvider];
+
+
+export const PaymentMetadataUpdatePaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+} as const;
+
+export interface PaymentMetadataUpdate {
+  paymentMethod?: string;
+  paymentProvider?: PaymentMetadataUpdatePaymentProvider;
 }
 
 export type PromoType = typeof PromoType[keyof typeof PromoType];
@@ -769,6 +844,8 @@ export interface DiscountSetting {
   customerType: string;
   discountPercentage: number;
   /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
   description?: string | null;
   isActive: boolean;
 }
@@ -778,7 +855,12 @@ export interface DiscountSettingUpdate {
      * @minimum 0
      * @maximum 100
      */
-  discountPercentage: number;
+  discountPercentage?: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  discountAmount?: number | null;
   description?: string;
   isActive?: boolean;
 }
@@ -977,6 +1059,8 @@ export const GymMembershipUpdateStatus = {
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface MembershipLookupInput {
@@ -1017,6 +1101,40 @@ export const MembershipPaymentProofInputPaymentMethod = {
 export interface MembershipPaymentProofInput {
   paymentMethod: MembershipPaymentProofInputPaymentMethod;
   paymentProofUrl: string;
+}
+
+export type MembershipPaymentStatus = typeof MembershipPaymentStatus[keyof typeof MembershipPaymentStatus];
+
+
+export const MembershipPaymentStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
+  confirmed: 'confirmed',
+  cancelled: 'cancelled',
+} as const;
+
+export interface MembershipPayment {
+  id: number;
+  membershipId: number;
+  periodStart: string;
+  periodEnd: string;
+  months: number;
+  amount: number;
+  status: MembershipPaymentStatus;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentProofUrl?: string | null;
+  /** @nullable */
+  submittedAt?: string | null;
+  /** @nullable */
+  confirmedAt?: string | null;
+  /** @nullable */
+  mutationKey?: string | null;
+  /** @nullable */
+  accountingRef?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type TenantStatus = typeof TenantStatus[keyof typeof TenantStatus];
@@ -1721,6 +1839,26 @@ export interface WaNotifLog {
   errorMessage?: string | null;
   sentAt: string;
 }
+
+export type ListFacilityCompanyMappingsParams = {
+facilityId?: number;
+};
+
+export type CreateFacilityCompanyMappingBody = {
+  facilityId: number;
+  companyId: number;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+  isActive?: boolean;
+  source?: string;
+  notes?: string | null;
+};
+
+export type UpdateFacilityCompanyMappingBody = {
+  isActive?: boolean;
+  effectiveUntil?: string | null;
+  notes?: string | null;
+};
 
 export type SendOtp200 = {
   success?: boolean;

@@ -1,0 +1,965 @@
+PHASE — IMPLEMENT CORPORATE SUBSCRIPTION + EVENT + RESCHEDULE SAFETY
+END-TO-END IMPLEMENTATION
+AUDIT → CLASSIFY → DESIGN → IMPLEMENT → TEST → VERIFY
+
+Gunakan hasil audit yang sudah dibuat:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md
+
+Jangan mengulang audit dari nol.
+
+Temuan audit yang harus ditutup:
+
+1. Corporate booking = PARTIALLY IMPLEMENTED
+2. Corporate subscription = MISSING
+3. Weekly schedule = PARTIALLY IMPLEMENTED
+4. Stop subscription = MISSING
+5. Corporate billing = PARTIALLY IMPLEMENTED
+6. Event schedule = PARTIALLY IMPLEMENTED
+7. Check-in = PARTIALLY IMPLEMENTED
+8. Mandatory photo proof = MISSING
+9. Corporate/Event reschedule = PARTIALLY IMPLEMENTED
+10. Reschedule approval conflict checking = HIGH-RISK GAP
+11. Invoice after reschedule = REVIEW REQUIRED
+12. Accounting = PARTIALLY IMPLEMENTED
+13. Central Finance = SAFE / NO MUTATION
+
+OBJECTIVE
+=========
+
+Implement seluruh gap tersebut secara aman dalam SATU EKSEKUSI.
+
+Target:
+
+Corporate Subscription
++
+Weekly Occurrence
++
+Stop Subscription
++
+Event Fixed Schedule
++
+Mandatory Check-in
++
+Mandatory Usage Photo
++
+Corporate/Event Reschedule
++
+Concurrency-safe Conflict Checking
++
+Correct Monthly Invoice
++
+Accounting Safety
++
+Regression Tests
+
+Jangan berhenti pada laporan.
+
+Jika ditemukan defect yang deterministik dan aman:
+FIX → TEST → VERIFY.
+
+Jika ada keputusan owner yang benar-benar diperlukan:
+STOP hanya pada bagian tersebut dan dokumentasikan blocker.
+
+============================================================
+1. PRESERVE EXISTING ARCHITECTURE
+============================================================
+
+WAJIB membaca:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md
+
+dan seluruh implementation yang sudah ada.
+
+Jangan membuat ulang functionality yang sudah tersedia.
+
+Gunakan:
+
+- existing booking model
+- existing booking history
+- existing reschedule_requests
+- existing corporate invoice
+- existing invoice items
+- existing check-in implementation
+- existing storage/media mechanism
+- existing authorization
+- existing facility availability
+- existing accounting mechanism
+
+Minimal diff.
+
+Jangan membuat duplicate subsystem.
+
+============================================================
+2. DATABASE DESIGN — CORPORATE SUBSCRIPTION
+============================================================
+
+Tambahkan subscription master hanya jika memang belum tersedia.
+
+Gunakan naming convention existing project.
+
+Concept:
+
+corporate_subscription
+
+Minimal information:
+
+- id
+- company_id
+- customer/payer reference jika diperlukan
+- facility_id
+- day_of_week
+- start_time
+- end_time
+- effective_start_date
+- billing_period / current_period
+- status
+- created_by
+- created_at
+- updated_at
+- stopped_at
+- stopped_by
+- stop_reason
+
+Status:
+
+ACTIVE
+PAUSED
+STOP_REQUESTED
+STOPPED
+
+Jangan hardcode business rules yang sudah memiliki configuration source.
+
+Jika existing schema sudah memiliki equivalent:
+REUSE.
+
+Jangan membuat duplicate table.
+
+============================================================
+3. CORPORATE OCCURRENCE
+============================================================
+
+Subscription adalah MASTER.
+
+Setiap pemakaian adalah OCCURRENCE/BOOKING.
+
+Architecture:
+
+SUBSCRIPTION
+    ↓
+OCCURRENCE
+    ↓
+BOOKING
+
+Contoh:
+
+Corporate ABC
+Setiap Senin
+19:00–21:00
+
+September:
+
+07 Sep
+14 Sep
+21 Sep
+28 Sep
+
+Masing-masing merupakan occurrence/booking yang dapat:
+
+- check-in
+- reschedule
+- usage proof
+- invoice
+
+Jangan menyimpan seluruh bulan hanya sebagai satu booking.
+
+============================================================
+4. GENERATION SAFETY
+============================================================
+
+Generate occurrences secara:
+
+- deterministic
+- idempotent
+- concurrency-safe
+
+Jangan membuat duplicate occurrence jika generation dijalankan dua kali.
+
+Gunakan unique identity yang tepat berdasarkan subscription + scheduled
+occurrence.
+
+Jangan generate occurrence melewati subscription yang sudah STOPPED.
+
+============================================================
+5. STOP SUBSCRIPTION
+============================================================
+
+Admin harus dapat:
+
+STOP SUBSCRIPTION
+
+Behavior:
+
+ACTIVE
+→ STOP_REQUESTED jika approval diperlukan
+→ STOPPED
+
+Setelah STOPPED:
+
+NO NEW OCCURRENCE
+
+Tetapi:
+
+EXISTING FUTURE BOOKINGS
+TIDAK BOLEH DIHAPUS OTOMATIS.
+
+Booking yang sudah dibuat tetap mempunyai histori dan dapat diproses sesuai
+statusnya.
+
+Jangan menghapus invoice atau payment historis.
+
+Simpan:
+
+- stopped_at
+- stopped_by
+- stop_reason
+
+============================================================
+6. CORPORATE BILLING
+============================================================
+
+Corporate booking menggunakan:
+
+payerType = company
+
+Corporate booking TIDAK membutuhkan direct payment pada
+sport_center.sport_payments.
+
+Canonical flow:
+
+BOOKING
+→ INVOICE ITEM
+→ COMPANY INVOICE
+→ INVOICE PAYMENT
+
+Billing status:
+
+UNBILLED
+→ BILLED
+→ PAID
+
+Jika sistem memang mendukung partial payment:
+
+PARTIALLY_PAID
+→ PAID
+
+Jangan membuat fake payment pada booking hanya agar payment audit PASS.
+
+============================================================
+7. MONTHLY INVOICE
+============================================================
+
+Invoice corporate harus berasal dari actual occurrences/usage yang memang
+invoiceable.
+
+Invoice detail minimal:
+
+- date
+- company
+- customer/participant
+- facility
+- start time
+- end time
+- duration
+- amount
+- discount jika applicable
+- DPP
+- PPN
+- total
+
+Jangan membuat duplicate invoice item.
+
+Gunakan existing invoice architecture.
+
+============================================================
+8. EVENT FIXED SCHEDULE
+============================================================
+
+Event berbeda dari Corporate Subscription.
+
+Event adalah fixed schedule.
+
+Concept:
+
+EVENT
+→ FIXED DATE
+→ FIXED TIME
+→ FACILITY
+→ BOOKING
+
+Jangan menggunakan subscription untuk Event.
+
+Jika existing event model belum ada:
+buat model minimal yang mengikuti architecture existing.
+
+Event tidak boleh otomatis recurring.
+
+============================================================
+9. EVENT CHECK-IN
+============================================================
+
+Pada tanggal event:
+
+Admin wajib melakukan CHECK-IN.
+
+Flow:
+
+EVENT DATE
+→ ADMIN CHECK-IN
+→ PHOTO PROOF
+→ USAGE VERIFIED
+→ COMPLETED
+
+Jangan mengizinkan Event menjadi completed tanpa check-in.
+
+Jika ada emergency/admin override:
+
+harus menggunakan explicit override:
+
+- approved_by
+- approved_at
+- reason
+
+Jangan membuat bypass tersembunyi.
+
+============================================================
+10. PHOTO PROOF
+============================================================
+
+Mandatory photo proof untuk Event.
+
+Untuk Corporate occurrence juga gunakan usage proof jika business rule
+existing mendukungnya.
+
+Photo harus mempunyai hubungan langsung dengan occurrence/booking.
+
+Gunakan existing Supabase Storage mechanism.
+
+Production tetap:
+
+Supabase Storage
+
+Jangan menggunakan Replit Object Storage sebagai production fallback.
+
+Minimal metadata:
+
+- booking_id
+- storage_path
+- photo_url/reference
+- uploaded_by
+- uploaded_at
+- captured_at jika tersedia
+
+Jangan menyimpan credential/token dalam metadata.
+
+============================================================
+11. CHECK-IN RULE
+============================================================
+
+Check-in hanya boleh dilakukan:
+
+- oleh admin/role yang berwenang
+- untuk booking yang valid
+- pada occurrence yang valid
+- sesuai jadwal
+- tidak duplicate
+
+Check-in harus atomic.
+
+Setelah check-in:
+
+checkInStatus = VERIFIED
+
+atau gunakan existing status naming.
+
+Jangan mengubah existing lifecycle contract tanpa alasan.
+
+============================================================
+12. RESCHEDULE — HIGH PRIORITY
+============================================================
+
+Tutup HIGH-RISK GAP yang ditemukan audit.
+
+Current problem:
+
+REQUEST RESCHEDULE memeriksa blocked schedule,
+
+tetapi APPROVAL TRANSACTION hanya memeriksa booking aktif.
+
+Ini harus diperbaiki.
+
+Approval wajib melakukan conflict validation
+DI DALAM TRANSACTION yang sama dengan mutation.
+
+Pattern:
+
+BEGIN
+→ lock/check target facility/time
+→ check all conflicting bookings
+→ check event
+→ check recurring occurrence
+→ check replacement occurrence
+→ validate request
+→ update booking/reschedule
+→ write history
+COMMIT
+
+Jika conflict ditemukan:
+
+ROLLBACK
+
+Tidak boleh:
+
+check availability
+→ beberapa saat kemudian update
+
+karena itu race condition.
+
+============================================================
+13. RESCHEDULE LOCKING
+============================================================
+
+Gunakan mekanisme PostgreSQL yang sesuai dengan existing architecture:
+
+- row locking
+- advisory lock
+- exclusion constraint
+- serializable transaction
+- atau kombinasi yang aman
+
+Pilih mekanisme yang paling sesuai dengan schema existing.
+
+Target:
+
+dua admin tidak boleh berhasil memasukkan dua booking pada slot yang sama.
+
+============================================================
+14. CORPORATE RESCHEDULE
+============================================================
+
+Reschedule Corporate hanya berlaku untuk ONE OCCURRENCE.
+
+Jangan mengubah master subscription.
+
+Example:
+
+Subscription:
+
+Every Monday
+
+Occurrence:
+
+14 Sep
+
+Reschedule:
+
+14 Sep
+→ 18 Sep
+
+Master tetap:
+
+Every Monday
+
+Occurrence 14 Sep:
+
+RESCHEDULED
+
+Replacement occurrence:
+
+18 Sep
+
+Jangan membuat duplicate booking.
+
+============================================================
+15. EVENT RESCHEDULE
+============================================================
+
+Event:
+
+15 Sep 09:00–17:00
+
+Reschedule:
+
+22 Sep 09:00–17:00
+
+Simpan:
+
+original date/time
+new date/time
+reason
+requested_by
+requested_at
+approved_by
+approved_at
+
+Original schedule harus tetap tersedia dalam history.
+
+Jangan DELETE histori.
+
+============================================================
+16. RESCHEDULE + CHECK-IN
+============================================================
+
+Jika occurrence:
+
+14 Sep
+→ rescheduled
+→ 18 Sep
+
+Tanggal check-in yang valid:
+
+18 Sep
+
+Bukan 14 Sep.
+
+Original occurrence:
+
+RESCHEDULED
+
+Replacement:
+
+ACTIVE
+
+Setelah digunakan:
+
+CHECKED_IN
+→ COMPLETED
+
+============================================================
+17. RESCHEDULE + BILLING
+============================================================
+
+Invoice harus mengikuti actual occurrence.
+
+Jika:
+
+14 Sep → 18 Sep
+
+Invoice item harus menunjuk occurrence tanggal:
+
+18 Sep
+
+Bukan:
+
+14 Sep
+
+Jangan membuat duplicate invoice item.
+
+Jika invoice sudah finalized/paid dan occurrence perlu reschedule:
+
+JANGAN blind update invoice.
+
+Gunakan existing correction mechanism.
+
+Jika tidak tersedia:
+fail-closed dan dokumentasikan blocker.
+
+============================================================
+18. AVAILABILITY
+============================================================
+
+Conflict checker harus mempertimbangkan:
+
+- normal booking
+- corporate occurrence
+- event
+- recurring occurrence
+- replacement occurrence
+- approved reschedule
+- pending reschedule jika business rule mengharuskannya
+
+Boundary:
+
+[startA, endA)
+vs
+[startB, endB)
+
+Pastikan midnight closing behavior tetap benar.
+
+============================================================
+19. PAYMENT SAFETY
+============================================================
+
+Personal:
+
+booking
+→ direct payment
+
+Corporate:
+
+booking
+→ invoice
+→ company payment
+
+Event:
+
+ikuti payerType.
+
+Jangan membuat payment baru karena reschedule.
+
+Jangan mengubah:
+
+- amount
+- provider reference
+- payment identity
+
+hanya karena tanggal berubah.
+
+============================================================
+20. ACCOUNTING SAFETY
+============================================================
+
+Reschedule tidak boleh membuat:
+
+- duplicate journal
+- duplicate journal lines
+- duplicate payment
+- duplicate invoice
+- duplicate tax
+
+Corporate invoice payment tetap menggunakan existing accounting path.
+
+Event payment tetap menggunakan existing accounting path.
+
+Jangan membuat direct SQL journal.
+
+============================================================
+21. CENTRAL FINANCE
+============================================================
+
+Central Finance harus tetap:
+
+UNCHANGED / SAFE.
+
+Jangan:
+
+- mengaktifkan worker lama
+- membuat posting baru
+- membuat journal Central Finance
+- melakukan backfill
+- mengubah finance mode
+
+Verify bahwa perubahan ini tidak menghasilkan unauthorized Central Finance
+posting.
+
+============================================================
+22. AUTHORIZATION
+============================================================
+
+Hanya role yang sesuai yang dapat:
+
+- create corporate subscription
+- stop subscription
+- create event
+- approve reschedule
+- check-in
+- upload usage proof
+
+Customer tidak boleh melakukan admin-only actions.
+
+Gunakan existing RBAC.
+
+============================================================
+23. API
+============================================================
+
+Buat/update API sesuai existing route convention.
+
+Minimal capabilities:
+
+Corporate:
+
+POST subscription
+GET subscription
+PATCH subscription
+POST stop
+GET occurrences
+
+Reschedule:
+
+POST request
+POST approve
+POST reject
+
+Event:
+
+POST event
+GET event
+PATCH event
+
+Check-in:
+
+POST check-in
+
+Proof:
+
+POST/upload proof
+
+Jangan membuat endpoint duplicate jika equivalent existing endpoint sudah
+ada.
+
+============================================================
+24. FRONTEND
+============================================================
+
+Admin UI harus menyediakan:
+
+Corporate:
+
+- Create Subscription
+- Weekly day
+- Time
+- Start date
+- Billing period
+- Status
+- Stop subscription
+- Occurrence list
+
+Event:
+
+- Create Event
+- Fixed date
+- Start/end
+- Facility
+- Participants
+- Event details
+
+Occurrence:
+
+- Check-in
+- Upload photo
+- Reschedule
+- History
+
+Reschedule:
+
+- Original date
+- New date
+- Reason
+- Availability
+- Approval status
+
+Jangan menyembunyikan API error.
+
+============================================================
+25. TESTS
+============================================================
+
+Tambahkan regression tests.
+
+Corporate:
+
+1. create subscription
+2. generate weekly occurrence
+3. idempotent generation
+4. stop subscription
+5. no occurrence after stop
+6. existing bookings preserved
+
+Event:
+
+7. create fixed event
+8. event does not recur
+9. check-in required
+10. photo proof required
+11. completed without proof rejected
+
+Reschedule:
+
+12. request reschedule
+13. approve reschedule
+14. reject reschedule
+15. conflict detected
+16. approval conflict checked transactionally
+17. concurrent approval cannot double-book
+18. corporate reschedule does not modify master subscription
+19. event reschedule preserves history
+20. check-in uses replacement date
+21. invoice uses replacement date
+22. no duplicate invoice item
+
+Payment/accounting:
+
+23. corporate booking does not require direct payment
+24. personal booking still requires direct payment
+25. reschedule does not duplicate payment
+26. reschedule does not duplicate journal
+27. reschedule does not alter payment amount
+
+============================================================
+26. TEST / TYPECHECK / BUILD
+============================================================
+
+Run:
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run build
+
+pnpm --filter @workspace/scripts run typecheck
+
+git diff --check
+
+Existing tests must continue to pass.
+
+============================================================
+27. DATABASE MIGRATION SAFETY
+============================================================
+
+If migration is required:
+
+- create minimal migration
+- no destructive migration
+- no dropping existing data
+- no rewriting historical financial data
+- backward compatible where possible
+
+Do not run destructive migration against Production.
+
+Validate migration in DEV first.
+
+============================================================
+28. PRODUCTION SAFETY
+============================================================
+
+Production data must NOT be modified during implementation/testing.
+
+Use DEV/test database for:
+
+- subscription tests
+- occurrence generation
+- reschedule
+- event
+- check-in
+- proof
+- invoice
+
+Production read-only audit may be used only for verification.
+
+Production write path must not be used for test data.
+
+============================================================
+29. FINAL VERIFICATION
+============================================================
+
+After implementation:
+
+verify:
+
+Corporate Subscription = PASS
+
+Weekly Occurrence = PASS
+
+Stop Subscription = PASS
+
+Corporate Billing = PASS
+
+Event Fixed Schedule = PASS
+
+Mandatory Check-in = PASS
+
+Mandatory Photo Proof = PASS
+
+Corporate Reschedule = PASS
+
+Event Reschedule = PASS
+
+Conflict-safe Approval = PASS
+
+Invoice after Reschedule = PASS
+
+Payment Integrity = PASS
+
+Accounting Integrity = PASS
+
+Central Finance = UNCHANGED
+
+Tests = PASS
+
+Typecheck = PASS
+
+Build = PASS
+
+git diff --check = PASS
+
+============================================================
+30. FINAL REPORT
+============================================================
+
+Update:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md
+
+and create:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_IMPLEMENTATION_REPORT.md
+
+Report:
+
+ROOT CAUSE / GAP
+IMPLEMENTATION
+FILES CHANGED
+MIGRATIONS
+API
+UI
+BUSINESS RULES
+TESTS
+TYPECHECK
+BUILD
+ACCOUNTING SAFETY
+CENTRAL FINANCE SAFETY
+PRODUCTION MUTATION
+
+Final status:
+
+CORPORATE SUBSCRIPTION = PASS
+EVENT = PASS
+CHECK-IN = PASS
+PHOTO PROOF = PASS
+RESCHEDULE = PASS
+CONFLICT SAFETY = PASS
+BILLING = PASS
+
+If any item cannot safely be implemented:
+
+mark:
+
+BLOCKED
+
+and explain exact reason.
+
+Do NOT fake PASS.
+
+============================================================
+FINAL REQUIREMENT
+============================================================
+
+Do not stop at audit.
+
+Implement → Test → Verify.
+
+Use minimal diff.
+
+Preserve existing Sport Center architecture.
+
+Preserve Accounting.
+
+Preserve Central Finance isolation.
+
+Do not mutate Production financial data.
+
+Do not create duplicate payment/invoice/journal.
+
+Do not create another unrelated phase.

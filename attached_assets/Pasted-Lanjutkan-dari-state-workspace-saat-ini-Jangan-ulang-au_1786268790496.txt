@@ -1,0 +1,296 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang audit, schema patch, mirror patch, importer patch, atau UAT.
+
+Status terakhir yang sudah VALID:
+
+* dependency install berhasil;
+* `typecheck:libs` PASS;
+* scripts typecheck PASS;
+* API typecheck PASS;
+* API build PASS;
+* focused regression tests 9/9 PASS;
+* strict QRIS UAT PASS:
+
+  * 22 payments
+  * 14 mutations
+  * seluruh scenario benar
+  * matcher parity intact
+  * no persistence
+  * no reconciliation/accounting writes
+* application runtime healthy;
+* strict matcher dan fixture `UAT_QRIS_202608` tidak berubah.
+
+Sisa task hanya:
+
+1. propagate resolver options secara lengkap melalui `enrichPayment` dan seluruh caller;
+2. tambahkan focused tests untuk dry-run historical classifier;
+3. final validation + final report.
+
+# 1. REVIEW RESOLVER PROPAGATION
+
+Audit helper enrichment yang baru.
+
+Pastikan parameter/options seperti:
+
+* company context;
+* provider;
+* paidAt;
+* settlement account resolution;
+* expected settlement resolution;
+* configuration/effective date context;
+
+benar-benar diteruskan dari:
+
+manual QRIS creation
+→ confirmation
+→ `enrichPayment`
+
+dan:
+
+Paylabs finalization
+→ `enrichPayment`.
+
+Jangan hanya memperbaiki type signature; pastikan runtime value benar-benar sampai ke resolver.
+
+# 2. MANUAL QRIS CALLERS
+
+Verifikasi seluruh caller manual QRIS:
+
+* initial payment creation jika applicable;
+* admin confirmation;
+* pending → confirmed transition.
+
+Saat confirmed, enrichment harus dapat menghasilkan:
+
+`company_id`
+`bank_account_id`
+`payment_provider`
+`paid_at`
+`expected_settlement_date`
+
+jika evidence/config tersedia.
+
+Replay/confirmation ulang tidak boleh mengganti non-null snapshot dengan NULL.
+
+# 3. PAYLABS CALLERS
+
+Verifikasi Paylabs success/finalization benar-benar meneruskan:
+
+* booking/facility/company context;
+* provider = paylabs;
+* provider references;
+* canonical paidAt;
+* settlement configuration context.
+
+Duplicate webhook harus tetap idempotent.
+
+# 4. DRY-RUN CLASSIFIER TESTS
+
+Tambahkan focused pure/unit tests untuk classifier historical.
+
+Minimal:
+
+### SAFE_COMPANY_BACKFILL
+
+Company deterministic dari booking/facility.
+
+### SAFE_BANK_ACCOUNT_BACKFILL
+
+Company + provider + effective settlement config deterministic.
+
+### SAFE_PROVIDER_BACKFILL
+
+Provider mempunyai strong evidence.
+
+### SAFE_EXPECTED_DATE_BACKFILL
+
+paid_at + provider + valid rule/calendar tersedia.
+
+### AMBIGUOUS
+
+Lebih dari satu possible company/account/provider.
+
+### NO_EVIDENCE
+
+Tidak ada deterministic evidence.
+
+Pastikan test membuktikan classifier:
+
+* hanya menghasilkan recommendation;
+* tidak melakukan UPDATE;
+* tidak apply backfill;
+* tidak mengubah historical row.
+
+# 5. ENVIRONMENT COLLISION TEST
+
+Tambahkan/pertahankan focused test bahwa requested payment/mutation ID yang tidak ada di active environment menghasilkan:
+
+`RECORD_NOT_FOUND_IN_ACTIVE_ENVIRONMENT`
+
+dan tidak mencari/fallback ke environment lain.
+
+# 6. MIRROR REGRESSION
+
+Verifikasi kembali SQL parameter alignment yang sebelumnya ditemukan salah.
+
+Tambahkan test/assertion jika belum ada untuk memastikan insert/update order cocok dengan column order.
+
+Pastikan replay:
+
+`NULL source`
+
+tidak menghapus:
+
+* company_id
+* bank_account_id
+* provider
+* expected_settlement_date
+* provider references
+* paid_at.
+
+# 7. GOOGLE SHEET REGRESSION
+
+Pastikan configured source mapping:
+
+source
+→ company
+→ bank_account
+
+tetap deterministic.
+
+Provider tetap terpisah dan fail-safe.
+
+Missing mapping tidak menyebabkan crash dan tidak menghasilkan auto-match QRIS.
+
+# 8. FINAL VALIDATION ORDER
+
+Jalankan:
+
+1. `pnpm run typecheck:libs`
+2. scripts typecheck
+3. API typecheck
+4. API build
+5. focused enrichment tests
+6. classifier tests
+7. payment/Paylabs tests
+8. strict `UAT_QRIS_202608` harness
+9. `git diff --check`
+10. restart combined workflow
+11. API health check
+
+Tidak perlu mengulang install jika dependency masih tersedia.
+
+# 9. STRICT UAT REGRESSION MUST REMAIN
+
+Expected:
+
+* 22 payments
+* 14 mutations
+* 14/14 scenarios PASS
+* 14/14 matcher parity
+* no persistence
+* no settlement creation
+* no accounting entry changes.
+
+Jika UAT berubah setelah resolver propagation:
+STOP dan laporkan regression.
+
+Jangan menyesuaikan fixture agar test pass.
+
+# 10. FINAL SOURCE DIFF REVIEW
+
+Pastikan perubahan hanya scope enrichment:
+
+* payment canonical dimensions;
+* resolver;
+* manual QRIS;
+* Paylabs;
+* CST mirror;
+* source mapping;
+* diagnostics;
+* classifier;
+* tests;
+* additive migration.
+
+Tidak boleh ada perubahan unrelated ke:
+
+* accounting;
+* strict matcher semantics;
+* UAT fixture;
+* production configuration.
+
+# 11. FINAL REPORT
+
+Berikan:
+
+## A. STATUS
+
+`READY`
+atau
+`NOT_READY`
+
+## B. Resolver propagation
+
+Jelaskan exact caller → helper → resolved fields.
+
+## C. Schema/migration
+
+## D. Manual QRIS final behavior
+
+## E. Paylabs final behavior
+
+## F. CST mirror final behavior
+
+## G. Google Sheet mapping final behavior
+
+## H. Diagnostics
+
+* environment identity;
+* mirror completeness.
+
+## I. Historical classifier
+
+Tampilkan classifications dan test results.
+
+## J. Tests/typecheck/build
+
+Tampilkan command + PASS/FAIL.
+
+## K. Strict UAT regression
+
+Harus menyebut:
+
+* 22/22
+* 14/14
+* parity
+* no persistence.
+
+## L. Runtime health
+
+## M. Remaining risks
+
+## N. Readiness answers
+
+Jawab:
+
+1. Apakah resolver options sekarang benar-benar propagated runtime?
+2. Apakah manual QRIS baru enriched?
+3. Apakah Paylabs finalization enriched?
+4. Apakah CST mirror tidak kehilangan dimension?
+5. Apakah Google Sheet mutation mendapat company/account dari source mapping?
+6. Apakah provider masih fail-safe?
+7. Apakah historical classifier terbukti dry-run only?
+8. Apakah environment collision terdeteksi?
+9. Apakah strict UAT masih 14/14?
+10. Apakah ada blocker sebelum staging enrichment rollout?
+
+# SAFETY
+
+Jangan:
+
+* commit;
+* push;
+* deploy production;
+* apply historical backfill;
+* final reconcile;
+* accounting post;
+* modify `UAT_QRIS_202608`.

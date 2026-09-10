@@ -1,0 +1,389 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang audit dari awal.
+
+Temuan terakhir yang harus dipertahankan:
+
+1. Database development aktif saat ini berisi fixture:
+   `UAT_QRIS_202608`
+
+2. `payment ID 3` pada development sekarang adalah fixture UAT, BUKAN payment aktual yang sebelumnya didiagnosis.
+
+3. `mutation ID 96` tidak ada pada database development aktif.
+
+4. Karena itu:
+
+   * JANGAN mengubah row ID 3;
+   * JANGAN membuat/backfill mutation 96;
+   * JANGAN menyimpulkan data tersebut mewakili kasus aktual;
+   * JANGAN melakukan backfill berdasarkan ID lintas environment.
+
+5. Root cause code-level yang sudah ditemukan:
+
+   * canonical `sport_payments` belum mempunyai kontrak lengkap untuk `company_id`, `bank_account_id`, dan `expected_settlement_date`;
+   * Paylabs finalization membuat payment tanpa settlement dimensions;
+   * CST/BizPortal mirror belum membawa company/account secara lengkap;
+   * Google Sheet importer hanya menggunakan optional `row.bankAccountId` dan belum mempunyai deterministic source mapping + company/account validation;
+   * provider detection source pada mutation belum canonical.
+
+Task sekarang adalah menyelesaikan **pipeline enrichment backward-compatible**, bukan memperbaiki historical record tertentu.
+
+# 1. ENVIRONMENT IDENTITY GUARD
+
+Sebelum melakukan diagnostic atau enrichment terhadap historical ID, tambahkan mechanism/helper diagnostic yang selalu menampilkan:
+
+* APP_ENV;
+* Supabase project/database fingerprint yang disanitasi;
+* company ID;
+* database host/project reference yang disanitasi;
+* apakah marker UAT aktif;
+* source schema.
+
+Tujuannya mencegah ID yang sama dari environment berbeda dianggap sebagai record yang sama.
+
+Jangan tampilkan credential.
+
+Jika user memberikan payment/mutation ID yang tidak ada di environment aktif, hasil harus eksplisit:
+
+`RECORD_NOT_FOUND_IN_ACTIVE_ENVIRONMENT`
+
+bukan fallback ke row ID sama dari environment lain.
+
+# 2. PAYMENT CANONICAL DIMENSIONS
+
+Tambahkan secara additive/backward-compatible pada canonical Sport Center payment jika belum tersedia:
+
+`company_id`
+
+`bank_account_id`
+
+`expected_settlement_date`
+
+Pertahankan field existing:
+
+`payment_provider`
+
+`provider_reference`
+
+`merchant_trade_no`
+
+`provider_trade_no`
+
+`paid_at`
+
+Historical rows boleh NULL.
+
+Transaksi baru harus sebisa mungkin enriched secara deterministic.
+
+Jangan membuat destructive migration.
+
+# 3. COMPANY RESOLUTION
+
+Buat helper canonical untuk menentukan company payment.
+
+Prioritas evidence:
+
+1. booking/company relation;
+2. facility/venue ownership;
+3. merchant/store configuration;
+4. explicit validated company configuration.
+
+Jangan infer dari mutation.
+
+Contoh semantic:
+
+`resolvePaymentCompany(booking, facility, config)`
+
+Return harus menjelaskan source evidence bila memungkinkan.
+
+Jika tidak deterministik:
+`NULL`
+
+dan downstream tetap REVIEW.
+
+# 4. SETTLEMENT BANK ACCOUNT RESOLUTION
+
+Buat helper:
+
+`resolveSettlementBankAccount(companyId, provider, paidAt)`
+
+Gunakan:
+
+company
++
+provider
++
+effective-dated settlement rule/configuration.
+
+Jangan hardcode numeric DB ID.
+
+Provider `mandiri_direct` dan `paylabs` boleh resolve ke rekening sama atau berbeda berdasarkan config.
+
+Jika tidak ada mapping:
+`NULL`.
+
+Jangan membuat NULL wildcard.
+
+# 5. EXPECTED SETTLEMENT DATE
+
+Untuk payment baru setelah provider/account diketahui:
+
+`paid_at`
+→ Asia/Jakarta
+→ provider settlement rule
+→ business calendar
+→ `expected_settlement_date`
+
+Simpan snapshot bila model existing menghendaki.
+
+Jika rule belum ada:
+boleh NULL / pending enrichment.
+
+Jangan invent H+1 jika config tidak tersedia kecuali existing explicit default rule memang menjadi kontrak.
+
+# 6. MANUAL QRIS CREATION
+
+Untuk QRIS manual:
+
+* provider hanya `mandiri_direct | unknown`;
+* company di-resolve deterministic;
+* bank account di-resolve dari company+provider config;
+* paid_at canonical;
+* expected settlement date dihitung bila rule tersedia.
+
+Jangan mengizinkan Paylabs melalui manual QRIS route.
+
+Non-QRIS tetap backward-compatible.
+
+# 7. PAYLABS FINALIZATION
+
+Saat Paylabs sukses:
+
+`payment_provider = paylabs`
+
+Isi:
+
+* company_id;
+* bank_account_id;
+* paid_at;
+* expected_settlement_date;
+* provider_reference;
+* merchant_trade_no;
+* provider_trade_no.
+
+Company harus berasal dari booking/facility/config, bukan provider callback arbitrary.
+
+Bank account berasal dari settlement config.
+
+Duplicate callback tetap idempotent dan tidak mengubah snapshot valid yang sudah ada.
+
+# 8. CST MIRROR
+
+Pastikan:
+
+`sport_center.sport_payments`
+→ `public.sport_payments`
+
+membawa:
+
+* company_id
+* bank_account_id
+* payment_provider
+* provider_code normalized
+* paid_at
+* expected_settlement_date
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* amount
+
+Gunakan COALESCE/merge strategy agar NULL source tidak menghapus value existing yang valid.
+
+Pastikan `payment_provider` dan `provider_code` konsisten.
+
+# 9. GOOGLE SHEET SOURCE MAPPING
+
+Audit/configure Google Sheet source secara deterministic.
+
+Tambahkan source mapping equivalent:
+
+`sheet/source identifier`
+→ `company_id`
+→ `bank_account_id`
+
+Gunakan metadata stabil seperti:
+
+* spreadsheet ID;
+* worksheet/tab;
+* configured import source ID.
+
+Jangan infer account dari amount atau description.
+
+Jika source mapping tidak ada:
+mutation tetap importable hanya jika existing behavior perlu dipertahankan, tetapi:
+`bank_account_id = NULL`
+dan tidak auto-match QRIS.
+
+# 10. MUTATION VALIDATION
+
+Saat configured Google Sheet import menghasilkan mutation:
+
+validasi:
+
+* company_id tersedia;
+* bank_account_id milik company tersebut;
+* source provenance tersedia;
+* source classification sesuai.
+
+Provider detection terpisah dari bank account.
+
+Jangan:
+`Mandiri bank account → mandiri_direct`
+
+secara otomatis.
+
+# 11. PROVIDER DETECTION SOURCE
+
+Jika provider mutation dapat dideteksi, simpan:
+
+`provider_name`
+
+dan:
+
+`provider_detection_source`
+
+Allowed evidence semantic:
+
+* explicit provider reference;
+* settlement reference;
+* provider batch reference;
+* proven description pattern;
+* provider-specific import source;
+* manual reviewed classification.
+
+Jika tidak cukup:
+`unknown`.
+
+# 12. MIRROR COMPLETENESS DIAGNOSTIC
+
+Tambahkan diagnostic read-only yang membandingkan source vs mirror untuk date range/provider.
+
+Output:
+
+| Metric              | Sport Center | CST |
+| ------------------- | -----------: | --: |
+| payment count       |              |     |
+| gross               |              |     |
+| Mandiri count/gross |              |     |
+| Paylabs count/gross |              |     |
+| unknown count/gross |              |     |
+| missing mirror IDs  |              |     |
+
+Diagnostic harus environment-aware.
+
+Tidak boleh menulis data.
+
+# 13. HISTORICAL BACKFILL CLASSIFIER
+
+Buat DRY-RUN classifier untuk historical rows:
+
+* SAFE_COMPANY_BACKFILL
+* SAFE_BANK_ACCOUNT_BACKFILL
+* SAFE_PROVIDER_BACKFILL
+* SAFE_EXPECTED_DATE_BACKFILL
+* AMBIGUOUS
+* NO_EVIDENCE
+
+Jangan apply.
+
+Pastikan classifier menampilkan evidence source.
+
+# 14. DO NOT TOUCH UAT FIXTURE
+
+Jangan memodifikasi:
+
+`UAT_QRIS_202608`
+
+kecuali test pipeline baru memang menggunakan dedicated test fixture terpisah.
+
+Existing UAT reconciliation 14/14 parity harus tetap pass.
+
+# 15. TEST
+
+Tambahkan/pertahankan tests untuk:
+
+* manual QRIS company enrichment;
+* manual QRIS bank account enrichment;
+* Paylabs company enrichment;
+* Paylabs settlement account enrichment;
+* expected settlement snapshot;
+* CST mirror preservation;
+* provider/provider_code consistency;
+* Google Sheet source→company/account mapping;
+* invalid company/account configuration;
+* unknown provider fail-safe;
+* environment collision diagnostic;
+* historical ambiguous backfill remains untouched.
+
+Jalankan existing QRIS strict UAT tests juga untuk regression.
+
+# 16. VALIDATION
+
+Jalankan:
+
+* relevant unit tests;
+* API typecheck;
+* API build;
+* scripts typecheck;
+* existing strict QRIS UAT harness.
+
+Pastikan strict matcher tidak berubah menjadi longgar.
+
+# 17. OUTPUT
+
+Laporkan:
+
+## A. Root causes final
+
+## B. Environment collision finding
+
+Jelaskan bahwa previous ID 3/96 tidak dapat divalidasi di active development environment.
+
+## C. Schema changes
+
+## D. Company resolution
+
+## E. Settlement account resolution
+
+## F. Paylabs finalization enrichment
+
+## G. Manual QRIS enrichment
+
+## H. CST mirror
+
+## I. Google Sheet source mapping
+
+## J. Provider detection
+
+## K. Mirror completeness diagnostic
+
+## L. Historical dry-run classifier
+
+## M. Tests/typecheck/build/UAT regression
+
+## N. Remaining risks
+
+## O. Readiness
+
+Jawab:
+
+1. Apakah payment baru sekarang mempunyai company?
+2. Apakah payment baru mempunyai settlement bank account bila config tersedia?
+3. Apakah Paylabs dimirror lengkap?
+4. Apakah Google Sheet mutation mendapat company/account dari configured source?
+5. Apakah provider tetap fail-safe?
+6. Apakah strict matcher unchanged?
+7. Apakah historical backfill masih dry-run only?
+8. Apakah environment mismatch kini terdeteksi eksplisit?
+
+Jangan commit/push/deploy production.
+Jangan historical backfill apply.
+Jangan final reconcile/accounting post.

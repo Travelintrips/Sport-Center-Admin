@@ -16,13 +16,17 @@
 - [WA Admin Commands & BizPortal](wa-admin-commands.md) — Admin phone sourced from DB settings.adminWaPhones first (not env); commands: APPROVE/REJECT/PAID/CANCEL/RESEND; unauthorized_admin_command audit; bookings has approved_by_admin_phone/approved_at/rejected_reason/paid_at columns.
 - [Dev DB full migration recipe](dev-db-migration.md) — Base SQLs (0000/0001/0002) create core tables; all ALTER TABLE extras (account_type, booker_name, fonnte_token, payer_type, etc.) live in scripts/migrate.ts + scripts/fix_settings_cols.ts; must apply both after fresh dev DB setup.
 - [DP multi-payment flow](dp-multi-payment.md) — payments table has payment_type (dp/pelunasan/full_payment); no unique constraint on booking_id; confirm DP → booking stays pending_payment; confirm pelunasan → booking confirmed.
+- [Group payment confirmation UI](group-payment-confirmation-ui.md) — recurring sessions share one confirmation decision; dedupe only the admin confirmation queue by groupRef while preserving session history.
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 
 - [Supabase development provisioning](supabase-dev-provisioning.md) — development must use isolated Supabase DB, Storage, and Realtime credentials with no production fallback.
 
 
 - [Payment provider audit](payment-provider-audit.md) — Booking payment currently supports manual transfer/QRIS; Paylabs has no active source, route, config, or repository history.
+- [Payment provider audit](payment-provider-audit.md) — QRIS payments now carry canonical provider/reference/timestamp metadata; preserve safe Paylabs callback and terminal-booking guards.
+- [Required payment provider metadata](payment-provider-order-metadata.md) — booking payments require receiving account, provider name/id, and provider order id; manual flows use traceable internal identifiers.
 - [QRIS settlement account](qris-bank-mandiri-mapping.md) — QRIS Sport Center settles to Bank Mandiri CST; never map it to cash or a separate QRIS COA.
+- [QRIS settlement rule periods](qris-settlement-rule-periods.md) — Mandiri QRIS needs exactly one active rule per effective date; replace forward with atomic audit, never rewrite active history.
 - [Incremental payment accounting](incremental-payment-accounting.md) — Idempotency must be keyed by payment mirror, not booking, because DP and pelunasan are separate payments.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
@@ -33,18 +37,62 @@
 - [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
 - [WhatsApp daily usage list](wa-daily-usage-list.md) — operational list includes confirmed/completed bookings and only resends after its persisted fingerprint changes.
 - [Gym walk-in detection](gym-walk-in-detection.md) — legacy Gym rows with time_slot mode still use per-visit access based on name/category fallback.
+- [Gym membership usage bookings](gym-membership-usage-bookings.md) — member check-ins mirror into zero-value confirmed bookings; exclude mirrors from WhatsApp rekap to avoid double counting.
+- [Gym membership payment history](gym-membership-payment-reconciliation.md) — every registration/renewal is a distinct payment event; never key monthly finance records only by membership ID.
 - [Recurring booking WA notification](recurring-wa-notification.md) — recurring/group bookings need one admin WhatsApp summary after all sessions and groupRef are created; per-session booking notifications are not enough.
 - [Re-import recovery](reimport-recovery.md) — Sport Center is a mature project, not a fresh import; on re-import just pnpm install + restart workflows, secrets/replit.md already cover setup.
+- [Artifact workflow setup](artifact-workflow-setup.md) — managed artifact workflows need PORT=8080 configured; remove manual duplicates to avoid port conflict; post-merge timeout=120s; availability at /api/availability not /api/bookings/availability.
 - [GAE deploy TS fix](gae-deploy-ts-fix.md) — analyticsPublic.ts GA4 limit field must be string "5" not number 5; blocks Cloud Build typecheck without fix.
 - [GAE deploy bundle gaps](gae-deploy-bundle-gaps.md) — gae-deploy/package.json must include @google-cloud/storage; @replit/object-storage must NOT be in esbuild external (bundle inline); app.ts uses process.cwd() for frontend dist path; express.static needs redirect:false.
 - [GAE health endpoints](gae-health-endpoints.md) — health/healthz/readiness mounted at root via app.use(healthRouter) in app.ts (NOT only under /api); /readiness does SELECT 1 with DB pool; test in jest.config.mjs uses ts-jest ESM mode + supertest.
 - [Paylabs callback invariant](paylabs-callback-invariant.md) — persist merchantTradeNo→booking_id before provider calls; callback must use exact transaction lookup and raw-body signature verification.
+- [Paylabs commit status contract](paylabs-commit-status-contract.md) — customer success UI must require committed local transaction/reconciliation, not provider success alone.
 - [Paylabs public key verification](paylabs-pubkey-verification.md) — fail-closed webhook (no key = reject), admin UI redacts keys (configured bool only), normalizePaylabsPublicKey() for PEM normalization.
+- [Paylabs webhook acknowledgement](paylabs-webhook-ack.md) — valid callbacks require a signed HTTP 200 ACK with the exact Paylabs body and headers.
 - [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.
 - [Booking payment method options](booking-payment-method-options.md) — active admin methods drive labels; manual customer payments use canonical QRIS/Transfer Bank values.
+- [Recurring additional charges](recurring-additional-charges.md) — recurring fees are stored on one created session and counted once in the group total; group edits clear sibling fees.
 - [Merge recovery validation](merge-recovery.md) — after external merges, sync workspace dependencies and regenerate API clients before validating typecheck/build.
 - [Sport Center payment accounting audit](sport-center-payment-accounting-audit.md) — `posting_status=posted` is insufficient; verify linked public entry, GL lines, and both PPN ledgers by payment ID.
 - [Legacy payment reconciliation](legacy-payment-reconciliation.md) — legacy accounting payments may retain valid entries without sport mirrors; link only unique ref+amount pairs, never delete audit rows.
 - [Payment-accounting integration contract](payment-accounting-integration-contract.md) — cross-project financial events require explicit ownership, immutable IDs, and database-enforced idempotency.
+- [UAT QRIS fixture integrity](uat-qris-fixture-integrity.md) — marker columns and expected settlement dates must agree with staged import rows before running reconciliation UAT.
+- [Payment enrichment propagation](payment-enrichment-propagation.md) — all payment creation/finalization callers must pass canonical paidAt/effective-date context; replay enrichment must COALESCE snapshots.
+- [Payment proof OCR validation](payment-proof-ocr.md) — server-side signed OCR compares QRIS/transfer evidence and blocks contradictory submission or confirmation.
+- [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
+- [Payment accounting verification](payment-accounting-verification.md) — assess mirror completion from linkage, GL, tax, replay, and recovery evidence, not function presence or `posted` alone.
+- [Payment method OCR auto-detection](payment-method-ocr.md) — high-confidence OCR can update payment_method, but must persist detector evidence and audit the change.
+- [AP2 discount modes](ap2-discount-modes.md) — fixed nominal discount takes precedence over percentage; AP Multiguna keeps its special hourly-price rule.
+- [Company ownership evidence](company-ownership-evidence.md) — historical payment company resolution must use validated relations; missing or conflicting evidence stays NULL and blocks posting.
+- [Live accounting schema audit](live-accounting-schema-audit.md) — active Supabase public accounting columns may be legacy-shaped; inspect information_schema before diagnostic SQL.
+- [Confirmed payment reconciliation](confirmed-payment-reconciliation.md) — payment confirmation can precede booking confirmation; retries must repair only the narrow split state without reposting accounting.
+- [Production payment-confirm trigger](payment-confirm-trigger-prod.md) — verify both function and trigger; production may have tables but neither mirroring object.
+- [Production runtime identity](gae-production-access.md) — current custom domain is attached to Replit Autoscale; tracked GAE files are legacy unless new runtime evidence says otherwise.
+- [Payment metadata-only edits](payment-metadata-edit.md) — dedicated /metadata endpoint; provider NOT NULL uses 'unknown'; QRIS forces mandiri_direct; confirmed rows fail closed on missing settlement rule.
+- [Posted journal metadata correction](posted-journal-metadata-correction.md) — mass historical journal metadata changes require an explicit transaction-local correction gate; financial fields remain immutable.
+- [Posted journal metadata backfill](posted-journal-metadata-backfill.md) — install the expanded metadata-only guard before backfilling posted journals, then use SET LOCAL inside the transaction.
+- [Payment date corrections](payment-date-corrections.md) — date-only edits must not send booking dates; incomplete or locked accounting evidence must block safely with an actionable conflict.
+- [Tesseract worker bundling](tesseract-worker-bundling.md) — keep OCR external to API bundle, available in App Engine runtime, and cache language files under /tmp.
+- [Sport Center workflow recovery](sport-center-workflow-recovery.md) — missing artifact node_modules causes `vite: not found`; keep one managed web workflow and use its actual port.
+- [Vite optimizer cache after dependency reinstall](vite-optimizer-cache.md) — stale optimized dependency paths after pnpm reinstall require clearing the artifact's generated `.vite` cache before restart.
+- [Supabase pool startup options](supabase-pool-startup-options.md) — Supavisor rejects pg pool `options` containing `search_path`; qualify schemas in SQL instead.
+- [Central Finance runtime invariants](central-finance-runtime-invariants.md) — adoption paths must still create canonical public evidence; partial canonical indexes require matching ON CONFLICT predicates.
+- [PostgreSQL concurrency harnesses](postgres-concurrency-harnesses.md) — pg clients are single-flight; race independent clients and size pools for any retained audit connection.
+- [Read-only audit probes](readonly-audit-probes.md) — optional schema probes need savepoints and must be serialized on a single pg client to preserve the read-only transaction.
+- [Payment-level accounting references](payment-level-accounting-references.md) — DP and pelunasan entries must use payment identity in public accounting refs, not the shared booking order.
+- [Posted accounting hard delete](posted-accounting-hard-delete.md) — confirmed bookings with posted journals require cancellation/refund reversal; never bypass the database audit guard.
+- [Central settlement wiring](central-settlement-wiring.md) — central payments call the existing settlement owner with payment-scoped identity; preserve canonical mutation ownership and DEV-only gating.
+- [Paylabs settlement rule invariant](paylabs-settlement-rule-invariant.md) — confirmed Paylabs payments require exactly one active OWNER_APPROVED rule matching company, provider, bank, and rule version.
+- [Booking flow audit invariants](booking-flow-audit-invariants.md) — all booking creation paths must share time, conflict, payment, approval, and lifecycle rules.
+- [Public booking detail schema](public-booking-detail-schema.md) — grouped customer details require the production payment allocation table or upload proof is hidden behind a false 404.
+- [Production secret bootstrap](secret-bootstrap.md) — load Secret Manager before importing the app; production startup must fail closed without required secrets.
+- [Shared GCP secret payload](shared-secret-flat-payload.md) — normalize flat `_DEV` pairs into isolated DEV/PROD config without cross-environment fallback.
+- [GSM-loaded test environment](gsm-test-environment.md) — managed API workflows load dev secrets before startup; shell Jest does not inherit them unless explicitly bootstrapped.
+- [Production audit runner](production-audit-runner.md) — isolate optional-query failures with savepoints so final read-only fingerprints remain valid.
+- [Canonical settlement companies](canonical-company-settlement.md) — settlement company IDs come from active public Supabase companies, not Sport Center user identities.
+- [Development migration ordering](startup-migration-order.md) — start the development scheduler only after background schema migrations and seed complete.
+- [Production auditor schema visibility](production-auditor-schema-visibility.md) — primary and auditor connections can show different schema state; resolve target/replica visibility before declaring a migration verified.
+- [WhatsApp fail-closed policy](whatsapp-fail-closed.md) — non-production must never call the provider; absent or false WA_DRY_RUN is blocked, true is simulated, production remains unchanged.
+- [Secret bootstrap write boundary](secret-bootstrap-write-boundary.md) — runtime bootstrap can read GSM but must not be assumed able to add versions; repairs need explicit write authorization.
 
 

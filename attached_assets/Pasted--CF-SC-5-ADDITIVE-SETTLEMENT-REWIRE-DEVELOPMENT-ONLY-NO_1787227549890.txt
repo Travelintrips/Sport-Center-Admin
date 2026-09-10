@@ -1,0 +1,292 @@
+# CF-SC-5 — ADDITIVE SETTLEMENT REWIRE
+## DEVELOPMENT ONLY — NO PROD CUTOVER
+
+CURRENT VERIFIED STATE:
+
+Central Finance payment path:
+payment_confirmed
+→ public accounting
+→ public.bank_mutations
+
+Canonical owner:
+public.bank_mutations
+
+Verified:
+- central application calls projection = NO
+- central application writes sport_center.bank_mutations = NO
+- database trigger still projects public mutation → sport_center.bank_mutations
+- schema/FK rewire required
+- PROD unchanged
+
+OBJECTIVE:
+
+Add an additive compatibility bridge so CENTRAL mode settlement uses
+public.bank_mutations directly while legacy/shadow historical behavior remains intact.
+
+DO NOT:
+- drop legacy columns
+- drop functions
+- drop tables
+- backfill PROD
+- change PROD finance mode
+- mutate PROD
+- break legacy/shadow
+- remove historical support
+
+============================================================
+PHASE 1 — ADD CANONICAL MUTATION LINK
+============================================================
+
+In DEVELOPMENT only:
+
+Add nullable column to:
+
+sport_center.payment_settlement_batches
+
+canonical_bank_mutation_id
+
+Type must match:
+public.bank_mutations.id
+
+Add FK:
+
+canonical_bank_mutation_id
+→ public.bank_mutations(id)
+
+Requirements:
+- nullable
+- additive
+- idempotent migration
+- existing bank_mutation_id unchanged
+- no historical backfill yet
+
+Add useful index if justified.
+
+============================================================
+PHASE 2 — DUAL CONTRACT
+============================================================
+
+Define:
+
+LEGACY / SHADOW:
+
+payment_settlement_batches.bank_mutation_id
+→ sport_center.bank_mutations.id
+
+CENTRAL:
+
+payment_settlement_batches.canonical_bank_mutation_id
+→ public.bank_mutations.id
+
+New central flow must NOT require bank_mutation_id.
+
+Do not populate both unless explicit compatibility logic requires it.
+
+============================================================
+PHASE 3 — PROJECTION TRIGGER GUARD
+============================================================
+
+Locate exact trigger/function that projects:
+
+public.bank_mutations
+→ sport_center.bank_mutations
+
+Add narrow guard:
+
+when:
+source_app = 'sport_center'
+AND source_module = 'central_finance'
+
+then:
+DO NOT project into sport_center.bank_mutations.
+
+All other existing legacy behavior remains unchanged.
+
+Do not globally disable trigger.
+
+Do not change unrelated projects.
+
+============================================================
+PHASE 4 — CENTRAL SETTLEMENT RESOLVER
+============================================================
+
+Update central settlement path to resolve bank mutation from:
+
+payment_settlement_batches.canonical_bank_mutation_id
+
+or canonical public mutation identity:
+
+canonical_key = sport_center:payment:<paymentId>
+
+Do NOT fall back to sport_center.bank_mutations in central mode.
+
+Legacy/shadow may still use old FK.
+
+============================================================
+PHASE 5 — IDEMPOTENCY
+============================================================
+
+Required invariant:
+
+one source payment
+→ one public.bank_mutations row
+→ one canonical_bank_mutation_id
+→ one settlement batch
+
+Retry must not:
+- create second public mutation
+- create sport_center.bank_mutations projection
+- create second settlement batch
+
+============================================================
+PHASE 6 — DEV RUNTIME PROOF
+============================================================
+
+In DEVELOPMENT central mode:
+
+Create controlled confirmed payment.
+
+Expected:
+
+payment confirmed
+→ finance event
+→ public accounting
+→ public.bank_mutations
+→ settlement batch canonical_bank_mutation_id set
+→ ZERO new sport_center.bank_mutations
+
+Verify:
+
+public mutation created = 1
+SC mutation created = 0
+settlement batch = 1
+canonical_bank_mutation_id != NULL
+legacy bank_mutation_id = NULL for new central row unless required by schema compatibility
+accounting effect = exactly one
+
+============================================================
+PHASE 7 — LEGACY/SHADOW REGRESSION
+============================================================
+
+Prove:
+
+legacy mode:
+existing projection behavior preserved
+
+shadow mode:
+legacy downstream preserved
+
+central mode:
+projection guard works
+
+Do not enable central in PROD.
+
+============================================================
+PHASE 8 — DB FUNCTION REGRESSION
+============================================================
+
+Re-audit:
+
+project_public_bank_mutation_to_canonical()
+
+Required:
+
+central-mode public mutation does not invoke/produce SC projection.
+
+Legacy-compatible mutation still follows current projection behavior if required.
+
+============================================================
+PHASE 9 — TESTS
+============================================================
+
+Add tests for:
+
+1. central public mutation is not projected
+2. legacy public mutation projection preserved
+3. canonical_bank_mutation_id FK works
+4. central settlement uses public mutation
+5. central settlement does not require SC mutation
+6. retry idempotent
+7. concurrent processing safe
+8. no duplicate settlement
+9. legacy rows remain readable
+10. no destructive migration
+
+Run:
+
+- canonical bank mutation tests
+- settlement tests
+- Central Finance tests
+- accounting integration
+- Sport Center boundary tests
+- migration verification
+- API build
+- typecheck delta
+- git diff --check
+
+============================================================
+PHASE 10 — RE-AUDIT RETIREMENT
+============================================================
+
+After DEV runtime proof, classify:
+
+sport_center.bank_mutations
+sport_center.bank_reconciliation_matches
+sport_center.bank_reconciliation_account_rules
+sport_center.bank_reconciliation_closing
+sport_center.bank_journal_entries
+
+and functions:
+
+find_settlement_bank_candidates
+project_public_bank_mutation_to_canonical
+recover_posted_settlement_from_bank_mutation
+legacy settlement functions
+
+as:
+
+KEEP
+LEGACY_ONLY
+HISTORICAL_ONLY
+SAFE_TO_RETIRE_LATER
+BLOCKED
+
+DO NOT RETIRE/DROP YET.
+
+============================================================
+FINAL REPORT
+============================================================
+
+MIGRATION =
+CANONICAL FK =
+PROJECTION GUARD =
+LEGACY FK PRESERVED =
+
+CENTRAL PUBLIC MUTATION =
+CENTRAL SC PROJECTION =
+CENTRAL SETTLEMENT BATCH =
+CANONICAL_BANK_MUTATION_ID =
+LEGACY BANK_MUTATION_ID =
+
+LEGACY MODE =
+SHADOW MODE =
+CENTRAL MODE =
+
+IDEMPOTENCY =
+CONCURRENCY =
+
+TESTS =
+ACCOUNTING INTEGRATION =
+MIGRATION VALIDATION =
+TYPECHECK DELTA =
+BUILD =
+GIT DIFF CHECK =
+API READY =
+
+PROD WRITES = 0
+PROD CUTOVER = NO
+
+READY FOR CENTRAL SETTLEMENT RUNTIME PROOF = YES/NO
+READY FOR SC LEGACY RETIREMENT = YES/NO
+
+BLOCKERS =

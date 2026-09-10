@@ -1,0 +1,417 @@
+Lanjutkan.
+
+Anda baru membaca dan merangkum instruction brief. Itu BELUM merupakan hasil audit yang diminta.
+
+Sekarang EXECUTE seluruh READ-ONLY AUDIT yang tertulis dalam file tersebut terhadap repository dan Supabase development database yang benar.
+
+## IMPORTANT
+
+JANGAN berhenti pada review dokumen.
+
+Saya membutuhkan EVIDENCE AKTUAL dari:
+
+* database schema;
+* table structure;
+* constraints;
+* indexes;
+* trigger/function definitions;
+* row counts;
+* repository call-chain;
+* runtime-reachable services/workers;
+* settlement/MDR configuration;
+* bank mutation interface.
+
+Tetap READ ONLY.
+
+Tidak boleh melakukan perubahan database atau source.
+
+---
+
+# DATABASE TARGET VALIDATION FIRST
+
+Sebelum audit, pastikan database yang diperiksa adalah database Supabase Sport Center development yang benar.
+
+Database tersebut harus memiliki object seperti:
+
+```text
+sport_center.sport_payments
+sport_center.accounting_journals
+sport_center.accounting_journal_lines
+sport_center.sport_bookings
+```
+
+Jika object tersebut tidak ditemukan:
+
+STOP.
+
+Jangan menggunakan `heliumdb` atau database lain sebagai substitute.
+
+Laporkan:
+
+```text
+BLOCKED — CORRECT SUPABASE DEVELOPMENT DATABASE NOT REACHABLE
+```
+
+Jangan menghasilkan kesimpulan architecture berdasarkan database yang salah.
+
+---
+
+# EXECUTE PHASE 1–20
+
+Jalankan seluruh audit sesuai file:
+
+`attached_assets/Pasted--PHASE-SPORT-CENTER-QRIS-SETTLEMENT-MDR-ARCHITECTURE-AU_1786380946337.txt`
+
+Termasuk minimal:
+
+1. Settlement object inventory.
+2. Sport Center settlement structures.
+3. Public QRIS settlement structures.
+4. Payment settlement metadata.
+5. Payment Clearing / COA readiness.
+6. MDR configuration.
+7. Current MDR calculation call-chain.
+8. Daily aggregation capability.
+9. Group booking vs settlement distinction.
+10. Bank mutation interface.
+11. Gross/MDR/net contract.
+12. Settlement-item idempotency.
+13. Settlement journal readiness.
+14. Journal linkage.
+15. Settlement eligibility.
+16. Settlement-date/T+n rules.
+17. Refund/reversal interaction.
+18. Bank reconciliation interface.
+19. Cross-schema conflict.
+20. Data-quality observations.
+
+---
+
+# VERY IMPORTANT CURRENT STATE
+
+Architecture baru yang sudah ada di Supabase adalah:
+
+```text
+Payment confirmed
+        ↓
+sport_center.accounting_journals
+status = draft
+        ↓
+approve
+        ↓
+posted
+```
+
+QRIS payment journal menggunakan:
+
+```text
+DR PAYMENT_CLEARING
+   CR SPORT_REVENUE
+   CR PPN_OUTPUT
+```
+
+PPN sudah selesai pada payment journal.
+
+Jadi audit settlement harus menganggap:
+
+> Settlement TIDAK menghitung revenue atau PPN lagi.
+
+Settlement hanya menangani konsep:
+
+```text
+Posted Payment Clearing
+        ↓
+Settlement Batch
+        ↓
+Gross
+        ↓
+MDR / Provider Fee
+        ↓
+Net
+        ↓
+Bank
+```
+
+---
+
+# CRITICAL BUSINESS REQUIREMENT
+
+MDR TIDAK boleh dinilai sebagai biaya per booking hanya karena field `mdr_amount` terdapat pada payment.
+
+Target bisnis adalah:
+
+```text
+Beberapa QRIS payment
+        ↓
+digabung sesuai settlement provider
+        ↓
+Gross Settlement
+        ↓
+MDR dihitung pada settlement
+        ↓
+Net Settlement
+        ↓
+dibandingkan dengan mutasi bank harian
+```
+
+Audit harus menentukan apakah existing structure benar-benar dapat mendukung model ini.
+
+---
+
+# DO NOT TOUCH RECONCILIATION
+
+Semua object:
+
+```text
+bank_mutations
+bank_reconciliation_matches
+bank_journal_entries
+bank_reconciliation_account_rules
+bank_reconciliation_closing
+Google Sheet sync
+matching engine
+expected cash flow
+reconciliation posting
+```
+
+adalah:
+
+```text
+PROTECTED — READ ONLY
+```
+
+Saya hanya ingin tahu interface yang nanti dipakai settlement.
+
+Jangan melakukan redesign/remediation reconciliation.
+
+---
+
+# REQUIRED EVIDENCE
+
+Untuk setiap object penting, jangan hanya mengatakan "ada".
+
+Berikan:
+
+```text
+Schema:
+Table/object:
+Purpose:
+Columns relevant:
+PK:
+FK:
+Unique constraints:
+Indexes:
+Triggers/functions:
+Row count:
+Runtime caller:
+Assessment:
+```
+
+Untuk source code, sertakan:
+
+```text
+File:
+Function:
+Caller:
+Destination:
+Runtime reachable: YES/NO
+Purpose:
+```
+
+---
+
+# CRITICAL QUESTIONS THAT MUST BE ANSWERED
+
+## A. Canonical settlement
+
+Harus menjawab:
+
+> Apakah canonical QRIS settlement sebaiknya berada di `sport_center`, `public`, atau reuse existing shared structure?
+
+Pilih SATU.
+
+Berikan evidence.
+
+---
+
+## B. Existing public.qris_settlements
+
+Harus menjawab:
+
+> Apakah `public.qris_settlements` dan `public.qris_settlement_items` aman direuse untuk Sport Center atau merupakan shared/public downstream object?
+
+Jangan menebak.
+
+---
+
+## C. MDR authority
+
+Harus menjawab:
+
+> Dari semua MDR config/rules yang ditemukan, mana yang authoritative untuk production?
+
+Jika tidak ada:
+
+```text
+NO CANONICAL MDR AUTHORITY FOUND
+```
+
+---
+
+## D. Daily aggregation
+
+Harus menjawab apakah sistem existing sudah mampu melakukan:
+
+```text
+Provider + settlement date + company + bank account
+        ↓
+many payment IDs
+        ↓
+one settlement batch
+```
+
+---
+
+## E. Payment eligibility
+
+Audit apakah payment berikut dapat dipilih secara deterministic:
+
+```text
+payment.status = confirmed
+AND accounting_journal.status = posted
+AND payment method/provider requires settlement
+AND not already settled
+```
+
+---
+
+## F. Settlement accounting
+
+Harus menentukan readiness untuk journal:
+
+```text
+DR Bank Net
+DR MDR Expense
+DR Provider Fee/Adjustment jika ada
+   CR Payment Clearing Gross
+```
+
+Jangan membuat journal.
+
+---
+
+## G. Bank matching
+
+Harus menjawab:
+
+> Field settlement mana yang nantinya paling tepat dibandingkan dengan mutasi bank harian?
+
+Expected principle:
+
+```text
+settlement.net_amount
+↔
+bank_mutation.amount
+```
+
+Tetapi validasi berdasarkan implementation existing.
+
+---
+
+# REUSE-FIRST
+
+Jangan merekomendasikan object baru sebelum membuktikan object existing tidak cukup.
+
+Gunakan classification:
+
+```text
+REUSE AS-IS
+REUSE WITH EXTENSION
+KEEP — SHARED
+LEGACY — DO NOT USE
+UAT ONLY
+NEW OBJECT NEEDED LATER
+```
+
+---
+
+# FINAL REPORT
+
+Berikan laporan lengkap dengan section 1–24 sebagaimana instruction brief.
+
+Yang paling penting sertakan:
+
+## REUSE MATRIX
+
+| Existing Object | Reuse? | Target Role | Reason |
+| --------------- | ------ | ----------- | ------ |
+
+## TARGET FLOW
+
+Berdasarkan evidence aktual:
+
+```text
+Posted Payment Journals
+        ↓
+Eligible Payments
+        ↓
+Settlement Batch
+        ↓
+Settlement Items
+        ↓
+Gross
+        ↓
+MDR / Fees
+        ↓
+Net
+        ↓
+Settlement Journal
+        ↓
+Expected Bank Settlement
+        ↓
+Existing Bank Reconciliation
+```
+
+Sesuaikan jika evidence menunjukkan model berbeda.
+
+## FINAL VERDICT
+
+Pilih hanya satu:
+
+```text
+READY — EXISTING SETTLEMENT COMPONENTS CAN BE REUSED
+```
+
+atau
+
+```text
+READY WITH GAPS — REUSE EXISTING COMPONENTS AND ADD MINIMAL EXTENSIONS
+```
+
+atau
+
+```text
+NOT READY — SETTLEMENT MODEL REQUIRES NEW CANONICAL STRUCTURE
+```
+
+---
+
+# CHANGE CONFIRMATION
+
+Wajib di akhir:
+
+```text
+Database changes: 0
+Source changes: 0
+Triggers changed: 0
+Functions changed: 0
+Migrations created: 0
+Historical records modified: 0
+Bank reconciliation changes: 0
+```
+
+Setelah laporan audit selesai:
+
+STOP.
+
+JANGAN mulai implementasi.

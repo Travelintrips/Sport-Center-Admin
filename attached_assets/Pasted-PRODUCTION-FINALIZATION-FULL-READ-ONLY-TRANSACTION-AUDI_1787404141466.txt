@@ -1,0 +1,672 @@
+PRODUCTION FINALIZATION + FULL READ-ONLY TRANSACTION AUDIT
+SPORT CENTER — CONTINUE AUTOMATICALLY
+
+STATUS TERKINI:
+
+PRODUCTION:
+- Secret Manager production access = PASS
+- Production deployment = ACTIVE
+- Production database = CONNECTED
+- search_path issue = FIXED IN SOURCE
+- Active deployment masih membutuhkan REPUBLISH
+- Production transaction audit = BELUM DIJALANKAN
+
+TARGET:
+
+1. Republish production dengan source fix terbaru.
+2. Verifikasi deployment aktif menggunakan source terbaru.
+3. Verifikasi production database kembali.
+4. Jalankan FULL PRODUCTION TRANSACTION INTEGRITY AUDIT secara READ-ONLY.
+5. Jika ditemukan source bug → FIX SOURCE → TEST → BUILD → REPUBLISH bila diperlukan.
+6. Jika ditemukan data anomaly → jangan langsung mutate; klasifikasikan dahulu.
+7. Jangan merusak Central Finance.
+8. Jangan meminta konfirmasi.
+
+==================================================
+PHASE 1 — PRE-RELEASE SAFETY
+==================================================
+
+Sebelum republish:
+
+verifikasi:
+
+- git status
+- git diff
+- git diff --check
+- production environment resolver
+- production Secret Manager loader
+- production database resolver
+- storage resolver
+- finance worker mode
+- search_path fix
+
+Pastikan tidak ada:
+
+- DEV credential
+- DEV database
+- DEV storage
+- DATABASE_URL fallback
+- test seed
+- destructive migration
+- accidental accounting worker
+- duplicate finance worker
+
+Jangan menampilkan secret.
+
+==================================================
+PHASE 2 — TEST SOURCE FIX
+==================================================
+
+Verifikasi fix search_path.
+
+Pastikan seluruh production database access menggunakan schema/search_path yang benar.
+
+Cari seluruh:
+
+- SET search_path
+- schema qualification
+- transaction connection
+- pooled connection
+- worker connection
+- raw SQL connection
+
+Pastikan tidak ada jalur lain yang masih memiliki search_path salah.
+
+Run:
+
+- typecheck
+- API tests
+- API build
+- full workspace build
+- git diff --check
+
+Jika gagal:
+
+FIX ROOT CAUSE
+→ TEST ULANG
+
+Jangan republish source yang gagal.
+
+==================================================
+PHASE 3 — REPUBLISH PRODUCTION
+==================================================
+
+Jika seluruh verification PASS:
+
+Republish production menggunakan deployment procedure resmi yang sudah ada.
+
+Jangan membuat deployment method baru.
+
+Jangan mengubah production traffic secara manual jika deployment system sudah menangani itu.
+
+Setelah publish:
+
+verify:
+
+- deployment/version active
+- production service running
+- correct version receiving traffic
+- production Secret Manager accessible
+- production DB reachable
+- health endpoint
+- readiness endpoint
+
+==================================================
+PHASE 4 — VERIFY PRODUCTION IDENTITY
+==================================================
+
+Pastikan active App Engine version menggunakan:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+Jangan hanya mengandalkan app.yaml.
+
+Gunakan active version metadata.
+
+Jika runtime identity tidak dapat diverifikasi:
+
+→ STOP transaction audit
+→ BLOCKED.
+
+==================================================
+PHASE 5 — READ-ONLY GUARD
+==================================================
+
+SEBELUM audit production:
+
+Pastikan database session benar-benar READ-ONLY.
+
+Audit process hanya boleh menjalankan:
+
+SELECT
+metadata inspection
+EXPLAIN jika diperlukan
+
+DILARANG:
+
+INSERT
+UPDATE
+DELETE
+ALTER
+CREATE
+DROP
+TRUNCATE
+migration
+repair
+backfill
+
+Jangan menjalankan application endpoint yang dapat menyebabkan mutation.
+
+Audit langsung menggunakan read-only database connection/query path.
+
+==================================================
+PHASE 6 — BOOKING LIFECYCLE AUDIT
+==================================================
+
+Audit seluruh production booking.
+
+Cari:
+
+1. completed tanpa check-in
+2. completed sebelum endTime
+3. future booking completed
+4. cancelled → completed
+5. pending reschedule → completed
+6. duplicate completion
+7. duplicate check-in
+8. old schedule completed setelah reschedule
+9. check-in pada cancelled booking
+10. booking yang selesai sebelum sesi benar-benar selesai
+
+Canonical contract:
+
+CONFIRMED
++
+CHECK-IN
++
+SESSION END PASSED
+=
+COMPLETED
+
+Payment paid != completed.
+
+Corporate invoice paid != completed.
+
+Group payment != completed.
+
+==================================================
+PHASE 7 — PAYMENT AUDIT
+==================================================
+
+Audit:
+
+booking
+→ payment
+→ payment identity
+→ payment outbox
+→ Central Finance
+
+Cari:
+
+- payment tanpa booking
+- booking tanpa expected payment
+- duplicate payment
+- duplicate payment identity
+- DP/final collision
+- amount mismatch
+- payment status inconsistency
+- payment accounting duplication
+- accounting posting tanpa source payment
+
+==================================================
+PHASE 8 — CENTRAL FINANCE AUDIT
+==================================================
+
+CRITICAL — JANGAN MENGUBAH DATA.
+
+Audit:
+
+Sport Center payment
+→ canonical accounting
+→ Central Finance
+
+Cari:
+
+- duplicate journal
+- duplicate payment_id
+- duplicate correlation ID
+- orphan journal
+- missing expected posting
+- wrong company
+- wrong account
+- amount mismatch
+- debit/credit imbalance
+
+Expected:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL POSTING
+
+TOTAL DEBIT = TOTAL CREDIT
+
+Jangan:
+
+- delete journal
+- recreate journal
+- force balance
+- post manual correction
+- change historical accounting
+
+==================================================
+PHASE 9 — CORPORATE BILLING
+==================================================
+
+Audit:
+
+company
+→ authorized customer
+→ corporate booking
+→ monthly invoice
+→ payment
+
+Cari:
+
+- unauthorized company linkage
+- arbitrary companyCustomerId
+- duplicate invoice
+- booking masuk invoice lebih dari sekali
+- invoice tanpa booking
+- invoice paid tanpa valid payment
+- future booking menjadi completed karena invoice paid
+- billing status inconsistency
+
+==================================================
+PHASE 10 — GROUP BOOKING
+==================================================
+
+Audit:
+
+- group membership
+- group merge history
+- group payment
+- group invoice
+- individual booking lifecycle
+
+Cari:
+
+- orphan group membership
+- duplicate booking membership
+- missing booking
+- booking hilang dari group
+- group payment menyebabkan premature completion
+- duplicate group payment
+
+Pastikan setiap booking tetap memiliki lifecycle sendiri.
+
+==================================================
+PHASE 11 — EVENT
+==================================================
+
+Audit seluruh production Event booking.
+
+Expected:
+
+NORMAL PRICE
+→ 21.4% DISCOUNT
+→ FINAL PRICE
+
+Contoh:
+
+100,000
+→ 21,400 discount
+→ 78,600 final
+
+Cari transaksi yang menggunakan formula lama:
+
+3 / 14
+21.43%
+21,43%
+
+JANGAN mengubah historical transaction otomatis.
+
+Jika ditemukan:
+
+hitung financial impact.
+
+Klasifikasikan:
+
+HISTORICAL
+atau
+REAL DATA ANOMALY.
+
+==================================================
+PHASE 12 — RECURRING
+==================================================
+
+Audit seluruh recurring booking.
+
+Cari:
+
+- past date
+- invalid date
+- duplicate date
+- operating hours violation
+- blocked schedule conflict
+- booking conflict
+- corporate approval bypass
+- completion propagation antar session
+
+Pastikan setiap recurring session memiliki lifecycle independent.
+
+==================================================
+PHASE 13 — RESCHEDULE
+==================================================
+
+Audit:
+
+- original schedule
+- replacement schedule
+- request
+- approval
+- history
+
+Cari:
+
+- old schedule masih active
+- new schedule conflict
+- missing history
+- pending reschedule completed
+- old schedule check-in setelah replacement
+- duplicate reschedule
+
+Pastikan approval reschedule atomic.
+
+==================================================
+PHASE 14 — REFUND / CANCELLATION
+==================================================
+
+Audit:
+
+payment
+→ refund
+→ accounting reversal
+
+Cari:
+
+- refund tanpa original payment
+- duplicate refund
+- refund > original payment
+- refunded booking tetap active
+- missing accounting reversal
+
+==================================================
+PHASE 15 — EXPENSE
+==================================================
+
+Audit:
+
+expense
+→ approval
+→ payment
+→ Central Finance
+
+Cari:
+
+- paid expense tanpa expected accounting
+- duplicate posting
+- wrong vendor
+- wrong company
+- wrong account
+- PPN Masukan mismatch
+- expense salah dikategorikan sebagai revenue
+
+==================================================
+PHASE 16 — QRIS / SETTLEMENT / RECONCILIATION
+==================================================
+
+Audit:
+
+payment
+→ QRIS
+→ settlement
+→ bank mutation
+→ reconciliation
+→ Central Finance
+
+Cari:
+
+- duplicate settlement
+- duplicate reconciliation
+- amount mismatch
+- MDR mismatch
+- settlement date mismatch
+- source identity mismatch
+- orphan settlement
+- unmatched settlement
+
+Jangan mengubah reconciliation.
+
+==================================================
+PHASE 17 — TAX / INVOICE
+==================================================
+
+Audit production invoice.
+
+Canonical:
+
+hargaDasar = hargaIncludePPN / 1.11
+
+dpp = hargaDasar × durasi
+
+dppNilaiLain = dpp × 11/12
+
+ppn = dppNilaiLain × 12%
+
+total = dpp + ppn
+
+Pastikan:
+
+TOTAL = DPP + PPN
+
+Invoice menampilkan:
+
+DPP
+DPP Nilai Lain
+PPN 12%
+TOTAL
+
+Event discount tidak boleh dihitung dua kali.
+
+Jangan rewrite historical invoice.
+
+==================================================
+PHASE 18 — DOCUMENTS
+==================================================
+
+Audit:
+
+Invoice
+SPP
+Kwitansi
+Lampiran
+Booking documentation
+
+Pastikan template hanya presentation layer.
+
+Template tidak boleh mengubah:
+
+payment
+tax
+booking
+accounting
+
+==================================================
+PHASE 19 — WHATSAPP
+==================================================
+
+Audit admin WhatsApp confirmation:
+
+booking
+→ notification
+→ payment proof
+→ approve
+→ lifecycle
+
+Cari:
+
+- token replay
+- expired token
+- cross-booking access
+- cross-company access
+- unauthorized approval
+- completion bypass
+
+Completion harus tetap melalui lifecycle canonical.
+
+==================================================
+PHASE 20 — DATA ANOMALY CLASSIFICATION
+==================================================
+
+Untuk setiap anomaly:
+
+ID
+ENTITY
+EXPECTED
+ACTUAL
+SEVERITY
+FINANCIAL IMPACT
+CLASSIFICATION
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+Jangan menganggap NULL otomatis error.
+
+==================================================
+PHASE 21 — REMEDIATION
+==================================================
+
+SOURCE BUG:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ REPUBLISH
+→ RE-AUDIT
+
+PRODUCTION DATA ANOMALY:
+
+JANGAN langsung UPDATE.
+
+Evaluasi:
+
+- exact rows
+- financial impact
+- Central Finance impact
+- reversibility
+- idempotency
+- historical implications
+
+Jika ambiguous:
+
+DO NOT MUTATE.
+
+Jika deterministic dan aman:
+
+siapkan targeted transactional remediation.
+
+Jangan:
+
+- delete journal
+- force balance
+- rewrite historical accounting
+- duplicate posting
+- recreate settlement
+
+==================================================
+PHASE 22 — FINAL CROSS-ENTITY RECONCILIATION
+==================================================
+
+Cross-check:
+
+BOOKING
+↔ PAYMENT
+↔ INVOICE
+↔ EXPENSE
+↔ JOURNAL
+↔ SETTLEMENT
+↔ RECONCILIATION
+↔ CENTRAL FINANCE
+
+Pastikan:
+
+NO UNEXPLAINED DUPLICATE
+NO ORPHAN ACCOUNTING
+NO DEBIT/CREDIT IMBALANCE
+NO PREMATURE COMPLETION
+NO UNAUTHORIZED COMPANY LINK
+NO DUPLICATE SETTLEMENT
+
+==================================================
+PHASE 23 — FINAL VERIFICATION
+==================================================
+
+Run after source fixes:
+
+- full tests
+- typecheck
+- build
+- git diff --check
+- production health
+- production readiness
+- production runtime identity
+- production DB identity
+
+Jika source berubah:
+
+REPUBLISH wajib dilakukan sebelum final verdict.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Jika bersih:
+
+PRODUCTION DEPLOYMENT = PASS
+PRODUCTION DATABASE = VERIFIED
+PRODUCTION TRANSACTION AUDIT = PASS
+CENTRAL FINANCE = SAFE
+BOOKING LIFECYCLE = PASS
+PAYMENT INTEGRITY = PASS
+CORPORATE BILLING = PASS
+GROUP = PASS
+EVENT = PASS
+RECURRING = PASS
+RESCHEDULE = PASS
+EXPENSE = PASS
+SETTLEMENT = PASS
+TAX = PASS
+
+Jika anomaly ditemukan:
+
+FIX → TEST → REPUBLISH → RE-AUDIT
+
+Jika hanya ada historical legitimate anomaly:
+
+DOCUMENTED — NO DESTRUCTIVE CHANGE
+
+Jika external blocker:
+
+BLOCKED hanya pada bagian tersebut.
+
+JANGAN meminta konfirmasi.
+JANGAN berhenti pada laporan jika masalah aman diperbaiki.
+JANGAN menggunakan DEV sebagai pengganti PROD.
+JANGAN menyentuh production data secara mutatif.

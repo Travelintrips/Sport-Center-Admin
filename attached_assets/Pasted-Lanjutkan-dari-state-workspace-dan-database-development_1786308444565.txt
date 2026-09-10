@@ -1,0 +1,343 @@
+Lanjutkan dari state workspace dan database development saat ini. Jangan ulang controlled repair yang sudah berhasil.
+
+Status terakhir:
+
+* Approved bank mapping sudah dibuat idempotent.
+* Payment 13 repair committed.
+* Payment 14 repair committed.
+* Posted accounting entry 9/10 mempertahankan immutable:
+
+  * `source = sport_center_booking`
+  * `source_id = booking_id`
+* Canonical payment linkage menggunakan field tambahan seperti `source_payment_id`/metadata, bukan mengubah immutable ledger identity.
+* GL tidak diubah.
+* Tax repair sudah dijalankan dalam scoped transaction.
+* `--dry-run` mode sudah ditambahkan.
+* Idempotency dry-run untuk payment 13/14 sudah PASS.
+* Typecheck runner/scripts dan `git diff --check` PASS.
+* API typecheck sebelumnya menunjukkan error existing/declaration-order issue yang perlu divalidasi ulang setelah building libs.
+* Belum ada production deploy/final reconciliation/MDR posting.
+
+Task sekarang hanya:
+
+1. FINAL READ-ONLY AUDIT
+2. BUILD/TEST VALIDATION
+3. RUNTIME HEALTH
+4. FINAL REPORT
+
+# 1. FINAL READ-ONLY AUDIT — PAYMENT 13
+
+Audit current committed state.
+
+Expected source:
+
+* payment id = 13
+* company_id = 1
+* amount = 100000
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* source account reference remains `1640006707220`
+
+Expected canonical bank mapping:
+
+* source ref `1640006707220`
+* company = 1
+* provider = mandiri_direct
+* canonical bank account ID = 2
+
+Expected mirror:
+
+* mirror ID = 8
+* payment_number = SCPAY-SC-13
+* source_payment_id = 13
+* company_id = 1
+* bank_account_id = 2
+* method = QRIS
+* provider = mandiri_direct
+* provider_code = mandiri_direct
+* entry_id = 9
+* posting_status = posted if all invariants passed
+
+Expected accounting:
+
+* entry ID = 9
+* correlation = sc_payment_13
+* source/source_id remain immutable legacy booking identity
+* canonical payment linkage present
+* company = 1
+* method/provider metadata complete where schema supports it
+
+Expected GL:
+
+* debit = 100000
+* credit = 100000
+* unchanged line count
+
+Expected public tax:
+
+* exactly one canonical payment-specific PPN line
+* amount = 9910
+* no duplicate
+
+# 2. FINAL READ-ONLY AUDIT — PAYMENT 14
+
+Expected:
+
+Source:
+
+* company_id = 1
+* amount = 50000
+* QRIS / mandiri_direct
+* source account ref unchanged
+
+Mapping:
+
+* canonical bank account = 2
+
+Mirror:
+
+* ID 9
+* source_payment_id = 14
+* company = 1
+* bank_account_id = 2
+* entry_id = 10
+* provider/method canonical
+
+Accounting:
+
+* entry 10 reused
+* correlation sc_payment_14
+* immutable source/source_id preserved
+* payment linkage metadata present
+
+GL:
+
+* debit = credit = 50000
+* unchanged
+
+Tax:
+
+* exactly one canonical payment-specific line
+* amount = 4955
+
+# 3. BANK MAPPING AUDIT
+
+Verify exactly one active, non-conflicting mapping for:
+
+* source_system = sport_center
+* source_account_ref = 1640006707220
+* company_id = 1
+* provider = mandiri_direct
+* canonical_bank_account_id = 2
+* effective date covers 2026-08-09
+
+No duplicate mapping.
+
+# 4. DUPLICATE AUDIT
+
+Verify exact counts:
+
+Accounting:
+
+* `sc_payment_13` = 1
+* `sc_payment_14` = 1
+
+Mirror:
+
+* `SCPAY-SC-13` = 1
+* `SCPAY-SC-14` = 1
+
+Tax:
+
+* canonical payment tax 13 = 1
+* canonical payment tax 14 = 1
+
+Internal journal:
+
+* payment 13 = 1
+* payment 14 = 1
+
+# 5. IDEMPOTENCY DRY-RUN
+
+Run:
+
+controlled repair runner with `--dry-run`.
+
+Expected:
+
+Payment 13:
+`ALREADY_COMPLETE`
+
+Payment 14:
+`ALREADY_COMPLETE`
+
+Mapping:
+`ALREADY_PRESENT`
+
+Expected proposed writes:
+
+0 material changes.
+
+No:
+
+* mirror insert
+* accounting insert
+* GL insert/update
+* tax insert
+* mapping insert
+
+# 6. OUT-OF-SCOPE CHANGE CHECK
+
+Compare repair audit/log/scope.
+
+Verify no other records were modified by controlled repair beyond:
+
+* approved source-account mapping
+* payment 13
+* payment 14
+* mirror 8
+* mirror 9
+* accounting metadata on entry 9/10 as allowed
+* canonical payment tax rows 13/14
+
+No unrelated:
+
+* payments
+* accounting entries
+* GL lines
+* facility mappings
+* users
+* settlements
+* mutations
+
+were modified.
+
+# 7. VALIDATION ORDER
+
+To avoid declaration false positives:
+
+1. `pnpm run typecheck:libs`
+2. scripts typecheck
+3. API typecheck
+4. API build
+5. relevant payment/provider/ownership/accounting/tax tests
+6. repair runner tests if any
+7. `git diff --check`
+
+If API typecheck errors remain, distinguish:
+
+* errors caused by current patch
+* pre-existing unrelated errors
+
+Do not claim fully clean typecheck if current patch introduces error.
+
+# 8. RUNTIME HEALTH
+
+Restart or verify combined development workflow.
+
+Check:
+
+* `/health` → 200
+* `/readiness` → 200
+* `/api/health` → 200
+
+Verify:
+
+* DB reachable
+* startup migrations OK
+* no repair/runtime errors
+
+# 9. AUDIT ENDPOINT
+
+If finance/admin auth context available, run:
+
+`GET /api/admin/audit-sport-center-payment/13`
+
+`GET /api/admin/audit-sport-center-payment/14`
+
+If not, use equivalent direct read-only audit.
+
+Do not bypass auth.
+
+# 10. ACCOUNTING DESIGN WARNING
+
+Do not change accounting design.
+
+Continue report:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+Current QRIS debit:
+
+`Bank Mandiri CST / 1-1020-CST`
+
+Clearing design remains a separate task.
+
+# 11. FINAL REPORT
+
+Return:
+
+## A. Environment
+
+## B. Bank mapping final state
+
+## C. Payment 13 final state
+
+## D. Payment 14 final state
+
+## E. Mirror 8/9 final state
+
+## F. Accounting entry 9/10 final state
+
+## G. GL invariant
+
+## H. Tax final state
+
+## I. Duplicate checks
+
+## J. Idempotency dry-run
+
+## K. Out-of-scope verification
+
+## L. Tests/typecheck/build
+
+## M. Runtime health
+
+## N. Remaining risks
+
+## O. Final status
+
+Use exactly one:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+`CONTROLLED_REPAIR_PARTIAL`
+
+`MANUAL_REVIEW_REQUIRED`
+
+`CONTROLLED_REPAIR_COMPLETE` only if:
+
+1. source company = 1 for both payments
+2. source account ref preserved
+3. canonical bank mapping = 2
+4. mirror source linkage complete
+5. entries 9/10 reused
+6. immutable posted ledger fields preserved
+7. GL unchanged and balanced
+8. canonical tax rows exactly one each
+9. second dry-run = ALREADY_COMPLETE
+10. no out-of-scope modifications
+11. runtime healthy
+
+# SAFETY
+
+Do not:
+
+* run repair apply again unless dry-run finds unexpected incompleteness
+* touch payment outside 13/14
+* change GL amount
+* final reconcile
+* settlement post
+* MDR post
+* production deploy
+* mass backfill

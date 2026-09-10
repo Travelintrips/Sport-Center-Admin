@@ -11,6 +11,9 @@
     "migrate:prod": "pnpm --filter @workspace/scripts run migrate:prod"
   },
   "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp", "esbuild", "@replit/object-storage"]
+  },
   "devDependencies": {
     "prettier": "^3.8.3",
     "typescript": "~5.9.3"

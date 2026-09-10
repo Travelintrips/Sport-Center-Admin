@@ -1,0 +1,201 @@
+PHASE PAYLABS — FIND ACTUAL SIGNATURE ROOT CAUSE
+
+STOP mengaudit ACK.
+ACK bukan root cause saat ini.
+
+Evidence sudah cukup:
+
+1. Callback nyata Paylabs sebelumnya:
+   status = 02
+   tetapi signatureValid = false.
+
+2. Ketika signature invalid:
+   server benar-benar mengirim HTTP 400.
+
+3. Karena HTTP 400:
+   Paylabs benar ketika mengatakan mereka tidak menerima
+   success response/ACK yang diharapkan.
+
+4. Jalur signed HTTP 200 ACK sudah ada tetapi tidak pernah
+   tercapai karena inbound signature verification gagal.
+
+TARGET SEKARANG:
+Temukan kenapa signature callback Paylabs asli gagal.
+
+==================================================
+A. JANGAN UBAH KEY DULU
+==================================================
+
+Public key yang sama dilaporkan digunakan pada project Paylabs
+lain dan bekerja.
+
+sameKey=true TIDAK BOLEH lagi dianggap otomatis sebagai
+WRONG_PAYLABS_PUBLIC_KEY.
+
+Jangan rotate/ganti key.
+Jangan bypass signature verification.
+
+==================================================
+B. CARI IMPLEMENTASI PROJECT YANG BERHASIL
+==================================================
+
+Jika source project Paylabs lain yang berhasil tersedia pada:
+- repository/workspace;
+- GitHub yang dapat diakses;
+- branch/history;
+
+temukan implementasi webhook/signature verification tersebut.
+
+Cari:
+Paylabs
+X-SIGNATURE
+X-TIMESTAMP
+X-PARTNER-ID
+createVerify
+crypto.verify
+RSA-SHA256
+SHA256
+webhook
+notification
+
+Bandingkan secara source-to-source.
+
+==================================================
+C. COMPARE EXACTLY
+==================================================
+
+WORKING PROJECT vs CURRENT SPORT CENTER:
+
+1. Raw body capture
+2. Middleware registration order
+3. express.json verify callback
+4. rawBody Buffer handling
+5. SHA256 body calculation
+6. JSON minification/canonicalization
+7. Endpoint/path included in canonical string
+8. Timestamp exact string
+9. X-SIGNATURE decoding
+10. Base64/Base64URL handling
+11. RSA algorithm
+12. RSA padding
+13. crypto.verify arguments
+14. PEM normalization
+15. public-key parsing
+16. sandbox credential resolver
+
+Jangan hanya menjelaskan.
+Tampilkan exact implementation difference.
+
+==================================================
+D. PERIKSA RAW BODY CURRENT PROJECT
+==================================================
+
+Source menunjukkan:
+
+express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  }
+})
+
+Pastikan middleware ini TERPASANG SEBELUM route Paylabs.
+
+Buktikan bahwa callback Paylabs asli masuk dengan:
+
+Buffer.isBuffer(req.rawBody) = true
+
+dan verifier benar-benar memakai buffer tersebut.
+
+Pastikan tidak ada:
+
+JSON.stringify(req.body)
+
+atau parse → stringify sebelum hashing.
+
+==================================================
+E. PERIKSA CANONICAL STRING TERHADAP DOKUMENTASI
+==================================================
+
+Jangan menganggap canonical string saat ini benar hanya karena
+sudah diimplementasikan.
+
+Verifikasi terhadap dokumentasi Paylabs v4.8.1 yang digunakan
+project.
+
+Bandingkan exact:
+
+HTTP method
+endpoint/path
+SHA256 body representation
+timestamp
+separator ":"
+case
+encoding
+
+Laporkan bentuk canonical string tanpa secret/signature.
+
+==================================================
+F. PERIKSA SIGNATURE DECODING
+==================================================
+
+Audit exact X-SIGNATURE yang diterima.
+
+Tanpa mencetak signature, laporkan:
+
+signatureHeaderPresent
+signatureCharacterLength
+signatureDecodedByteLength
+signatureEncodingDetected
+
+Periksa apakah verifier mengharapkan:
+Base64
+Base64URL
+hex
+atau format lain sesuai Paylabs.
+
+==================================================
+G. JANGAN GUNAKAN CALLBACK PALSU SEBAGAI BUKTI CRYPTO
+==================================================
+
+Callback dengan:
+
+X-SIGNATURE: invalid
+
+hanya membuktikan fail-closed bekerja.
+
+Itu TIDAK membantu menentukan kenapa signature asli Paylabs gagal.
+
+Untuk cryptographic diagnosis, gunakan:
+1. source comparison dengan project working; atau
+2. SATU callback Paylabs Sandbox asli berikutnya.
+
+==================================================
+H. OUTPUT FINAL
+==================================================
+
+Berikan:
+
+WORKING PROJECT IMPLEMENTATION
+CURRENT PROJECT IMPLEMENTATION
+EXACT DIFFERENCE
+
+Kemudian satu verdict:
+
+RAW_BODY_IMPLEMENTATION_MISMATCH
+CANONICAL_STRING_MISMATCH
+ENDPOINT_PATH_MISMATCH
+TIMESTAMP_MISMATCH
+SIGNATURE_ENCODING_MISMATCH
+RSA_VERIFY_MISMATCH
+KEY_MISMATCH
+NO_IMPLEMENTATION_DIFFERENCE
+BLOCKED_NO_WORKING_PROJECT_SOURCE
+
+Jika exact defect ditemukan:
+perbaiki HANYA defect signature tersebut,
+build,
+restart,
+dan jangan membuat transaksi kedua tanpa kebutuhan.
+
+Jangan commit.
+Jangan push.

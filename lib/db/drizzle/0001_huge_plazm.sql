@@ -16,6 +16,7 @@ CREATE TABLE "sport_center"."discount_settings" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"customer_type" text NOT NULL,
 	"discount_percentage" integer DEFAULT 0 NOT NULL,
+"discount_amount" integer,
 	"description" text,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,

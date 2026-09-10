@@ -6,6 +6,7 @@ const pinoHttp: any = (_pinoHttpModule as any).default ?? _pinoHttpModule;
 import router from "./routes";
 import healthRouter from "./routes/health";
 import { logger } from "./lib/logger";
+import { isStartupReady } from "./lib/startupReadiness";
 import path from "path";
 import fs from "fs";
 
@@ -47,6 +48,29 @@ app.use(
   }),
 );
 app.use(express.urlencoded({ extended: true }));
+
+// The development server binds its port before the background schema setup
+// completes so the workflow health check can connect. Do not let application
+// requests race that setup: otherwise an admin can submit against a table that
+// has not been created yet and receive an opaque Drizzle query error.
+app.use((req, res, next) => {
+  const isHealthProbe =
+    req.path === "/health" ||
+    req.path === "/healthz" ||
+    req.path === "/readiness" ||
+    req.path === "/api/health" ||
+    req.path === "/api/healthz" ||
+    req.path === "/api/readiness";
+  if (process.env.NODE_ENV !== "production" && !isStartupReady() && !isHealthProbe) {
+    res.setHeader("Retry-After", "2");
+    res.status(503).json({
+      error: "Server sedang menyiapkan database. Coba lagi sebentar.",
+      code: "STARTUP_MIGRATIONS_PENDING",
+    });
+    return;
+  }
+  next();
+});
 
 // ── Health / readiness endpoints at root level ────────────────────────────────
 // Mounted without the /api prefix so App Engine liveness/readiness probes,

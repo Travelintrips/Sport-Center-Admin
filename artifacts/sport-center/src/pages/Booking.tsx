@@ -33,7 +33,7 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
-  Plane, ShieldCheck, User, Building2, CreditCard, Banknote, PartyPopper, Tag
+  Plane, ShieldCheck, User, Building2, CreditCard, Banknote, PartyPopper, Tag, Plus, Trash2
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -52,6 +52,13 @@ function formatDate(dateStr: string, lang: string = "id") {
 }
 
 type RepeatType = "weekly" | "monthly";
+
+const OPERATIONAL_BOOKING_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "admin_booking",
+  "staff",
+]);
 
 export default function Booking() {
   const [, setLocation] = useLocation();
@@ -90,6 +97,7 @@ export default function Booking() {
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
   // Akun admin_booking: bisa booking atas nama customer lain
   const isAdminBooking = currentUser?.role === "admin_booking";
+  const isOperationalAccount = OPERATIONAL_BOOKING_ROLES.has(currentUser?.role ?? "");
   // Akun perusahaan: user IS the company account
   const isCompanyAccount = (currentUser as any)?.accountType === "company";
 
@@ -133,6 +141,7 @@ export default function Booking() {
     }
   }, [isAdminBooking, selectedCustomerId, customers, currentUser]);
   const [notes, setNotes] = useState("");
+  const [additionalCharges, setAdditionalCharges] = useState<{ name: string; amount: string }[]>([]);
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
   const [vendorId, setVendorId] = useState<string>("");
 
@@ -143,7 +152,10 @@ export default function Booking() {
   const isAP = bookingMode === "angkasa_pura";
   const isCompanyMode = bookingMode === "perusahaan";
   const isEvent = bookingMode === "event";
-  const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
+  // Contract: Event discount is exactly 21.4%, not 3/14 (21.428…%).
+  // Use integer-safe rupiah math: 214/1000 of the normal price.
+  const EVENT_DISCOUNT_NUMERATOR = 214;
+  const EVENT_DISCOUNT_DENOMINATOR = 1000;
   const [idCardNumber, setIdCardNumber] = useState("");
 
   // --- Company mode state ---
@@ -312,6 +324,9 @@ export default function Booking() {
             durationHours: duration,
             repeatType,
             repeatCount,
+            additionalCharges: additionalCharges
+              .filter((charge) => charge.name.trim() && Number(charge.amount) > 0)
+              .map((charge) => ({ name: charge.name.trim(), amount: Number(charge.amount) })),
           },
         },
         {
@@ -330,7 +345,7 @@ export default function Booking() {
     }, 400);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate]);
+  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, additionalCharges, checkRecurringMutate]);
 
   // Redirect if missing params
   useEffect(() => {
@@ -402,6 +417,20 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
+    const incompleteCharge = additionalCharges.find(
+      (charge) => (charge.name.trim() && Number(charge.amount) <= 0) || (!charge.name.trim() && Number(charge.amount) > 0),
+    );
+    if (incompleteCharge) {
+      toast({
+        title: t("Biaya tambahan belum lengkap", "Additional charge is incomplete"),
+        description: t("Isi nama dan nominal positif untuk setiap biaya tambahan.", "Enter a name and positive amount for every additional charge."),
+        variant: "destructive",
+      });
+      return;
+    }
+    const additionalChargesPayload = additionalCharges
+      .filter((charge) => charge.name.trim() && Number(charge.amount) > 0)
+      .map((charge) => ({ name: charge.name.trim(), amount: Number(charge.amount) }));
 
     // ─── Mode Perusahaan ────────────────────────────────────────────────────
     if (isCompanyMode) {
@@ -462,7 +491,14 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+               additionalCharges: additionalChargesPayload,
+
               vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
+              downPaymentAmount:
+                paymentType === "dp" && dpAmount
+                  ? Number(dpAmount)
+                  : undefined,
+
             } as any,
           });
         } else {
@@ -483,6 +519,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+               additionalCharges: additionalChargesPayload,
               vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
             } as any,
           });
@@ -557,6 +594,11 @@ export default function Booking() {
           payerType: isCompanyBilling ? "company" : "personal",
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
+           additionalCharges: additionalChargesPayload,
+              downPaymentAmount:
+                paymentType === "dp" && dpAmount
+                  ? Number(dpAmount)
+                  : undefined,
         } as any,
       });
     } else {
@@ -582,6 +624,7 @@ export default function Booking() {
           ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
           ...(bookingSource ? { source: bookingSource } : {}),
           vendorId: vendorId ? Number(vendorId) : undefined,
+           additionalCharges: additionalChargesPayload,
         } as any,
       });
     }
@@ -615,12 +658,19 @@ export default function Booking() {
         .map((d) => d.date)
     : [];
   const effectiveCount = selectedDates.length;
-  const effectiveTotalPrice = checkResult ? checkResult.pricePerSession * effectiveCount : 0;
+  const additionalChargesTotal = additionalCharges.reduce(
+    (sum, charge) => sum + (Number.isFinite(Number(charge.amount)) ? Number(charge.amount) : 0),
+    0,
+  );
+  const effectiveTotalPrice = checkResult
+    ? checkResult.pricePerSession * effectiveCount + (effectiveCount > 0 ? additionalChargesTotal : 0)
+    : 0;
 
   // --- End time ---
   const [hours, minutes] = startTime ? startTime.split(":").map(Number) : [0, 0];
   const endHours = hours + duration;
   const endTime = `${endHours.toString().padStart(2, "0")}:${(minutes || 0).toString().padStart(2, "0")}`;
+
 
   const bookingPeopleCount = isWalkIn
     ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
@@ -628,6 +678,15 @@ export default function Booking() {
   const totalPrice = facility
     ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
     : 0;
+  const singlePriceBeforeDiscount = totalPrice + additionalChargesTotal;
+  const isMultiguna = facility
+    ? `${facility.name} ${facility.category}`.toLowerCase().replace(/[^a-z0-9]/g, "").includes("multiguna")
+    : false;
+  const apMultigunaDiscount = isAP && isMultiguna
+    ? Math.max(0, totalPrice - (300000 * duration))
+    : 0;
+  const apMultigunaDiscountTotal = apMultigunaDiscount * (isRepeat ? (effectiveCount || repeatCount) : 1);
+
 
   if (isLoadingFacility || isLoadingUser) {
     return (
@@ -887,6 +946,63 @@ export default function Booking() {
                   <Label htmlFor="notes">{t("Catatan Tambahan (Opsional)", "Additional Notes (Optional)")}</Label>
                   <Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder={t("Permintaan khusus...", "Special requests...")} />
                 </div>
+                <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Label className="font-semibold">{t("Biaya Tambahan", "Additional Charges")}</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                         {isRepeat
+                           ? t("Opsional, misalnya tips petugas atau air mineral. Berlaku sekali untuk seluruh booking berulang.", "Optional, such as staff tips or mineral water. Applied once to the entire recurring booking.")
+                           : t("Opsional, misalnya tips petugas atau air mineral. Berlaku sekali untuk booking ini.", "Optional, such as staff tips or mineral water. Applied once to this booking.")}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 gap-1 border-amber-300 bg-background"
+                      onClick={() => setAdditionalCharges((current) => [...current, { name: "", amount: "" }])}
+                    >
+                      <Plus size={14} /> {t("Tambah", "Add")}
+                    </Button>
+                  </div>
+                  {additionalCharges.map((charge, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Input
+                        value={charge.name}
+                        onChange={(event) => setAdditionalCharges((current) => current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, name: event.target.value } : item,
+                        ))}
+                        placeholder={t("Nama biaya", "Charge name")}
+                        className="bg-background"
+                      />
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={charge.amount ? Number(charge.amount).toLocaleString("id-ID") : ""}
+                        onChange={(event) => setAdditionalCharges((current) => current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, amount: event.target.value.replace(/[^0-9]/g, "") } : item,
+                        ))}
+                        placeholder="Rp"
+                        className="w-32 bg-background font-mono"
+                      />
+                      <button
+                        type="button"
+                        aria-label={t("Hapus biaya tambahan", "Remove additional charge")}
+                        onClick={() => setAdditionalCharges((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                        className="rounded-md p-2 text-muted-foreground hover:bg-red-100 hover:text-red-600"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {additionalChargesTotal > 0 && (
+                    <div className="flex justify-between border-t border-amber-200 pt-2 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:text-amber-200">
+                      <span>{t("Total biaya tambahan", "Additional charges total")}</span>
+                      <span>{formatCurrency(additionalChargesTotal)}</span>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </form>
           </Card>
@@ -919,7 +1035,11 @@ export default function Booking() {
                   <Plane size={18} className="shrink-0" />
                   <div>
                     <div className="font-semibold text-xs">{t("Angkasa Pura", "Angkasa Pura")}</div>
-                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Discount")}</div>
+                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                      {isMultiguna
+                        ? t("14,29% Multiguna · 20% lainnya", "14.29% Multipurpose · 20% others")
+                        : t("Diskon 20%", "20% discount")}
+                    </div>
                   </div>
                 </button>
                 {isAdminBooking && (
@@ -931,7 +1051,7 @@ export default function Booking() {
                     <PartyPopper size={18} className="shrink-0" />
                     <div>
                       <div className="font-semibold text-xs">{t("Event", "Event")}</div>
-                      <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,43%", "21.43% off")}</div>
+                      <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,4%", "21.4% off")}</div>
                     </div>
                   </button>
                 )}
@@ -961,7 +1081,7 @@ export default function Booking() {
                   <Tag size={14} className="shrink-0 text-purple-600" />
                   <div>
                     <span className="font-semibold text-purple-800">{t("Diskon Event 21,4% sudah diterapkan", "21.4% Event Discount Applied")}</span>
-                    <div className="text-xs text-purple-600 mt-0.5">{t("Diskon 21,43% otomatis diterapkan untuk booking event.", "21.43% discount automatically applied for event bookings.")}</div>
+                    <div className="text-xs text-purple-600 mt-0.5">{t("Diskon 21,4% otomatis diterapkan untuk booking event.", "21.4% discount automatically applied for event bookings.")}</div>
                   </div>
                 </div>
               )}
@@ -978,7 +1098,11 @@ export default function Booking() {
                   />
                   <div className="flex items-start gap-2 text-xs text-muted-foreground">
                     <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-500" />
-                    <span>{t("Booking akan menunggu verifikasi ID Card oleh admin. Diskon diterapkan setelah ID Card terverifikasi.", "Booking will await ID Card verification by admin. Discount is applied once the ID Card is verified.")}</span>
+                    <span>
+                      {isMultiguna
+                        ? t("Booking menunggu verifikasi ID Card. Harga khusus Multiguna menjadi Rp 300.000/jam setelah terverifikasi.", "Booking awaits ID Card verification. The special Multipurpose price becomes Rp 300,000/hour after verification.")
+                        : t("Booking akan menunggu verifikasi ID Card oleh admin. Diskon 20% diterapkan setelah ID Card terverifikasi.", "Booking will await ID Card verification by admin. The 20% discount is applied once the ID Card is verified.")}
+                    </span>
                   </div>
                 </div>
               )}
@@ -1394,7 +1518,11 @@ export default function Booking() {
                                 <input
                                   type="date"
                                   value={editingValue}
-                                  min={new Date().toISOString().split("T")[0]}
+                                    min={
+                                      isOperationalAccount
+                                        ? undefined
+                                        : new Date().toISOString().split("T")[0]
+                                    }
                                   onChange={(e) => setEditingValue(e.target.value)}
                                   className="flex-1 text-sm bg-transparent border-none outline-none text-blue-800"
                                 />
@@ -1489,7 +1617,7 @@ export default function Booking() {
                         {facility && (
                           <div className="flex justify-between border-t border-violet-200 dark:border-violet-800 pt-1.5">
                             <span className="text-muted-foreground">{t("Sisa Pembayaran", "Remaining")}</span>
-                            <span className="font-bold text-foreground">Rp {Math.max(0, totalPrice - Number(dpAmount)).toLocaleString("id-ID")}</span>
+                            <span className="font-bold text-foreground">Rp {Math.max(0, singlePriceBeforeDiscount - (couponResult?.discountAmount ?? 0) - apMultigunaDiscount - Number(dpAmount)).toLocaleString("id-ID")}</span>
                           </div>
                         )}
                       </div>
@@ -1596,6 +1724,23 @@ export default function Booking() {
                   </span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
+
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                  <span>× {duration} {t("jam", "hours")}</span>
+                </div>
+                {isAP && isMultiguna && (
+                  <>
+                    <div className="flex justify-between text-green-700 font-medium">
+                      <span>{t("Diskon AP Multiguna", "AP Multipurpose discount")}</span>
+                      <span>−{formatCurrency(apMultigunaDiscountTotal)}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground text-right">
+                      {t("Harga setelah verifikasi: Rp300.000/jam", "Price after verification: Rp300,000/hour")}
+                    </div>
+                  </>
+                )}
+
                 {isWalkIn ? (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">{t("Jumlah orang", "People")}</span>
@@ -1606,13 +1751,20 @@ export default function Booking() {
                     <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
                     <span>× {duration} {t("jam", "hours")}</span>
                   </div>
+
                 )}
                 {isRepeat && (
                   <>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">{t("Harga/sesi", "Price/session")}</span>
-                      <span>{formatCurrency(totalPrice)}</span>
+                         <span>{formatCurrency(totalPrice)}</span>
                     </div>
+                     {additionalChargesTotal > 0 && (
+                       <div className="flex justify-between text-amber-700 font-medium">
+                         <span>{t("Biaya tambahan (sekali)", "Additional charge (once)")}</span>
+                         <span>+{formatCurrency(additionalChargesTotal)}</span>
+                       </div>
+                     )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">{t("Sesi dipilih", "Sessions selected")}</span>
                       <span>
@@ -1631,18 +1783,18 @@ export default function Booking() {
                   </div>
                 )}
                 {isEvent && (() => {
-                  const eventDisc = Math.round(totalPrice * EVENT_DISCOUNT_RATE);
-                  const eventDiscRepeat = isRepeat
-                    ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
+                  const eventDisc = Math.floor((totalPrice * EVENT_DISCOUNT_NUMERATOR + EVENT_DISCOUNT_DENOMINATOR / 2) / EVENT_DISCOUNT_DENOMINATOR);
+                   const eventDiscRepeat = isRepeat
+                     ? Math.floor(((totalPrice * (effectiveCount || repeatCount)) * EVENT_DISCOUNT_NUMERATOR + EVENT_DISCOUNT_DENOMINATOR / 2) / EVENT_DISCOUNT_DENOMINATOR)
                     : eventDisc;
                   return (
                     <>
                       <div className="flex justify-between text-muted-foreground text-sm">
                         <span>{t("Harga Normal", "Normal Price")}</span>
-                        <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency(checkResult ? effectiveTotalPrice : totalPrice * repeatCount)) : formatCurrency(totalPrice)}</span>
+                       <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency((checkResult ? effectiveTotalPrice : totalPrice * repeatCount + additionalChargesTotal))) : formatCurrency(singlePriceBeforeDiscount)}</span>
                       </div>
                       <div className="flex justify-between text-purple-700 font-medium">
-                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
+                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,4%", "Event Discount 21.4%")}</span>
                         <span>−{isRepeat ? (isChecking ? "..." : formatCurrency(eventDiscRepeat)) : formatCurrency(eventDisc)}</span>
                       </div>
                     </>
@@ -1657,18 +1809,20 @@ export default function Booking() {
                   </div>
                 )}
                 {(() => {
+
                   const disc = isEvent
                     ? (isRepeat
-                        ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
-                        : Math.round(totalPrice * EVENT_DISCOUNT_RATE))
-                    : (couponResult?.discountAmount ?? 0);
+                         ? Math.floor(((totalPrice * (effectiveCount || repeatCount)) * EVENT_DISCOUNT_NUMERATOR + EVENT_DISCOUNT_DENOMINATOR / 2) / EVENT_DISCOUNT_DENOMINATOR)
+                         : Math.floor((totalPrice * EVENT_DISCOUNT_NUMERATOR + EVENT_DISCOUNT_DENOMINATOR / 2) / EVENT_DISCOUNT_DENOMINATOR))
+                    : (couponResult?.discountAmount ?? 0) + apMultigunaDiscountTotal;
+
                   const grand = isRepeat
-                    ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
-                    : Math.max(0, totalPrice - disc);
+                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount + additionalChargesTotal) - disc))
+                     : Math.max(0, singlePriceBeforeDiscount - disc);
                   return (
                     <>
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                        <span>{t("Grand Total", "Grand Total")}</span>
+                        <span>{isAP && isMultiguna ? t("Perkiraan Total Setelah Verifikasi", "Estimated Total After Verification") : t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (

@@ -14,7 +14,7 @@ import {
   companyInvoicesTable,
   companyInvoiceItemsTable,
 } from "@workspace/db";
-import { eq, desc, and, inArray, ne, sql, gte, lte, isNull } from "drizzle-orm";
+import { eq, desc, and, inArray, ne, sql, gte, lte, isNull, isNotNull, asc } from "drizzle-orm";
 import { adminMiddleware, financeMiddleware, superAdminMiddleware } from "../lib/auth";
 import { runBankAudit } from "../lib/bankAudit";
 import {
@@ -27,6 +27,10 @@ import {
 import { writeApprovalToSheetRow, isGoogleSheetsConfigured } from "../lib/googleSheets";
 import * as XLSX from "xlsx";
 import multer from "multer";
+import { ensurePaymentBankAccount } from "../lib/paymentEnrichment";
+import { readPaymentProofOcr } from "../lib/paymentOcr";
+import { getClientInfo, getUserFromReq, logAudit } from "../lib/auditLog";
+import { getPaymentReconciliationMissingFields } from "../lib/paymentReconciliationEligibility";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -43,12 +47,23 @@ async function propagateApproval(
   const ctx = auditCtx ?? {};
 
   if (type === "payment") {
-    const [pmt] = await db.select({
-      bookingId: paymentsTable.bookingId,
-      amount: paymentsTable.amount,
-    }).from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    const [rawPayment] = await db.select().from(paymentsTable)
+      .where(eq(paymentsTable.id, id)).limit(1);
+    if (!rawPayment) throw new Error(`Payment ${id} tidak ditemukan`);
+    const [paymentBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, rawPayment.bookingId)).limit(1);
+    if (!paymentBooking) throw new Error(`Booking ${rawPayment.bookingId} tidak ditemukan`);
+    const pmt = await ensurePaymentBankAccount(
+      rawPayment,
+      paymentBooking,
+      rawPayment.paymentProvider ?? "unknown",
+    );
 
-    await db.update(paymentsTable).set({ status: "confirmed", updatedAt: new Date() }).where(eq(paymentsTable.id, id));
+    await db.update(paymentsTable).set({
+      status: "confirmed",
+      settlementStatus: "settled",
+      updatedAt: new Date(),
+    }).where(eq(paymentsTable.id, id));
     await db.insert(auditLogsTable).values({
       userId: ctx.userId, userRole: ctx.userRole,
       action: "payment_confirmed_via_recon", entity: "payment", entityId: id,
@@ -56,7 +71,7 @@ async function propagateApproval(
       ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
     });
 
-    if (pmt?.bookingId) {
+    if (pmt.bookingId) {
       const updated = await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
         and(eq(bookingsTable.id, pmt.bookingId), inArray(bookingsTable.status, CONFIRMABLE as any[]))
       ).returning({ id: bookingsTable.id });
@@ -78,10 +93,16 @@ async function propagateApproval(
           .where(and(eq(bookingsTable.groupRef, mainBooking.groupRef), ne(bookingsTable.id, pmt.bookingId)));
         for (const sib of siblings) {
           if (!CONFIRMABLE.includes(sib.status as any)) continue;
+          const [siblingPayment] = await db.select().from(paymentsTable)
+            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")))
+            .limit(1);
+          if (siblingPayment) {
+            await ensurePaymentBankAccount(siblingPayment, paymentBooking);
+          }
           await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
             .where(eq(bookingsTable.id, sib.id));
           await db.update(paymentsTable)
-            .set({ status: "confirmed", updatedAt: new Date() })
+            .set({ status: "confirmed", settlementStatus: "settled", updatedAt: new Date() })
             .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
           await db.insert(auditLogsTable).values({
             userId: ctx.userId, userRole: ctx.userRole,
@@ -145,7 +166,7 @@ async function propagateApproval(
 
         // Konfirmasi payment terkait
         await db.update(paymentsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
+            .set({ status: "confirmed", settlementStatus: "settled", updatedAt: new Date() })
           .where(and(
             eq(paymentsTable.bookingId, row.id),
             inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[])
@@ -274,7 +295,9 @@ async function postAccountingJournal(
   mutation: {
     id: number; transactionDate: string; amount: string | null; direction: string;
     description: string; accountingPosted: boolean;
-    bankAccountId?: string | null; taxType?: string | null; transactionType?: string | null;
+    bankAccountId?: string | null; companyId?: number | null;
+    matchedPaymentId?: number | null;
+    taxType?: string | null; transactionType?: string | null;
   },
   candidateType: string | undefined,
   candidateId: number | undefined,
@@ -287,6 +310,28 @@ async function postAccountingJournal(
 
   const journalId = `JRN-${mutation.transactionDate.replace(/-/g, "").slice(0, 8)}-${String(mutation.id).padStart(6, "0")}`;
   const memo = mutation.description.slice(0, 200);
+  const paymentId =
+    mutation.matchedPaymentId ??
+    (candidateType === "payment" ? candidateId ?? null : null);
+  const [paymentSnapshot] = paymentId
+    ? await db.select({
+        id: paymentsTable.id,
+        paymentMethod: paymentsTable.paymentMethod,
+        paymentProvider: paymentsTable.paymentProvider,
+        providerName: paymentsTable.providerName,
+        providerReference: paymentsTable.providerReference,
+        providerId: paymentsTable.providerId,
+        providerOrderId: paymentsTable.providerOrderId,
+        merchantTradeNo: paymentsTable.merchantTradeNo,
+        providerTradeNo: paymentsTable.providerTradeNo,
+        companyId: paymentsTable.companyId,
+        bankAccountId: paymentsTable.bankAccountId,
+        expectedSettlementDate: paymentsTable.expectedSettlementDate,
+        mdrRate: paymentsTable.mdrRate,
+        mdrAmount: paymentsTable.mdrAmount,
+        settlementStatus: paymentsTable.settlementStatus,
+      }).from(paymentsTable).where(eq(paymentsTable.id, paymentId)).limit(1)
+    : [undefined];
 
   let debitCode: string, debitName: string, creditCode: string, creditName: string;
 
@@ -359,7 +404,7 @@ async function postAccountingJournal(
   await db.insert(bankJournalEntriesTable).values({
     journalId,
     mutationId: mutation.id,
-    companyId: (mutation as any).companyId ?? null,
+    companyId: mutation.companyId ?? paymentSnapshot?.companyId ?? null,
     direction: mutation.direction,
     amount: String(amount),
     debitAccountCode: debitCode,
@@ -369,6 +414,21 @@ async function postAccountingJournal(
     memo,
     candidateType: candidateType ?? null,
     candidateId: candidateId ?? null,
+    paymentId: paymentSnapshot?.id ?? null,
+    paymentMethod: paymentSnapshot?.paymentMethod ?? null,
+    paymentProvider: paymentSnapshot?.paymentProvider ?? null,
+    providerName: paymentSnapshot?.providerName ?? null,
+    providerReference: paymentSnapshot?.providerReference ?? null,
+    providerId: paymentSnapshot?.providerId ?? null,
+    providerOrderId: paymentSnapshot?.providerOrderId ?? null,
+    merchantTradeNo: paymentSnapshot?.merchantTradeNo ?? null,
+    providerTradeNo: paymentSnapshot?.providerTradeNo ?? null,
+    paymentCompanyId: paymentSnapshot?.companyId ?? null,
+    paymentBankAccountId: paymentSnapshot?.bankAccountId ?? null,
+    paymentExpectedSettlementDate: paymentSnapshot?.expectedSettlementDate ?? null,
+    paymentMdrRate: paymentSnapshot?.mdrRate ?? null,
+    paymentMdrAmount: paymentSnapshot?.mdrAmount ?? null,
+    paymentSettlementStatus: paymentSnapshot?.settlementStatus ?? null,
     postedAt: new Date(),
     postedBy: postedBy ?? null,
   });
@@ -538,6 +598,7 @@ router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"
       const normDesc = normalizeDescription(row.description);
       const providerOrderId = extractOrderId(row.description);
       const providerName = extractProviderName(row.description);
+       const providerDetectionSource = providerName ? "proven description pattern" : null;
 
       const [existing] = await db
         .select({ id: bankMutationsTable.id })
@@ -565,6 +626,7 @@ router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"
           mutationKey,
           normalizedDescription: normDesc,
           providerName,
+           providerDetectionSource,
           providerOrderId,
           rawPayload: row,
           status: "unmatched",
@@ -706,6 +768,16 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         p.ocr_amount         AS "ocrAmount",
         p.ocr_date           AS "ocrDate",
         p.ocr_raw            AS "ocrRaw",
+        p.ocr_data           AS "ocrData",
+        p.payment_method     AS "paymentMethod",
+         p.payment_provider   AS "paymentProvider",
+         p.provider_name      AS "providerName",
+         p.company_id         AS "companyId",
+         p.bank_account_id    AS "bankAccountId",
+         p.provider_id        AS "providerId",
+         p.provider_order_id  AS "providerOrderId",
+         p.expected_settlement_date AS "expectedSettlementDate",
+         p.settlement_status  AS "settlementStatus",
         p.status             AS "paymentStatus",
         p.booking_id         AS "paymentBookingId",
         -- Booking enrichment via payment (candidateType = 'payment')
@@ -751,9 +823,18 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
 
     // Normalise: untuk candidateType='order' salin field order* ke field utama agar UI konsisten
     const normalised = (rows as any[]).map((r) => {
+      const reconciliationMissing = r.candidateType === "payment"
+        ? getPaymentReconciliationMissingFields({
+            paymentMethod: r.paymentMethod,
+            providerName: r.providerName,
+            companyId: r.companyId == null ? null : Number(r.companyId),
+          })
+        : [];
       if (r.candidateType === "order") {
         return {
           ...r,
+          reconciliationReady: null,
+          reconciliationMissing: [],
           bookingOrderNumber: r.orderOrderNumber ?? r.bookingOrderNumber,
           customerName: r.orderCustomerName ?? r.customerName,
           customerPhone: r.orderCustomerPhone ?? r.customerPhone,
@@ -766,11 +847,17 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
       if (r.candidateType === "group_payment") {
         return {
           ...r,
+          reconciliationReady: reconciliationMissing.length === 0,
+          reconciliationMissing,
           customerName: r.groupCustomerName ?? r.customerName,
           customerPhone: r.groupCustomerPhone ?? r.customerPhone,
         };
       }
-      return r;
+      return {
+        ...r,
+        reconciliationReady: reconciliationMissing.length === 0,
+        reconciliationMissing,
+      };
     });
 
     // Enrich group_payment candidates with child bookings data (batch query)
@@ -866,6 +953,45 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
     const auditCtx = { userId: adminUser?.userId, userRole: adminUser?.role, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string };
     let approvedCandidateType: string | undefined;
     let approvedCandidateId: number | undefined;
+    let selectedMatch: typeof bankReconciliationMatchesTable.$inferSelect | undefined;
+
+    if (matchId) {
+      [selectedMatch] = await db
+        .select()
+        .from(bankReconciliationMatchesTable)
+        .where(and(
+          eq(bankReconciliationMatchesTable.mutationId, mutationId),
+          eq(bankReconciliationMatchesTable.id, matchId),
+        ))
+        .limit(1);
+    }
+
+    const selectedType = selectedMatch?.candidateType ?? candidateType;
+    const selectedId = selectedMatch?.candidateId ?? candidateId;
+    if (selectedType === "payment" && selectedId) {
+      const [payment] = await db
+        .select({
+          paymentMethod: paymentsTable.paymentMethod,
+          providerName: paymentsTable.providerName,
+          companyId: paymentsTable.companyId,
+        })
+        .from(paymentsTable)
+        .where(eq(paymentsTable.id, selectedId))
+        .limit(1);
+      if (!payment) {
+        res.status(409).json({ error: "Payment kandidat tidak ditemukan." });
+        return;
+      }
+      const missing = getPaymentReconciliationMissingFields(payment);
+      if (missing.length > 0) {
+        res.status(409).json({
+          error: "Payment belum memenuhi syarat kandidat rekonsiliasi.",
+          code: "PAYMENT_RECONCILIATION_METADATA_INCOMPLETE",
+          missing,
+        });
+        return;
+      }
+    }
 
     await db
       .update(bankReconciliationMatchesTable)
@@ -883,11 +1009,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           )
         );
 
-      const [match] = await db
-        .select()
-        .from(bankReconciliationMatchesTable)
-        .where(eq(bankReconciliationMatchesTable.id, matchId))
-        .limit(1);
+      const match = selectedMatch;
 
       approvedCandidateType = match?.candidateType ?? undefined;
       approvedCandidateId = match?.candidateId ?? undefined;
@@ -897,7 +1019,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .set({
           status: "approved",
           matchedPaymentId: match?.candidateType === "payment" ? match.candidateId : null,
-          matchedOrderId: ((match?.candidateType as string) === "order" || (match?.candidateType as string) === "group_payment") ? match.candidateId : null,
+          matchedOrderId: match && ((match.candidateType as string) === "order" || (match.candidateType as string) === "group_payment") ? match.candidateId : null,
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));
@@ -1224,71 +1346,191 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       return;
     }
 
-    const imgRes = await fetch(proofUrl);
-    if (!imgRes.ok) {
-      res.status(400).json({ error: `Gagal mengunduh gambar: ${imgRes.statusText}` });
+    if (!paymentId) {
+      res.status(400).json({ error: "paymentId wajib diisi" });
       return;
     }
-    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
 
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("ind+eng", 1, {
-      cachePath: "/tmp/tesseract-cache",
-      logger: () => {},
-    });
-    const { data } = await worker.recognize(imgBuffer);
-    await worker.terminate();
-
-    const rawText = data.text || "";
-    const lines = rawText.split("\n").map((l: string) => l.trim()).filter(Boolean);
-    let ocrName: string | null = null;
-    let ocrAmount: number | null = null;
-    let ocrDate: string | null = null;
-
-    const amountMatch = rawText.match(/(?:Rp\.?\s*|IDR\s*)?([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?)/i);
-    if (amountMatch) {
-      const cleaned = amountMatch[1]!.replace(/\./g, "").replace(",", ".");
-      ocrAmount = parseFloat(cleaned) || null;
-    }
-
-    const dateMatch = rawText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})|(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
-    if (dateMatch) {
-      if (dateMatch[4]) {
-        ocrDate = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
-      } else {
-        const d = dateMatch[1]!.padStart(2, "0");
-        const m = dateMatch[2]!.padStart(2, "0");
-        const y = dateMatch[3]!.length === 2 ? `20${dateMatch[3]}` : dateMatch[3]!;
-        ocrDate = `${y}-${m}-${d}`;
-      }
-    }
-
-    const skipWords = /^(transfer|bank|rekening|tanggal|nominal|total|biaya|fee|dari|ke|kode|ref|no|rp|idr|berhasil|sukses|debet|kredit|saldo|date|amount|beneficiary|sender)/i;
-    for (const line of lines) {
-      if (line.length > 3 && /[a-zA-Z]{3,}/.test(line) && !skipWords.test(line) && !/^\d+$/.test(line)) {
-        ocrName = line.slice(0, 100);
-        break;
-      }
-    }
-
-    if (paymentId) {
-      await db.execute(sql`
-        UPDATE sport_center.sport_payments
-        SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate}, ocr_raw = ${rawText.slice(0, 2000)}
-        WHERE id = ${paymentId}
-      `);
-    }
+    const result = await scanPaymentProofOcr(Number(paymentId), proofUrl, req);
 
     res.json({
       ok: true,
-      ocrName,
-      ocrAmount,
-      ocrDate,
-      ocrRaw: rawText.slice(0, 500),
+      ...result,
     });
   } catch (err: any) {
     req.log.error({ err }, "OCR scan error");
     res.status(500).json({ error: err?.message ?? "Gagal scan OCR" });
+  }
+});
+
+type PaymentOcrScanResult = {
+  ocrName: string | null;
+  ocrAmount: number | null;
+  ocrDate: string | null;
+  ocrRaw: string;
+  paymentMethod: string | null;
+  paymentMethodDetection: Awaited<ReturnType<typeof readPaymentProofOcr>>["paymentMethodDetection"];
+  paymentMethodAutoUpdated: boolean;
+  accountingReviewRequired: boolean;
+  outcome: "updated" | "unchanged" | "skipped";
+};
+
+async function scanPaymentProofOcr(
+  paymentId: number,
+  proofUrl: string,
+  req: Parameters<typeof adminMiddleware>[0],
+): Promise<PaymentOcrScanResult> {
+  const ocrResult = await readPaymentProofOcr(proofUrl);
+  const { ocrName, ocrAmount, ocrDate, ocrRaw, paymentMethodDetection } = ocrResult;
+  const [currentPayment] = await db.select().from(paymentsTable)
+    .where(eq(paymentsTable.id, paymentId)).limit(1);
+  if (!currentPayment) {
+    throw new Error("Payment tidak ditemukan");
+  }
+
+  let paymentMethod = currentPayment.paymentMethod ?? null;
+  let paymentMethodAutoUpdated = false;
+  const ocrData = {
+    ...(currentPayment.ocrData && typeof currentPayment.ocrData === "object"
+      ? currentPayment.ocrData as Record<string, unknown>
+      : {}),
+    paymentMethodDetection: {
+      ...paymentMethodDetection,
+      detectedAt: new Date().toISOString(),
+      source: "ocr",
+    },
+  };
+  let paymentProvider: string | null = null;
+
+  if (
+    paymentMethodDetection.highConfidence &&
+    paymentMethodDetection.paymentMethod &&
+    paymentMethodDetection.paymentMethod !== currentPayment.paymentMethod
+  ) {
+    paymentMethod = paymentMethodDetection.paymentMethod;
+    paymentMethodAutoUpdated = true;
+    if (paymentMethod === "QRIS" && currentPayment.paymentProvider === "unknown") {
+      paymentProvider = "mandiri_direct";
+    }
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "payment_method_auto_detected_ocr",
+      entity: "payment",
+      entityId: paymentId,
+      before: {
+        paymentMethod: currentPayment.paymentMethod,
+        paymentStatus: currentPayment.status,
+      },
+      after: {
+        paymentMethod,
+        confidence: paymentMethodDetection.confidence,
+        signals: paymentMethodDetection.signals,
+        matchedTerms: paymentMethodDetection.matchedTerms,
+        accountingReviewRequired: currentPayment.status === "confirmed",
+        source: "ocr",
+      },
+      ...getClientInfo(req),
+    });
+  }
+
+  await db.execute(sql`
+    UPDATE sport_center.sport_payments
+    SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate},
+        ocr_raw = ${ocrRaw}, ocr_data = ${JSON.stringify(ocrData)}::jsonb,
+        payment_method = COALESCE(${paymentMethodAutoUpdated ? paymentMethod : null}, payment_method),
+        payment_provider = COALESCE(${paymentProvider}::sport_center.payment_provider, payment_provider),
+        updated_at = NOW()
+    WHERE id = ${paymentId}
+  `);
+
+  return {
+    ocrName,
+    ocrAmount,
+    ocrDate,
+    ocrRaw: ocrRaw.slice(0, 500),
+    paymentMethod,
+    paymentMethodDetection,
+    paymentMethodAutoUpdated,
+    accountingReviewRequired: paymentMethodAutoUpdated && currentPayment.status === "confirmed",
+    outcome: paymentMethodAutoUpdated
+      ? "updated"
+      : paymentMethodDetection.highConfidence && paymentMethodDetection.paymentMethod
+        ? "unchanged"
+        : "skipped",
+  };
+}
+
+// POST /bank-reconciliation/scan-ocr-bulk
+// Processes a small cursor-based batch so admins can safely re-scan all
+// existing payment proofs without creating one long request.
+router.post("/bank-reconciliation/scan-ocr-bulk", adminMiddleware, async (req, res) => {
+  try {
+    const requestedBatchSize = Number(req.body?.batchSize ?? 5);
+    const cursor = Number(req.body?.cursor ?? 0);
+    const batchSize = Number.isInteger(requestedBatchSize)
+      ? Math.min(Math.max(requestedBatchSize, 1), 5)
+      : 5;
+    const safeCursor = Number.isInteger(cursor) && cursor >= 0 ? cursor : 0;
+
+    const conditions = safeCursor > 0
+      ? and(isNotNull(paymentsTable.proofUrl), gte(paymentsTable.id, safeCursor + 1))
+      : isNotNull(paymentsTable.proofUrl);
+    const payments = await db.select({
+      id: paymentsTable.id,
+      proofUrl: paymentsTable.proofUrl,
+    })
+      .from(paymentsTable)
+      .where(conditions)
+      .orderBy(asc(paymentsTable.id))
+      .limit(batchSize);
+
+    let updated = 0;
+    let unchanged = 0;
+    let skipped = 0;
+    let failed = 0;
+    let accountingReviewRequired = 0;
+    const errors: Array<{ paymentId: number; error: string }> = [];
+
+    for (const payment of payments) {
+      if (!payment.proofUrl?.trim()) {
+        skipped++;
+        continue;
+      }
+      try {
+        const result = await scanPaymentProofOcr(payment.id, payment.proofUrl, req);
+        if (result.outcome === "updated") updated++;
+        else if (result.outcome === "unchanged") unchanged++;
+        else skipped++;
+        if (result.accountingReviewRequired) accountingReviewRequired++;
+      } catch (error) {
+        failed++;
+        if (errors.length < 10) {
+          errors.push({
+            paymentId: payment.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        req.log.warn({ err: error, paymentId: payment.id }, "Bulk payment proof OCR failed");
+      }
+    }
+
+    const nextCursor = payments.length > 0 ? payments[payments.length - 1]!.id : safeCursor;
+    res.json({
+      ok: true,
+      processed: payments.length,
+      updated,
+      unchanged,
+      skipped,
+      failed,
+      accountingReviewRequired,
+      errors,
+      nextCursor,
+      hasMore: payments.length === batchSize,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Bulk OCR scan error");
+    res.status(500).json({ error: err?.message ?? "Gagal bulk scan OCR" });
   }
 });
 

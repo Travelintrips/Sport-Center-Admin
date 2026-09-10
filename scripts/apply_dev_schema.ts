@@ -26,6 +26,31 @@ for (const file of ["0000_fearless_adam_warlock.sql", "0001_huge_plazm.sql", "00
   console.log(`${file}: ${ok} ok, ${fail} skip/fail`);
 }
 
+// The base Drizzle migration creates legacy table names. The application schema
+// reads the sport_* names, so normalize them before seeding or starting the API.
+for (const [from, to] of [
+  ["settings", "sport_settings"],
+  ["bookings", "sport_bookings"],
+  ["facilities", "sport_facilities"],
+  ["gym_memberships", "sport_memberships"],
+  ["payments", "sport_payments"],
+] as const) {
+  await client.query(`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'sport_center' AND table_name = '${from}'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'sport_center' AND table_name = '${to}'
+      ) THEN
+        EXECUTE 'ALTER TABLE sport_center.${from} RENAME TO ${to}';
+      END IF;
+    END $$
+  `);
+}
+console.log("Legacy tables normalized to sport_* names");
+
 // Seed admin user
 const hash = crypto.createHmac("sha256", process.env.SESSION_SECRET || "").update("admin123").digest("hex");
 await client.query(`
@@ -41,13 +66,6 @@ await client.query(`
   ON CONFLICT DO NOTHING
 `).catch(() => {});
 
-// Seed 1 facility
-await client.query(`
-  INSERT INTO sport_center.facilities (name, category, description, price_per_hour, open_hour, close_hour, is_active)
-  VALUES ('Lapangan Futsal A', 'futsal', 'Lapangan futsal indoor', 150000, '06:00', '22:00', true)
-  ON CONFLICT DO NOTHING
-`).catch(() => {});
-
-console.log("Seed done");
+console.log("Base schema ready; run scripts seed-all to populate facilities and demo data");
 await client.end();
 console.log("Done.");

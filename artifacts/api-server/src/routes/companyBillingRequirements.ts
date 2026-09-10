@@ -90,8 +90,10 @@ router.put("/company-billing-requirements/:companyId", adminMiddleware, async (r
       entity: "company",
       entityId: cid,
       after: { documentTypes: validTypes },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
+
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
       ipAddress,
       userAgent,
     });
@@ -205,9 +207,11 @@ router.post("/company-invoices/:id/audit-billing-action", adminMiddleware, async
       action,
       entity: "company_invoice",
       entityId: invoiceId,
-      after: { documents },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
+
+      after: { documents: Array.isArray(documents) ? documents.slice(0, 30) : [] },
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
       ipAddress,
       userAgent,
     });

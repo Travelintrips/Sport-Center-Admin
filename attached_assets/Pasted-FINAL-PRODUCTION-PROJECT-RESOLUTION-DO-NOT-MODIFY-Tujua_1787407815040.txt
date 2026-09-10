@@ -1,0 +1,233 @@
+FINAL PRODUCTION PROJECT RESOLUTION — DO NOT MODIFY
+
+Tujuan:
+Menentukan project GCP Production Sport Center yang sebenarnya.
+Jangan melakukan deployment, migration, IAM change, Secret change, database query, atau data mutation.
+
+CURRENT EVIDENCE:
+
+Configured deployment:
+  project = sc-sport-center
+
+Configured runtime:
+  sc-sport-center@appspot.gserviceaccount.com
+
+Configured Secret ID:
+  sport-center
+
+Known accessible project:
+  sport-center-506306
+  project number 398772007342
+
+Namun:
+  sport-center-506306 tidak memiliki App Engine application.
+
+sc-sport-center:
+  tidak dapat diakses oleh akun audit saat ini.
+
+Public production:
+  https://sc.travelintrips.co.id
+  HTTP 200
+  server: Google Frontend
+
+==================================================
+PHASE 1 — DO NOT CHANGE CONFIGURATION
+==================================================
+
+Jangan mengubah:
+
+- GCP_PROJECT_ID
+- project ID deployment
+- app.yaml
+- cloudbuild.yaml
+- Secret Manager
+- service account
+- database
+- deployment target
+
+Jangan membuat project baru.
+
+==================================================
+PHASE 2 — FIND DEPLOYMENT SOURCE
+==================================================
+
+Audit repository secara read-only untuk menemukan:
+
+- siapa/akun apa yang melakukan deployment terakhir
+- Cloud Build configuration
+- deployment history
+- GAE deployment scripts
+- CI/CD configuration
+- Replit deployment metadata
+- GCP project reference
+- service account reference
+- Cloud Build service account
+- deployment timestamp/version
+- domain mapping configuration
+
+Cari evidence aktual, bukan komentar/dokumentasi.
+
+==================================================
+PHASE 3 — PUBLIC DOMAIN ANALYSIS
+==================================================
+
+Analisis:
+
+https://sc.travelintrips.co.id
+
+Cari secara read-only:
+
+- DNS records
+- CNAME
+- Google Frontend headers
+- redirect chain
+- App Engine domain mapping evidence
+- Cloud Run evidence
+- Firebase evidence
+- Google-managed certificate evidence
+
+Jangan menyimpulkan project ID hanya dari hostname.
+
+Tujuannya hanya mengidentifikasi kemungkinan hosting platform.
+
+==================================================
+PHASE 4 — GCP PROJECT CANDIDATES
+==================================================
+
+Gunakan hanya project yang benar-benar dapat dibuktikan.
+
+Untuk setiap candidate:
+
+PROJECT ID
+PROJECT NUMBER
+APP ENGINE EXISTS?
+ACTIVE SERVICE?
+ACTIVE VERSION?
+DOMAIN MAPPING?
+PRODUCTION DEPLOYMENT EVIDENCE?
+
+Jangan menganggap:
+
+sport-center-506306 = Production
+
+hanya karena nama project cocok.
+
+==================================================
+PHASE 5 — DEPLOYMENT ACCOUNT
+==================================================
+
+Jika repository/deployment logs menyimpan identifier deployment principal:
+
+tentukan:
+
+DEPLOYMENT PRINCIPAL
+DEPLOYMENT PROJECT
+DEPLOYMENT TIME
+DEPLOYMENT VERSION
+
+Jangan tampilkan private key/token/credential.
+
+Jika hanya tersedia email/service-account identifier, tampilkan identifier yang tidak sensitif.
+
+==================================================
+PHASE 6 — PRODUCTION PROJECT CONFLICT
+==================================================
+
+Jika:
+
+configured project = sc-sport-center
+
+tetapi:
+
+accessible project = sport-center-506306
+
+dan sc-sport-center tidak dapat diakses,
+
+JANGAN mengubah configuration.
+
+Report:
+
+CONFIGURED PROJECT = sc-sport-center
+ACCESSIBLE PROJECT = sport-center-506306
+ACTUAL PRODUCTION PROJECT = UNVERIFIED
+
+==================================================
+PHASE 7 — SECRET MANAGER
+==================================================
+
+Jangan mencoba membaca secret value.
+
+Jika production bootstrap tidak tersedia:
+
+report:
+
+PRODUCTION BOOTSTRAP = UNAVAILABLE
+
+Jangan membuat bootstrap baru.
+
+Jangan membuat secret baru.
+
+==================================================
+PHASE 8 — APP ENGINE
+==================================================
+
+Jika sc-sport-center tidak dapat diakses:
+
+jangan klaim:
+
+App Engine exists
+version exists
+runtime identity confirmed
+
+Expected runtime tetap:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+classification:
+
+EXPECTED / UNVERIFIED
+
+==================================================
+PHASE 9 — FINAL OUTPUT
+==================================================
+
+Berikan tabel:
+
+| Item | Result | Evidence |
+|---|---|---|
+| Actual Production Project | ... | ... |
+| Project Number | ... | ... |
+| App Engine Project | ... | ... |
+| Production Deployment | ... | ... |
+| Production Domain | ... | ... |
+| Runtime Service Account | ... | ... |
+| Secret Manager Project | ... | ... |
+| Deployment Principal | ... | ... |
+
+Kemudian verdict:
+
+A.
+PRODUCTION PROJECT CONFIRMED
+
+atau
+
+B.
+PRODUCTION PROJECT UNVERIFIED — EXTERNAL GCP ACCESS REQUIRED
+
+Jika B:
+
+jelaskan EXACTLY project/access yang harus diberikan kepada authorized audit account.
+
+Jangan meminta perubahan aplikasi.
+
+Jangan mengubah database.
+
+Jangan mengubah IAM.
+
+Jangan deploy.
+
+Jangan menggunakan DEV sebagai PROD.
+
+Jangan menjalankan transaction audit.
+
+Lanjutkan seluruh investigasi read-only yang masih bisa dilakukan tanpa akses production.
