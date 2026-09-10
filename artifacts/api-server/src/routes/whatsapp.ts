@@ -42,7 +42,7 @@ import { logAudit, logAccountingError } from "../lib/auditLog";
 import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
-import { calculateTax, recordTaxTransaction } from "../lib/tax";
+import { recordTaxTransaction, resolveCustomerTax } from "../lib/tax";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import {
   checkInBooking,
@@ -701,16 +701,20 @@ router.post("/wa/booking", async (req, res) => {
     }
 
     const totalPrice = Number(facility.pricePerHour) * Number(durationHours);
-    // Hitung PPN — mengikuti effective_date backward-compat rule
-    const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
+    const customer = await ensureCustomer(customerPhone, customerName);
+    const taxCalc = await resolveCustomerTax(totalPrice, {
+      customerId: customer.id,
+      bookingDate,
+    });
     const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     const [booking] = await db.insert(bookingsTable).values({
       orderNumber,
       customerName,
-      customerEmail: `wa_${cleanPhone(customerPhone)}@whatsapp.local`,
+      customerEmail: customer.email,
       customerPhone,
+      customerId: customer.id,
       facilityId: Number(facilityId),
       bookingDate,
       startTime,
@@ -725,9 +729,11 @@ router.post("/wa/booking", async (req, res) => {
       paymentDeadline,
       status: "pending_payment",
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
-      dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
-      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
-      grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+      dpp: String(taxCalc.dpp),
+      ppnAmount: String(taxCalc.taxAmount),
+      grandTotal: String(taxCalc.grandTotal),
+      ppnTreatment: taxCalc.ppnTreatment,
+      ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
     }).returning();
 
     // History
@@ -964,13 +970,20 @@ router.post("/wa/action/:token", async (req, res) => {
         });
 
         const _today = new Date().toISOString().split("T")[0];
-        const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
+        const {
+          dpp: _dpp,
+          ppnAmount: _ppnAmount,
+          ppnCollectedByCustomer: _ppnCollectedByCustomer,
+        } = extractBookingDpp(booking);
         const _paymentMethod = payment?.paymentMethod ?? "Transfer Bank";
         postConfirmedPaymentAccounting({
           bookingId: booking.id,
           orderNumber: booking.orderNumber,
           dpp: _dpp,
           ppnAmount: _ppnAmount,
+          ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+          ppnTreatment: booking.ppnTreatment,
+          ppnCollectedByCustomer: _ppnCollectedByCustomer,
           facilityId: booking.facilityId,
           journalDate: _today,
           paymentMethod: _paymentMethod,
@@ -1387,13 +1400,20 @@ router.post("/wa/review/:token", async (req, res) => {
       });
 
       const _today = new Date().toISOString().split("T")[0];
-      const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
+      const {
+        dpp: _dpp,
+        ppnAmount: _ppnAmount,
+        ppnCollectedByCustomer: _ppnCollectedByCustomer,
+      } = extractBookingDpp(booking);
       const _paymentMethod = payment?.paymentMethod ?? "Transfer Bank";
       postConfirmedPaymentAccounting({
         bookingId: booking.id,
         orderNumber: booking.orderNumber,
         dpp: _dpp,
         ppnAmount: _ppnAmount,
+        ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+        ppnTreatment: booking.ppnTreatment,
+        ppnCollectedByCustomer: _ppnCollectedByCustomer,
         facilityId: booking.facilityId,
         journalDate: _today,
         paymentMethod: _paymentMethod,
@@ -2031,13 +2051,20 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
   });
 
   const _paidToday = new Date().toISOString().split("T")[0];
-  const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
+  const {
+    dpp: _paidDpp,
+    ppnAmount: _paidPpnAmount,
+    ppnCollectedByCustomer: _paidPpnCollectedByCustomer,
+  } = extractBookingDpp(booking);
   const _paidPaymentMethod = paymentForAccounting?.paymentMethod ?? "Transfer Bank";
   postConfirmedPaymentAccounting({
     bookingId: booking.id,
     orderNumber: booking.orderNumber,
     dpp: _paidDpp,
     ppnAmount: _paidPpnAmount,
+    ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    ppnTreatment: booking.ppnTreatment,
+    ppnCollectedByCustomer: _paidPpnCollectedByCustomer,
     facilityId: booking.facilityId,
     journalDate: _paidToday,
     paymentMethod: _paidPaymentMethod,
@@ -2915,8 +2942,11 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     : "";
 
   // ── 9. Hitung PPN ──────────────────────────────────────────────────────────
-  const taxCalc = await calculateTax(totalPrice, "sport_booking", session.bookingDate);
-  const grandTotal = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
+  const taxCalc = await resolveCustomerTax(totalPrice, {
+    customerId: customer.id,
+    bookingDate: session.bookingDate,
+  });
+  const grandTotal = taxCalc.grandTotal;
   const orderNumber = await generateBookingOrderNumber();
 
   // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
@@ -2939,10 +2969,12 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     status: "waiting_admin_approval",
     bookerName: session.bookerName || null,
     notes: session.notes || null,
-    ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
-    dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
-    ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
-    grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+    ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+    dpp: String(taxCalc.dpp),
+    ppnAmount: String(taxCalc.taxAmount),
+    grandTotal: String(taxCalc.grandTotal),
+    ppnTreatment: taxCalc.ppnTreatment,
+    ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
   }).returning();
 
   await db.insert(bookingHistoryTable).values({

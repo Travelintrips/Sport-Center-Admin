@@ -9,9 +9,10 @@ describe("payment accounting for inclusive PPN", () => {
       grandTotal: 219820,
     });
 
-    expect(amounts).toEqual({
+    expect(amounts).toMatchObject({
       dpp: 200000,
       ppnAmount: 19820,
+      ppnCollectedByCustomer: false,
     });
     expect(amounts.dpp + amounts.ppnAmount).toBe(219820);
   });
@@ -24,9 +25,10 @@ describe("payment accounting for inclusive PPN", () => {
       grandTotal: 219820,
     });
 
-    expect(amounts).toEqual({
+    expect(amounts).toMatchObject({
       dpp: 200000,
       ppnAmount: 19820,
+      ppnCollectedByCustomer: false,
     });
   });
 });

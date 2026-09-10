@@ -374,13 +374,20 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   });
 
   const today = new Date().toISOString().split("T")[0];
-  const { dpp, ppnAmount } = extractBookingDpp(booking);
+  const {
+    dpp,
+    ppnAmount,
+    ppnCollectedByCustomer,
+  } = extractBookingDpp(booking);
   const paymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
   postConfirmedPaymentAccounting({
     bookingId: booking.id,
     orderNumber: booking.orderNumber,
     dpp,
     ppnAmount,
+    ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    ppnTreatment: booking.ppnTreatment,
+    ppnCollectedByCustomer,
     facilityId: booking.facilityId,
     journalDate: today,
     paymentMethod,

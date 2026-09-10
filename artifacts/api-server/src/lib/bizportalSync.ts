@@ -1833,6 +1833,11 @@ async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: numb
   merchantTradeNo: string | null;
   providerTradeNo: string | null;
   ppnRate: number;
+   dpp: number | null;
+   ppnAmount: number | null;
+   grandTotal: number | null;
+   ppnTreatment: string | null;
+   ppnCollectedByCustomer: boolean;
   paidAt: string | null;
   journalDate: string;
 } | null> {
@@ -1851,7 +1856,12 @@ async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: numb
        sp.provider_order_id,
        sp.merchant_trade_no,
        sp.provider_trade_no,
+        sb.dpp,
+        sb.ppn_amount,
+        sb.grand_total,
        COALESCE(sb.ppn_rate, 0) AS ppn_rate,
+        sb.ppn_treatment,
+        COALESCE(sb.ppn_collected_by_customer, false) AS ppn_collected_by_customer,
        COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date::text AS journal_date,
        COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::text AS paid_at
      FROM sport_center.sport_payments sp
@@ -1876,6 +1886,11 @@ async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: numb
     merchantTradeNo: row.merchant_trade_no == null ? null : String(row.merchant_trade_no),
     providerTradeNo: row.provider_trade_no == null ? null : String(row.provider_trade_no),
     ppnRate: Number(row.ppn_rate ?? 0),
+     dpp: row.dpp == null ? null : Math.round(Number(row.dpp)),
+     ppnAmount: row.ppn_amount == null ? null : Math.round(Number(row.ppn_amount)),
+     grandTotal: row.grand_total == null ? null : Math.round(Number(row.grand_total)),
+     ppnTreatment: row.ppn_treatment == null ? null : String(row.ppn_treatment),
+     ppnCollectedByCustomer: row.ppn_collected_by_customer === true,
     paidAt: row.paid_at == null ? null : String(row.paid_at),
     journalDate: String(row.journal_date),
   };
@@ -1956,9 +1971,12 @@ export async function processPaymentAccountingOutbox(): Promise<{
       await postConfirmedPaymentAccounting({
         bookingId: input.bookingId,
         orderNumber: input.orderNumber,
-        dpp: input.amount,
-        ppnAmount: 0,
+         dpp: input.dpp ?? input.amount,
+         ppnAmount: input.ppnAmount ?? 0,
         ppnRate: input.ppnRate,
+         ppnTreatment: input.ppnTreatment,
+         ppnCollectedByCustomer: input.ppnCollectedByCustomer,
+         grossAmount: input.grandTotal,
         facilityId: null,
         journalDate: input.journalDate,
         paymentMethod: input.paymentMethod ?? undefined,
@@ -2071,8 +2089,12 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         COALESCE(sp.paid_at, sp.confirmed_at) AS paid_at,
         sp.created_at     AS payment_created_at,
         sb.order_number,
+        sb.dpp,
         sb.ppn_rate,
         sb.ppn_amount,
+        sb.grand_total,
+        sb.ppn_treatment,
+        COALESCE(sb.ppn_collected_by_customer, false) AS ppn_collected_by_customer,
         pb.id             AS biz_booking_id
       FROM sport_center.sport_payments sp
       JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
@@ -2094,10 +2116,26 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
 
         // Gunakan jumlah yang benar-benar dibayar per payment record (bukan grand_total booking)
         const amount  = Math.round(Number(p.payment_amount));
-        const taxRate = p.ppn_rate   != null ? Number(p.ppn_rate)   : 0;
-        // Distribusikan PPN secara proporsional tidak diperlukan untuk pencatatan BizPortal;
-        // masukkan 0 agar tidak salah alokasi — BizPortal menghitung ulang dari tarifnya sendiri.
-        const taxAmount = 0;
+        const collectedByCustomer =
+          p.ppn_collected_by_customer === true ||
+          p.ppn_treatment === "collected_by_customer";
+        const taxRate = collectedByCustomer
+          ? 0
+          : p.ppn_rate != null
+            ? Number(p.ppn_rate)
+            : 0;
+        const bookingDpp = p.dpp == null ? 0 : Math.max(0, Math.round(Number(p.dpp)));
+        const bookingPpn = p.ppn_amount == null ? 0 : Math.max(0, Math.round(Number(p.ppn_amount)));
+        const bookingGross = p.grand_total == null
+          ? bookingDpp + bookingPpn
+          : Math.max(0, Math.round(Number(p.grand_total)));
+        const taxAmount = collectedByCustomer || bookingGross <= 0
+          ? 0
+          : Math.min(
+              bookingPpn,
+              Math.max(0, Math.round((amount * bookingPpn) / bookingGross)),
+            );
+        const paymentDpp = Math.max(0, amount - taxAmount);
 
         // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
         // NOTE: bank_account_id is intentionally omitted. The source field is a
@@ -2192,6 +2230,10 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             paymentType: p.payment_type,
             paidAt: p.paid_at || p.payment_created_at,
             ppnRate: taxRate,
+             ppnAmount: taxAmount,
+             grossAmount: amount,
+             ppnTreatment: p.ppn_treatment || null,
+             ppnCollectedByCustomer: collectedByCustomer,
             sourcePaymentId: Number(p.sc_payment_id),
           });
 

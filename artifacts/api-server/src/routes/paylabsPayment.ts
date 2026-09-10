@@ -1358,12 +1358,19 @@ router.post("/paylabs/webhook", async (req, res) => {
 
         // Jurnal akuntansi — wajib untuk semua pembayaran Paylabs
         const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-        const { dpp, ppnAmount } = extractBookingDpp(bk);
+        const {
+          dpp,
+          ppnAmount,
+          ppnCollectedByCustomer,
+        } = extractBookingDpp(bk);
         postConfirmedPaymentAccounting({
           bookingId: bk.id,
           orderNumber: bk.orderNumber ?? "",
           dpp,
           ppnAmount,
+          ppnRate: bk.ppnRate == null ? null : Number(bk.ppnRate),
+          ppnTreatment: bk.ppnTreatment,
+          ppnCollectedByCustomer,
           facilityId: bk.facilityId,
           journalDate: today,
           paymentMethod: confirmedPaymentMethod,
@@ -1475,12 +1482,19 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
         const bk = rows[0];
         if (!bk) return;
         const today = new Date().toISOString().split("T")[0];
-        const { dpp, ppnAmount } = extractBookingDpp(bk);
+        const {
+          dpp,
+          ppnAmount,
+          ppnCollectedByCustomer,
+        } = extractBookingDpp(bk);
         postConfirmedPaymentAccounting({
           bookingId: bk.id,
           orderNumber: bk.orderNumber ?? "",
           dpp,
           ppnAmount,
+          ppnRate: bk.ppnRate == null ? null : Number(bk.ppnRate),
+          ppnTreatment: bk.ppnTreatment,
+          ppnCollectedByCustomer,
           facilityId: bk.facilityId,
           journalDate: today,
           paymentMethod: reconPaymentMethod,
@@ -1632,12 +1646,19 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
             const bk = rows[0];
             if (!bk) return;
             const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-            const { dpp, ppnAmount } = extractBookingDpp(bk);
+            const {
+              dpp,
+              ppnAmount,
+              ppnCollectedByCustomer,
+            } = extractBookingDpp(bk);
             postConfirmedPaymentAccounting({
               bookingId: bk.id,
               orderNumber: bk.orderNumber ?? "",
               dpp,
               ppnAmount,
+              ppnRate: bk.ppnRate == null ? null : Number(bk.ppnRate),
+              ppnTreatment: bk.ppnTreatment,
+              ppnCollectedByCustomer,
               facilityId: bk.facilityId,
               journalDate: today,
               paymentMethod: reconciliation?.paymentMethod ?? "Transfer Bank",

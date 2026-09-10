@@ -1,0 +1,49 @@
+Lampiran meminta penerapan aturan pajak berdasarkan tipe customer, termasuk snapshot historis dan dampaknya ke invoice serta jurnal. Saya akan memetakan titik data dan alur yang sudah ada dulu agar perubahan tetap minimal dan tidak merusak aturan PPN inklusif yang berlaku untuk booking personal.
+
+26 actions Audit awal menemukan sebagian fondasi sudah ada, tetapi ada ketidakkonsistenan penting: resolver company masih memakai rumus PPN inklusif untuk semua kasus, invoice bulanan masih menghitung ulang dengan 1,11, dan jurnal pembayaran belum membedakan PPN yang dipungut customer dari kas Sport Center. Saya lanjutkan dengan membaca kontrak booking, invoice, dan posting jurnal yang tepat sebelum mengubahnya.
+
+39 actions Saya akan menyatukan perhitungan menjadi satu kontrak: harga dasar booking perusahaan diperlakukan sebagai DPP, PPN normal menambah grand total, sedangkan PPN yang dipungut customer tetap tampil tetapi dikeluarkan dari kas Sport Center. PPh dihitung dari DPP dan snapshot booking menyimpan treatment serta net kas historis.
+
+78 actions Perhitungan booking dan invoice sudah saya ubah ke snapshot pajak. Berikutnya saya cek jalur payment accounting dan typecheck agar perubahan tidak hanya benar di resolver, tetapi juga seimbang pada jurnal dan tidak merusak startup API.
+
+5 actions Typecheck sudah lulus. Saya lanjutkan audit sisa rumus 1.11, terutama tampilan invoice dan jalur konfirmasi payment yang masih bisa memakai logika lama, lalu saya jalankan test pajak/accounting dan restart API.
+
+17 actions Typecheck dan test accounting yang relevan sudah lulus. Masih ada dua hal sebelum selesai: memperbaiki jalur payment callback yang tidak melewati helper utama, lalu restart workflow API/web dan memastikan log startup bersih. Saya juga akan menutup gap test untuk matriks pajak murni.
+
+11 actions
+
+Worked for 11 minutes You've reached your daily free quota limit. It will reset at 12:00 AM UTC.
+
+Free
+16 minutes ago
+Inspecting current state
+
+Inspecting current state
+Saya lanjut dari titik terakhir: saya akan cek diff yang sudah ada, membaca lampiran aturan pajak, lalu menelusuri callback payment yang belum tersentuh. Setelah itu saya perbaiki gap yang tersisa, jalankan verifikasi langsung, dan hidupkan workflow untuk memastikan startup bersih.
+
+
+
+6 actions
+Snapshot menunjukkan workspace bersih selain file lampiran, jadi perubahan sebelumnya kemungkinan sudah tersimpan di commit atau tidak berada di working tree. Saya akan validasi keadaan aktual dari commit terakhir dan mencari jalur callback/payment serta resolver pajak yang sedang dipakai sekarang sebelum menyentuh kode.
+
+
+
+65 actions
+Titik gap sudah jelas: resolver booking belum membedakan PPN normal vs PPN yang dipungut customer, invoice masih menghitung ulang dengan 1,11, dan posting payment masih selalu membuat kas/utang PPN seolah PPN diterima Sport Center. Saya akan ubah sumber angka menjadi snapshot booking, lalu meneruskan treatment itu ke invoice dan jurnal tanpa mengubah flow provider.
+
+
+
+62 actions
+Perubahan inti sudah masuk ke kalkulator pajak, snapshot invoice, template invoice, dan jalur payment accounting. Patch renderer dokumen gagal karena konteks HTML-nya berbeda dari perkiraan; saya akan pecah menjadi perubahan kecil lalu langsung jalankan typecheck dan test untuk menangkap kontrak yang belum tersambung.
+
+
+
+42 actions
+Typecheck sekarang sudah bersih setelah dependency type declarations dibangun. Test runner masih gagal sebelum test berjalan karena setup Jest memuat top-level await dalam mode CommonJS; saya akan perbaiki konfigurasi runner yang memang dibutuhkan proyek, lalu menambah/menjalankan test matriks pajak dan memvalidasi preview/invoice lewat build serta workflow.
+
+
+
+31 actions
+
+Worked for 10 minutes
+You've reached your monthly free quota limit. It will reset on September 22, 2026.

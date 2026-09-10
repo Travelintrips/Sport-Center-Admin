@@ -1767,7 +1767,19 @@ export function postConfirmedPaymentAccounting(
     const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? snapshotPph)));
     const storedGross = Number(bookingSnapshot?.grandTotal ?? bookingSnapshot?.totalPrice ?? 0);
     const inputGross = Math.round(Number(input.dpp ?? 0) + Number(input.ppnAmount ?? 0));
-    const snapshotGross = inputGross > 0 ? inputGross : storedGross;
+    // A payment can be a DP or pelunasan, so its amount is not necessarily
+    // the booking total. Once a booking snapshot exists, it is the source of
+    // truth; only legacy rows without a snapshot may use caller-provided
+    // amounts.
+    const hasBookingTaxSnapshot =
+      bookingSnapshot?.dpp != null ||
+      bookingSnapshot?.ppnAmount != null ||
+      bookingSnapshot?.grandTotal != null;
+    const snapshotGross = hasBookingTaxSnapshot
+      ? storedGross
+      : inputGross > 0
+        ? inputGross
+        : storedGross;
     const snapshotDpp = Math.max(
       0,
       Number(bookingSnapshot?.dpp ?? (snapshotGross - Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0))),
