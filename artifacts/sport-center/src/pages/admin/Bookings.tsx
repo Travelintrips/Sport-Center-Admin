@@ -3810,6 +3810,18 @@ export default function AdminBookings() {
                       listPayment?.isBankReconciled ||
                       (Array.isArray(b.payments) && b.payments.some((payment: any) => payment.isBankReconciled)),
                     );
+                     const bookingTax = getBookingInvoiceTax(b);
+                     const bookingGrossTotal = Math.round(Number(b.grandTotal ?? b.totalPrice ?? 0));
+                     const bookingDisplayTotal = bookingTax.pphAmount > 0
+                       ? bookingTax.netAmount
+                       : bookingGrossTotal;
+                     const groupDisplayTotal = isMultiSessionGroup
+                       ? groupRows.reduce((sum: number, row: any) => {
+                           const rowTax = getBookingInvoiceTax(row);
+                           const rowGross = Math.round(Number(row.grandTotal ?? row.totalPrice ?? 0));
+                           return sum + (rowTax.pphAmount > 0 ? rowTax.netAmount : rowGross);
+                         }, 0)
+                       : bookingDisplayTotal;
 
                     return (
                     <motion.tr
@@ -3945,9 +3957,9 @@ export default function AdminBookings() {
                         <div className="space-y-0.5">
                           {/* Nominal utama: total grup jika group booking, individual jika bukan */}
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            {b.groupRef && groupsByRef[b.groupRef]
-                              ? formatCurrency(groupsByRef[b.groupRef].totalPayment)
-                              : formatCurrency(b.grandTotal ?? b.totalPrice)}
+                             {b.groupRef && isMultiSessionGroup
+                               ? formatCurrency(groupDisplayTotal)
+                               : formatCurrency(bookingDisplayTotal)}
                           </span>
                           {b.groupRef && (
                             <div className="flex flex-col gap-0.5 mt-0.5">
@@ -3968,7 +3980,7 @@ export default function AdminBookings() {
                                   <Link2 size={9} /> {b.groupRef}
                                 </span>
                                 <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                                  sesi ini: {formatCurrency(b.grandTotal ?? b.totalPrice)}
+                                   sesi ini: {formatCurrency(bookingDisplayTotal)}
                                 </span>
                               </div>
                             </div>
