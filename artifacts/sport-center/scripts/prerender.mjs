@@ -60,7 +60,7 @@ const STRUCTURED_DATA = {
       '@id': `${BASE_URL}/#organization`,
       name: 'Sport Center Bandara Soekarno-Hatta',
       url: `${BASE_URL}/`,
-      logo: `${BASE_URL}/favicon.svg`,
+       logo: `${BASE_URL}/favicon-192x192.png`,
     },
     {
       '@type': 'WebSite',
