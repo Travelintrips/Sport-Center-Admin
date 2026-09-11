@@ -71,6 +71,19 @@ readiness check even though the source build succeeded.
 migration, verify every required trigger after applying it, then publish the API
 release.
 
+Production startup should re-apply the narrow manual-provider resolver and
+mirror-function patch under the provisioning lock, then verify the behavior
+markers. This protects the confirmation path when a published runtime sees an
+older replace-in-place function definition.
+
+**Why:** The live database can retain an older trigger function after a
+successful application publish even though the source migration is correct;
+manual confirmations then fail with a provider-rule error.
+
+**How to apply:** Keep the patch limited to the canonical resolver/mirror
+functions and fail startup if the post-patch markers are not present. Never
+repair this by converting a manual payment to a gateway provider.
+
 Existence-only checks are insufficient for replace-in-place PostgreSQL
 functions. Production startup verification must also recognize the behavioral
 markers required by the current payment contract.

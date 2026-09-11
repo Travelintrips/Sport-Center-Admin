@@ -27,11 +27,13 @@ export function startPaymentMirrorMigration(): Promise<void> {
   startupPromise = (process.env.NODE_ENV === "production"
     ? db.transaction(async (tx) => {
         // Production schema provisioning remains external, but these two
-        // replace-in-place functions have been observed drifting back to an
-        // older definition after a successful publish. Repair only that
-        // narrowly-scoped compatibility drift under the same advisory lock
-        // used by the provisioning runner, then perform the full fail-closed
-        // verification below before the server binds its port.
+        // replace-in-place functions can drift back to an older definition
+        // after a successful publish. Always re-apply this narrowly-scoped
+        // compatibility patch under the same advisory lock used by the
+        // provisioning runner, then perform the full fail-closed verification
+        // below before the server binds its port. This is intentionally limited
+        // to the canonical payment resolver and mirror trigger; it does not
+        // mutate payment rows or weaken the settlement guard.
         await tx.execute(sql`
           SELECT pg_advisory_xact_lock(918274615)
         `);
@@ -83,15 +85,9 @@ export function startPaymentMirrorMigration(): Promise<void> {
             }
           | undefined;
 
-        if (!compatibilityRow?.resolver_supports_manual_provider) {
-          await tx.execute(sql.raw(paymentMetadataResolverMigration));
-        }
-        if (
-          !compatibilityRow?.trigger_exists ||
-          !compatibilityRow.mirror_supports_manual_metadata_correction
-        ) {
-          await tx.execute(sql.raw(manualProviderMirrorMigration));
-        }
+        void compatibilityRow;
+        await tx.execute(sql.raw(paymentMetadataResolverMigration));
+        await tx.execute(sql.raw(manualProviderMirrorMigration));
 
         return tx.execute(sql.raw(`
         SELECT

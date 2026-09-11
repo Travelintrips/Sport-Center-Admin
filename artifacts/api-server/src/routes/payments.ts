@@ -1898,6 +1898,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           ? "Rekening penerima pembayaran belum tersedia untuk payment ini."
           : message.startsWith("PAYMENT_PROVIDER")
             ? "Metadata provider pembayaran belum lengkap."
+            : message.includes("CANONICAL_PROVIDER_RULE_UNRESOLVED")
+              ? "Aturan settlement pembayaran belum tersinkron. Publikasikan ulang aplikasi lalu coba konfirmasi kembali."
             : message.includes("CANONICAL_") || message.includes("MIRROR_")
               ? "Pembayaran belum dapat dikonfirmasi karena aturan settlement atau data penerima belum lengkap."
               : isAccountingConflict
