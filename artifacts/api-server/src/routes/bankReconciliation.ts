@@ -1063,7 +1063,8 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
       -- Group payment representative booking join
       LEFT JOIN sport_center.sport_bookings bgp
         ON bgp.id = m.candidate_id AND m.candidate_type = 'group_payment'
-      WHERE m.mutation_id = ${mutationId}
+       WHERE m.mutation_id = ${mutationId}
+         AND m.status = 'candidate'
       ORDER BY m.match_score DESC
     `);
 
@@ -1210,6 +1211,13 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           eq(bankReconciliationMatchesTable.id, matchId),
         ))
         .limit(1);
+      if (selectedMatch?.status === "rejected") {
+        res.status(409).json({
+          error: "Match rejected historis tidak dapat dipulihkan. Jalankan matching ulang atau buat approval manual baru.",
+          code: "HISTORICAL_REJECTED_MATCH",
+        });
+        return;
+      }
     }
 
     const selectedType = selectedMatch?.candidateType ?? candidateType;
@@ -1969,6 +1977,7 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
     const [existing] = await db.select().from(bankReconciliationMatchesTable).where(and(
       eq(bankReconciliationMatchesTable.mutationId, mutationId),
       eq(bankReconciliationMatchesTable.candidateId, candidateId),
+      eq(bankReconciliationMatchesTable.status, "candidate"),
     )).limit(1);
 
     if (existing) {

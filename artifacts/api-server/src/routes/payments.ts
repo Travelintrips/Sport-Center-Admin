@@ -52,6 +52,10 @@ import { readPaymentProofOcr } from "../lib/paymentOcr";
 async function postPaymentAccountingProjection(payment: any, booking: any): Promise<void> {
   let dpp = extractBookingDpp(booking).dpp;
   let ppnAmount = extractBookingDpp(booking).ppnAmount;
+  let pphAmount = Number(booking.pphAmount ?? 0);
+  let pphRate = booking.pphRate == null ? null : Number(booking.pphRate);
+  let ppnTreatment = booking.ppnTreatment ?? null;
+  let ppnCollectedByCustomer = booking.ppnCollectedByCustomer === true;
 
   if (booking.groupRef) {
     const groupBookings = await db
@@ -60,25 +64,27 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
         totalPrice: bookingsTable.totalPrice,
         grandTotal: bookingsTable.grandTotal,
         ppnAmount: bookingsTable.ppnAmount,
-         ppnTreatment: bookingsTable.ppnTreatment,
-         ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+        pphAmount: bookingsTable.pphAmount,
+        pphRate: bookingsTable.pphRate,
+        ppnTreatment: bookingsTable.ppnTreatment,
+        ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
       })
       .from(bookingsTable)
       .where(eq(bookingsTable.groupRef, booking.groupRef));
     dpp = 0;
     ppnAmount = 0;
-          pphAmount = 0;
-          pphRate = null;
-          ppnTreatment = null;
-          ppnCollectedByCustomer = false;
+    pphAmount = 0;
+    pphRate = null;
+    ppnTreatment = null;
+    ppnCollectedByCustomer = false;
     for (const groupBooking of groupBookings) {
       const extracted = extractBookingDpp(groupBooking);
       dpp += extracted.dpp;
       ppnAmount += extracted.ppnAmount;
-            pphAmount += Number(groupBooking.pphAmount ?? 0);
-            pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
-            ppnTreatment ??= groupBooking.ppnTreatment;
-            ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
+      pphAmount += Number(groupBooking.pphAmount ?? 0);
+      pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
+      ppnTreatment ??= groupBooking.ppnTreatment;
+      ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
     }
   }
 
@@ -89,8 +95,8 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
     dpp,
     ppnAmount,
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
-    ppnTreatment: booking.ppnTreatment,
-    ppnCollectedByCustomer: booking.ppnCollectedByCustomer,
+    ppnTreatment,
+    ppnCollectedByCustomer,
     facilityId: booking.facilityId,
     journalDate: paidAt.toISOString().slice(0, 10),
     paymentMethod: payment.paymentMethod ?? undefined,
@@ -436,6 +442,8 @@ router.post("/payments", async (req, res) => {
           grandTotal: bookingsTable.grandTotal,
           dpp: bookingsTable.dpp,
           ppnAmount: bookingsTable.ppnAmount,
+          pphAmount: bookingsTable.pphAmount,
+          pphRate: bookingsTable.pphRate,
           ppnTreatment: bookingsTable.ppnTreatment,
           ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
           netAmount: bookingsTable.netAmount,
@@ -446,6 +454,13 @@ router.post("/payments", async (req, res) => {
           isDpPaid: booking.isDpPaid,
           totalPrice: booking.totalPrice,
           grandTotal: booking.grandTotal,
+          dpp: booking.dpp,
+          ppnAmount: booking.ppnAmount,
+          pphAmount: booking.pphAmount,
+          pphRate: booking.pphRate,
+          ppnTreatment: booking.ppnTreatment,
+          ppnCollectedByCustomer: booking.ppnCollectedByCustomer,
+          netAmount: booking.netAmount,
         }];
     const groupBookingIds = groupBookings.map((b) => b.id);
     const existingPayments = await db.select().from(paymentsTable)
