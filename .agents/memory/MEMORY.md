@@ -35,6 +35,7 @@
 
 - [COA Accounts feature](coa-accounts-feature.md) — coa_accounts table in sport_center schema; expenses FK to coa_accounts; journal type auto-detected from accountType (expense→operational, asset→kasbon, liability→bayar hutang).
 - [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
+- [API bundle schema rebuild](api-bundle-schema-rebuild.md) — shared database schema changes require rebuilding the API workflow before runtime responses reflect new fields.
 - [WhatsApp daily usage list](wa-daily-usage-list.md) — operational list includes confirmed/completed bookings and only resends after its persisted fingerprint changes.
 - [Gym walk-in detection](gym-walk-in-detection.md) — legacy Gym rows with time_slot mode still use per-visit access based on name/category fallback.
 - [Gym membership usage bookings](gym-membership-usage-bookings.md) — member check-ins mirror into zero-value confirmed bookings; exclude mirrors from WhatsApp rekap to avoid double counting.
