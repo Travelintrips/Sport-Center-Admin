@@ -44,6 +44,7 @@ import RescheduleDialog from "@/components/RescheduleDialog";
 import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
 import { getToken } from "@/lib/auth";
+import { calculateBookingWithholdingTax } from "@/lib/tax";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -219,9 +220,24 @@ export default function BookingDetail() {
     // Deteksi payment_type dan amount yang tepat berdasarkan state booking
     const bPayments = ((booking as any).payments as any[]) ?? [];
     const groupTotal = Number((booking as any).groupInfo?.groupNetTotalPayment ?? 0);
+    const bookingGross = Number((booking as any).grandTotal ?? booking.totalPrice ?? 0);
+    const bookingDpp = Number((booking as any).dpp ?? (
+      Number((booking as any).ppnAmount ?? 0) > 0
+        ? Math.round(bookingGross / 1.11)
+        : bookingGross
+    ));
+    const bookingWithholding = calculateBookingWithholdingTax({
+      grossAmount: bookingGross,
+      dpp: bookingDpp,
+      pphRate: (booking as any).pphRate,
+      pphAmount: (booking as any).pphAmount,
+      netAmount: (booking as any).netAmount,
+      ppnCollectedByCustomer: (booking as any).ppnCollectedByCustomer,
+      ppnTreatment: (booking as any).ppnTreatment,
+    });
     const paymentTotal = groupTotal > 0
       ? groupTotal
-      : Number((booking as any).netAmount ?? (booking as any).grandTotal ?? booking.totalPrice);
+      : bookingWithholding.netAmount;
     // downPayment means a DP has been configured; isDpPaid means the admin
     // has already confirmed a DP proof. The former must drive the first
     // upload so a configured DP is not misclassified as full_payment.
@@ -362,11 +378,24 @@ export default function BookingDetail() {
   const statusConfig = getStatusConfig(booking.status);
   const StatusIcon = statusConfig.icon;
   const isPending = uploadProgress === "uploading" || submitPayment.isPending;
+  const bookingGross = Number((booking as any).grandTotal ?? booking.totalPrice ?? 0);
+  const bookingDpp = Number((booking as any).dpp ?? (
+    Number((booking as any).ppnAmount ?? 0) > 0
+      ? Math.round(bookingGross / 1.11)
+      : bookingGross
+  ));
+  const bookingWithholding = calculateBookingWithholdingTax({
+    grossAmount: bookingGross,
+    dpp: bookingDpp,
+    pphRate: (booking as any).pphRate,
+    pphAmount: (booking as any).pphAmount,
+    netAmount: (booking as any).netAmount,
+    ppnCollectedByCustomer: (booking as any).ppnCollectedByCustomer,
+    ppnTreatment: (booking as any).ppnTreatment,
+  });
   const payableTotal = Number(
     (booking as any).groupInfo?.groupNetTotalPayment ??
-    (booking as any).netAmount ??
-    (booking as any).grandTotal ??
-    booking.totalPrice,
+    bookingWithholding.netAmount,
   );
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
@@ -502,6 +531,15 @@ export default function BookingDetail() {
                   : gt;
                 const dppNilaiLainVal = hasPpn ? Math.round(dppVal * 11 / 12) : 0;
                 const ppnVal = hasPpn ? (gt - dppVal) : 0;
+                 const withholding = calculateBookingWithholdingTax({
+                   grossAmount: gt,
+                   dpp: dppVal,
+                   pphRate: (booking as any).pphRate,
+                   pphAmount: (booking as any).pphAmount,
+                   netAmount: (booking as any).netAmount,
+                   ppnCollectedByCustomer: (booking as any).ppnCollectedByCustomer,
+                   ppnTreatment: (booking as any).ppnTreatment,
+                 });
                 return (
                   <div className="space-y-1.5 w-full">
                     {Array.isArray((booking as any).additionalCharges) && (booking as any).additionalCharges.length > 0 && (
@@ -538,6 +576,25 @@ export default function BookingDetail() {
                       <div>{t("Total DPP + PPN", "Total DPP + PPN")}</div>
                       <div className="text-primary">Rp {gt.toLocaleString("id-ID")}</div>
                     </div>
+                     {withholding.enabled && (
+                       <>
+                         <div className="flex justify-between items-center text-sm">
+                           <span className="text-orange-700 dark:text-orange-300">
+                             PPh dipotong {withholding.rate}%
+                           </span>
+                           <span className="text-orange-700 dark:text-orange-300 font-semibold">
+                             −Rp {withholding.amount.toLocaleString("id-ID")}
+                           </span>
+                         </div>
+                         <div className="h-px bg-border" />
+                         <div className="flex justify-between items-center text-xl font-black">
+                           <div>{t("Net dibayar", "Net payable")}</div>
+                           <div className="text-green-600 dark:text-green-400">
+                             Rp {withholding.netAmount.toLocaleString("id-ID")}
+                           </div>
+                         </div>
+                       </>
+                     )}
                   </div>
                 );
               })()

@@ -68,7 +68,11 @@ import {
   Dumbbell,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
-import { calculateInclusiveInvoiceTax, isAdditiveLegacyTaxSnapshot } from "@/lib/tax";
+import {
+  calculateBookingWithholdingTax,
+  calculateInclusiveInvoiceTax,
+  isAdditiveLegacyTaxSnapshot,
+} from "@/lib/tax";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
 
@@ -108,40 +112,27 @@ function getBookingInvoiceTax(booking: any) {
       : dppNilaiLain > 0
         ? Math.round(dppNilaiLain * 0.12)
         : 0;
-  const storedPph = booking.pphAmount == null ? null : Number(booking.pphAmount);
-  const configuredPphRate = Math.max(0, Number(booking.pphRate ?? 0));
-  const pphAmount = Math.max(
-    0,
-    Math.round(
-      storedPph != null && Number.isFinite(storedPph)
-        ? storedPph
-        : (configuredPphRate > 0 ? dpp * configuredPphRate / 100 : 0),
-    ),
-  );
-  const pphRate = configuredPphRate > 0
-    ? configuredPphRate
-    : (pphAmount > 0 && dpp > 0 ? Math.round((pphAmount / dpp) * 100) : 0);
   const ppnCollectedByCustomer =
     booking.ppnCollectedByCustomer === true ||
     booking.ppnTreatment === "collected_by_customer";
-  const cashGross = ppnCollectedByCustomer ? dpp : grandTotal;
-  const netAmount = Math.max(
-    0,
-    Math.round(
-      booking.netAmount != null
-        ? Number(booking.netAmount)
-        : cashGross - pphAmount,
-    ),
-  );
+  const withholding = calculateBookingWithholdingTax({
+    grossAmount: grandTotal,
+    dpp,
+    pphRate: booking.pphRate,
+    pphAmount: booking.pphAmount,
+    netAmount: booking.netAmount,
+    ppnCollectedByCustomer,
+    ppnTreatment: booking.ppnTreatment,
+  });
 
   return {
     grandTotal,
     dpp,
     dppNilaiLain,
     ppnAmount,
-    pphRate,
-    pphAmount,
-    netAmount,
+    pphRate: withholding.rate,
+    pphAmount: withholding.amount,
+    netAmount: withholding.netAmount,
   };
 }
 
