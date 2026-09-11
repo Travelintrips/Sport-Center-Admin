@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
 import { CartProvider } from "@/lib/cart";
 import NotFound from "@/pages/not-found";
-import { Component, type ReactNode, type ErrorInfo } from "react";
+import { Component, lazy, Suspense, type ReactNode, type ErrorInfo } from "react";
 
 class AdminErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -46,75 +46,74 @@ import AdminLayout from "@/components/layout/AdminLayout";
 
 // Customer Pages
 import Home from "@/pages/Home";
-import Facilities from "@/pages/Facilities";
-import FacilityDetail from "@/pages/FacilityDetail";
-import Booking from "@/pages/Booking";
-import BookingDetail from "@/pages/BookingDetail";
-import Promos from "@/pages/Promos";
-import Terms from "@/pages/Terms";
-import Privacy from "@/pages/Privacy";
-import Contact from "@/pages/Contact";
-import Login from "@/pages/Login";
-import Register from "@/pages/Register";
-import MyBookings from "@/pages/MyBookings";
-import MyProfile from "@/pages/MyProfile";
-import VerifyId from "@/pages/VerifyId";
-import Membership from "@/pages/Membership";
-import Cart from "@/pages/Cart";
+const Facilities = lazy(() => import("@/pages/Facilities"));
+const FacilityLanding = lazy(() => import("@/pages/FacilityLanding"));
+const FacilityDetail = lazy(() => import("@/pages/FacilityDetail"));
+const Booking = lazy(() => import("@/pages/Booking"));
+const BookingDetail = lazy(() => import("@/pages/BookingDetail"));
+const Promos = lazy(() => import("@/pages/Promos"));
+const Terms = lazy(() => import("@/pages/Terms"));
+const Privacy = lazy(() => import("@/pages/Privacy"));
+const Contact = lazy(() => import("@/pages/Contact"));
+const Login = lazy(() => import("@/pages/Login"));
+const Register = lazy(() => import("@/pages/Register"));
+const MyBookings = lazy(() => import("@/pages/MyBookings"));
+const MyProfile = lazy(() => import("@/pages/MyProfile"));
+const VerifyId = lazy(() => import("@/pages/VerifyId"));
+const Membership = lazy(() => import("@/pages/Membership"));
+const Cart = lazy(() => import("@/pages/Cart"));
 // Admin Pages
-import AdminLogin from "@/pages/admin/Login";
-import AdminDashboard from "@/pages/admin/Dashboard";
-import AdminBookings from "@/pages/admin/Bookings";
-import AdminFacilities from "@/pages/admin/Facilities";
-import AdminSchedule from "@/pages/admin/Schedule";
-import AdminCustomers from "@/pages/admin/Customers";
-import AdminPromos from "@/pages/admin/Promos";
-import AdminSettings from "@/pages/admin/Settings";
-import AdminMemberships from "@/pages/admin/Memberships";
-import AdminApMembers from "@/pages/admin/ApMembers";
-import AdminAuditLog from "@/pages/admin/AuditLog";
-import AdminPricingRules from "@/pages/admin/PricingRules";
-import AdminMaintenance from "@/pages/admin/Maintenance";
-import AdminReports from "@/pages/admin/Reports";
-import AdminQrCheckin from "@/pages/admin/QrCheckin";
-import AdminNotificationTemplates from "@/pages/admin/NotificationTemplates";
-import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
-import AdminExtensionRequests from "@/pages/admin/ExtensionRequests";
-import AdminCalendar from "@/pages/admin/Calendar";
-import AdminCompanyBilling from "@/pages/admin/CompanyBilling";
-import AdminNotifications from "@/pages/admin/Notifications";
-
-import AdminCompanyVerifications from "@/pages/admin/CompanyVerifications";
-
-import AdminTaxReport from "@/pages/admin/TaxReport";
-import AdminCheckoutForm from "@/pages/admin/CheckoutForm";
-import AdminOperatorAccounts from "@/pages/admin/OperatorAccounts";
-import AdminBankReconciliation from "@/pages/admin/BankReconciliation";
-import AdminWaBookings from "@/pages/admin/WaBookings";
-import AdminWaAiAssistant from "@/pages/admin/WaAiAssistant";
-import AdminExpenses from "@/pages/admin/Expenses";
-import AdminDocumentTemplates from "@/pages/admin/DocumentTemplates";
-import AdminInvoiceSettings from "@/pages/admin/InvoiceSettings";
-import AdminDocumentSettings from "@/pages/admin/DocumentSettings";
-import AdminInvoiceView from "@/pages/admin/InvoiceView";
-import AdminDataConnections from "@/pages/admin/DataConnections";
-import AdminDiscountSettings from "@/pages/admin/DiscountSettings";
-import AdminVendors from "@/pages/admin/Vendors";
-import AdminPaylabsGateway from "@/pages/admin/PaylabsGateway";
-import AdminPaymentSettlementConfigs from "@/pages/admin/PaymentSettlementConfigs";
-import AdminCorporateSubscriptions from "@/pages/admin/CorporateSubscriptions";
-import AdminEvents from "@/pages/admin/Events";
+const AdminLogin = lazy(() => import("@/pages/admin/Login"));
+const AdminDashboard = lazy(() => import("@/pages/admin/Dashboard"));
+const AdminBookings = lazy(() => import("@/pages/admin/Bookings"));
+const AdminFacilities = lazy(() => import("@/pages/admin/Facilities"));
+const AdminSchedule = lazy(() => import("@/pages/admin/Schedule"));
+const AdminCustomers = lazy(() => import("@/pages/admin/Customers"));
+const AdminPromos = lazy(() => import("@/pages/admin/Promos"));
+const AdminSettings = lazy(() => import("@/pages/admin/Settings"));
+const AdminMemberships = lazy(() => import("@/pages/admin/Memberships"));
+const AdminApMembers = lazy(() => import("@/pages/admin/ApMembers"));
+const AdminAuditLog = lazy(() => import("@/pages/admin/AuditLog"));
+const AdminPricingRules = lazy(() => import("@/pages/admin/PricingRules"));
+const AdminMaintenance = lazy(() => import("@/pages/admin/Maintenance"));
+const AdminReports = lazy(() => import("@/pages/admin/Reports"));
+const AdminQrCheckin = lazy(() => import("@/pages/admin/QrCheckin"));
+const AdminNotificationTemplates = lazy(() => import("@/pages/admin/NotificationTemplates"));
+const AdminRescheduleRequests = lazy(() => import("@/pages/admin/RescheduleRequests"));
+const AdminExtensionRequests = lazy(() => import("@/pages/admin/ExtensionRequests"));
+const AdminCalendar = lazy(() => import("@/pages/admin/Calendar"));
+const AdminCompanyBilling = lazy(() => import("@/pages/admin/CompanyBilling"));
+const AdminNotifications = lazy(() => import("@/pages/admin/Notifications"));
+const AdminCompanyVerifications = lazy(() => import("@/pages/admin/CompanyVerifications"));
+const AdminTaxReport = lazy(() => import("@/pages/admin/TaxReport"));
+const AdminCheckoutForm = lazy(() => import("@/pages/admin/CheckoutForm"));
+const AdminOperatorAccounts = lazy(() => import("@/pages/admin/OperatorAccounts"));
+const AdminBankReconciliation = lazy(() => import("@/pages/admin/BankReconciliation"));
+const AdminWaBookings = lazy(() => import("@/pages/admin/WaBookings"));
+const AdminWaAiAssistant = lazy(() => import("@/pages/admin/WaAiAssistant"));
+const AdminExpenses = lazy(() => import("@/pages/admin/Expenses"));
+const AdminDocumentTemplates = lazy(() => import("@/pages/admin/DocumentTemplates"));
+const AdminInvoiceSettings = lazy(() => import("@/pages/admin/InvoiceSettings"));
+const AdminDocumentSettings = lazy(() => import("@/pages/admin/DocumentSettings"));
+const AdminInvoiceView = lazy(() => import("@/pages/admin/InvoiceView"));
+const AdminDataConnections = lazy(() => import("@/pages/admin/DataConnections"));
+const AdminDiscountSettings = lazy(() => import("@/pages/admin/DiscountSettings"));
+const AdminVendors = lazy(() => import("@/pages/admin/Vendors"));
+const AdminPaylabsGateway = lazy(() => import("@/pages/admin/PaylabsGateway"));
+const AdminPaymentSettlementConfigs = lazy(() => import("@/pages/admin/PaymentSettlementConfigs"));
+const AdminCorporateSubscriptions = lazy(() => import("@/pages/admin/CorporateSubscriptions"));
+const AdminEvents = lazy(() => import("@/pages/admin/Events"));
 
 // WhatsApp Booking Flow Pages (standalone, no auth)
-import WaBookingForm from "@/pages/wa/BookingForm";
-import WaBookingStatus from "@/pages/wa/BookingStatus";
-import WaProofUpload from "@/pages/wa/ProofUpload";
-import WaUploadRedirect from "@/pages/wa/UploadRedirect";
-import WaAdminAction from "@/pages/wa/AdminAction";
-import WaAdminReview from "@/pages/wa/AdminReview";
-import WaRegister from "@/pages/wa/Register";
-import WaBookingApproval from "@/pages/wa/BookingApproval";
-import WaKwitansi from "@/pages/wa/Kwitansi";
+const WaBookingForm = lazy(() => import("@/pages/wa/BookingForm"));
+const WaBookingStatus = lazy(() => import("@/pages/wa/BookingStatus"));
+const WaProofUpload = lazy(() => import("@/pages/wa/ProofUpload"));
+const WaUploadRedirect = lazy(() => import("@/pages/wa/UploadRedirect"));
+const WaAdminAction = lazy(() => import("@/pages/wa/AdminAction"));
+const WaAdminReview = lazy(() => import("@/pages/wa/AdminReview"));
+const WaRegister = lazy(() => import("@/pages/wa/Register"));
+const WaBookingApproval = lazy(() => import("@/pages/wa/BookingApproval"));
+const WaKwitansi = lazy(() => import("@/pages/wa/Kwitansi"));
 
 import { removeToken } from "@/lib/auth";
 
@@ -256,6 +255,10 @@ function Router() {
           <Switch>
             <Route path="/" component={Home} />
             <Route path="/facilities" component={Facilities} />
+            <Route path="/futsal" component={FacilityLanding} />
+            <Route path="/badminton" component={FacilityLanding} />
+            <Route path="/basket" component={FacilityLanding} />
+            <Route path="/gym" component={FacilityLanding} />
             <Route path="/facilities/:id" component={FacilityDetail} />
             <Route path="/booking" component={Booking} />
             <Route path="/booking/:orderNumber" component={BookingDetail} />
@@ -285,7 +288,9 @@ function App() {
         <CartProvider>
           <TooltipProvider>
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
+              <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Memuat halaman…</div>}>
+                <Router />
+              </Suspense>
             </WouterRouter>
             <Toaster />
           </TooltipProvider>

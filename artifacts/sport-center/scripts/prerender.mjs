@@ -53,6 +53,7 @@ const STRUCTURED_DATA = {
         opens: '06:00',
         closes: '22:00',
       },
+      telephone: '+62 812-1610-4734',
     },
     {
       '@type': 'Organization',
@@ -82,6 +83,30 @@ const ROUTES = [
     path: '/facilities',
     title: 'Fasilitas Olahraga | Sport Center Soekarno-Hatta',
     description: 'Temukan fasilitas olahraga terlengkap di Sport Center Soekarno-Hatta. Lapangan futsal, basket, badminton, gym, dan banyak lagi — tersedia untuk booking online.',
+  },
+  {
+    path: '/futsal',
+    title: 'Futsal Soekarno-Hatta | Booking Lapangan di Sport Center',
+    description: 'Booking lapangan futsal Soekarno-Hatta di Sport Center Bandara. Lapangan multiguna untuk tim dan komunitas, buka 06:00–22:00 WIB.',
+    breadcrumb: 'Futsal Soekarno-Hatta',
+  },
+  {
+    path: '/badminton',
+    title: 'Badminton Soekarno-Hatta | Booking Lapangan Indoor',
+    description: 'Booking lapangan badminton Soekarno-Hatta di Sport Center Bandara. Tersedia Badminton Court A dan B, indoor, dan buka setiap hari 06:00–22:00 WIB.',
+    breadcrumb: 'Badminton Soekarno-Hatta',
+  },
+  {
+    path: '/basket',
+    title: 'Basket Soekarno-Hatta | Booking Lapangan Multiguna',
+    description: 'Booking lapangan basket Soekarno-Hatta di Sport Center Bandara. Gunakan lapangan multiguna untuk latihan dan permainan basket, buka 06:00–22:00 WIB.',
+    breadcrumb: 'Basket Soekarno-Hatta',
+  },
+  {
+    path: '/gym',
+    title: 'Gym Soekarno-Hatta | Fitness & Membership',
+    description: 'Gym Soekarno-Hatta di Sport Center Bandara menyediakan akses fitness per kunjungan dan membership. Gym buka 06:00–22:00 WIB di Kota Tangerang.',
+    breadcrumb: 'Gym Soekarno-Hatta',
   },
   {
     path: '/promos',
@@ -134,7 +159,17 @@ function buildSeoBlock(route) {
     `    <meta name="twitter:image" content="${OG_IMAGE}" />`,
     route.path === '/'
       ? `    <script type="application/ld+json">${JSON.stringify(STRUCTURED_DATA)}</script>`
-      : null,
+      : route.breadcrumb
+        ? `    <script type="application/ld+json">${JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              { '@type': 'ListItem', position: 1, name: 'Beranda', item: `${BASE_URL}/` },
+              { '@type': 'ListItem', position: 2, name: 'Fasilitas', item: `${BASE_URL}/facilities` },
+              { '@type': 'ListItem', position: 3, name: route.breadcrumb, item: `${BASE_URL}${route.path}` },
+            ],
+          })}</script>`
+        : null,
   ];
   return lines.filter(Boolean).join('\n');
 }

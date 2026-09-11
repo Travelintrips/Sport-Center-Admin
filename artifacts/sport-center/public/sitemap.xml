@@ -14,6 +14,30 @@
   </url>
 
   <url>
+    <loc>https://sc.travelintrips.co.id/futsal</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <url>
+    <loc>https://sc.travelintrips.co.id/badminton</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <url>
+    <loc>https://sc.travelintrips.co.id/basket</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <url>
+    <loc>https://sc.travelintrips.co.id/gym</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <url>
     <loc>https://sc.travelintrips.co.id/promos</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>

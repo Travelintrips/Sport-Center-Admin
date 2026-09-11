@@ -1,6 +1,4 @@
 import SEOHead from "@/components/SEOHead";
-import { AnalyticsSection } from "@/components/AnalyticsSection";
-import { AnalyticsReportSection } from "@/components/AnalyticsReportSection";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,8 +33,13 @@ import { useListFacilities, useGetSettings, useListPromos } from "@workspace/api
 import { useQuery } from "@tanstack/react-query";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
-import buildingImg from "@assets/1780087062_1780089778393.png";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useCallback, useMemo } from "react";
+
+const AnalyticsReportSection = lazy(() =>
+  import("@/components/AnalyticsReportSection").then((module) => ({
+    default: module.AnalyticsReportSection,
+  })),
+);
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -559,10 +562,13 @@ export default function Home() {
               {/* Main image card */}
               <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border border-white/60 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 aspect-[4/3] group">
                 <img
-                  src={buildingImg}
+                  src="/hero.webp"
                   alt="Gedung Sport Center Bandara Soekarno-Hatta"
                   width="1200"
                   height="900"
+                  fetchPriority="high"
+                  decoding="async"
+                  sizes="(min-width: 1024px) 50vw, 100vw"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                 />
                 {/* Inner vignette */}
@@ -739,7 +745,7 @@ export default function Home() {
               <div className="absolute -inset-3 bg-gradient-to-tr from-primary/20 via-primary/5 to-transparent rounded-[2rem] transform -rotate-2" />
               <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border-4 border-white dark:border-slate-900 aspect-[16/10]">
                 <img
-                  src={buildingImg}
+                  src="/hero.webp"
                   alt="Gedung Sport Center Bandara Soekarno-Hatta"
                   width="1200"
                   height="750"
@@ -1043,7 +1049,9 @@ export default function Home() {
         </div>
       </section>
 
-      <AnalyticsReportSection />
+      <Suspense fallback={null}>
+        <AnalyticsReportSection />
+      </Suspense>
 
     </div>
   );

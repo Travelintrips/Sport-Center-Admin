@@ -277,7 +277,12 @@ export default function FacilityDetail() {
             <div className="aspect-[4/3] md:aspect-[16/9] bg-muted rounded-3xl overflow-hidden relative shadow-lg group">
               <img 
                 src={getFacilityImage(facility.category, facility.images)} 
-                alt={facility.name} 
+                alt={`${facility.name} di Sport Center Bandara Soekarno-Hatta`}
+                width="1408"
+                height="768"
+                fetchPriority="high"
+                decoding="async"
+                sizes="(min-width: 1024px) 66vw, 100vw"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-80" />

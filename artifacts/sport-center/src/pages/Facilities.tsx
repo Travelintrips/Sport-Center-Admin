@@ -742,7 +742,12 @@ export default function Facilities() {
                   <div className="w-full h-full rounded-t-2xl rounded-b-lg overflow-hidden relative">
                     <img 
                       src={getFacilityImage(facility.category, facility.images)} 
-                      alt={facility.name} 
+                      alt={`${facility.name} di Sport Center Bandara Soekarno-Hatta`}
+                      width="1408"
+                      height="1056"
+                      loading="lazy"
+                      decoding="async"
+                      sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
                       className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-in-out" 
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-80" />
