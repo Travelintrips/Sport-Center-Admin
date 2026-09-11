@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable } from "@workspace/db";
-import { eq, or, ilike, isNull, isNotNull, desc } from "drizzle-orm";
+import { eq, and, or, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { createHmac } from "crypto";
 import { normalizePhone } from "./bookings";
+import { calculateWithholdingTax } from "../lib/tax";
 
 const router = Router();
 
@@ -424,10 +425,60 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
     if (withholdingTaxRate !== undefined) updates.withholdingTaxRate = String(withholdingTaxRate);
 
     const [updated] = await db.update(usersTable).set(updates).where(eq(usersTable.id, id)).returning();
+
+    // PPh is normally snapshotted when a booking is created. If an admin
+    // enables or changes the withholding setting afterwards, apply the new
+    // configuration to this company's still-unbilled bookings so the setting
+    // can be used immediately in company invoice preview/generation.
+    let recalculatedBookingCount = 0;
+    const updatedAccountType = updated.accountType ?? "personal";
+    const withholdingSettingChanged =
+      withholdingTaxEnabled !== undefined || withholdingTaxRate !== undefined;
+    if (updatedAccountType === "company" && withholdingSettingChanged) {
+      const unbilledBookings = await db.select({
+        id: bookingsTable.id,
+        grandTotal: bookingsTable.grandTotal,
+        totalPrice: bookingsTable.totalPrice,
+        dpp: bookingsTable.dpp,
+        ppnAmount: bookingsTable.ppnAmount,
+        ppnTreatment: bookingsTable.ppnTreatment,
+        ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+      }).from(bookingsTable).where(and(
+        eq(bookingsTable.companyCustomerId, id),
+        eq(bookingsTable.billingStatus, "unbilled"),
+      ));
+
+      for (const booking of unbilledBookings) {
+        const grandTotal = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+        const dpp = Math.max(
+          0,
+          Number(booking.dpp ?? grandTotal - Number(booking.ppnAmount ?? 0)),
+        );
+        const collectedByCustomer =
+          booking.ppnCollectedByCustomer === true ||
+          booking.ppnTreatment === "collected_by_customer";
+        const cashGross = collectedByCustomer ? dpp : grandTotal;
+        const pph = calculateWithholdingTax(
+          cashGross,
+          dpp,
+          updated.withholdingTaxEnabled === true,
+          Number(updated.withholdingTaxRate ?? 10),
+        );
+
+        await db.update(bookingsTable).set({
+          pphRate: pph.enabled ? String(pph.rate) : null,
+          pphAmount: pph.enabled ? String(pph.amount) : null,
+          netAmount: String(pph.netAmount),
+          updatedAt: new Date(),
+        }).where(eq(bookingsTable.id, booking.id));
+        recalculatedBookingCount++;
+      }
+    }
+
     const userBookings = await db.select().from(bookingsTable).where(
       or(eq(bookingsTable.customerId, id), eq(bookingsTable.companyCustomerId, id))
     );
-    res.json(mapUser(updated, userBookings));
+    res.json({ ...mapUser(updated, userBookings), recalculatedBookingCount });
   } catch (err) {
     req.log.error({ err }, "Update customer error");
     res.status(500).json({ error: "Internal server error" });

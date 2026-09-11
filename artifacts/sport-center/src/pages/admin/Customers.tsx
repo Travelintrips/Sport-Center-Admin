@@ -452,8 +452,14 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
     };
     try {
       if (initial) {
-        await updateMutation.mutateAsync({ id: initial.id, data: payload });
-        toast({ title: "Customer diperbarui" });
+        const result = await updateMutation.mutateAsync({ id: initial.id, data: payload });
+        const recalculatedCount = Number((result as any)?.recalculatedBookingCount ?? 0);
+        toast({
+          title: "Customer diperbarui",
+          description: recalculatedCount > 0
+            ? `PPh diterapkan ke ${recalculatedCount} booking yang belum ditagihkan.`
+            : "Pengaturan PPh akan berlaku untuk booking baru.",
+        });
       } else {
         const result = await createMutation.mutateAsync({ data: payload });
         const tempPwd = (result as any)?.tempPassword;
