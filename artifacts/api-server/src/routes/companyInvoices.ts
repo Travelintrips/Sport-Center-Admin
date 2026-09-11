@@ -11,7 +11,7 @@ import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from ".
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
-import { calculateInclusiveInvoiceTax } from "../lib/tax";
+import { calculateInclusiveInvoiceTax, calculateWithholdingTax } from "../lib/tax";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -125,23 +125,23 @@ function summarizeWithholdingTax(
     ppnCollectedByCustomer?: boolean | null;
   }>,
 ) {
-  const pphAmount = rows.reduce((sum, row) => sum + Math.max(0, Number(row.pphAmount ?? 0)), 0);
-  const rates = [...new Set(
-    rows
-      .map((row) => Number(row.pphRate ?? 0))
-      .filter((rate) => rate > 0),
-  )];
-  const netAmount = rows.reduce((sum, row) => {
-    if (row.netAmount != null && Number.isFinite(Number(row.netAmount))) {
-      return sum + Math.max(0, Number(row.netAmount));
-    }
-    const grandTotal = Number(row.grandTotal ?? row.totalPrice ?? 0);
-    const dpp = Math.max(0, Number(row.dpp ?? grandTotal - Number(row.ppnAmount ?? 0)));
-    const collectedByCustomer =
-      row.ppnCollectedByCustomer === true || row.ppnTreatment === "collected_by_customer";
-    const cashGross = collectedByCustomer ? dpp : grandTotal;
-    return sum + Math.max(0, cashGross - Number(row.pphAmount ?? 0));
-  }, 0);
+  // Recalculate from the tax base instead of trusting historical pphAmount or
+  // netAmount snapshots. The withholding formula is:
+  // PPh = DPP × rate, Net = (DPP + PPN) − PPh.
+  const calculations = rows.map((row) => {
+    const grandTotal = Math.max(0, Math.round(Number(row.grandTotal ?? row.totalPrice ?? 0)));
+    const ppnAmount = Math.max(0, Math.round(Number(row.ppnAmount ?? 0)));
+    const dpp = Math.max(0, Math.round(Number(row.dpp ?? grandTotal - ppnAmount)));
+    const storedPph = Math.max(0, Number(row.pphAmount ?? 0));
+    const configuredRate = Math.max(0, Number(row.pphRate ?? 0));
+    const enabled = configuredRate > 0 || storedPph > 0;
+    const rate = configuredRate > 0 ? configuredRate : (enabled ? 10 : 0);
+    const withholding = calculateWithholdingTax(grandTotal, dpp, enabled, rate);
+    return { rate: withholding.rate, amount: withholding.amount, netAmount: withholding.netAmount };
+  });
+  const pphAmount = calculations.reduce((sum, row) => sum + row.amount, 0);
+  const rates = [...new Set(calculations.map((row) => row.rate).filter((rate) => rate > 0))];
+  const netAmount = calculations.reduce((sum, calculation) => sum + calculation.netAmount, 0);
   return {
     pphRate: pphAmount > 0 && rates.length === 1 ? rates[0] : 0,
     pphAmount: Math.round(pphAmount),
@@ -206,12 +206,13 @@ function mapInvoice(
   const dppNilaiLain = legacyAdditiveSnapshot
     ? fallbackTax.dppNilaiLain
     : Number(inv.dppNilaiLain ?? 0) || (ppnAmount > 0 ? Math.round(dpp * 11 / 12) : 0);
-  const pphAmount = Number(inv.pphAmount ?? 0);
-  const pphRate = Number(inv.pphRate ?? 0);
-  const cashGross = inv.ppnCollectedByCustomer === true || inv.ppnTreatment === "collected_by_customer"
-    ? dpp
-    : grandTotal;
-  const netAmount = Number(inv.netAmount ?? Math.max(0, cashGross - pphAmount));
+  const storedPphAmount = Math.max(0, Number(inv.pphAmount ?? 0));
+  const configuredPphRate = Math.max(0, Number(inv.pphRate ?? 0));
+  const pphEnabled = configuredPphRate > 0 || storedPphAmount > 0;
+  const pphRate = configuredPphRate > 0 ? configuredPphRate : (pphEnabled ? 10 : 0);
+  const withholding = calculateWithholdingTax(grandTotal, dpp, pphEnabled, pphRate);
+  const pphAmount = withholding.amount;
+  const netAmount = withholding.netAmount;
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -948,19 +949,42 @@ router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) =
 
     const [year, month] = inv.periodMonth.split("-").map(Number);
     const periodLabel = new Date(year, month - 1, 1).toLocaleDateString("id-ID", { year: "numeric", month: "long" });
+    const invoiceTotal = Math.max(0, Math.round(Number(inv.totalAmount ?? 0)));
+    const storedPpnAmount = Math.max(0, Math.round(Number(inv.ppnAmount ?? 0)));
+    const storedGrandTotal = Math.max(0, Math.round(Number(inv.grandTotal ?? invoiceTotal)));
+    const legacyAdditiveSnapshot =
+      storedPpnAmount > 0 &&
+      storedGrandTotal > invoiceTotal &&
+      Math.abs(storedGrandTotal - invoiceTotal - storedPpnAmount) <= 1;
+    const fallbackTax = calcTaxBreakdown(invoiceTotal);
+    const messagePpnAmount = legacyAdditiveSnapshot ? fallbackTax.ppnAmount : storedPpnAmount;
+    const messageGrandTotal = legacyAdditiveSnapshot ? fallbackTax.grandTotal : storedGrandTotal;
+    const messageDpp = legacyAdditiveSnapshot
+      ? fallbackTax.dpp
+      : Math.max(0, messageGrandTotal - messagePpnAmount);
+    const storedPphAmount = Math.max(0, Number(inv.pphAmount ?? 0));
+    const configuredPphRate = Math.max(0, Number(inv.pphRate ?? 0));
+    const pphEnabled = configuredPphRate > 0 || storedPphAmount > 0;
+    const messagePphRate = configuredPphRate > 0 ? configuredPphRate : (pphEnabled ? 10 : 0);
+    const messageWithholding = calculateWithholdingTax(
+      messageGrandTotal,
+      messageDpp,
+      pphEnabled,
+      messagePphRate,
+    );
 
     const message = encodeURIComponent(
       `Halo ${company?.picName ?? company?.companyName ?? ""},\n\n` +
       `Berikut tagihan perusahaan Anda:\n` +
       `• No Invoice: *${inv.invoiceNumber}*\n` +
       `• Periode: *${periodLabel}*\n` +
-      `• DPP: Rp ${Number(inv.totalAmount).toLocaleString("id-ID")}\n` +
-      `• PPN 11%: Rp ${Number(inv.ppnAmount).toLocaleString("id-ID")}\n` +
-      `• Grand Total: Rp ${Number(inv.grandTotal).toLocaleString("id-ID")}\n` +
-      (Number(inv.pphAmount ?? 0) > 0
-        ? `• PPh dipotong ${Number(inv.pphRate ?? 0)}%: Rp ${Number(inv.pphAmount).toLocaleString("id-ID")}\n`
+      `• DPP: Rp ${messageDpp.toLocaleString("id-ID")}\n` +
+      `• PPN 12%: Rp ${messagePpnAmount.toLocaleString("id-ID")}\n` +
+      `• Grand Total: Rp ${messageGrandTotal.toLocaleString("id-ID")}\n` +
+      (messageWithholding.enabled
+        ? `• PPh dipotong ${messageWithholding.rate}%: Rp ${messageWithholding.amount.toLocaleString("id-ID")}\n`
         : "") +
-      `• *Net dibayar: Rp ${Number(inv.netAmount ?? inv.grandTotal).toLocaleString("id-ID")}*\n\n` +
+      `• *Net dibayar: Rp ${messageWithholding.netAmount.toLocaleString("id-ID")}*\n\n` +
       `Mohon segera melakukan pembayaran. Terima kasih.\n\n` +
       `Sport Center Soekarno-Hatta`
     );
