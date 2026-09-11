@@ -67,10 +67,18 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
       .where(eq(bookingsTable.groupRef, booking.groupRef));
     dpp = 0;
     ppnAmount = 0;
+          pphAmount = 0;
+          pphRate = null;
+          ppnTreatment = null;
+          ppnCollectedByCustomer = false;
     for (const groupBooking of groupBookings) {
       const extracted = extractBookingDpp(groupBooking);
       dpp += extracted.dpp;
       ppnAmount += extracted.ppnAmount;
+            pphAmount += Number(groupBooking.pphAmount ?? 0);
+            pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
+            ppnTreatment ??= groupBooking.ppnTreatment;
+            ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
     }
   }
 
@@ -426,6 +434,11 @@ router.post("/payments", async (req, res) => {
           isDpPaid: bookingsTable.isDpPaid,
           totalPrice: bookingsTable.totalPrice,
           grandTotal: bookingsTable.grandTotal,
+          dpp: bookingsTable.dpp,
+          ppnAmount: bookingsTable.ppnAmount,
+          ppnTreatment: bookingsTable.ppnTreatment,
+          ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+          netAmount: bookingsTable.netAmount,
         }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
       : [{
           id: booking.id,
@@ -493,7 +506,16 @@ router.post("/payments", async (req, res) => {
           .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
           .limit(1)
       : [];
-    const total = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
+    const grossTotal = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
+    const netTotal = groupBookings.reduce((sum, row) => {
+      const gross = Number(row.grandTotal ?? row.totalPrice ?? 0);
+      const dpp = Math.max(0, Number(row.dpp ?? gross - Number(row.ppnAmount ?? 0)));
+      const collectedByCustomer =
+        row.ppnCollectedByCustomer === true || row.ppnTreatment === "collected_by_customer";
+      const cashGross = collectedByCustomer ? dpp : gross;
+      return sum + Math.max(0, Number(row.netAmount ?? cashGross));
+    }, 0);
+    const total = Math.round(netTotal || grossTotal);
     const confirmedDp = Math.max(
       0,
       ...groupPayments

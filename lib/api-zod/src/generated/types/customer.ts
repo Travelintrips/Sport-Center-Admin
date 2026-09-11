@@ -34,6 +34,7 @@ export interface Customer {
   monthlyCreditLimit?: number | null;
   /** @nullable */
   allowMonthlyBilling?: boolean | null;
+  ppnEnabled?: boolean;
   /** @nullable */
   withholdingTaxEnabled?: boolean | null;
   /** @nullable */

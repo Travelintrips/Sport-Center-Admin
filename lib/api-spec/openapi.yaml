@@ -3704,7 +3704,7 @@ components:
 
     CompanyInvoice:
       type: object
-      required: [id, invoiceNumber, companyCustomerId, periodMonth, totalAmount, ppnAmount, grandTotal, pphRate, pphAmount, netAmount, status, createdAt]
+      required: [id, invoiceNumber, companyCustomerId, periodMonth, totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer, pphRate, pphAmount, netAmount, status, createdAt]
       properties:
         id:
           type: integer
@@ -3717,6 +3717,10 @@ components:
         periodMonth:
           type: string
         totalAmount:
+          type: number
+        dpp:
+          type: number
+        dppNilaiLain:
           type: number
         ppnAmount:
           type: number
@@ -3737,7 +3741,7 @@ components:
           type: number
         status:
           type: string
-          enum: [unpaid, paid]
+          enum: [unpaid, partial_paid, paid, waiting_verification]
         paidAt:
           type: ["string", "null"]
         notes:
@@ -3767,7 +3771,7 @@ components:
       properties:
         status:
           type: string
-          enum: [unpaid, paid]
+          enum: [unpaid, partial_paid, paid, waiting_verification]
         notes:
           type: string
 

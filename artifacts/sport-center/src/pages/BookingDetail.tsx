@@ -218,10 +218,10 @@ export default function BookingDetail() {
 
     // Deteksi payment_type dan amount yang tepat berdasarkan state booking
     const bPayments = ((booking as any).payments as any[]) ?? [];
-    const groupTotal = Number((booking as any).groupInfo?.groupTotalPayment ?? 0);
+    const groupTotal = Number((booking as any).groupInfo?.groupNetTotalPayment ?? 0);
     const paymentTotal = groupTotal > 0
       ? groupTotal
-      : Number((booking as any).grandTotal ?? booking.totalPrice);
+      : Number((booking as any).netAmount ?? (booking as any).grandTotal ?? booking.totalPrice);
     // downPayment means a DP has been configured; isDpPaid means the admin
     // has already confirmed a DP proof. The former must drive the first
     // upload so a configured DP is not misclassified as full_payment.
@@ -363,7 +363,8 @@ export default function BookingDetail() {
   const StatusIcon = statusConfig.icon;
   const isPending = uploadProgress === "uploading" || submitPayment.isPending;
   const payableTotal = Number(
-    (booking as any).groupInfo?.groupTotalPayment ??
+    (booking as any).groupInfo?.groupNetTotalPayment ??
+    (booking as any).netAmount ??
     (booking as any).grandTotal ??
     booking.totalPrice,
   );
@@ -768,8 +769,6 @@ export default function BookingDetail() {
                       <div className="text-xs space-y-1 text-muted-foreground">
                         <div className="flex justify-between"><span>{t("DP Dibayar", "DP Paid")}:</span><span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpInputAmount).toLocaleString("id-ID")}</span></div>
 
-                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number((booking as any).groupInfo?.groupTotalPayment ?? (booking as any).grandTotal ?? booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
-
                         <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, payableTotal - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
 
                       </div>
@@ -842,13 +841,11 @@ export default function BookingDetail() {
                           <>
                             {t("Bayar", "Pay")}{" "}
                             <span className="text-primary text-base">
-                              Rp {(booking as any).groupInfo
-                                ? (booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")
-                                : booking.totalPrice.toLocaleString("id-ID")}
+                              Rp {payableTotal.toLocaleString("id-ID")}
                             </span>{" "}
                             {(booking as any).groupInfo && (
                               <span className="text-xs text-muted-foreground font-normal">
-                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {Math.round((booking as any).groupInfo.groupTotalPayment / (booking as any).groupInfo.groupSessionCount).toLocaleString("id-ID")})
+                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {Math.round(payableTotal / (booking as any).groupInfo.groupSessionCount).toLocaleString("id-ID")})
                               </span>
                             )}{" "}
                             {t("via:", "via:")}
@@ -1013,7 +1010,7 @@ export default function BookingDetail() {
                   <PaylabsPaymentSection
                     bookingId={booking.id}
                     orderNumber={booking.orderNumber}
-                    amount={Number((booking as any).grandTotal ?? booking.totalPrice)}
+                    amount={payableTotal}
                     paylabsConfig={paylabsConfig!}
                     onBack={() => setPaymentMethod(null)}
                     onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}

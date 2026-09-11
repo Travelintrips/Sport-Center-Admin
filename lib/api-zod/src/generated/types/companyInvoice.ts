@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Booking } from './booking';
+import type { CompanyInvoicePpnTreatment } from './companyInvoicePpnTreatment';
 import type { CompanyInvoiceStatus } from './companyInvoiceStatus';
 
 export interface CompanyInvoice {
@@ -17,6 +18,9 @@ export interface CompanyInvoice {
   totalAmount: number;
   ppnAmount: number;
   grandTotal: number;
+  ppnRate?: number;
+  ppnTreatment?: CompanyInvoicePpnTreatment;
+  ppnCollectedByCustomer?: boolean;
   pphRate: number;
   pphAmount: number;
   netAmount: number;

@@ -195,6 +195,7 @@ async function getBookingWithPayment(id: number) {
   // Jika booking bagian dari grup recurring, ambil info grup
   let groupInfo: {
     groupTotalPayment: number;
+    groupNetTotalPayment: number;
     groupSessionCount: number;
     groupRef: string;
     additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
@@ -205,6 +206,12 @@ async function getBookingWithPayment(id: number) {
     const groupBookings = await db.select({
       id: bookingsTable.id,
       additionalCharges: bookingsTable.additionalCharges,
+      dpp: bookingsTable.dpp,
+      ppnAmount: bookingsTable.ppnAmount,
+      grandTotal: bookingsTable.grandTotal,
+      ppnTreatment: bookingsTable.ppnTreatment,
+      ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+      netAmount: bookingsTable.netAmount,
     })
       .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
     if (group) {
@@ -214,14 +221,26 @@ async function getBookingWithPayment(id: number) {
       groupInfo = {
         groupRef: booking.groupRef,
         groupTotalPayment: Number(group.totalPayment),
+        groupNetTotalPayment: groupBookings.reduce((sum, row) => {
+          const grandTotal = Number(row.grandTotal ?? row.totalPrice ?? 0);
+          const dpp = Math.max(0, Number(row.dpp ?? grandTotal - Number(row.ppnAmount ?? 0)));
+          const collectedByCustomer =
+            row.ppnCollectedByCustomer === true || row.ppnTreatment === "collected_by_customer";
+          const cashGross = collectedByCustomer ? dpp : grandTotal;
+          return sum + Math.max(0, Number(row.netAmount ?? cashGross));
+        }, 0),
         groupSessionCount: groupBookings.length,
         additionalCharges: groupCharges,
       };
     }
   }
 
-  const payableTotal = groupInfo?.groupTotalPayment ?? (
-    booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice)
+  const payableTotal = groupInfo?.groupNetTotalPayment ?? (
+    booking.netAmount != null
+      ? Number(booking.netAmount)
+      : booking.grandTotal != null
+        ? Number(booking.grandTotal)
+        : Number(booking.totalPrice)
   );
 
   // idCardNumber adalah PII — jangan ekspos di endpoint publik (customer invoice).

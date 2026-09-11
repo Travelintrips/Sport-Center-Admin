@@ -818,7 +818,6 @@ export async function postSportCenterBookingPayment(
       };
     }
 
-    const cashAmount = requestedAmount;
     const grossAmount = Math.round(Number(input.grossAmount ?? requestedAmount));
     if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
       throw new Error(`[accounting] Nominal payment ${input.paymentNumber} tidak valid.`);
@@ -835,6 +834,17 @@ export async function postSportCenterBookingPayment(
     const methodLabel = normalizePublicPaymentMethod(canonicalMethod);
     const hasPpn = ppnAmount > 0;
     const hasPph = pphAmount > 0;
+    if (hasPph && !ids.coaPphDipotong) {
+      throw new Error("[accounting] COA PPh Dipotong Pelanggan tidak ditemukan di public chart_of_accounts.");
+    }
+    const expectedCashAmount = Math.max(0, grossAmount - pphAmount);
+    if (hasPph && requestedAmount !== expectedCashAmount) {
+      throw new Error(
+        `[accounting] Nominal payment ${input.paymentNumber} harus berupa nilai net setelah PPh ` +
+        `(expected=${expectedCashAmount}, received=${requestedAmount}).`,
+      );
+    }
+    const cashAmount = requestedAmount;
 
     const entryResult = await client.query(
       `INSERT INTO public.accounting_entries
@@ -878,7 +888,7 @@ export async function postSportCenterBookingPayment(
           ($1,$11,$12,0,$13)`,
         [
           entryId, paymentAccount.id, `Penerimaan ${input.paymentNumber} via ${methodLabel}`, cashAmount,
-          ids.coaPendapatan, `PPh dipotong ${input.orderNumber}`, pphAmount,
+           ids.coaPphDipotong!, `PPh dipotong ${input.orderNumber}`, pphAmount,
           ids.coaPendapatan, `Pendapatan booking ${input.orderNumber}`, dpp,
           ids.coaPpnKeluaran, `PPN Keluaran booking ${input.orderNumber}`, ppnAmount,
         ],
@@ -892,7 +902,7 @@ export async function postSportCenterBookingPayment(
           ($1,$8,$9,0,$10)`,
         [
           entryId, paymentAccount.id, `Penerimaan ${input.paymentNumber} via ${methodLabel}`, cashAmount,
-          ids.coaPendapatan, `PPh dipotong ${input.orderNumber}`, pphAmount,
+           ids.coaPphDipotong!, `PPh dipotong ${input.orderNumber}`, pphAmount,
           ids.coaPendapatan, `Pendapatan booking ${input.orderNumber}`, dpp,
         ],
       );
@@ -1082,16 +1092,28 @@ async function getPublicIdsForQuery(pool: pg.Pool | pg.PoolClient) {
   const kas = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`);
   const pendapatan = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`);
   const ppn = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`);
+  const pph = await pool.query(
+    `SELECT id
+       FROM public.chart_of_accounts c
+      WHERE c.is_active = true
+        AND (
+          c.code IN ('1-1301-CST', '1-1301')
+          OR COALESCE(to_jsonb(c)->>'name', to_jsonb(c)->>'account_name', '') ILIKE '%PPh%Potong%'
+        )
+      ORDER BY CASE WHEN code = '1-1301-CST' THEN 0 ELSE 1 END, id
+      LIMIT 1`,
+  );
   const journalId = Number(journal.rows[0]?.id);
   const coaKas = Number(kas.rows[0]?.id);
   const coaPendapatan = Number(pendapatan.rows[0]?.id);
   const coaPpnKeluaran = Number(ppn.rows[0]?.id);
+  const coaPphDipotong = pph.rows[0]?.id == null ? null : Number(pph.rows[0].id);
   if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
     throw new Error(
       `[accounting] Public COA/journal lookup gagal untuk payment posting: journalId=${journalId} coaKas=${coaKas} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}.`,
     );
   }
-  return { journalId, coaKas, coaPendapatan, coaPpnKeluaran };
+  return { journalId, coaKas, coaPendapatan, coaPpnKeluaran, coaPphDipotong };
 }
 
 

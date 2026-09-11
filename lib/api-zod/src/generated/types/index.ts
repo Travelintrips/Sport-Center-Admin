@@ -44,6 +44,7 @@ export * from './checkAvailabilityParams';
 export * from './clearBankMutationsInput';
 export * from './clearBankMutationsResult';
 export * from './companyInvoice';
+export * from './companyInvoicePpnTreatment';
 export * from './companyInvoiceStatus';
 export * from './companyInvoiceUpdate';
 export * from './companyInvoiceUpdateStatus';

@@ -663,6 +663,7 @@ export interface Customer {
   monthlyCreditLimit?: number | null;
   /** @nullable */
   allowMonthlyBilling?: boolean | null;
+  ppnEnabled?: boolean;
   /** @nullable */
   withholdingTaxEnabled?: boolean | null;
   /** @nullable */
@@ -695,6 +696,7 @@ export interface CustomerInput {
   paymentTermsDays?: number;
   monthlyCreditLimit?: number;
   allowMonthlyBilling?: boolean;
+  ppnEnabled?: boolean;
   withholdingTaxEnabled?: boolean;
   withholdingTaxRate?: number;
   accountStatus?: string;
@@ -721,10 +723,22 @@ export interface CustomerUpdate {
   paymentTermsDays?: number;
   monthlyCreditLimit?: number;
   allowMonthlyBilling?: boolean;
+  ppnEnabled?: boolean;
   withholdingTaxEnabled?: boolean;
   withholdingTaxRate?: number;
   accountStatus?: string;
 }
+
+export type CompanyInvoicePpnTreatment = typeof CompanyInvoicePpnTreatment[keyof typeof CompanyInvoicePpnTreatment];
+
+
+export const CompanyInvoicePpnTreatment = {
+  none: 'none',
+  inclusive: 'inclusive',
+  normal: 'normal',
+  collected_by_customer: 'collected_by_customer',
+  mixed: 'mixed',
+} as const;
 
 export type CompanyInvoiceStatus = typeof CompanyInvoiceStatus[keyof typeof CompanyInvoiceStatus];
 
@@ -743,6 +757,9 @@ export interface CompanyInvoice {
   totalAmount: number;
   ppnAmount: number;
   grandTotal: number;
+  ppnRate?: number;
+  ppnTreatment?: CompanyInvoicePpnTreatment;
+  ppnCollectedByCustomer?: boolean;
   pphRate: number;
   pphAmount: number;
   netAmount: number;
