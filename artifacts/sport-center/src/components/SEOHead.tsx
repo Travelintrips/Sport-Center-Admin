@@ -5,7 +5,9 @@
  */
 
 const SITE_NAME = "Sport Center Soekarno-Hatta";
-const BASE_URL = (import.meta.env.VITE_PUBLIC_URL as string | undefined) ?? "";
+const BASE_URL =
+  ((import.meta.env.VITE_PUBLIC_URL as string | undefined) ||
+    "https://sc.travelintrips.co.id").replace(/\/$/, "");
 const DEFAULT_IMAGE = `${BASE_URL}/opengraph.jpg`;
 const ROBOTS =
   "index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1";

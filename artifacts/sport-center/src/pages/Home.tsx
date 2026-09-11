@@ -447,8 +447,8 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
       <SEOHead
-        title="Sport Center Soekarno-Hatta | Booking Lapangan Olahraga"
-        description="Pusat olahraga premium di kawasan Bandara Soekarno-Hatta. Booking lapangan futsal, basket, badminton, dan gym secara online 24/7."
+        title="Sport Center Bandara Soekarno-Hatta | Booking Lapangan & Gym"
+        description="Sport Center Bandara Soekarno-Hatta untuk booking lapangan futsal, basket, badminton, dan gym online. Cek jadwal fasilitas di kawasan Bandara."
         path="/"
       />
 
@@ -481,7 +481,7 @@ export default function Home() {
               </div>
 
               <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-black tracking-tight text-slate-900 dark:text-white leading-[1.05] mb-6">
-                {t("Sport Center", "Sport Center")}<br />
+                {t("Sport Center Bandara", "Sport Center Bandara")}<br />
                 <span className="relative inline-block text-primary">
                   {t("Soekarno-Hatta", "Soekarno-Hatta")}
                   <svg className="absolute -bottom-1 left-0 w-full" height="6" viewBox="0 0 300 6" preserveAspectRatio="none">
@@ -528,7 +528,14 @@ export default function Home() {
                 <div className="flex -space-x-3">
                   {[1, 2, 3, 4, 5].map((i) => (
                     <div key={i} className="w-9 h-9 rounded-full border-2 border-white dark:border-slate-950 bg-slate-100 overflow-hidden shadow-sm">
-                      <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${i}&backgroundColor=f1f5f9,fed7aa`} alt="User" />
+                      <img
+                        src={`https://api.dicebear.com/7.x/notionists/svg?seed=${i}&backgroundColor=f1f5f9,fed7aa`}
+                        alt="Avatar anggota Sport Center"
+                        width="36"
+                        height="36"
+                        loading="lazy"
+                        decoding="async"
+                      />
                     </div>
                   ))}
                 </div>
@@ -554,6 +561,8 @@ export default function Home() {
                 <img
                   src={buildingImg}
                   alt="Gedung Sport Center Bandara Soekarno-Hatta"
+                  width="1200"
+                  height="900"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                 />
                 {/* Inner vignette */}
@@ -650,7 +659,11 @@ export default function Home() {
                 <div className="relative aspect-[4/3] overflow-hidden bg-muted">
                   <img
                     src={getFacilityImage(facility.category, facility.images)}
-                    alt={facility.name}
+                    alt={`${facility.name} di Sport Center Bandara Soekarno-Hatta`}
+                    width="800"
+                    height="600"
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-in-out"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60" />
@@ -725,7 +738,15 @@ export default function Home() {
             <div className="relative animate-in fade-in slide-in-from-left-8 duration-1000">
               <div className="absolute -inset-3 bg-gradient-to-tr from-primary/20 via-primary/5 to-transparent rounded-[2rem] transform -rotate-2" />
               <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border-4 border-white dark:border-slate-900 aspect-[16/10]">
-                <img src={buildingImg} alt="Gedung Sport Center" className="w-full h-full object-cover" />
+                <img
+                  src={buildingImg}
+                  alt="Gedung Sport Center Bandara Soekarno-Hatta"
+                  width="1200"
+                  height="750"
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-full object-cover"
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
               </div>
               <div className="absolute -bottom-6 -right-2 md:right-6 p-4 rounded-2xl bg-white dark:bg-slate-900 shadow-xl border border-border/50 flex items-center gap-3 max-w-[260px]">
@@ -829,7 +850,15 @@ export default function Home() {
               {promos.slice(0, 2).map((promo) => (
                 <div key={promo.id} className="group relative bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border border-border/50 flex flex-col sm:flex-row shadow-sm hover:shadow-xl transition-all duration-500">
                   <div className="w-full sm:w-2/5 aspect-square sm:aspect-auto relative overflow-hidden bg-muted shrink-0">
-                    <img src={promo.imageUrl || "/hero.png"} alt={promo.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                    <img
+                      src={promo.imageUrl || "/hero.png"}
+                      alt={`${promo.title} di Sport Center Soekarno-Hatta`}
+                      width="800"
+                      height="800"
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                    />
                     {promo.discountPercent && (
                       <div className="absolute top-4 left-4 bg-red-500 text-white px-3 py-1.5 rounded-xl text-sm font-black shadow-lg transform -rotate-2">
                         {t("DISKON", "DISCOUNT")} {promo.discountPercent}%

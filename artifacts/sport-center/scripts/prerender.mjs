@@ -28,12 +28,55 @@ const BASE_URL = (process.env.VITE_PUBLIC_URL ?? 'https://sc.travelintrips.co.id
 const OG_IMAGE = `${BASE_URL}/opengraph.jpg`;
 const ROBOTS = 'index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1';
 const SITE_NAME = 'Sport Center Soekarno-Hatta';
+const STRUCTURED_DATA = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': ['SportsActivityLocation', 'LocalBusiness'],
+      '@id': `${BASE_URL}/#sports-location`,
+      name: 'Sport Center Bandara Soekarno-Hatta',
+      url: `${BASE_URL}/`,
+      image: OG_IMAGE,
+      description: 'Pusat olahraga untuk booking lapangan futsal, basket, badminton, dan gym di kawasan Bandara Soekarno-Hatta.',
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: 'Jl. C3 No. 831, Pajang, Benda',
+        addressLocality: 'Kota Tangerang',
+        addressRegion: 'Banten',
+        postalCode: '15126',
+        addressCountry: 'ID',
+      },
+      hasMap: 'https://maps.app.goo.gl/iiXurNzUPFZpEA5s6',
+      openingHoursSpecification: {
+        '@type': 'OpeningHoursSpecification',
+        dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+        opens: '06:00',
+        closes: '22:00',
+      },
+    },
+    {
+      '@type': 'Organization',
+      '@id': `${BASE_URL}/#organization`,
+      name: 'Sport Center Bandara Soekarno-Hatta',
+      url: `${BASE_URL}/`,
+      logo: `${BASE_URL}/favicon.svg`,
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${BASE_URL}/#website`,
+      url: `${BASE_URL}/`,
+      name: 'Sport Center Bandara Soekarno-Hatta',
+      publisher: { '@id': `${BASE_URL}/#organization` },
+      inLanguage: 'id-ID',
+    },
+  ],
+};
 
 const ROUTES = [
   {
     path: '/',
-    title: 'Sport Center Soekarno-Hatta | Booking Lapangan Olahraga',
-    description: 'Pusat olahraga premium di kawasan Bandara Soekarno-Hatta. Booking lapangan futsal, basket, badminton, dan gym secara online 24/7.',
+    title: 'Sport Center Bandara Soekarno-Hatta | Booking Lapangan & Gym',
+    description: 'Sport Center Bandara Soekarno-Hatta untuk booking lapangan futsal, basket, badminton, dan gym online. Cek jadwal fasilitas di kawasan Bandara.',
   },
   {
     path: '/facilities',
@@ -89,6 +132,9 @@ function buildSeoBlock(route) {
     `    <meta name="twitter:title" content="${esc(route.title)}" />`,
     `    <meta name="twitter:description" content="${esc(route.description)}" />`,
     `    <meta name="twitter:image" content="${OG_IMAGE}" />`,
+    route.path === '/'
+      ? `    <script type="application/ld+json">${JSON.stringify(STRUCTURED_DATA)}</script>`
+      : null,
   ];
   return lines.filter(Boolean).join('\n');
 }
@@ -100,7 +146,8 @@ function stripGenericSeoTags(html) {
     .replace(/[ \t]*<meta\s+name="robots"[^>]*\/?>\n?/g, '')
     .replace(/[ \t]*<meta\s+property="og:[^"]*"[^>]*\/?>\n?/g, '')
     .replace(/[ \t]*<meta\s+name="twitter:[^"]*"[^>]*\/?>\n?/g, '')
-    .replace(/[ \t]*<link\s+rel="canonical"[^>]*\/?>\n?/g, '');
+    .replace(/[ \t]*<link\s+rel="canonical"[^>]*\/?>\n?/g, '')
+    .replace(/[ \t]*<script\s+type="application\/ld\+json">[\s\S]*?<\/script>\n?/g, '');
 }
 
 const baseHtml = readFileSync(join(distDir, 'index.html'), 'utf-8');
