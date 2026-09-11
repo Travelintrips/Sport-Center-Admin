@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { getListCompanyInvoicesQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
+import { calculateInclusiveInvoiceTax } from "@/lib/tax";
 
 const BILLING_DOC_TYPES = [
   { key: "invoice", label: "Invoice" },
@@ -96,11 +97,8 @@ async function auditBillingAction(invoiceId: number, action: string, documents?:
 // PPN 12%          = DPP Nilai Lain × 0.12   (= DPP × 11%)
 // Grand Total      = DPP + PPN ≈ totalAmountInclusive
 function taxBreakdown(totalAmountInclusive: number) {
-  const dpp = Math.round(totalAmountInclusive / 1.11);
-  const dppNilaiLain = Math.round(dpp * 11 / 12);
-  const ppn = Math.round(dppNilaiLain * 0.12);
-  const grandTotal = dpp + ppn;
-  return { dpp, dppNilaiLain, ppn, grandTotal };
+  const tax = calculateInclusiveInvoiceTax(totalAmountInclusive);
+  return { ...tax, ppn: tax.ppnAmount };
 }
 
 // ─── Document Template Settings ──────────────────────────────────────────────
@@ -1007,9 +1005,10 @@ function GenerateInvoiceDialog({
         {companyId && preview && (preview.bookingCount ?? 0) > 0 && (() => {
           // Sum-of-rows agar konsisten dengan tabel (hindari rounding drift)
           const pvRows: any[] = preview?.bookings ?? [];
-          const rowDpp   = (b: any) => Math.round((b.totalPrice ?? 0) / 1.11);
-          const rowDppNL = (b: any) => Math.round(rowDpp(b) * 11 / 12);
-          const rowPpn   = (b: any) => Math.round(rowDppNL(b) * 0.12);
+          const rowTax   = (b: any) => calculateInclusiveInvoiceTax(Number(b.totalPrice ?? 0));
+          const rowDpp   = (b: any) => rowTax(b).dpp;
+          const rowDppNL = (b: any) => rowTax(b).dppNilaiLain;
+          const rowPpn   = (b: any) => rowTax(b).ppnAmount;
           const pvDpp         = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowDpp(b), 0) : (preview?.dpp ?? Math.round(subtotal / 1.11));
           const pvDppNilaiLain = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowDppNL(b), 0) : (preview?.dppNilaiLain ?? Math.round(pvDpp * 11 / 12));
           const pvPpn          = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowPpn(b), 0) : (preview?.ppnAmount ?? Math.round(pvDppNilaiLain * 0.12));
@@ -1503,9 +1502,10 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
         {/* Totals */}
          {(() => {
-           const rowDpp      = (i: any) => Math.round((i.subtotal ?? 0) / 1.11);
-           const rowDppNL    = (i: any) => Math.round(rowDpp(i) * 11 / 12);
-           const rowPpn      = (i: any) => Math.round(rowDppNL(i) * 0.12);
+           const rowTax      = (i: any) => calculateInclusiveInvoiceTax(Number(i.subtotal ?? 0));
+           const rowDpp      = (i: any) => rowTax(i).dpp;
+           const rowDppNL    = (i: any) => rowTax(i).dppNilaiLain;
+           const rowPpn      = (i: any) => rowTax(i).ppnAmount;
            const dpp         = invoice.dpp ?? items.reduce((s: number, i: any) => s + rowDpp(i), 0);
            const dppNilaiLain = invoice.dppNilaiLain ?? items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
            const ppn         = invoice.ppnAmount ?? items.reduce((s: number, i: any) => s + rowPpn(i), 0);

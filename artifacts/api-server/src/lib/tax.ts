@@ -21,6 +21,29 @@ export interface WithholdingTaxCalculation {
   netAmount: number;
 }
 
+export interface InclusiveInvoiceTaxBreakdown {
+  dpp: number;
+  dppNilaiLain: number;
+  ppnAmount: number;
+  grandTotal: number;
+}
+
+/**
+ * Calculate the company-invoice presentation for a price that already
+ * includes PPN. The 11% effective tax is presented as DPP Nilai Lain × 12%.
+ *
+ * Grand total intentionally stays equal to the inclusive selling price.
+ */
+export function calculateInclusiveInvoiceTax(
+  totalAmountInclusive: number,
+): InclusiveInvoiceTaxBreakdown {
+  const grandTotal = Math.max(0, Math.round(Number(totalAmountInclusive) || 0));
+  const dpp = Math.round(grandTotal / 1.11);
+  const dppNilaiLain = Math.round(dpp * 11 / 12);
+  const ppnAmount = Math.round(dppNilaiLain * 0.12);
+  return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+}
+
 /**
  * PPh dipotong dari DPP, bukan dari PPN. Gross tetap menjadi nilai invoice/
  * booking, sedangkan netAmount adalah nominal yang benar-benar dibayar oleh

@@ -68,6 +68,7 @@ import {
   Dumbbell,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
+import { calculateInclusiveInvoiceTax, isAdditiveLegacyTaxSnapshot } from "@/lib/tax";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
 
@@ -86,18 +87,27 @@ type BookingStatus =
   | "refunded";
 
 function getBookingInvoiceTax(booking: any) {
-  const grandTotal = Math.max(0, Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0)));
+  const totalPrice = Math.max(0, Math.round(Number(booking.totalPrice ?? booking.grandTotal ?? 0)));
   const storedPpn = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
-  const dpp = Math.max(
-    0,
-    Math.round(Number(booking.dpp ?? grandTotal - storedPpn)),
-  );
-  const dppNilaiLain = storedPpn > 0 ? Math.round(dpp * 11 / 12) : 0;
-  const ppnAmount = storedPpn > 0
-    ? storedPpn
-    : dppNilaiLain > 0
-      ? Math.round(dppNilaiLain * 0.12)
-      : 0;
+  const legacyAdditiveSnapshot = isAdditiveLegacyTaxSnapshot(booking);
+  const hasInclusiveSnapshot = booking.ppnTreatment === "inclusive" || legacyAdditiveSnapshot;
+  const inclusiveTax = calculateInclusiveInvoiceTax(totalPrice);
+  const grandTotal = hasInclusiveSnapshot
+    ? inclusiveTax.grandTotal
+    : Math.max(0, Math.round(Number(booking.grandTotal ?? totalPrice)));
+  const dpp = hasInclusiveSnapshot
+    ? inclusiveTax.dpp
+    : Math.max(0, Math.round(Number(booking.dpp ?? grandTotal - storedPpn)));
+  const dppNilaiLain = storedPpn > 0 || hasInclusiveSnapshot
+    ? (hasInclusiveSnapshot ? inclusiveTax.dppNilaiLain : Math.round(dpp * 11 / 12))
+    : 0;
+  const ppnAmount = hasInclusiveSnapshot
+    ? inclusiveTax.ppnAmount
+    : storedPpn > 0
+      ? storedPpn
+      : dppNilaiLain > 0
+        ? Math.round(dppNilaiLain * 0.12)
+        : 0;
   const storedPph = booking.pphAmount == null ? null : Number(booking.pphAmount);
   const configuredPphRate = Math.max(0, Number(booking.pphRate ?? 0));
   const pphAmount = Math.max(

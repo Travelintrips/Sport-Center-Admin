@@ -11,6 +11,7 @@ import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from ".
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import { calculateInclusiveInvoiceTax } from "../lib/tax";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -37,11 +38,7 @@ function periodDateRange(periodMonth: string) {
 
 // Fallback only for legacy bookings that have no tax snapshot.
 function calcTaxBreakdown(totalAmountInclusive: number) {
-  const dpp = Math.round(totalAmountInclusive / 1.11);
-  const dppNilaiLain = Math.round(dpp * 11 / 12);
-  const ppnAmount = Math.round(dppNilaiLain * 0.12);
-  const grandTotal = dpp + ppnAmount;
-  return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+  return calculateInclusiveInvoiceTax(totalAmountInclusive);
 }
 
 function summarizeBookingTax(rows: Array<{
@@ -61,11 +58,43 @@ function summarizeBookingTax(rows: Array<{
   }
 
   const dpp = rows.reduce((sum, b) => {
+    const totalPrice = Math.max(0, Math.round(Number(b.totalPrice ?? 0)));
     const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
-    return sum + Math.max(0, Number(b.dpp ?? grand - Number(b.ppnAmount ?? 0)));
+    const storedPpn = Math.max(0, Math.round(Number(b.ppnAmount ?? 0)));
+    const looksLikeAdditiveLegacySnapshot =
+      storedPpn > 0 &&
+      totalPrice > 0 &&
+      grand > totalPrice &&
+      Math.abs(grand - totalPrice - storedPpn) <= 1;
+    if (looksLikeAdditiveLegacySnapshot) {
+      return sum + calcTaxBreakdown(totalPrice).dpp;
+    }
+    return sum + Math.max(0, Number(b.dpp ?? grand - storedPpn));
   }, 0);
-  const ppnAmount = rows.reduce((sum, b) => sum + Math.max(0, Number(b.ppnAmount ?? 0)), 0);
-  const grandTotal = rows.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice ?? 0), 0);
+  const ppnAmount = rows.reduce((sum, b) => {
+    const totalPrice = Math.max(0, Math.round(Number(b.totalPrice ?? 0)));
+    const storedPpn = Math.max(0, Math.round(Number(b.ppnAmount ?? 0)));
+    const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
+    const looksLikeAdditiveLegacySnapshot =
+      storedPpn > 0 &&
+      totalPrice > 0 &&
+      grand > totalPrice &&
+      Math.abs(grand - totalPrice - storedPpn) <= 1;
+    return sum + (looksLikeAdditiveLegacySnapshot
+      ? calcTaxBreakdown(totalPrice).ppnAmount
+      : storedPpn);
+  }, 0);
+  const grandTotal = rows.reduce((sum, b) => {
+    const totalPrice = Math.max(0, Math.round(Number(b.totalPrice ?? 0)));
+    const storedPpn = Math.max(0, Math.round(Number(b.ppnAmount ?? 0)));
+    const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
+    const looksLikeAdditiveLegacySnapshot =
+      storedPpn > 0 &&
+      totalPrice > 0 &&
+      grand > totalPrice &&
+      Math.abs(grand - totalPrice - storedPpn) <= 1;
+    return sum + (looksLikeAdditiveLegacySnapshot ? totalPrice : grand);
+  }, 0);
   const rates = [...new Set(rows.map((b) => Number(b.ppnRate ?? 0)).filter((rate) => rate > 0))];
   const collected = rows.length > 0 && rows.every((b) =>
     b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer",
@@ -162,10 +191,21 @@ function mapInvoice(
   company?: typeof usersTable.$inferSelect | null,
 ) {
   const totalAmount = Number(inv.totalAmount); // inclusive price (subtotal pemakaian)
-  const ppnAmount = Number(inv.ppnAmount ?? 0);
-  const grandTotal = Number(inv.grandTotal ?? totalAmount);
-  const dpp = Math.max(0, grandTotal - ppnAmount);
-  const dppNilaiLain = Number(inv.dppNilaiLain ?? 0) || (ppnAmount > 0 ? Math.round(dpp * 11 / 12) : 0);
+  const storedPpnAmount = Number(inv.ppnAmount ?? 0);
+  const storedGrandTotal = Number(inv.grandTotal ?? totalAmount);
+  const legacyAdditiveSnapshot =
+    storedPpnAmount > 0 &&
+    storedGrandTotal > totalAmount &&
+    Math.abs(storedGrandTotal - totalAmount - storedPpnAmount) <= 1;
+  const fallbackTax = calcTaxBreakdown(totalAmount);
+  const ppnAmount = legacyAdditiveSnapshot ? fallbackTax.ppnAmount : storedPpnAmount;
+  const grandTotal = legacyAdditiveSnapshot ? fallbackTax.grandTotal : storedGrandTotal;
+  const dpp = legacyAdditiveSnapshot
+    ? fallbackTax.dpp
+    : Math.max(0, grandTotal - ppnAmount);
+  const dppNilaiLain = legacyAdditiveSnapshot
+    ? fallbackTax.dppNilaiLain
+    : Number(inv.dppNilaiLain ?? 0) || (ppnAmount > 0 ? Math.round(dpp * 11 / 12) : 0);
   const pphAmount = Number(inv.pphAmount ?? 0);
   const pphRate = Number(inv.pphRate ?? 0);
   const cashGross = inv.ppnCollectedByCustomer === true || inv.ppnTreatment === "collected_by_customer"

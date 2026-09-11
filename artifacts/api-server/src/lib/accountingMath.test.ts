@@ -31,7 +31,11 @@ jest.unstable_mockModule("drizzle-orm", () => ({
 
 const { extractBookingDpp } = await import("./accountingMath.js");
 const { createJournalEntry } = await import("./accounting.js");
-const { calculateWithholdingTax, calculateTaxFromTreatment } = await import("./tax.js");
+const {
+  calculateWithholdingTax,
+  calculateTaxFromTreatment,
+  calculateInclusiveInvoiceTax,
+} = await import("./tax.js");
 
 function selectResult(rows: unknown[]) {
   return {
@@ -90,6 +94,26 @@ describe("confirmed booking payment accounting", () => {
       amount: 0,
       grossAmount: 200000,
       netAmount: 200000,
+    });
+  });
+
+  it("keeps an inclusive Rp500,000 invoice at Rp500,000", () => {
+    expect(calculateInclusiveInvoiceTax(500000)).toEqual({
+      dpp: 450450,
+      dppNilaiLain: 412913,
+      ppnAmount: 49550,
+      grandTotal: 500000,
+    });
+  });
+
+  it("does not invent PPh for a booking without withholding", () => {
+    const tax = calculateInclusiveInvoiceTax(500000);
+    expect(calculateWithholdingTax(tax.grandTotal, tax.dpp, false, 10)).toMatchObject({
+      enabled: false,
+      rate: 0,
+      amount: 0,
+      grossAmount: 500000,
+      netAmount: 500000,
     });
   });
 
