@@ -34,6 +34,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useRef, useState, useCallback, useMemo } from "react";
+import buildingImg from "@assets/1780087062_1780089778393.png";
 
 const AnalyticsReportSection = lazy(() =>
   import("@/components/AnalyticsReportSection").then((module) => ({
@@ -562,7 +563,7 @@ export default function Home() {
               {/* Main image card */}
               <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border border-white/60 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 aspect-[4/3] group">
                 <img
-                  src="/hero.webp"
+                  src={buildingImg}
                   alt="Gedung Sport Center Bandara Soekarno-Hatta"
                   width="1200"
                   height="900"
@@ -745,7 +746,7 @@ export default function Home() {
               <div className="absolute -inset-3 bg-gradient-to-tr from-primary/20 via-primary/5 to-transparent rounded-[2rem] transform -rotate-2" />
               <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border-4 border-white dark:border-slate-900 aspect-[16/10]">
                 <img
-                  src="/hero.webp"
+                  src={buildingImg}
                   alt="Gedung Sport Center Bandara Soekarno-Hatta"
                   width="1200"
                   height="750"
