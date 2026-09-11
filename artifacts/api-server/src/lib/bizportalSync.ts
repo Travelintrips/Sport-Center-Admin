@@ -2135,8 +2135,6 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
               bookingPpn,
               Math.max(0, Math.round((amount * bookingPpn) / bookingGross)),
             );
-        const paymentDpp = Math.max(0, amount - taxAmount);
-
         // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
         // NOTE: bank_account_id is intentionally omitted. The source field is a
         // raw text account number from sport_center.sport_payments, but
