@@ -12,6 +12,7 @@ Harga lapangan adalah **inklusif PPN** (tax-inclusive). Grand Total = harga yang
 - Frontend DPP display = `grandTotal - ppnAmount` (bukan `totalPrice` karena keduanya sama sekarang).
 - `recordTaxTransaction(...)` inserts to tax_transactions table (non-blocking, fire-and-forget).
 - Company invoices: PPN is summed from `booking.ppnAmount` (already stored), NOT recalculated.
+- Admin booking detail must display the stored booking tax snapshot (`dpp`, `ppnAmount`, `pphAmount`, `netAmount`) using the same gross/net rule as company invoices; do not derive DPP from `grandTotal` alone.
 
 ## DB tables
 - `sport_center.tax_settings` — seeded with `PPN_OUT_11` at 11%.

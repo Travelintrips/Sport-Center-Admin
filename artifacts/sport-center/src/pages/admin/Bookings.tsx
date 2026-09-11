@@ -85,6 +85,56 @@ type BookingStatus =
   | "expired"
   | "refunded";
 
+function getBookingInvoiceTax(booking: any) {
+  const grandTotal = Math.max(0, Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0)));
+  const storedPpn = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
+  const dpp = Math.max(
+    0,
+    Math.round(Number(booking.dpp ?? grandTotal - storedPpn)),
+  );
+  const dppNilaiLain = storedPpn > 0 ? Math.round(dpp * 11 / 12) : 0;
+  const ppnAmount = storedPpn > 0
+    ? storedPpn
+    : dppNilaiLain > 0
+      ? Math.round(dppNilaiLain * 0.12)
+      : 0;
+  const storedPph = booking.pphAmount == null ? null : Number(booking.pphAmount);
+  const configuredPphRate = Math.max(0, Number(booking.pphRate ?? 0));
+  const pphAmount = Math.max(
+    0,
+    Math.round(
+      storedPph != null && Number.isFinite(storedPph)
+        ? storedPph
+        : (configuredPphRate > 0 ? dpp * configuredPphRate / 100 : 0),
+    ),
+  );
+  const pphRate = configuredPphRate > 0
+    ? configuredPphRate
+    : (pphAmount > 0 && dpp > 0 ? Math.round((pphAmount / dpp) * 100) : 0);
+  const ppnCollectedByCustomer =
+    booking.ppnCollectedByCustomer === true ||
+    booking.ppnTreatment === "collected_by_customer";
+  const cashGross = ppnCollectedByCustomer ? dpp : grandTotal;
+  const netAmount = Math.max(
+    0,
+    Math.round(
+      booking.netAmount != null
+        ? Number(booking.netAmount)
+        : cashGross - pphAmount,
+    ),
+  );
+
+  return {
+    grandTotal,
+    dpp,
+    dppNilaiLain,
+    ppnAmount,
+    pphRate,
+    pphAmount,
+    netAmount,
+  };
+}
+
 const STATUS_CONFIG: Record<
   BookingStatus,
   { label: string; color: string; bg: string; icon: React.ElementType; pill: string }
@@ -1121,6 +1171,7 @@ function BookingDetailDrawer({
 
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
+  const bookingTax = getBookingInvoiceTax(booking);
 
   const handleAction = (action: string) => {
     if (confirmAction === action) {
@@ -1439,13 +1490,10 @@ function BookingDetailDrawer({
                   </div>
                 </div>
               )}
-              {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
+              {bookingTax.ppnAmount > 0 || bookingTax.pphAmount > 0 ? (
                 <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1 space-y-1.5">
                   {(() => {
-                    const gt = Number(booking.grandTotal ?? booking.totalPrice);
-                    const dppCard = Math.round(gt / 1.11);
-                    const dppNilaiLainCard = Math.round(dppCard * 11 / 12);
-                    const ppnCard = gt - dppCard;
+                    const { grandTotal: gt, dpp: dppCard, dppNilaiLain: dppNilaiLainCard, ppnAmount: ppnCard, pphRate, pphAmount, netAmount } = bookingTax;
                     return (<>
                       <div className="flex justify-between items-center text-sm">
                         <span className="flex items-center gap-1 text-slate-500"><CreditCard size={11} />DPP</span>
@@ -1463,6 +1511,18 @@ function BookingDetailDrawer({
                         <span className="font-bold text-slate-700 dark:text-slate-200">Total DPP + PPN</span>
                         <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(gt)}</span>
                       </div>
+                      {pphAmount > 0 && (
+                        <>
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-orange-700 dark:text-orange-300 pl-3.5">PPh dipotong {pphRate}%</span>
+                            <span className="text-orange-700 dark:text-orange-300 font-semibold">−{formatCurrency(pphAmount)}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1">
+                            <span className="font-bold text-slate-700 dark:text-slate-200">Net dibayar</span>
+                            <span className="font-black text-green-700 dark:text-green-400 text-base">{formatCurrency(netAmount)}</span>
+                          </div>
+                        </>
+                      )}
                       <div className="flex items-center gap-2 pt-1">
                         <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded font-semibold">PPN_OUT_12</span>
                         <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold">DPP Nilai Lain</span>
