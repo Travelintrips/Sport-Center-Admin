@@ -284,7 +284,8 @@ async function runStartupMigrations() {
     `ALTER TABLE sport_center.users
         ADD COLUMN IF NOT EXISTS ppn_enabled boolean NOT NULL DEFAULT true,
        ADD COLUMN IF NOT EXISTS withholding_tax_enabled boolean NOT NULL DEFAULT false,
-       ADD COLUMN IF NOT EXISTS withholding_tax_rate numeric(5,2) NOT NULL DEFAULT 10`,
+       ADD COLUMN IF NOT EXISTS withholding_tax_rate numeric(5,2) NOT NULL DEFAULT 10,
+       ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false`,
     `ALTER TABLE sport_center.sport_bookings
         ADD COLUMN IF NOT EXISTS ppn_treatment text NOT NULL DEFAULT 'none',
         ADD COLUMN IF NOT EXISTS ppn_collected_by_customer boolean NOT NULL DEFAULT false,
