@@ -5,6 +5,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { CUSTOM_MIGRATION_SQL } from "../migrate.js";
+import { loadSecretsFromGSM } from "../../artifacts/api-server/src/lib/secretLoader.js";
 
 /**
  * Split a SQL string into individual statements while respecting $$ dollar-
@@ -62,7 +63,22 @@ const { Client } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isProd = process.argv.includes("--prod");
+const shouldApply = process.argv.includes("--apply");
 const envLabel = isProd ? "PROD" : "DEV";
+
+if (isProd && !shouldApply) {
+  console.error("[migrate] REFUSED: production migration requires explicit --apply.");
+  process.exit(1);
+}
+
+if (isProd && !process.env.SUPABASE_DATABASE_URL) {
+  process.env.NODE_ENV = "production";
+  const secretResult = await loadSecretsFromGSM();
+  if (secretResult.fatal.length > 0) {
+    console.error("[migrate] ERROR: production secrets could not be loaded.");
+    process.exit(1);
+  }
+}
 
 const rawUrl = isProd
   ? process.env.SUPABASE_DATABASE_URL
