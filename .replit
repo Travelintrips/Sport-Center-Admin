@@ -8,6 +8,7 @@ run = [
   "env",
   "PORT=8080",
   "NODE_ENV=production",
+  "GCP_PROJECT_ID=sport-center-506306",
   "GCP_SECRET_ID=sport-center",
   "node",
   "--enable-source-maps",
