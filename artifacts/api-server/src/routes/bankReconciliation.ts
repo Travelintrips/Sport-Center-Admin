@@ -31,9 +31,56 @@ import { ensurePaymentBankAccount } from "../lib/paymentEnrichment";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
 import { getClientInfo, getUserFromReq, logAudit } from "../lib/auditLog";
 import { getPaymentReconciliationMissingFields } from "../lib/paymentReconciliationEligibility";
+import { assessVendorDirectionRecovery } from "../lib/vendorDirectionRecovery";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+type DirectionRecoveryRow = {
+  mutation: typeof bankMutationsTable.$inferSelect;
+  eligible: boolean;
+  debitAmount: number | null;
+  evidence: string[];
+  blockers: string[];
+};
+
+async function assessDirectionRecoveryRow(
+  mutation: typeof bankMutationsTable.$inferSelect,
+): Promise<DirectionRecoveryRow> {
+  const [approvedMatch] = await db
+    .select({ id: bankReconciliationMatchesTable.id })
+    .from(bankReconciliationMatchesTable)
+    .where(and(
+      eq(bankReconciliationMatchesTable.mutationId, mutation.id),
+      eq(bankReconciliationMatchesTable.status, "approved"),
+    ))
+    .limit(1);
+
+  const duplicateOut = await db.execute(sql`
+    SELECT 1
+    FROM sport_center.bank_mutations
+    WHERE id <> ${mutation.id}
+      AND direction = 'OUT'
+      AND transaction_date = ${mutation.transactionDate}
+      AND normalized_description = ${mutation.normalizedDescription}
+      AND amount = ${mutation.amount}
+      AND status <> 'rejected'
+    LIMIT 1
+  `).then((result) => result.rows.length > 0);
+
+  const assessment = assessVendorDirectionRecovery(mutation, {
+    approvedMatch: Boolean(approvedMatch),
+    duplicateOut,
+    periodLocked: false,
+  });
+  return {
+    mutation,
+    eligible: assessment.eligible,
+    debitAmount: assessment.debitAmount,
+    evidence: assessment.evidence,
+    blockers: assessment.blockers,
+  };
+}
 
 // Module-level helper — dipanggil dari /approve DAN /approve-candidate
 // Memperbarui status payment/booking + settlement invoice perusahaan
@@ -552,6 +599,205 @@ function parseRows(rows: any[]): Array<{
     .filter(Boolean) as any[];
 }
 
+// GET /bank-reconciliation/vendor-direction-recovery
+// Preview legacy vendor rows that were imported as IN. This endpoint never mutates.
+router.get("/bank-reconciliation/vendor-direction-recovery", financeMiddleware, async (req, res) => {
+  try {
+    const requestedIds = String(req.query["mutationIds"] ?? "")
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isInteger(value) && value > 0);
+
+    const mutations = await db
+      .select()
+      .from(bankMutationsTable)
+      .where(requestedIds.length ? inArray(bankMutationsTable.id, requestedIds) : eq(bankMutationsTable.direction, "IN"))
+      .orderBy(asc(bankMutationsTable.transactionDate), asc(bankMutationsTable.id));
+
+    const rows: DirectionRecoveryRow[] = [];
+    for (const mutation of mutations) {
+      const row = await assessDirectionRecoveryRow(mutation);
+      const periodLocked = await isPeriodLocked(mutation.transactionDate, mutation.bankAccountId);
+      if (periodLocked) {
+        row.eligible = false;
+        row.blockers = [...new Set([...row.blockers, "period_locked"])];
+      }
+      if (requestedIds.length > 0 || row.evidence.includes("vendor_description")) {
+        rows.push(row);
+      }
+    }
+
+    const audit = await db
+      .select()
+      .from(auditLogsTable)
+      .where(eq(auditLogsTable.action, "vendor_direction_recovery"))
+      .orderBy(desc(auditLogsTable.createdAt))
+      .limit(200);
+
+    res.json({
+      ok: true,
+      mode: "preview",
+      total: rows.length,
+      eligible: rows.filter((row) => row.eligible).length,
+      blocked: rows.filter((row) => !row.eligible).length,
+      rows,
+      audit,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Vendor direction recovery preview error");
+    res.status(500).json({ error: err?.message ?? "Gagal membuat preview pemulihan arah vendor" });
+  }
+});
+
+// POST /bank-reconciliation/vendor-direction-recovery
+// Apply is deliberately super-admin only and requires an explicit apply=true.
+router.post("/bank-reconciliation/vendor-direction-recovery", superAdminMiddleware, async (req, res) => {
+  try {
+    if (req.body?.apply !== true) {
+      res.status(400).json({
+        error: "Pemulihan tidak dijalankan. Kirim apply=true setelah meninjau preview.",
+        code: "EXPLICIT_APPLY_REQUIRED",
+      });
+      return;
+    }
+
+    const requestedIds = Array.isArray(req.body?.mutationIds)
+      ? req.body.mutationIds.map((value: unknown) => Number(value)).filter((value: number) => Number.isInteger(value) && value > 0)
+      : [];
+    if (!requestedIds.length) {
+      res.status(400).json({ error: "mutationIds wajib diisi agar pemulihan tidak berjalan massal tanpa target." });
+      return;
+    }
+
+    const adminUser = (req as any).user;
+    const recovered: Array<{ id: number; oldMutationKey: string; newMutationKey: string; debitAmount: number }> = [];
+    const blocked: Array<{ id: number; blockers: string[] }> = [];
+
+    for (const mutationId of requestedIds) {
+      const [mutation] = await db
+        .select()
+        .from(bankMutationsTable)
+        .where(eq(bankMutationsTable.id, mutationId))
+        .limit(1);
+      if (!mutation) {
+        blocked.push({ id: mutationId, blockers: ["not_found"] });
+        continue;
+      }
+
+      const periodLocked = await isPeriodLocked(mutation.transactionDate, mutation.bankAccountId);
+      const row = await assessDirectionRecoveryRow(mutation);
+      const assessment = assessVendorDirectionRecovery(mutation, {
+        approvedMatch: row.blockers.includes("approved_match"),
+        duplicateOut: row.blockers.includes("duplicate_out_mutation"),
+        periodLocked,
+      });
+      if (!assessment.eligible || !assessment.debitAmount) {
+        blocked.push({
+          id: mutation.id,
+          blockers: [...new Set([...assessment.blockers, ...(periodLocked ? ["period_locked"] : [])])],
+        });
+        continue;
+      }
+
+      const newMutationKey = buildMutationKey(mutation.transactionDate, assessment.debitAmount, "OUT");
+      const collision = await db
+        .select({ id: bankMutationsTable.id })
+        .from(bankMutationsTable)
+        .where(and(
+          eq(bankMutationsTable.mutationKey, newMutationKey),
+          sql`${bankMutationsTable.id} <> ${mutation.id}`,
+          ne(bankMutationsTable.status, "rejected"),
+        ))
+        .limit(1);
+      if (collision.length) {
+        blocked.push({ id: mutation.id, blockers: ["duplicate_out_mutation"] });
+        continue;
+      }
+
+      const before = {
+        direction: mutation.direction,
+        creditAmount: mutation.creditAmount,
+        debitAmount: mutation.debitAmount,
+        amount: mutation.amount,
+        mutationKey: mutation.mutationKey,
+        status: mutation.status,
+        matchedPaymentId: mutation.matchedPaymentId,
+        matchedOrderId: mutation.matchedOrderId,
+      };
+      const after = {
+        direction: "OUT",
+        creditAmount: "0",
+        debitAmount: String(assessment.debitAmount),
+        amount: String(assessment.debitAmount),
+        mutationKey: newMutationKey,
+        status: "unmatched",
+        matchedPaymentId: null,
+        matchedOrderId: null,
+        evidence: assessment.evidence,
+      };
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(bankReconciliationMatchesTable)
+          .set({ status: "rejected" })
+          .where(eq(bankReconciliationMatchesTable.mutationId, mutation.id));
+        const updated = await tx
+          .update(bankMutationsTable)
+          .set({
+            direction: "OUT",
+            creditAmount: "0",
+            debitAmount: String(assessment.debitAmount),
+            amount: String(assessment.debitAmount),
+            mutationKey: newMutationKey,
+            status: "unmatched",
+            matchedPaymentId: null,
+            matchedOrderId: null,
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(bankMutationsTable.id, mutation.id),
+            eq(bankMutationsTable.direction, "IN"),
+            eq(bankMutationsTable.accountingPosted, false),
+          ))
+          .returning({ id: bankMutationsTable.id });
+        if (updated.length !== 1) {
+          throw new Error("RECOVERY_CONCURRENCY_CONFLICT");
+        }
+        await tx.insert(auditLogsTable).values({
+          userId: adminUser?.userId,
+          userRole: adminUser?.role,
+          action: "vendor_direction_recovery",
+          entity: "bank_mutation",
+          entityId: mutation.id,
+          before,
+          after,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string,
+        });
+      });
+      recovered.push({
+        id: mutation.id,
+        oldMutationKey: mutation.mutationKey,
+        newMutationKey,
+        debitAmount: assessment.debitAmount,
+      });
+    }
+
+    res.json({
+      ok: true,
+      mode: "apply",
+      recoveredCount: recovered.length,
+      blockedCount: blocked.length,
+      recovered,
+      blocked,
+      note: "Baris yang dipulihkan kembali berstatus unmatched dan perlu matching ulang.",
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Vendor direction recovery apply error");
+    res.status(500).json({ error: err?.message ?? "Gagal memulihkan arah transaksi vendor" });
+  }
+});
+
 // POST /bank-reconciliation/import
 router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"), async (req, res) => {
   try {
@@ -817,7 +1063,8 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
       -- Group payment representative booking join
       LEFT JOIN sport_center.sport_bookings bgp
         ON bgp.id = m.candidate_id AND m.candidate_type = 'group_payment'
-      WHERE m.mutation_id = ${mutationId}
+       WHERE m.mutation_id = ${mutationId}
+         AND m.status = 'candidate'
       ORDER BY m.match_score DESC
     `);
 
@@ -964,6 +1211,13 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           eq(bankReconciliationMatchesTable.id, matchId),
         ))
         .limit(1);
+      if (selectedMatch?.status === "rejected") {
+        res.status(409).json({
+          error: "Match rejected historis tidak dapat dipulihkan. Jalankan matching ulang atau buat approval manual baru.",
+          code: "HISTORICAL_REJECTED_MATCH",
+        });
+        return;
+      }
     }
 
     const selectedType = selectedMatch?.candidateType ?? candidateType;
@@ -1723,6 +1977,7 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
     const [existing] = await db.select().from(bankReconciliationMatchesTable).where(and(
       eq(bankReconciliationMatchesTable.mutationId, mutationId),
       eq(bankReconciliationMatchesTable.candidateId, candidateId),
+      eq(bankReconciliationMatchesTable.status, "candidate"),
     )).limit(1);
 
     if (existing) {

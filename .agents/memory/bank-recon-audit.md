@@ -32,3 +32,11 @@ description: Key bugs found and patterns to watch in the bank reconciliation sys
 ---
 
 **Stats bar must use API statusCounts, not client-side reduce** — Computing stats from current page gives wrong totals when paginated. API returns `statusCounts` (group by status, same filters minus status filter).
+
+---
+
+**Rerun must preserve rejected match history** — AI matching may replace only active `candidate` rows; historical `rejected` rows are audit evidence, not blockers or reusable approvals.
+
+**Why:** Re-evaluation after a rejected suggestion must create a fresh candidate without restoring the old decision or silently deleting its audit history.
+
+**How to apply:** Scope rerun cleanup to `candidate`, show only active candidates in the candidate endpoint, and reject approval attempts that reference a historical rejected row.

@@ -13,6 +13,7 @@ import {
   type QrisMutationInput,
 } from "./qrisCandidateEngine";
 import { getPaymentReconciliationMissingFields } from "./paymentReconciliationEligibility";
+import { REPLACEABLE_MATCH_STATUSES } from "./bankMatchingPolicy";
 
 const GOPAY_PATTERN = /DOMPET ANAK BANGSA|GOPAY|OVO|DANA|LINKAJA|SHOPEEPAY/i;
 const ORDER_ID_PATTERN = /\b(ID\d{15,25}[A-Z]{0,4}|TRX\d{10,}|INV-\d{8,})\b/i;
@@ -1075,10 +1076,14 @@ async function _runMatchingImpl(mutationIds?: number[]): Promise<{
       continue;
     }
 
-    // Hapus kandidat lama
+    // Replace only the active, unevaluated candidates. Keep rejected rows as
+    // immutable history; they must not block a fresh candidate on rerun.
     await db
       .delete(bankReconciliationMatchesTable)
-      .where(eq(bankReconciliationMatchesTable.mutationId, mutation.id));
+      .where(and(
+        eq(bankReconciliationMatchesTable.mutationId, mutation.id),
+        inArray(bankReconciliationMatchesTable.status, REPLACEABLE_MATCH_STATUSES),
+      ));
 
     const candidates = await computeMatchesForMutation(mutation);
 

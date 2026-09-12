@@ -206,6 +206,7 @@ async function getBookingWithPayment(id: number) {
     const groupBookings = await db.select({
       id: bookingsTable.id,
       additionalCharges: bookingsTable.additionalCharges,
+      totalPrice: bookingsTable.totalPrice,
       dpp: bookingsTable.dpp,
       ppnAmount: bookingsTable.ppnAmount,
       grandTotal: bookingsTable.grandTotal,
