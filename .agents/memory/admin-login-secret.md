@@ -30,3 +30,15 @@ sure the right URL wins or it will fix the wrong DB.
 **Operator login:** `admin_booking` accounts use the same password hashing as admins but
 must also be accepted by the admin portal login endpoint. A valid operator can log in via
 the general login endpoint, but the admin portal must explicitly allow `admin_booking`.
+
+## Malformed stored hashes
+
+`verifyPassword` must reject empty or malformed stored hashes as invalid credentials before
+calling `crypto.timingSafeEqual`. Otherwise a legacy value with the wrong byte length can
+throw and turn an ordinary failed login into HTTP 500.
+
+**Why:** Production returned a misleading “API unavailable” message because the admin-login
+route mapped that internal exception to 500; the API itself was reachable.
+
+**How to apply:** Keep password verification fail-closed and return 401 for malformed stored
+hashes. After source changes, republish before expecting the production custom domain to use them.

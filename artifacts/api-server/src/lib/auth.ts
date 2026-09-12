@@ -75,6 +75,13 @@ export async function verifyPassword(
   password: string,
   storedHash: string
 ): Promise<{ valid: boolean; legacy: boolean }> {
+  // A malformed or empty stored hash must fail closed as invalid credentials.
+  // Without this guard, timingSafeEqual can throw when the legacy value is
+  // not a 32-byte hex digest, turning a login failure into HTTP 500.
+  if (!isValidPasswordHash(storedHash)) {
+    return { valid: false, legacy: false };
+  }
+
   // bcrypt hashes always start with $2b$ or $2a$
   if (storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$")) {
     const valid = await bcrypt.compare(password, storedHash);

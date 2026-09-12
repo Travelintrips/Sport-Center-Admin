@@ -52,6 +52,10 @@ import { readPaymentProofOcr } from "../lib/paymentOcr";
 async function postPaymentAccountingProjection(payment: any, booking: any): Promise<void> {
   let dpp = extractBookingDpp(booking).dpp;
   let ppnAmount = extractBookingDpp(booking).ppnAmount;
+  let pphAmount = Number(booking.pphAmount ?? 0);
+  let pphRate = booking.pphRate == null ? null : Number(booking.pphRate);
+  let ppnTreatment = booking.ppnTreatment ?? null;
+  let ppnCollectedByCustomer = booking.ppnCollectedByCustomer === true;
 
   if (booking.groupRef) {
     const groupBookings = await db
@@ -59,6 +63,8 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
         dpp: bookingsTable.dpp,
         totalPrice: bookingsTable.totalPrice,
         grandTotal: bookingsTable.grandTotal,
+         pphRate: bookingsTable.pphRate,
+         pphAmount: bookingsTable.pphAmount,
         ppnAmount: bookingsTable.ppnAmount,
          ppnTreatment: bookingsTable.ppnTreatment,
          ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
@@ -67,18 +73,14 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
       .where(eq(bookingsTable.groupRef, booking.groupRef));
     dpp = 0;
     ppnAmount = 0;
-          pphAmount = 0;
-          pphRate = null;
-          ppnTreatment = null;
-          ppnCollectedByCustomer = false;
     for (const groupBooking of groupBookings) {
       const extracted = extractBookingDpp(groupBooking);
       dpp += extracted.dpp;
       ppnAmount += extracted.ppnAmount;
-            pphAmount += Number(groupBooking.pphAmount ?? 0);
-            pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
-            ppnTreatment ??= groupBooking.ppnTreatment;
-            ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
+      pphAmount += Number(groupBooking.pphAmount ?? 0);
+      pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
+      ppnTreatment ??= groupBooking.ppnTreatment;
+      ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
     }
   }
 
@@ -91,6 +93,8 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
     ppnTreatment: booking.ppnTreatment,
     ppnCollectedByCustomer: booking.ppnCollectedByCustomer,
+    pphRate,
+    pphAmount,
     facilityId: booking.facilityId,
     journalDate: paidAt.toISOString().slice(0, 10),
     paymentMethod: payment.paymentMethod ?? undefined,
@@ -446,6 +450,13 @@ router.post("/payments", async (req, res) => {
           isDpPaid: booking.isDpPaid,
           totalPrice: booking.totalPrice,
           grandTotal: booking.grandTotal,
+          dpp: booking.dpp,
+          ppnAmount: booking.ppnAmount,
+          ppnTreatment: booking.ppnTreatment,
+          ppnCollectedByCustomer: booking.ppnCollectedByCustomer,
+          netAmount: booking.netAmount,
+          pphRate: booking.pphRate,
+          pphAmount: booking.pphAmount,
         }];
     const groupBookingIds = groupBookings.map((b) => b.id);
     const existingPayments = await db.select().from(paymentsTable)
@@ -507,14 +518,24 @@ router.post("/payments", async (req, res) => {
           .limit(1)
       : [];
     const grossTotal = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
-    const netTotal = groupBookings.reduce((sum, row) => {
+    const groupRows = groupBookings as Array<{
+      grandTotal: string | null;
+      totalPrice: string;
+      dpp: string | null;
+      ppnAmount: string | null;
+      ppnTreatment: string | null;
+      ppnCollectedByCustomer: boolean;
+      netAmount: string | null;
+    }>;
+    let netTotal = 0;
+    for (const row of groupRows) {
       const gross = Number(row.grandTotal ?? row.totalPrice ?? 0);
       const dpp = Math.max(0, Number(row.dpp ?? gross - Number(row.ppnAmount ?? 0)));
       const collectedByCustomer =
         row.ppnCollectedByCustomer === true || row.ppnTreatment === "collected_by_customer";
       const cashGross = collectedByCustomer ? dpp : gross;
-      return sum + Math.max(0, Number(row.netAmount ?? cashGross));
-    }, 0);
+      netTotal += Math.max(0, Number(row.netAmount ?? cashGross));
+    }
     const total = Math.round(netTotal || grossTotal);
     const confirmedDp = Math.max(
       0,
