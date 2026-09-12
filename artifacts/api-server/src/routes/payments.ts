@@ -63,16 +63,21 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
         dpp: bookingsTable.dpp,
         totalPrice: bookingsTable.totalPrice,
         grandTotal: bookingsTable.grandTotal,
-         pphRate: bookingsTable.pphRate,
-         pphAmount: bookingsTable.pphAmount,
         ppnAmount: bookingsTable.ppnAmount,
-         ppnTreatment: bookingsTable.ppnTreatment,
-         ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+        pphAmount: bookingsTable.pphAmount,
+        pphRate: bookingsTable.pphRate,
+        ppnTreatment: bookingsTable.ppnTreatment,
+        ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
       })
       .from(bookingsTable)
       .where(eq(bookingsTable.groupRef, booking.groupRef));
     dpp = 0;
     ppnAmount = 0;
+
+    pphAmount = 0;
+    pphRate = null;
+    ppnTreatment = null;
+    ppnCollectedByCustomer = false;
     for (const groupBooking of groupBookings) {
       const extracted = extractBookingDpp(groupBooking);
       dpp += extracted.dpp;
@@ -91,10 +96,11 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
     dpp,
     ppnAmount,
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
-    ppnTreatment: booking.ppnTreatment,
-    ppnCollectedByCustomer: booking.ppnCollectedByCustomer,
+    ppnTreatment,
+    ppnCollectedByCustomer,
     pphRate,
     pphAmount,
+
     facilityId: booking.facilityId,
     journalDate: paidAt.toISOString().slice(0, 10),
     paymentMethod: payment.paymentMethod ?? undefined,
@@ -440,6 +446,8 @@ router.post("/payments", async (req, res) => {
           grandTotal: bookingsTable.grandTotal,
           dpp: bookingsTable.dpp,
           ppnAmount: bookingsTable.ppnAmount,
+          pphAmount: bookingsTable.pphAmount,
+          pphRate: bookingsTable.pphRate,
           ppnTreatment: bookingsTable.ppnTreatment,
           ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
           netAmount: bookingsTable.netAmount,
@@ -1919,6 +1927,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           ? "Rekening penerima pembayaran belum tersedia untuk payment ini."
           : message.startsWith("PAYMENT_PROVIDER")
             ? "Metadata provider pembayaran belum lengkap."
+            : message.includes("CANONICAL_PROVIDER_RULE_UNRESOLVED")
+              ? "Aturan settlement pembayaran belum tersinkron. Publikasikan ulang aplikasi lalu coba konfirmasi kembali."
             : message.includes("CANONICAL_") || message.includes("MIRROR_")
               ? "Pembayaran belum dapat dikonfirmasi karena aturan settlement atau data penerima belum lengkap."
               : isAccountingConflict
