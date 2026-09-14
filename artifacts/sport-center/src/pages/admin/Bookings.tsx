@@ -224,6 +224,24 @@ const FILTER_OPTIONS = [
   { value: "refunded",        label: "Pengembalian Dana" },
 ];
 
+const SETTLEMENT_FILTER_OPTIONS = [
+  { value: "all", label: "Semua Settlement" },
+  { value: "bank_reconciled", label: "Settled · Rekonsil Bank" },
+  { value: "outside_bank_reconciliation", label: "Settled · Di luar Rekonsil" },
+  { value: "not_settled", label: "Belum Settled" },
+];
+
+function getBookingPayments(booking: any): any[] {
+  return [
+    booking?.payment,
+    ...(Array.isArray(booking?.payments) ? booking.payments : []),
+  ].filter(Boolean);
+}
+
+function bookingHasPaymentFlag(booking: any, flag: string): boolean {
+  return getBookingPayments(booking).some((payment) => payment?.[flag] === true);
+}
+
 function StatusBadge({ status, isDpPaid }: { status: string; isDpPaid?: boolean }) {
   const cfg = STATUS_CONFIG[status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const Icon = cfg.icon;
@@ -2604,6 +2622,7 @@ export default function AdminBookings() {
   const { toast } = useToast();
 
   const [statusFilter, setStatusFilter] = useState("all");
+  const [settlementFilter, setSettlementFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -3035,6 +3054,18 @@ export default function AdminBookings() {
             : b.status === statusFilter;
         if (!match) return false;
       }
+      const isSettled = bookingHasPaymentFlag(b, "isSettled");
+      const isBankReconciled = bookingHasPaymentFlag(b, "isBankReconciled");
+      const isSettledOutsideBankReconciliation = bookingHasPaymentFlag(
+        b,
+        "isSettledOutsideBankReconciliation",
+      );
+      if (settlementFilter === "bank_reconciled" && !isBankReconciled) return false;
+      if (
+        settlementFilter === "outside_bank_reconciliation" &&
+        !isSettledOutsideBankReconciliation
+      ) return false;
+      if (settlementFilter === "not_settled" && isSettled) return false;
       if (dateFrom && b.bookingDate < dateFrom) return false;
       if (dateTo && b.bookingDate > dateTo) return false;
       if (search) {
@@ -3055,7 +3086,7 @@ export default function AdminBookings() {
     return statusFilter === "waiting_confirmation"
       ? dedupePaymentConfirmationBookings(sorted)
       : sorted;
-  }, [bookings, statusFilter, search, dateFrom, dateTo]);
+  }, [bookings, statusFilter, settlementFilter, search, dateFrom, dateTo]);
 
   // Satu groupRef hanya boleh memiliki satu entry aksi verifikasi pada
   // tampilan saat ini. Memilih row dengan bukti pembayaran membuat aksi tetap
@@ -3709,6 +3740,18 @@ export default function AdminBookings() {
             </SelectTrigger>
             <SelectContent>
               {FILTER_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value} className="text-xs">
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={settlementFilter} onValueChange={setSettlementFilter}>
+            <SelectTrigger className="h-8 w-52 text-xs rounded-lg border-slate-200 dark:border-slate-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SETTLEMENT_FILTER_OPTIONS.map((o) => (
                 <SelectItem key={o.value} value={o.value} className="text-xs">
                   {o.label}
                 </SelectItem>
