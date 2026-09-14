@@ -119,6 +119,7 @@ function getBookingInvoiceTax(booking: any) {
   const withholding = calculateBookingWithholdingTax({
     grossAmount: grandTotal,
     dpp,
+    companyCustomerId: booking.companyCustomerId,
     pphRate: booking.pphRate,
     pphAmount: booking.pphAmount,
     netAmount: booking.netAmount,

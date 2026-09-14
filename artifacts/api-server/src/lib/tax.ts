@@ -76,6 +76,7 @@ export async function resolveWithholdingTax(
   }
   const [company] = await db
     .select({
+      accountType: usersTable.accountType,
       withholdingTaxEnabled: usersTable.withholdingTaxEnabled,
       withholdingTaxRate: usersTable.withholdingTaxRate,
     })
@@ -85,7 +86,7 @@ export async function resolveWithholdingTax(
   return calculateWithholdingTax(
     grossAmount,
     dpp,
-    company?.withholdingTaxEnabled === true,
+    company?.accountType === "company" && company.withholdingTaxEnabled === true,
     Number(company?.withholdingTaxRate ?? 10),
   );
 }

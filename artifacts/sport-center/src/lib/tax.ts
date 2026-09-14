@@ -8,6 +8,7 @@ export interface InclusiveInvoiceTaxBreakdown {
 export interface BookingWithholdingTaxInput {
   grossAmount: number;
   dpp: number;
+  companyCustomerId?: number | string | null;
   pphRate?: number | string | null;
   pphAmount?: number | string | null;
   netAmount?: number | string | null;
@@ -24,7 +25,8 @@ export function calculateBookingWithholdingTax(input: BookingWithholdingTaxInput
   const dpp = Math.max(0, Math.round(Number(input.dpp) || 0));
   const configuredRate = Math.max(0, Number(input.pphRate ?? 0) || 0);
   const storedAmount = Math.max(0, Math.round(Number(input.pphAmount ?? 0) || 0));
-  const enabled = configuredRate > 0 || storedAmount > 0;
+  const isCompanyBooking = input.companyCustomerId != null;
+  const enabled = isCompanyBooking && (configuredRate > 0 || storedAmount > 0);
   const rate = configuredRate > 0
     ? configuredRate
     : (storedAmount > 0 && dpp > 0 ? Math.round((storedAmount / dpp) * 100) : 0);
@@ -37,9 +39,7 @@ export function calculateBookingWithholdingTax(input: BookingWithholdingTaxInput
   const storedNet = input.netAmount == null ? null : Number(input.netAmount);
   const netAmount = enabled
     ? Math.max(0, Math.round(cashGross - amount))
-    : (storedNet != null && Number.isFinite(storedNet)
-      ? Math.max(0, Math.round(storedNet))
-      : cashGross);
+    : cashGross;
 
   return { enabled, rate, amount, grossAmount, dpp, cashGross, netAmount };
 }

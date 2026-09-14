@@ -213,6 +213,7 @@ async function getBookingWithPayment(id: number) {
       grandTotal: bookingsTable.grandTotal,
       ppnTreatment: bookingsTable.ppnTreatment,
       ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+       companyCustomerId: bookingsTable.companyCustomerId,
       pphRate: bookingsTable.pphRate,
       pphAmount: bookingsTable.pphAmount,
       netAmount: bookingsTable.netAmount,
@@ -233,7 +234,7 @@ async function getBookingWithPayment(id: number) {
           const withholding = calculateWithholdingTax(
             grandTotal,
             dpp,
-            configuredPphRate > 0 || storedPphAmount > 0,
+            row.companyCustomerId != null && (configuredPphRate > 0 || storedPphAmount > 0),
             configuredPphRate > 0 ? configuredPphRate : 10,
           );
           return sum + withholding.netAmount;
@@ -254,7 +255,7 @@ async function getBookingWithPayment(id: number) {
   const bookingWithholding = calculateWithholdingTax(
     bookingGrandTotal,
     bookingDpp,
-    bookingPphRate > 0 || bookingPphAmount > 0,
+    booking.companyCustomerId != null && (bookingPphRate > 0 || bookingPphAmount > 0),
     bookingPphRate > 0 ? bookingPphRate : 10,
   );
   const payableTotal = groupInfo?.groupNetTotalPayment ?? bookingWithholding.netAmount;
@@ -565,6 +566,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         dpp: b.dpp == null ? null : Number(b.dpp),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+         pphRate: b.companyCustomerId == null || b.pphRate == null ? null : Number(b.pphRate),
+         pphAmount: b.companyCustomerId == null || b.pphAmount == null ? null : Number(b.pphAmount),
         additionalCharges: normalizeAdditionalCharges(b.additionalCharges),
         groupAdditionalCharges: b.groupRef
           ? (groupAdditionalCharges.get(b.groupRef) ?? [])

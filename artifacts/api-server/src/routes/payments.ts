@@ -53,8 +53,8 @@ import { readPaymentProofOcr } from "../lib/paymentOcr";
 async function postPaymentAccountingProjection(payment: any, booking: any): Promise<void> {
   let dpp = extractBookingDpp(booking).dpp;
   let ppnAmount = extractBookingDpp(booking).ppnAmount;
-  let pphAmount = Number(booking.pphAmount ?? 0);
-  let pphRate = booking.pphRate == null ? null : Number(booking.pphRate);
+  let pphAmount = booking.companyCustomerId == null ? 0 : Number(booking.pphAmount ?? 0);
+  let pphRate = booking.companyCustomerId == null || booking.pphRate == null ? null : Number(booking.pphRate);
   let ppnTreatment = booking.ppnTreatment ?? null;
   let ppnCollectedByCustomer = booking.ppnCollectedByCustomer === true;
 
@@ -64,6 +64,7 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
         dpp: bookingsTable.dpp,
         totalPrice: bookingsTable.totalPrice,
         grandTotal: bookingsTable.grandTotal,
+         companyCustomerId: bookingsTable.companyCustomerId,
         ppnAmount: bookingsTable.ppnAmount,
         pphAmount: bookingsTable.pphAmount,
         pphRate: bookingsTable.pphRate,
@@ -83,8 +84,10 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
       const extracted = extractBookingDpp(groupBooking);
       dpp += extracted.dpp;
       ppnAmount += extracted.ppnAmount;
-      pphAmount += Number(groupBooking.pphAmount ?? 0);
-      pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
+      if (groupBooking.companyCustomerId != null) {
+        pphAmount += Number(groupBooking.pphAmount ?? 0);
+        pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
+      }
       ppnTreatment ??= groupBooking.ppnTreatment;
       ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
     }
@@ -445,6 +448,7 @@ router.post("/payments", async (req, res) => {
           isDpPaid: bookingsTable.isDpPaid,
           totalPrice: bookingsTable.totalPrice,
           grandTotal: bookingsTable.grandTotal,
+           companyCustomerId: bookingsTable.companyCustomerId,
           dpp: bookingsTable.dpp,
           ppnAmount: bookingsTable.ppnAmount,
           pphAmount: bookingsTable.pphAmount,
@@ -459,6 +463,7 @@ router.post("/payments", async (req, res) => {
           isDpPaid: booking.isDpPaid,
           totalPrice: booking.totalPrice,
           grandTotal: booking.grandTotal,
+           companyCustomerId: booking.companyCustomerId,
           dpp: booking.dpp,
           ppnAmount: booking.ppnAmount,
           ppnTreatment: booking.ppnTreatment,
@@ -530,6 +535,7 @@ router.post("/payments", async (req, res) => {
     const groupRows = groupBookings as Array<{
       grandTotal: string | null;
       totalPrice: string;
+      companyCustomerId: number | null;
       dpp: string | null;
       ppnAmount: string | null;
       pphRate: string | null;
@@ -547,7 +553,7 @@ router.post("/payments", async (req, res) => {
       const withholding = calculateWithholdingTax(
         gross,
         dpp,
-        configuredPphRate > 0 || storedPphAmount > 0,
+        row.companyCustomerId != null && (configuredPphRate > 0 || storedPphAmount > 0),
         configuredPphRate > 0 ? configuredPphRate : 10,
       );
       netTotal += withholding.netAmount;

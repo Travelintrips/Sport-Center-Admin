@@ -229,6 +229,7 @@ export default function BookingDetail() {
     const bookingWithholding = calculateBookingWithholdingTax({
       grossAmount: bookingGross,
       dpp: bookingDpp,
+      companyCustomerId: (booking as any).companyCustomerId,
       pphRate: (booking as any).pphRate,
       pphAmount: (booking as any).pphAmount,
       netAmount: (booking as any).netAmount,
@@ -387,6 +388,7 @@ export default function BookingDetail() {
   const bookingWithholding = calculateBookingWithholdingTax({
     grossAmount: bookingGross,
     dpp: bookingDpp,
+    companyCustomerId: (booking as any).companyCustomerId,
     pphRate: (booking as any).pphRate,
     pphAmount: (booking as any).pphAmount,
     netAmount: (booking as any).netAmount,
@@ -534,6 +536,7 @@ export default function BookingDetail() {
                  const withholding = calculateBookingWithholdingTax({
                    grossAmount: gt,
                    dpp: dppVal,
+                   companyCustomerId: (booking as any).companyCustomerId,
                    pphRate: (booking as any).pphRate,
                    pphAmount: (booking as any).pphAmount,
                    netAmount: (booking as any).netAmount,
