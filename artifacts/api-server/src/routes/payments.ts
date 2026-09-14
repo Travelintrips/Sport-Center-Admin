@@ -33,6 +33,7 @@ import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoic
 import { normalizePaymentProvider, resolveManualPaymentPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { validatePaymentMetadataUpdate } from "../lib/paymentMetadataUpdate";
+import { calculateWithholdingTax } from "../lib/tax";
 import {
   ensurePaymentBankAccount,
   resolveRequiredPaymentEnrichment,
@@ -531,6 +532,8 @@ router.post("/payments", async (req, res) => {
       totalPrice: string;
       dpp: string | null;
       ppnAmount: string | null;
+      pphRate: string | null;
+      pphAmount: string | null;
       ppnTreatment: string | null;
       ppnCollectedByCustomer: boolean;
       netAmount: string | null;
@@ -539,10 +542,15 @@ router.post("/payments", async (req, res) => {
     for (const row of groupRows) {
       const gross = Number(row.grandTotal ?? row.totalPrice ?? 0);
       const dpp = Math.max(0, Number(row.dpp ?? gross - Number(row.ppnAmount ?? 0)));
-      const collectedByCustomer =
-        row.ppnCollectedByCustomer === true || row.ppnTreatment === "collected_by_customer";
-      const cashGross = collectedByCustomer ? dpp : gross;
-      netTotal += Math.max(0, Number(row.netAmount ?? cashGross));
+      const storedPphAmount = Math.max(0, Number(row.pphAmount ?? 0));
+      const configuredPphRate = Math.max(0, Number(row.pphRate ?? 0));
+      const withholding = calculateWithholdingTax(
+        gross,
+        dpp,
+        configuredPphRate > 0 || storedPphAmount > 0,
+        configuredPphRate > 0 ? configuredPphRate : 10,
+      );
+      netTotal += withholding.netAmount;
     }
     const total = Math.round(netTotal || grossTotal);
     const confirmedDp = Math.max(

@@ -31,9 +31,9 @@ export function calculateBookingWithholdingTax(input: BookingWithholdingTaxInput
   const amount = configuredRate > 0
     ? Math.round(dpp * configuredRate / 100)
     : storedAmount;
-  const cashGross = input.ppnCollectedByCustomer || input.ppnTreatment === "collected_by_customer"
-    ? dpp
-    : grossAmount;
+  // PPh is withheld from DPP, but the customer still settles DPP + PPN.
+  // PPN collection ownership must not remove PPN from the net invoice amount.
+  const cashGross = grossAmount;
   const storedNet = input.netAmount == null ? null : Number(input.netAmount);
   const netAmount = enabled
     ? Math.max(0, Math.round(cashGross - amount))

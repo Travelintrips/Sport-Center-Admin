@@ -3871,15 +3871,13 @@ export default function AdminBookings() {
                         b.payments.some((payment: any) => payment.isSettledOutsideBankReconciliation)),
                     );
                      const bookingTax = getBookingInvoiceTax(b);
-                      // The main Total column represents the booking amount before
-                      // withholding. PPh is a separate deduction, not a price
-                      // reduction; for PPN collected by the customer, cashGross is
-                      // the DPP that Sport Center actually invoices.
-                      const bookingDisplayTotal = bookingTax.cashGross;
+                      // The main Total column shows the amount payable after
+                      // withholding: DPP + PPN - PPh.
+                      const bookingDisplayTotal = bookingTax.netAmount;
                      const groupDisplayTotal = isMultiSessionGroup
                        ? groupRows.reduce((sum: number, row: any) => {
                            const rowTax = getBookingInvoiceTax(row);
-                            return sum + rowTax.cashGross;
+                            return sum + rowTax.netAmount;
                          }, 0)
                        : bookingDisplayTotal;
 

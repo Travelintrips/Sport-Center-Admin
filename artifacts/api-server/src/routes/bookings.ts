@@ -213,6 +213,8 @@ async function getBookingWithPayment(id: number) {
       grandTotal: bookingsTable.grandTotal,
       ppnTreatment: bookingsTable.ppnTreatment,
       ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
+      pphRate: bookingsTable.pphRate,
+      pphAmount: bookingsTable.pphAmount,
       netAmount: bookingsTable.netAmount,
     })
       .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
@@ -226,10 +228,15 @@ async function getBookingWithPayment(id: number) {
         groupNetTotalPayment: groupBookings.reduce((sum, row) => {
           const grandTotal = Number(row.grandTotal ?? row.totalPrice ?? 0);
           const dpp = Math.max(0, Number(row.dpp ?? grandTotal - Number(row.ppnAmount ?? 0)));
-          const collectedByCustomer =
-            row.ppnCollectedByCustomer === true || row.ppnTreatment === "collected_by_customer";
-          const cashGross = collectedByCustomer ? dpp : grandTotal;
-          return sum + Math.max(0, Number(row.netAmount ?? cashGross));
+          const storedPphAmount = Math.max(0, Number(row.pphAmount ?? 0));
+          const configuredPphRate = Math.max(0, Number(row.pphRate ?? 0));
+          const withholding = calculateWithholdingTax(
+            grandTotal,
+            dpp,
+            configuredPphRate > 0 || storedPphAmount > 0,
+            configuredPphRate > 0 ? configuredPphRate : 10,
+          );
+          return sum + withholding.netAmount;
         }, 0),
         groupSessionCount: groupBookings.length,
         additionalCharges: groupCharges,
@@ -237,13 +244,20 @@ async function getBookingWithPayment(id: number) {
     }
   }
 
-  const payableTotal = groupInfo?.groupNetTotalPayment ?? (
-    booking.netAmount != null
-      ? Number(booking.netAmount)
-      : booking.grandTotal != null
-        ? Number(booking.grandTotal)
-        : Number(booking.totalPrice)
+  const bookingGrandTotal = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+  const bookingDpp = Math.max(
+    0,
+    Number(booking.dpp ?? bookingGrandTotal - Number(booking.ppnAmount ?? 0)),
   );
+  const bookingPphAmount = Math.max(0, Number(booking.pphAmount ?? 0));
+  const bookingPphRate = Math.max(0, Number(booking.pphRate ?? 0));
+  const bookingWithholding = calculateWithholdingTax(
+    bookingGrandTotal,
+    bookingDpp,
+    bookingPphRate > 0 || bookingPphAmount > 0,
+    bookingPphRate > 0 ? bookingPphRate : 10,
+  );
+  const payableTotal = groupInfo?.groupNetTotalPayment ?? bookingWithholding.netAmount;
 
   // idCardNumber adalah PII — jangan ekspos di endpoint publik (customer invoice).
   const { idCardNumber: _redacted, ...rest } = booking;
@@ -263,9 +277,9 @@ async function getBookingWithPayment(id: number) {
     dpp: booking.dpp == null ? null : Number(booking.dpp),
     ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
     grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
-    pphRate: booking.pphRate == null ? null : Number(booking.pphRate),
-    pphAmount: booking.pphAmount == null ? null : Number(booking.pphAmount),
-    netAmount: booking.netAmount == null ? null : Number(booking.netAmount),
+    pphRate: bookingWithholding.enabled ? bookingWithholding.rate : null,
+    pphAmount: bookingWithholding.enabled ? bookingWithholding.amount : null,
+    netAmount: bookingWithholding.netAmount,
     downPayment: Number(booking.downPayment ?? 0),
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
@@ -928,7 +942,7 @@ router.post("/bookings", async (req, res) => {
     });
     const pphCalc = await resolveWithholdingTax(
       companyBillingUser?.id,
-      taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : (taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice),
+      taxCalc.grandTotal,
       taxCalc.dpp,
     );
     const orderNumber = await generateBookingOrderNumber();
@@ -1563,7 +1577,7 @@ router.post("/bookings/recurring", async (req, res) => {
       taxByDate.set(bookingDate, taxCalc);
       const pphCalc = await resolveWithholdingTax(
         verifiedCompanyCustomerId,
-        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+        taxCalc.grandTotal,
         taxCalc.dpp,
       );
       projectedGrandTotal += pphCalc.netAmount;
@@ -1606,7 +1620,7 @@ router.post("/bookings/recurring", async (req, res) => {
         : taxByDate.get(bookingDate)!;
       const pphCalc = await resolveWithholdingTax(
         companyBillingUser?.id,
-        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : (taxCalc.taxAmount > 0 ? taxCalc.grandTotal : sessionTotalPrice),
+        taxCalc.grandTotal,
         taxCalc.dpp,
       );
       const orderNumber = await generateBookingOrderNumber();
@@ -2077,7 +2091,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         });
         const pphCalc = await resolveWithholdingTax(
           row.companyCustomerId,
-          taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+          taxCalc.grandTotal,
           taxCalc.dpp,
         );
 
@@ -2143,7 +2157,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       });
       const pphCalc = await resolveWithholdingTax(
         beforeUpdate.companyCustomerId,
-        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+        taxCalc.grandTotal,
         taxCalc.dpp,
       );
 
@@ -2591,7 +2605,7 @@ router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) =>
     });
     const pphCalc = await resolveWithholdingTax(
       booking.companyCustomerId,
-      taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+      taxCalc.grandTotal,
       taxCalc.dpp,
     );
 
@@ -2805,7 +2819,7 @@ async function runApVerification(
   });
   const finalPphCalc = await resolveWithholdingTax(
     booking.companyCustomerId,
-    finalTaxCalc.ppnCollectedByCustomer ? finalTaxCalc.dpp : finalTaxCalc.grandTotal,
+    finalTaxCalc.grandTotal,
     finalTaxCalc.dpp,
   );
 
@@ -2889,7 +2903,7 @@ async function runApVerification(
        });
         const siblingPphCalc = await resolveWithholdingTax(
           sibling.companyCustomerId,
-          siblingTaxCalc.ppnCollectedByCustomer ? siblingTaxCalc.dpp : siblingTaxCalc.grandTotal,
+          siblingTaxCalc.grandTotal,
           siblingTaxCalc.dpp,
         );
        await reverseTaxTransaction(sibling.id, sibling.orderNumber, sibling.bookingDate);
@@ -3007,7 +3021,7 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
     });
     const pphCalc = await resolveWithholdingTax(
       booking.companyCustomerId,
-      taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+      taxCalc.grandTotal,
       taxCalc.dpp,
     );
     await db.update(bookingsTable).set({
@@ -3165,7 +3179,7 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
       });
       const pphCalc = await resolveWithholdingTax(
         booking.companyCustomerId,
-        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+        taxCalc.grandTotal,
         taxCalc.taxAmount > 0 ? taxCalc.dpp : finalTotal,
       );
 
