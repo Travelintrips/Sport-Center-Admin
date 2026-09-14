@@ -133,6 +133,7 @@ function getBookingInvoiceTax(booking: any) {
     ppnAmount,
     pphRate: withholding.rate,
     pphAmount: withholding.amount,
+    cashGross: withholding.cashGross,
     netAmount: withholding.netAmount,
   };
 }
@@ -3870,15 +3871,15 @@ export default function AdminBookings() {
                         b.payments.some((payment: any) => payment.isSettledOutsideBankReconciliation)),
                     );
                      const bookingTax = getBookingInvoiceTax(b);
-                     const bookingGrossTotal = Math.round(Number(b.grandTotal ?? b.totalPrice ?? 0));
-                     const bookingDisplayTotal = bookingTax.pphAmount > 0
-                       ? bookingTax.netAmount
-                       : bookingGrossTotal;
+                      // The main Total column represents the booking amount before
+                      // withholding. PPh is a separate deduction, not a price
+                      // reduction; for PPN collected by the customer, cashGross is
+                      // the DPP that Sport Center actually invoices.
+                      const bookingDisplayTotal = bookingTax.cashGross;
                      const groupDisplayTotal = isMultiSessionGroup
                        ? groupRows.reduce((sum: number, row: any) => {
                            const rowTax = getBookingInvoiceTax(row);
-                           const rowGross = Math.round(Number(row.grandTotal ?? row.totalPrice ?? 0));
-                           return sum + (rowTax.pphAmount > 0 ? rowTax.netAmount : rowGross);
+                            return sum + rowTax.cashGross;
                          }, 0)
                        : bookingDisplayTotal;
 
@@ -4061,6 +4062,11 @@ export default function AdminBookings() {
                                 <span className="text-[10px] text-slate-400 dark:text-slate-500">
                                    sesi ini: {formatCurrency(bookingDisplayTotal)}
                                 </span>
+                                 {bookingTax.pphAmount > 0 && (
+                                   <span className="text-[10px] text-orange-600 dark:text-orange-400">
+                                     net setelah PPh: {formatCurrency(bookingTax.netAmount)}
+                                   </span>
+                                 )}
                               </div>
                             </div>
                           )}
