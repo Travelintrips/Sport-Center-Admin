@@ -741,6 +741,157 @@ router.post("/company-invoices/:id/rebuild-items", adminMiddleware, async (req, 
   }
 });
 
+// Apply withholding tax to the booking snapshots that make up an invoice.
+// Gross booking values remain unchanged; only PPh and net payable values are
+// synchronized to the booking, invoice item, and invoice summary.
+router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const rate = Number(req.body?.rate ?? 10);
+    const confirmPaidInvoice = req.body?.confirmPaidInvoice === true;
+    const reason = String(req.body?.reason ?? "").trim();
+
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      res.status(400).json({ error: "Tarif PPh harus berada di antara 0 dan 100 persen" });
+      return;
+    }
+
+    const [invoice] = await db
+      .select()
+      .from(companyInvoicesTable)
+      .where(eq(companyInvoicesTable.id, id))
+      .limit(1);
+    if (!invoice) {
+      res.status(404).json({ error: "Invoice tidak ditemukan" });
+      return;
+    }
+
+    const isSettled = invoice.status === "paid" || invoice.status === "partial_paid";
+    if (isSettled && !confirmPaidInvoice) {
+      res.status(409).json({
+        code: "PAID_INVOICE_CONFIRMATION_REQUIRED",
+        error: "Invoice sudah memiliki status pembayaran. Konfirmasi koreksi PPh terlebih dahulu.",
+      });
+      return;
+    }
+    if (isSettled && !reason) {
+      res.status(400).json({ error: "Alasan koreksi wajib diisi untuk invoice yang sudah dibayar" });
+      return;
+    }
+
+    const existingItems = await resolveInvoiceItems(id, invoice);
+    const bookingIds = existingItems
+      .map((item: any) => Number(item.bookingId))
+      .filter((bookingId: number) => Number.isInteger(bookingId) && bookingId > 0);
+    if (bookingIds.length === 0) {
+      res.status(409).json({ error: "Invoice belum memiliki booking yang dapat disesuaikan" });
+      return;
+    }
+
+    let updatedInvoice: typeof companyInvoicesTable.$inferSelect;
+    let updatedBookings = 0;
+    let totalPph = 0;
+    let totalNet = 0;
+
+    await db.transaction(async (tx) => {
+      const bookings = await tx
+        .select()
+        .from(bookingsTable)
+        .where(and(
+          inArray(bookingsTable.id, bookingIds),
+          eq(bookingsTable.companyCustomerId, invoice.companyCustomerId),
+        ));
+
+      const bookingById = new Map(bookings.map((booking) => [booking.id, booking]));
+      const missingBookingIds = bookingIds.filter((bookingId) => !bookingById.has(bookingId));
+      if (missingBookingIds.length > 0) {
+        throw new Error(`Booking invoice tidak ditemukan atau perusahaan tidak cocok: ${missingBookingIds.join(", ")}`);
+      }
+
+      for (const bookingId of bookingIds) {
+        const booking = bookingById.get(bookingId)!;
+        const grandTotal = Math.max(0, Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0)));
+        const ppnAmount = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
+        const dpp = Math.max(0, Math.round(Number(booking.dpp ?? grandTotal - ppnAmount)));
+        const withholding = calculateWithholdingTax(grandTotal, dpp, rate > 0, rate);
+
+        await tx.update(bookingsTable)
+          .set({
+            pphRate: String(withholding.rate),
+            pphAmount: String(withholding.amount),
+            netAmount: String(withholding.netAmount),
+            updatedAt: new Date(),
+          })
+          .where(eq(bookingsTable.id, bookingId));
+
+        const item = existingItems.find((candidate: any) => Number(candidate.bookingId) === bookingId);
+        if (item?.id) {
+          await tx.update(companyInvoiceItemsTable)
+            .set({ pphAmount: String(withholding.amount) })
+            .where(eq(companyInvoiceItemsTable.id, item.id));
+        }
+
+        totalPph += withholding.amount;
+        totalNet += withholding.netAmount;
+        updatedBookings += 1;
+      }
+
+      const [updated] = await tx.update(companyInvoicesTable)
+        .set({
+          pphRate: String(rate),
+          pphAmount: String(Math.round(totalPph)),
+          netAmount: String(Math.round(totalNet)),
+        })
+        .where(eq(companyInvoicesTable.id, id))
+        .returning();
+      updatedInvoice = updated;
+    });
+
+    const [company] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, invoice.companyCustomerId))
+      .limit(1);
+    const updatedItems = await db
+      .select()
+      .from(companyInvoiceItemsTable)
+      .where(eq(companyInvoiceItemsTable.invoiceId, id));
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_WITHHOLDING_APPLIED",
+      entity: "company_invoice",
+      entityId: id,
+      before: {
+        status: invoice.status,
+        pphRate: invoice.pphRate,
+        pphAmount: invoice.pphAmount,
+        netAmount: invoice.netAmount,
+      },
+      after: {
+        status: updatedInvoice!.status,
+        pphRate: rate,
+        pphAmount: Math.round(totalPph),
+        netAmount: Math.round(totalNet),
+        updatedBookingCount: updatedBookings,
+        reason: reason || null,
+      },
+      ipAddress,
+      userAgent,
+    });
+
+    res.json({
+      ...mapInvoice(updatedInvoice!, company?.companyName ?? company?.name, updatedItems, company),
+      updatedBookingCount: updatedBookings,
+      accountingReviewRequired: isSettled,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Apply company invoice withholding error");
+    res.status(500).json({ error: err?.message ?? "Internal server error" });
+  }
+});
+
 router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));

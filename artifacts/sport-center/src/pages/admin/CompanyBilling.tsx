@@ -1057,6 +1057,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const updateMutation = useUpdateCompanyInvoice();
   const [sendingWa, setSendingWa] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [applyingWithholding, setApplyingWithholding] = useState(false);
   const [generatingPackage, setGeneratingPackage] = useState(false);
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreview, setProofPreview] = useState<string | null>(null);
@@ -1159,6 +1160,48 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       toast({ title: e?.message ?? "Gagal sinkronisasi item", variant: "destructive" });
     } finally {
       setRebuilding(false);
+    }
+  };
+
+  const handleApplyWithholding = async () => {
+    if (!invoice) return;
+    const isSettled = invoice.status === "paid" || invoice.status === "partial_paid";
+    if (isSettled) {
+      const confirmed = window.confirm(
+        "Invoice ini sudah memiliki status pembayaran. Terapkan koreksi PPh 10% ke booking dan net invoice? " +
+        "Harga booking, DPP, PPN, dan Grand Total tetap; jurnal pembayaran perlu ditinjau finance.",
+      );
+      if (!confirmed) return;
+    }
+
+    setApplyingWithholding(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/company-invoices/${invoiceId}/apply-withholding`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token ?? ""}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          rate: 10,
+          confirmPaidInvoice: isSettled,
+          reason: isSettled ? "Koreksi PPh 10% atas invoice dan booking terkait" : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal menerapkan PPh");
+      toast({
+        title: "PPh 10% diterapkan ke booking",
+        description: `${data.updatedBookingCount ?? 0} booking disinkronkan. Harga/DPP dan Grand Total tetap.`,
+      });
+      qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+      qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
+      qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
+    } catch (e: any) {
+      toast({ title: e?.message ?? "Gagal menerapkan PPh", variant: "destructive" });
+    } finally {
+      setApplyingWithholding(false);
     }
   };
 
@@ -1442,6 +1485,16 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
               <RefreshCw size={11} className={rebuilding ? "animate-spin" : ""} />
               {rebuilding ? "Sinkronisasi..." : "Sinkronisasi Item"}
             </Button>
+             <Button
+               size="sm"
+               variant="outline"
+               onClick={handleApplyWithholding}
+               disabled={applyingWithholding || items.length === 0}
+               className="gap-1.5 text-xs h-7 border-orange-300 text-orange-700 hover:bg-orange-50"
+             >
+               <RefreshCw size={11} className={applyingWithholding ? "animate-spin" : ""} />
+               {applyingWithholding ? "Menerapkan PPh..." : "Terapkan PPh 10% ke Booking"}
+             </Button>
           </div>
           {items.length === 0 ? (
             <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg border-dashed space-y-2">
@@ -1463,6 +1516,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                     <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">DPP</th>
                     <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">PPN 12%</th>
                     <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Total</th>
+                     <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">PPh 10%</th>
+                     <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Net Booking</th>
                     <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">No. Booking</th>
                   </tr>
                 </thead>
@@ -1482,16 +1537,24 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                       <td className="p-2.5 text-right whitespace-nowrap">{formatCurrency(Math.round((item.subtotal ?? 0) / 1.11))}</td>
                       <td className="p-2.5 text-right whitespace-nowrap text-muted-foreground">{formatCurrency(Math.round(Math.round(Math.round((item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
                       <td className="p-2.5 text-right whitespace-nowrap font-semibold">{formatCurrency(item.subtotal ?? 0)}</td>
+                       <td className="p-2.5 text-right whitespace-nowrap text-orange-700">{Number(item.pphAmount ?? 0) > 0 ? `- ${formatCurrency(item.pphAmount)}` : "—"}</td>
+                       <td className="p-2.5 text-right whitespace-nowrap font-semibold text-green-700">
+                         {Number(item.pphAmount ?? 0) > 0
+                           ? formatCurrency(Math.max(0, Number(item.totalAmount ?? item.subtotal ?? 0) - Number(item.pphAmount ?? 0)))
+                           : "—"}
+                       </td>
                       <td className="p-2.5 whitespace-nowrap font-mono text-[10px] text-muted-foreground">{item.orderNumber ?? "-"}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="border-t bg-muted/30">
-                    <td colSpan={6} className="p-2.5 text-xs font-semibold text-muted-foreground">{items.length} sesi</td>
+                     <td colSpan={6} className="p-2.5 text-xs font-semibold text-muted-foreground">{items.length} sesi</td>
                     <td className="p-2.5 text-right text-xs font-semibold">{formatCurrency(items.reduce((s: number, i: any) => s + Math.round((i.subtotal ?? 0) / 1.11), 0))}</td>
                     <td className="p-2.5 text-right text-xs text-muted-foreground">{formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round((i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
                     <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + (i.subtotal ?? 0), 0))}</td>
+                     <td className="p-2.5 text-right text-xs text-orange-700">{formatCurrency(items.reduce((s: number, i: any) => s + Number(i.pphAmount ?? 0), 0))}</td>
+                     <td className="p-2.5 text-right text-xs font-bold text-green-700">{formatCurrency(items.reduce((s: number, i: any) => s + Math.max(0, Number(i.totalAmount ?? i.subtotal ?? 0) - Number(i.pphAmount ?? 0)), 0))}</td>
                     <td />
                   </tr>
                 </tfoot>
