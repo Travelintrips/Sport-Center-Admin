@@ -1259,6 +1259,16 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     let { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
+    if (
+      status !== undefined &&
+      status !== "confirmed" &&
+      status !== "rejected"
+    ) {
+      res.status(400).json({
+        error: "Status pembayaran harus confirmed atau rejected.",
+      });
+      return;
+    }
     // Edit metadata tanpa perubahan status harus lewat endpoint khusus
     // PATCH /payments/:id/metadata yang metadata-only dan tervalidasi ketat.
     // Route lebar ini hanya untuk konfirmasi/penolakan status (boleh disertai
@@ -1498,37 +1508,232 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           },
         );
         const [enrichedPayment] = await db
-          .update(paymentsTable)
-          .set({
+          .select()
+          .from(paymentsTable)
+          .where(eq(paymentsTable.id, preparedPayment.id))
+          .limit(1);
+        if (enrichedPayment) {
+          preparedPayment = {
+            ...preparedPayment,
             companyId: enrichment.companyId ?? preparedPayment.companyId,
             bankAccountId: enrichment.bankAccountId ?? preparedPayment.bankAccountId,
-            expectedSettlementDate: enrichment.expectedSettlementDate ?? preparedPayment.expectedSettlementDate,
+            expectedSettlementDate:
+              enrichment.expectedSettlementDate ?? preparedPayment.expectedSettlementDate,
             paidAt: preparedPayment.paidAt ?? preparedPayment.confirmedAt ?? new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(paymentsTable.id, preparedPayment.id))
-          .returning();
-        if (enrichedPayment) preparedPayment = enrichedPayment;
+          };
+          Object.assign(updateData, {
+            companyId: preparedPayment.companyId,
+            bankAccountId: preparedPayment.bankAccountId,
+            expectedSettlementDate: preparedPayment.expectedSettlementDate,
+            paidAt: preparedPayment.paidAt,
+          });
+        }
       }
     }
 
     let payment: typeof before | undefined;
-    if (status === "confirmed") {
-      assertPaymentMirrorMigrationReady();
-      // Claim the pending payment in the database. Two concurrent callbacks
-      // can both read "pending", but only one can transition it and continue
-      // to accounting.
-      [payment] = await db
-        .update(paymentsTable)
-        .set(updateData)
-        .where(and(eq(paymentsTable.id, id), inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[])))
+    const siblingSyncs: Array<{
+      booking: typeof booking;
+      targetStatus: string;
+      proofUrl: string | null | undefined;
+      paidAt: Date | null | undefined;
+    }> = [];
+    const userInfo = getUserFromReq(req);
+    const clientInfo = getClientInfo(req);
 
-        .returning();
+    if (status === "confirmed" || status === "rejected") {
+      if (status === "confirmed") {
+        assertPaymentMirrorMigrationReady();
+      }
+
+      // Claim the payment and update every local booking record in one
+      // transaction. This prevents a payment from becoming confirmed while
+      // its booking/history/group rows remain stale after a later DB error.
+      payment = await db.transaction(async (tx) => {
+        const [claimed] = await tx
+          .update(paymentsTable)
+          .set(updateData)
+          .where(
+            status === "confirmed"
+              ? and(
+                  eq(paymentsTable.id, id),
+                  inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[]),
+                )
+              : eq(paymentsTable.id, id),
+          )
+          .returning();
+
+        if (!claimed) return undefined;
+
+        if (paymentMethodChanged && booking) {
+          const linkedMutationConditions = [
+            eq(bankMutationsTable.matchedPaymentId, claimed.id),
+            eq(bankMutationsTable.matchedOrderId, booking.id),
+            eq(bankMutationsTable.mutationKey, `SC-${booking.orderNumber}`),
+          ];
+          await tx
+            .update(bankMutationsTable)
+            .set({
+              companyId: claimed.companyId,
+              bankAccountId: claimed.bankAccountId,
+              providerName: claimed.providerName,
+              providerOrderId: claimed.providerOrderId,
+              updatedAt: new Date(),
+            })
+            .where(or(...linkedMutationConditions));
+        }
+
+        const propagateGroupStatus = async (
+          targetStatus: string,
+          note: string,
+          proofUrl?: string | null,
+          paidAt?: Date | null,
+          extraFields?: Record<string, unknown>,
+        ) => {
+          if (!booking?.groupRef) return;
+          const siblings = await tx
+            .select()
+            .from(bookingsTable)
+            .where(
+              and(
+                eq(bookingsTable.groupRef, booking.groupRef),
+                ne(bookingsTable.id, claimed.bookingId),
+              ),
+            );
+          for (const sibling of siblings) {
+            if (!isBookingConfirmableStatus(sibling.status)) continue;
+            await tx
+              .update(bookingsTable)
+              .set({
+                status: targetStatus as any,
+                updatedAt: new Date(),
+                ...(extraFields ?? {}),
+              })
+              .where(eq(bookingsTable.id, sibling.id));
+            await tx.insert(bookingHistoryTable).values({
+              bookingId: sibling.id,
+              fromStatus: sibling.status,
+              toStatus: targetStatus,
+              changedByName: userInfo.userName || "admin",
+              note: `${note} (grup ${booking.groupRef})`,
+            });
+            await tx
+              .update(paymentsTable)
+              .set({
+                status: status as any,
+                ...(status === "confirmed"
+                  ? {
+                      confirmedAt: claimed.paidAt ?? claimed.confirmedAt ?? new Date(),
+                      paidAt: claimed.paidAt ?? claimed.confirmedAt ?? new Date(),
+                    }
+                  : {}),
+              })
+              .where(
+                and(
+                  eq(paymentsTable.bookingId, sibling.id),
+                  eq(paymentsTable.status, "pending"),
+                ),
+              );
+            siblingSyncs.push({
+              booking: {
+                ...sibling,
+                totalPrice: "0",
+                grandTotal: null,
+                dpp: null,
+                ppnAmount: null,
+              } as typeof booking,
+              targetStatus,
+              proofUrl,
+              paidAt,
+            });
+          }
+        };
+
+        if (status === "confirmed") {
+          const isDP = claimed.paymentType === "dp";
+          const prevStatus = booking?.status ?? "waiting_confirmation";
+          if (isDP) {
+            await tx
+              .update(bookingsTable)
+              .set({
+                status: "pending_payment",
+                isDpPaid: true,
+                updatedAt: new Date(),
+              })
+              .where(eq(bookingsTable.id, claimed.bookingId));
+            await tx.insert(bookingHistoryTable).values({
+              bookingId: claimed.bookingId,
+              fromStatus: prevStatus,
+              toStatus: "pending_payment",
+              changedByName: userInfo.userName || "admin",
+              note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
+            });
+            await propagateGroupStatus(
+              "pending_payment",
+              "DP dikonfirmasi oleh admin, menunggu pelunasan",
+              null,
+              null,
+              { isDpPaid: true },
+            );
+          } else {
+            await tx
+              .update(bookingsTable)
+              .set({ status: "confirmed", updatedAt: new Date() })
+              .where(eq(bookingsTable.id, claimed.bookingId));
+            await tx.insert(bookingHistoryTable).values({
+              bookingId: claimed.bookingId,
+              fromStatus: prevStatus,
+              toStatus: "confirmed",
+              changedByName: userInfo.userName || "admin",
+              note:
+                claimed.paymentType === "pelunasan"
+                  ? "Pelunasan dikonfirmasi oleh admin"
+                  : "Pembayaran dikonfirmasi oleh admin",
+            });
+            await propagateGroupStatus(
+              "confirmed",
+              claimed.paymentType === "pelunasan"
+                ? "Pelunasan dikonfirmasi oleh admin"
+                : "Pembayaran dikonfirmasi oleh admin",
+              claimed.proofUrl,
+              new Date(),
+            );
+          }
+        } else {
+          const prevStatus = booking?.status ?? "waiting_confirmation";
+          await tx
+            .update(bookingsTable)
+            .set({ status: "pending_payment", updatedAt: new Date() })
+            .where(eq(bookingsTable.id, claimed.bookingId));
+          await tx.insert(bookingHistoryTable).values({
+            bookingId: claimed.bookingId,
+            fromStatus: prevStatus,
+            toStatus: "pending_payment",
+            changedByName: userInfo.userName || "admin",
+            note: `Pembayaran ditolak: ${notes ?? ""}`,
+          });
+          await propagateGroupStatus(
+            "pending_payment",
+            `Pembayaran ditolak: ${notes ?? ""}`,
+            null,
+            null,
+          );
+        }
+
+        return claimed;
+      });
 
       if (!payment) {
-        const [current] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
-        if (!current) { res.status(404).json({ error: "Not found" }); return; }
-        if (current.status === "confirmed") {
+        const [current] = await db
+          .select()
+          .from(paymentsTable)
+          .where(eq(paymentsTable.id, id))
+          .limit(1);
+        if (!current) {
+          res.status(404).json({ error: "Not found" });
+          return;
+        }
+        if (status === "confirmed" && current.status === "confirmed") {
           res.json({ ...current, amount: Number(current.amount) });
           return;
         }
@@ -1536,110 +1741,37 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         return;
       }
     } else {
-      await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
-      [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
-      if (!payment) { res.status(404).json({ error: "Not found" }); return; }
-    }
-
-    if (paymentMethodChanged && booking) {
-      const linkedMutationConditions = [
-        eq(bankMutationsTable.matchedPaymentId, payment.id),
-        eq(bankMutationsTable.matchedOrderId, booking.id),
-        eq(bankMutationsTable.mutationKey, `SC-${booking.orderNumber}`),
-      ];
-
-      // Mutasi bank memakai payment/order link yang sudah ada. Hanya metadata
-      // settlement yang diperbarui; nominal, tanggal, status, dan keputusan
-      // rekonsiliasi tidak disentuh.
-      await db
-        .update(bankMutationsTable)
-        .set({
-          companyId: payment.companyId,
-          bankAccountId: payment.bankAccountId,
-          providerName: payment.providerName,
-          providerOrderId: payment.providerOrderId,
-          updatedAt: new Date(),
-        })
-        .where(or(...linkedMutationConditions));
-    }
-
-    const userInfo = getUserFromReq(req);
-    const clientInfo = getClientInfo(req);
-
-    // Helper: propagasi status ke semua sibling dalam grup
-    const propagateGroupStatus = async (
-      targetStatus: string,
-      note: string,
-      proofUrl?: string | null,
-      paidAt?: Date | null,
-      extraFields?: Record<string, unknown>,
-    ) => {
-      if (!booking?.groupRef) return;
-      const siblings = await db.select().from(bookingsTable).where(
-        and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, payment.bookingId))
-      );
-      for (const sib of siblings) {
-        if (!isBookingConfirmableStatus(sib.status)) continue;
-        const sibPrev = sib.status;
-        await db.update(bookingsTable)
-          .set({ status: targetStatus as any, updatedAt: new Date(), ...(extraFields ?? {}) })
-          .where(eq(bookingsTable.id, sib.id));
-        await db.insert(bookingHistoryTable).values({
-          bookingId: sib.id,
-          fromStatus: sibPrev,
-          toStatus: targetStatus,
-          changedByName: userInfo.userName || "admin",
-          note: `${note} (grup ${booking.groupRef})`,
-        });
-        // Update juga sibling payment records ke status yang sama
-        await db.update(paymentsTable)
-         .set({
-           status: status as any,
-           ...(status === "confirmed"
-             ? { confirmedAt: payment.paidAt ?? payment.confirmedAt ?? new Date(), paidAt: payment.paidAt ?? payment.confirmedAt ?? new Date() }
-             : {}),
-         })
-          .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
-        // Sync sibling ke BizPortal dengan total_price = 0:
-        // Nilai finansial sudah tercatat di booking utama (primary) sehingga
-        // sibling tidak boleh menambah nominal di BizPortal (mencegah double counting).
-        syncStatusToBizportal(sib.orderNumber, targetStatus, proofUrl, paidAt, {
-          ...sib,
-          totalPrice: "0",
-          grandTotal: null,
-          dpp: null,
-          ppnAmount: null,
-        } as any).catch(() => {});
+      payment = await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(paymentsTable)
+          .set(updateData)
+          .where(eq(paymentsTable.id, id))
+          .returning();
+        return updated;
+      });
+      if (!payment) {
+        res.status(404).json({ error: "Not found" });
+        return;
       }
-    };
+    }
+
+    for (const siblingSync of siblingSyncs) {
+      syncStatusToBizportal(
+        siblingSync.booking.orderNumber,
+        siblingSync.targetStatus,
+        siblingSync.proofUrl,
+        siblingSync.paidAt,
+        siblingSync.booking,
+      ).catch(() => {});
+    }
 
     if (status === "confirmed") {
       const isDP = payment.paymentType === "dp";
 
       if (isDP) {
-        // DP dikonfirmasi — set isDpPaid=true, booking kembali ke pending_payment untuk upload pelunasan
-        const prevStatus = booking?.status ?? "waiting_confirmation";
-        await db.update(bookingsTable)
-          .set({ status: "pending_payment", isDpPaid: true, updatedAt: new Date() })
-          .where(eq(bookingsTable.id, payment.bookingId));
-
         if (booking) {
-          try {
-            await db.insert(bookingHistoryTable).values({
-              bookingId: payment.bookingId,
-              fromStatus: prevStatus,
-              toStatus: "pending_payment",
-              changedByName: userInfo.userName || "admin",
-              note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
-            });
-          } catch (err) {
-            req.log.error({ err, paymentId: id, bookingId: payment.bookingId }, "Payment confirmed but DP history could not be written");
-          }
-
           // Sync status ke BizPortal — booking sudah DP, menunggu pelunasan
           syncStatusToBizportal(booking.orderNumber, "pending_payment", payment.proofUrl).catch(() => {});
-
-          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan", null, null, { isDpPaid: true });
         }
 
         await logAudit({
@@ -1653,37 +1785,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         });
       } else {
         // Pelunasan / full_payment dikonfirmasi → booking confirmed
-        const prevStatus = booking?.status ?? "waiting_confirmation";
-        await db.update(bookingsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
-          .where(eq(bookingsTable.id, payment.bookingId));
-
         if (booking) {
-          try {
-            await db.insert(bookingHistoryTable).values({
-              bookingId: payment.bookingId,
-              fromStatus: prevStatus,
-              toStatus: "confirmed",
-              changedByName: userInfo.userName || "admin",
-              note:
-                payment.paymentType === "pelunasan"
-                  ? "Pelunasan dikonfirmasi oleh admin"
-                  : "Pembayaran dikonfirmasi oleh admin",
-            });
-          } catch (err) {
-            req.log.error({ err, paymentId: id, bookingId: payment.bookingId }, "Payment confirmed but booking history could not be written");
-          }
-
-          // Propagasi confirmed ke semua sibling dalam grup
-          await propagateGroupStatus(
-            "confirmed",
-            payment.paymentType === "pelunasan"
-              ? "Pelunasan dikonfirmasi oleh admin"
-              : "Pembayaran dikonfirmasi oleh admin",
-            payment.proofUrl,
-            new Date(),
-          );
-
           const [facility] = await db
             .select({ name: facilitiesTable.name })
             .from(facilitiesTable)
@@ -1809,21 +1911,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       }
     } else if (status === "rejected") {
       // Tolak DP atau pelunasan — booking kembali ke pending_payment
-      const prevStatus = booking?.status ?? "waiting_confirmation";
-      await db.update(bookingsTable)
-        .set({ status: "pending_payment", updatedAt: new Date() })
-        .where(eq(bookingsTable.id, payment.bookingId));
-
       if (booking) {
-        await db.insert(bookingHistoryTable).values({
-          bookingId: payment.bookingId,
-          fromStatus: prevStatus,
-          toStatus: "pending_payment",
-          changedByName: userInfo.userName || "admin",
-          note: `Pembayaran ditolak: ${notes ?? ""}`,
-        });
-        // Propagasi rejected ke semua sibling dalam grup
-        await propagateGroupStatus("pending_payment", `Pembayaran ditolak: ${notes ?? ""}`, null, null);
         syncStatusToBizportal(booking.orderNumber, "pending_payment", null, null, booking).catch(() => {});
       }
 
