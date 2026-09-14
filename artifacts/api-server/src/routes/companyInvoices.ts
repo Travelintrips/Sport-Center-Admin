@@ -126,12 +126,23 @@ function summarizeWithholdingTax(
   }>,
 ) {
   // Recalculate from the tax base instead of trusting historical pphAmount or
-  // netAmount snapshots. The withholding formula is:
-  // PPh = DPP × rate, Net = (DPP + PPN) − PPh.
+  // netAmount snapshots. Some booking rows store PPN additively (grandTotal =
+  // totalPrice + ppnAmount), while the company invoice presents that same
+  // price as PPN-inclusive. Normalize those legacy snapshots before applying
+  // withholding so Net never becomes larger than the invoice total.
   const calculations = rows.map((row) => {
-    const grandTotal = Math.max(0, Math.round(Number(row.grandTotal ?? row.totalPrice ?? 0)));
+    const totalPrice = Math.max(0, Math.round(Number(row.totalPrice ?? 0)));
+    const storedGrandTotal = Math.max(0, Math.round(Number(row.grandTotal ?? totalPrice)));
     const ppnAmount = Math.max(0, Math.round(Number(row.ppnAmount ?? 0)));
-    const dpp = Math.max(0, Math.round(Number(row.dpp ?? grandTotal - ppnAmount)));
+    const looksLikeAdditiveLegacySnapshot =
+      ppnAmount > 0 &&
+      totalPrice > 0 &&
+      storedGrandTotal > totalPrice &&
+      Math.abs(storedGrandTotal - totalPrice - ppnAmount) <= 1;
+    const grandTotal = looksLikeAdditiveLegacySnapshot ? totalPrice : storedGrandTotal;
+    const dpp = looksLikeAdditiveLegacySnapshot
+      ? calcTaxBreakdown(totalPrice).dpp
+      : Math.max(0, Math.round(Number(row.dpp ?? grandTotal - ppnAmount)));
     const storedPph = Math.max(0, Number(row.pphAmount ?? 0));
     const configuredRate = Math.max(0, Number(row.pphRate ?? 0));
     const enabled = configuredRate > 0 || storedPph > 0;
