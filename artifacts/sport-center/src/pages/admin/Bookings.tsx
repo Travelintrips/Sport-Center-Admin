@@ -64,6 +64,7 @@ import {
   MessageCircle,
   CheckCircle,
   AlertCircle,
+  Banknote,
   Lock as LockIcon,
   Dumbbell,
 } from "lucide-react";
@@ -3741,6 +3742,16 @@ export default function AdminBookings() {
           <span className="text-xs text-slate-400 ml-auto shrink-0">
             {bookingsError ? "Data tidak tersedia" : `${filtered.length} booking`}
           </span>
+           <div className="w-full flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-400 lg:w-auto lg:ml-2">
+             <span className="inline-flex items-center gap-1">
+               <span className="h-2 w-2 rounded-full bg-yellow-400 ring-1 ring-yellow-600/30" />
+               Settled · Rekonsil Bank
+             </span>
+             <span className="inline-flex items-center gap-1">
+               <span className="h-2 w-2 rounded-full bg-sky-400 ring-1 ring-sky-600/30" />
+               Settled · Di luar Rekonsil
+             </span>
+           </div>
         </div>
 
         {/* Table */}
@@ -3810,6 +3821,11 @@ export default function AdminBookings() {
                       listPayment?.isBankReconciled ||
                       (Array.isArray(b.payments) && b.payments.some((payment: any) => payment.isBankReconciled)),
                     );
+                    const isSettledOutsideBankReconciliation = Boolean(
+                      listPayment?.isSettledOutsideBankReconciliation ||
+                      (Array.isArray(b.payments) &&
+                        b.payments.some((payment: any) => payment.isSettledOutsideBankReconciliation)),
+                    );
                      const bookingTax = getBookingInvoiceTax(b);
                      const bookingGrossTotal = Math.round(Number(b.grandTotal ?? b.totalPrice ?? 0));
                      const bookingDisplayTotal = bookingTax.pphAmount > 0
@@ -3840,20 +3856,40 @@ export default function AdminBookings() {
                           onChange={() => toggleSelect(b.id)}
                         />
                       </td>
-                       <td className="px-4 py-3">
-                         <span
-                           className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 font-mono text-xs font-bold ${
-                             isBankReconciled
-                               ? "bg-yellow-100 text-yellow-800 ring-1 ring-inset ring-yellow-300 dark:bg-yellow-900/40 dark:text-yellow-200 dark:ring-yellow-700"
-                               : "text-slate-600 dark:text-slate-400"
-                           }`}
-                           title={isBankReconciled ? "Payment settled dan matched dengan mutasi bank" : undefined}
-                         >
-                           {b.orderNumber}
-                           {isBankReconciled && (
-                             <CheckCircle2 size={11} className="text-yellow-700 dark:text-yellow-300" aria-label="Settled dan matched" />
-                           )}
-                         </span>
+                        <td className="px-4 py-3">
+                          <div className="flex min-w-[112px] flex-col items-start gap-1">
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 font-mono text-xs font-bold ${
+                                isBankReconciled
+                                  ? "bg-yellow-100 text-yellow-800 ring-1 ring-inset ring-yellow-300 dark:bg-yellow-900/40 dark:text-yellow-200 dark:ring-yellow-700"
+                                  : "text-slate-600 dark:text-slate-400"
+                              }`}
+                            >
+                              {b.orderNumber}
+                            </span>
+                            {(isBankReconciled || isSettledOutsideBankReconciliation) && (
+                              <div className="flex flex-wrap gap-1">
+                                {isBankReconciled && (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full border border-yellow-300 bg-yellow-50 px-1.5 py-0.5 text-[9px] font-bold text-yellow-800 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-200"
+                                    title="Payment settled dan matched dengan mutasi bank melalui rekonsiliasi"
+                                  >
+                                    <CheckCircle2 size={10} />
+                                    Rekonsil
+                                  </span>
+                                )}
+                                {isSettledOutsideBankReconciliation && (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[9px] font-bold text-sky-800 dark:border-sky-700 dark:bg-sky-900/30 dark:text-sky-200"
+                                    title="Payment settled tetapi tidak memiliki match rekonsiliasi bank final"
+                                  >
+                                    <Banknote size={10} />
+                                    Non-rekon
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

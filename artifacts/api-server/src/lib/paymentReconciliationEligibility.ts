@@ -21,9 +21,13 @@ export function isPaymentSettledAndMatched(
   hasFinalBankMatch: boolean,
 ): boolean {
   return (
-    String(payment.settlementStatus ?? "").trim().toLowerCase() === "settled" &&
+    isPaymentSettled(payment) &&
     hasFinalBankMatch
   );
+}
+
+export function isPaymentSettled(payment: { settlementStatus?: string | null }): boolean {
+  return String(payment.settlementStatus ?? "").trim().toLowerCase() === "settled";
 }
 
 export type ReconciliationPaymentReference = {

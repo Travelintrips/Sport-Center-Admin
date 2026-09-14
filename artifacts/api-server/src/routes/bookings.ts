@@ -33,6 +33,7 @@ import { generateBookingOrderNumber } from "../lib/orderNumber";
 import {
   FINAL_BANK_MATCH_STATUSES,
   getReconciledPaymentIds,
+  isPaymentSettled,
   isPaymentSettledAndMatched,
 } from "../lib/paymentReconciliationEligibility";
 
@@ -521,14 +522,18 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         const label = isPaylabsPayment && !isDirectQris
           ? resolvePaylabsDisplayLabel(isPaylabsQris ? "qris" : paymentCode, paylabsLabels)
           : undefined;
+        const isSettled = isPaymentSettled(p);
+        const isBankReconciled = isPaymentSettledAndMatched(
+          p,
+          reconciledPaymentIds.has(p.id),
+        );
         return {
           ...p,
           paymentMethod: label ?? p.paymentMethod,
           amount: Number(p.amount),
-          isBankReconciled: isPaymentSettledAndMatched(
-            p,
-            reconciledPaymentIds.has(p.id),
-          ),
+          isSettled,
+          isBankReconciled,
+          isSettledOutsideBankReconciliation: isSettled && !isBankReconciled,
         };
       });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
@@ -558,10 +563,17 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
            ? {
                ...paymentForResponse,
                amount: Number(paymentForResponse.amount),
+               isSettled: isPaymentSettled(paymentForResponse),
                isBankReconciled: isPaymentSettledAndMatched(
                  paymentForResponse,
                  reconciledPaymentIds.has(paymentForResponse.id),
                ),
+               isSettledOutsideBankReconciliation:
+                 isPaymentSettled(paymentForResponse) &&
+                 !isPaymentSettledAndMatched(
+                   paymentForResponse,
+                   reconciledPaymentIds.has(paymentForResponse.id),
+                 ),
              }
            : null,
         payments: paymentsForResponse,
