@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useListCompanyInvoices, useGenerateCompanyInvoice, useUpdateCompanyInvoice,
   useListCustomers,
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -40,6 +41,11 @@ const BILLING_DOC_TYPES = [
 
 function formatCurrency(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
+}
+
+function getLocalDateInputValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 function getMonthOptions() {
@@ -1062,6 +1068,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreview, setProofPreview] = useState<string | null>(null);
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"QRIS" | "Transfer Bank">("Transfer Bank");
+  const [paymentDate, setPaymentDate] = useState(getLocalDateInputValue);
   const [uploadingProof, setUploadingProof] = useState(false);
   const [markPaidOnUpload, setMarkPaidOnUpload] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1085,6 +1093,16 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     staleTime: 0,
     refetchOnMount: "always",
   });
+
+  useEffect(() => {
+    if (!invoice) return;
+    if (invoice.paymentMethod === "QRIS" || invoice.paymentMethod === "Transfer Bank") {
+      setPaymentMethod(invoice.paymentMethod);
+    }
+    if (invoice.paidAt) {
+      setPaymentDate(String(invoice.paidAt).slice(0, 10));
+    }
+  }, [invoice?.id]);
 
 
   const { data: siteSettings } = useQuery({
@@ -1132,7 +1150,10 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
   const handleMarkPaid = async () => {
     try {
-      await updateMutation.mutateAsync({ id: invoiceId, data: { status: "paid" } });
+      await updateMutation.mutateAsync({
+        id: invoiceId,
+        data: { status: "paid", paymentMethod, paymentDate } as any,
+      });
       toast({ title: "Invoice ditandai sebagai lunas" });
       qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
       qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
@@ -1229,6 +1250,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       const formData = new FormData();
       if (proofFile) formData.append("file", proofFile);
       formData.append("paymentNotes", paymentNotes);
+      formData.append("paymentMethod", paymentMethod);
+      formData.append("paymentDate", paymentDate);
       formData.append("markPaid", String(markPaidOnUpload));
       const res = await fetch(`/api/company-invoices/${invoiceId}/upload-payment-proof`, {
         method: "POST",
@@ -1241,6 +1264,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       setProofFile(null);
       setProofPreview(null);
       setPaymentNotes("");
+      setMarkPaidOnUpload(false);
       qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
       qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
     } catch (e: any) {
@@ -1685,7 +1709,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         <div className="rounded-lg border p-4 space-y-3">
           <div className="font-semibold text-sm flex items-center gap-2">
             <Upload size={14} className="text-blue-600" />
-            Bukti Pembayaran Transfer
+             Bukti Pembayaran Pelunasan
           </div>
 
           {/* Existing proof */}
@@ -1710,6 +1734,22 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                   <FileText size={14} /> Lihat Bukti Pembayaran (PDF)
                 </a>
               )}
+              {invoice.status === "paid" && (
+                <div className="grid grid-cols-2 gap-2 text-sm bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-green-700 dark:text-green-400">Metode Pembayaran</div>
+                    <div className="font-semibold text-green-900 dark:text-green-200">{invoice.paymentMethod || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-green-700 dark:text-green-400">Tanggal Pembayaran</div>
+                    <div className="font-semibold text-green-900 dark:text-green-200">
+                      {invoice.paidAt
+                        ? new Date(invoice.paidAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" })
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+              )}
               {invoice.paymentNotes && (
                 <div className="text-sm text-muted-foreground bg-muted/30 rounded p-2">{invoice.paymentNotes}</div>
               )}
@@ -1720,8 +1760,33 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
           {invoice.status !== "paid" && (
             <div className="space-y-3 pt-1 border-t">
               <div className="text-xs text-muted-foreground">
-                {invoice.paymentProofUrl ? "Perbarui bukti pembayaran" : "Upload bukti transfer dari perusahaan"}
+                 {invoice.paymentProofUrl ? "Perbarui bukti pembayaran" : "Upload bukti pembayaran dari perusahaan"}
               </div>
+
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                 <div className="space-y-1.5">
+                   <Label className="text-xs">Metode Pembayaran</Label>
+                   <Select value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as "QRIS" | "Transfer Bank")}>
+                     <SelectTrigger className="h-9 text-sm">
+                       <SelectValue />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="Transfer Bank">Transfer Bank</SelectItem>
+                       <SelectItem value="QRIS">QRIS</SelectItem>
+                     </SelectContent>
+                   </Select>
+                 </div>
+                 <div className="space-y-1.5">
+                   <Label htmlFor="company-payment-date" className="text-xs">Tanggal Pembayaran</Label>
+                   <Input
+                     id="company-payment-date"
+                     type="date"
+                     value={paymentDate}
+                     onChange={(e) => setPaymentDate(e.target.value)}
+                     className="h-9 text-sm"
+                   />
+                 </div>
+               </div>
 
               <input
                 ref={fileInputRef}
@@ -1757,7 +1822,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                   className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg py-6 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                 >
                   <ImageIcon size={16} />
-                  Pilih foto atau PDF bukti transfer
+                   Pilih foto atau PDF bukti pembayaran
                 </button>
               )}
 
@@ -1778,7 +1843,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                 <Textarea
                   value={paymentNotes}
                   onChange={(e) => setPaymentNotes(e.target.value)}
-                  placeholder="Mis: Transfer BCA tgl 5 Agustus 2026, ref TXN-12345..."
+                   placeholder="Mis: Transfer BCA, ref TXN-12345..."
                   rows={2}
                   className="text-sm"
                 />
@@ -1791,7 +1856,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                   onCheckedChange={(v) => setMarkPaidOnUpload(!!v)}
                 />
                 <label htmlFor="mark-paid" className="text-sm cursor-pointer select-none">
-                  Tandai invoice ini sebagai <strong>Lunas</strong> setelah upload
+                   Tandai invoice ini sebagai <strong>Lunas</strong> setelah upload
                 </label>
               </div>
 
@@ -1802,7 +1867,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                 size="sm"
               >
                 <Upload size={13} />
-                {uploadingProof ? "Mengupload..." : "Simpan Bukti Pembayaran"}
+                 {uploadingProof ? "Menyimpan..." : "Simpan Bukti Pembayaran"}
               </Button>
             </div>
           )}

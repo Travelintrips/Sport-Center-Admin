@@ -25,6 +25,7 @@ export const companyInvoicesTable = scSchema.table("company_invoices", {
   remainingAmount: numeric("remaining_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   status: invoiceStatusEnum("invoice_status").notNull().default("unpaid"),
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  paymentMethod: text("payment_method"),
   paymentProofUrl: text("payment_proof_url"),
   paymentNotes: text("payment_notes"),
   notes: text("notes"),

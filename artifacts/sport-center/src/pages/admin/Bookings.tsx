@@ -1675,7 +1675,13 @@ function BookingDetailDrawer({
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
                           disabled={isUpdating}
-                          lockedReason={pmt.isMembershipPayment ? "Metode pembayaran membership dikelola dari data membership" : undefined}
+                          lockedReason={
+                            pmt.isMembershipPayment
+                              ? "Metode pembayaran membership dikelola dari data membership"
+                              : pmt.isCompanyInvoicePayment
+                                ? "Metode pembayaran dikelola dari pelunasan invoice perusahaan"
+                                : undefined
+                          }
                         />
                         {(() => {
                           const ocr = pmt.ocrData as {
@@ -4011,11 +4017,13 @@ export default function AdminBookings() {
                               })
                            }
                            disabled={updatePaymentMetadataMutation.isPending}
-                            lockedReason={
-                              isMembershipPayment
-                                ? "Metode pembayaran dikelola dari data membership"
-                                : undefined
-                            }
+                             lockedReason={
+                               isMembershipPayment
+                                 ? "Metode pembayaran dikelola dari data membership"
+                                 : listPayment?.isCompanyInvoicePayment
+                                   ? "Metode pembayaran dikelola dari pelunasan invoice perusahaan"
+                                   : undefined
+                             }
                          />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">

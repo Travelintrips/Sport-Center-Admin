@@ -36,6 +36,27 @@ function periodDateRange(periodMonth: string) {
   return { startDate, endDate };
 }
 
+const COMPANY_PAYMENT_METHODS = ["QRIS", "Transfer Bank"] as const;
+type CompanyPaymentMethod = (typeof COMPANY_PAYMENT_METHODS)[number];
+
+function normalizeCompanyPaymentMethod(value: unknown): CompanyPaymentMethod | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "qris") return "QRIS";
+  if (normalized === "transfer bank" || normalized === "transfer_bank" || normalized === "transfer") {
+    return "Transfer Bank";
+  }
+  return null;
+}
+
+function parseCompanyPaymentDate(value: unknown): Date | null {
+  const raw = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const parsed = new Date(`${raw}T12:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw
+    ? null
+    : parsed;
+}
+
 // Fallback only for legacy bookings that have no tax snapshot.
 function calcTaxBreakdown(totalAmountInclusive: number) {
   return calculateInclusiveInvoiceTax(totalAmountInclusive);
@@ -246,6 +267,7 @@ function mapInvoice(
     grandTotal,
     status: inv.status,
     paidAt: inv.paidAt ?? null,
+    paymentMethod: inv.paymentMethod ?? null,
     paymentProofUrl: inv.paymentProofUrl ?? null,
     paymentNotes: inv.paymentNotes ?? null,
     notes: inv.notes ?? null,
@@ -321,6 +343,7 @@ router.get("/company-invoices", adminMiddleware, async (req, res) => {
       netAmount: companyInvoicesTable.netAmount,
       status: companyInvoicesTable.status,
       paidAt: companyInvoicesTable.paidAt,
+       paymentMethod: companyInvoicesTable.paymentMethod,
       notes: companyInvoicesTable.notes,
       createdAt: companyInvoicesTable.createdAt,
     }).from(companyInvoicesTable);
@@ -910,11 +933,23 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (!inv) { res.status(404).json({ error: "Not found" }); return; }
 
     const { status, notes } = req.body;
+    const paymentMethod = normalizeCompanyPaymentMethod(req.body?.paymentMethod);
+    const paymentDateRaw = String(req.body?.paymentDate ?? "").trim();
     const updates: Partial<typeof companyInvoicesTable.$inferInsert> = {};
     if (status !== undefined) updates.status = status;
     if (notes !== undefined) updates.notes = notes;
+    if (req.body?.paymentMethod !== undefined && !paymentMethod) {
+      res.status(400).json({ error: "Metode pembayaran harus QRIS atau Transfer Bank" });
+      return;
+    }
+    if (paymentMethod) updates.paymentMethod = paymentMethod;
     if (status === "paid" && inv.status !== "paid") {
-      updates.paidAt = new Date();
+      const paidAt = parseCompanyPaymentDate(paymentDateRaw);
+      if (!paymentMethod || !paidAt) {
+        res.status(400).json({ error: "Metode dan tanggal pembayaran wajib diisi saat invoice dilunasi" });
+        return;
+      }
+      updates.paidAt = paidAt;
     }
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
@@ -924,7 +959,7 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     if (status === "paid" && inv.status !== "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid" })
+        .set({ billingStatus: "paid", paidAt: updated.paidAt ?? new Date() })
         .where(eq(bookingsTable.companyInvoiceId, id));
 
       await logAudit({
@@ -1027,9 +1062,15 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
     const id = parseInt(String(req.params.id));
     const paymentNotes = String(req.body?.paymentNotes || "").trim() || null;
     const markPaid = req.body?.markPaid === "true" || req.body?.markPaid === true;
+    const paymentMethod = normalizeCompanyPaymentMethod(req.body?.paymentMethod);
+    const paymentDateRaw = String(req.body?.paymentDate ?? "").trim();
 
     const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
     if (!inv) { res.status(404).json({ error: "Invoice tidak ditemukan" }); return; }
+    if (markPaid && (!paymentMethod || !parseCompanyPaymentDate(paymentDateRaw))) {
+      res.status(400).json({ error: "Metode dan tanggal pembayaran wajib diisi saat invoice dilunasi" });
+      return;
+    }
 
     let proofUrl: string | null = inv.paymentProofUrl ?? null;
 
@@ -1043,17 +1084,24 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
       paymentProofUrl: proofUrl,
       paymentNotes,
     };
+    if (req.body?.paymentMethod !== undefined) {
+      if (!paymentMethod) {
+        res.status(400).json({ error: "Metode pembayaran harus QRIS atau Transfer Bank" });
+        return;
+      }
+      updates.paymentMethod = paymentMethod;
+    }
 
     if (markPaid && inv.status !== "paid") {
       updates.status = "paid";
-      updates.paidAt = new Date();
+      updates.paidAt = parseCompanyPaymentDate(paymentDateRaw)!;
     }
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
 
     if (markPaid && inv.status !== "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid" })
+        .set({ billingStatus: "paid", paidAt: updated.paidAt ?? new Date() })
         .where(eq(bookingsTable.companyInvoiceId, id));
 
       const paidDate = updated.paidAt ?? new Date();

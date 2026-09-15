@@ -63,6 +63,7 @@
 - [Payment proof OCR validation](payment-proof-ocr.md) — server-side signed OCR compares QRIS/transfer evidence and blocks contradictory submission or confirmation.
 - [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
 - [Payment accounting verification](payment-accounting-verification.md) — assess mirror completion from linkage, GL, tax, replay, and recovery evidence, not function presence or `posted` alone.
+- [Company invoice payment display](company-invoice-payment-display.md) — propagate invoice settlement method/date to booking views without creating duplicate per-booking payments.
 - [Payment method OCR auto-detection](payment-method-ocr.md) — high-confidence OCR can update payment_method, but must persist detector evidence and audit the change.
 - [AP2 discount modes](ap2-discount-modes.md) — fixed nominal discount takes precedence over percentage; AP Multiguna keeps its special hourly-price rule.
 - [Company ownership evidence](company-ownership-evidence.md) — historical payment company resolution must use validated relations; missing or conflicting evidence stays NULL and blocks posting.

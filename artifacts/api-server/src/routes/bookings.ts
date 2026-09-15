@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -184,10 +184,38 @@ async function getBookingWithPayment(id: number) {
   const allPayments = await db.select().from(paymentsTable)
     .where(inArray(paymentsTable.bookingId, groupBookingIds));
   allPayments.sort((a, b) => a.id - b.id);
+  const [companyInvoice] = booking.companyInvoiceId
+    ? await db.select({
+        id: companyInvoicesTable.id,
+        status: companyInvoicesTable.status,
+        grandTotal: companyInvoicesTable.grandTotal,
+        totalAmount: companyInvoicesTable.totalAmount,
+        paymentMethod: companyInvoicesTable.paymentMethod,
+        paymentProofUrl: companyInvoicesTable.paymentProofUrl,
+        paidAt: companyInvoicesTable.paidAt,
+      }).from(companyInvoicesTable)
+        .where(eq(companyInvoicesTable.id, booking.companyInvoiceId))
+        .limit(1)
+    : [];
+  const companyInvoicePayment = companyInvoice?.status === "paid" && companyInvoice.paymentMethod
+    ? {
+        id: -companyInvoice.id,
+        bookingId: booking.id,
+        amount: Number(companyInvoice.grandTotal ?? companyInvoice.totalAmount ?? booking.totalPrice),
+        proofUrl: companyInvoice.paymentProofUrl,
+        paymentMethod: companyInvoice.paymentMethod,
+        paymentProvider: "unknown",
+        status: "confirmed",
+        paidAt: companyInvoice.paidAt,
+        confirmedAt: companyInvoice.paidAt,
+        createdAt: companyInvoice.paidAt,
+        isCompanyInvoicePayment: true,
+      }
+    : null;
   const payment =
     allPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
     allPayments[allPayments.length - 1] ??
-    null;
+    companyInvoicePayment;
   const allocations = booking.groupRef
     ? await db.select().from(paymentAllocationsTable)
       .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
@@ -319,6 +347,26 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       : [];
 
     const bookingIds = bookings.map((b) => b.id);
+    const companyInvoiceIds = [
+      ...new Set(
+        bookings
+          .map((b) => b.companyInvoiceId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const companyInvoices = companyInvoiceIds.length > 0
+      ? await db.select({
+          id: companyInvoicesTable.id,
+          status: companyInvoicesTable.status,
+          grandTotal: companyInvoicesTable.grandTotal,
+          totalAmount: companyInvoicesTable.totalAmount,
+          paymentMethod: companyInvoicesTable.paymentMethod,
+          paymentProofUrl: companyInvoicesTable.paymentProofUrl,
+          paidAt: companyInvoicesTable.paidAt,
+        }).from(companyInvoicesTable)
+          .where(inArray(companyInvoicesTable.id, companyInvoiceIds))
+      : [];
+    const companyInvoiceById = new Map(companyInvoices.map((invoice) => [invoice.id, invoice]));
     const groupRefs = [
       ...new Set(
         bookings
@@ -494,7 +542,26 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const payment =
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
-        null;
+        (() => {
+          const invoice = b.companyInvoiceId != null
+            ? companyInvoiceById.get(b.companyInvoiceId)
+            : undefined;
+          return invoice?.status === "paid" && invoice.paymentMethod
+            ? {
+                id: -invoice.id,
+                bookingId: b.id,
+                amount: Number(invoice.grandTotal ?? invoice.totalAmount ?? b.totalPrice),
+                proofUrl: invoice.paymentProofUrl,
+                paymentMethod: invoice.paymentMethod,
+                paymentProvider: "unknown",
+                status: "confirmed" as const,
+                paidAt: invoice.paidAt,
+                confirmedAt: invoice.paidAt,
+                createdAt: invoice.paidAt,
+                isCompanyInvoicePayment: true,
+              }
+            : null;
+        })();
       const transactionPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
       const paymentMethodCode = String(payment?.paymentMethod ?? "").trim().toLowerCase();
       const configuredPaymentCode = paylabsLabels.some((method) =>
