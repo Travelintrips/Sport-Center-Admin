@@ -20,3 +20,14 @@ with blank payment method and date.
 **How to apply:** Resolve direct booking invoice IDs first, then union them with
 invoice IDs found through invoice items; keep the synthetic payment read-only and
 use the item amount for the individual booking display.
+
+Date corrections for a paid company invoice must update the invoice's canonical
+`paid_at` and synchronize `sport_bookings.paid_at` for both direct and
+item-only-linked bookings in the same transaction.
+
+**Why:** The invoice is one settlement event shared by its bookings; changing
+only one booking would make list views and reconciliation disagree.
+
+**How to apply:** Treat a paid invoice as the synthetic payment source in the
+booking date correction endpoint, preserve its method/status/financial values,
+and never insert a booking-level payment row.

@@ -184,7 +184,14 @@ async function getBookingWithPayment(id: number) {
   const allPayments = await db.select().from(paymentsTable)
     .where(inArray(paymentsTable.bookingId, groupBookingIds));
   allPayments.sort((a, b) => a.id - b.id);
-  const [companyInvoice] = booking.companyInvoiceId
+  const [companyInvoiceItem] = await db.select({
+    invoiceId: companyInvoiceItemsTable.invoiceId,
+    totalAmount: companyInvoiceItemsTable.totalAmount,
+  }).from(companyInvoiceItemsTable)
+    .where(eq(companyInvoiceItemsTable.bookingId, id))
+    .limit(1);
+  const companyInvoiceId = booking.companyInvoiceId ?? companyInvoiceItem?.invoiceId;
+  const [companyInvoice] = companyInvoiceId
     ? await db.select({
         id: companyInvoicesTable.id,
         status: companyInvoicesTable.status,
@@ -194,14 +201,15 @@ async function getBookingWithPayment(id: number) {
         paymentProofUrl: companyInvoicesTable.paymentProofUrl,
         paidAt: companyInvoicesTable.paidAt,
       }).from(companyInvoicesTable)
-        .where(eq(companyInvoicesTable.id, booking.companyInvoiceId))
+        .where(eq(companyInvoicesTable.id, companyInvoiceId))
         .limit(1)
     : [];
-  const companyInvoicePayment = companyInvoice?.status === "paid" && companyInvoice.paymentMethod
+  const companyInvoicePayment = companyInvoice?.status === "paid" &&
+    (companyInvoice.paymentMethod || companyInvoice.paidAt)
     ? {
         id: -companyInvoice.id,
         bookingId: booking.id,
-        amount: Number(companyInvoice.grandTotal ?? companyInvoice.totalAmount ?? booking.totalPrice),
+        amount: Number(companyInvoiceItem?.totalAmount ?? companyInvoice.grandTotal ?? companyInvoice.totalAmount ?? booking.totalPrice),
         proofUrl: companyInvoice.paymentProofUrl,
         paymentMethod: companyInvoice.paymentMethod,
         paymentProvider: "unknown",
@@ -2524,12 +2532,51 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
     // bertepatan dengan booking lain karena slot tersebut bukan booking baru.
 
     const updated = await db.transaction(async (tx) => {
-      const [payment] = await tx
+      const [bookingPayment] = await tx
         .select()
         .from(paymentsTable)
         .where(eq(paymentsTable.bookingId, id))
         .orderBy(desc(paymentsTable.createdAt))
         .limit(1);
+
+      // Company invoice settlement is canonical at invoice level. Legacy
+      // bookings can reach the invoice only through company_invoice_items.
+      const [companyInvoiceItem] = await tx
+        .select({
+          invoiceId: companyInvoiceItemsTable.invoiceId,
+          totalAmount: companyInvoiceItemsTable.totalAmount,
+        })
+        .from(companyInvoiceItemsTable)
+        .where(eq(companyInvoiceItemsTable.bookingId, id))
+        .limit(1);
+      const companyInvoiceId = before.companyInvoiceId ?? companyInvoiceItem?.invoiceId;
+      const [companyInvoice] = companyInvoiceId != null
+        ? await tx
+            .select()
+            .from(companyInvoicesTable)
+            .where(eq(companyInvoicesTable.id, companyInvoiceId))
+            .limit(1)
+        : [];
+      const companyInvoicePayment =
+        companyInvoice?.status === "paid"
+          ? {
+              id: -companyInvoice.id,
+              bookingId: id,
+              amount: Number(companyInvoiceItem?.totalAmount ?? companyInvoice.grandTotal ?? companyInvoice.totalAmount ?? before.totalPrice),
+              proofUrl: companyInvoice.paymentProofUrl,
+              paymentMethod: companyInvoice.paymentMethod,
+              paymentProvider: "company_invoice",
+              status: "confirmed" as const,
+              settlementStatus: "settled",
+              paidAt: companyInvoice.paidAt,
+              confirmedAt: companyInvoice.paidAt,
+              createdAt: companyInvoice.paidAt,
+              isCompanyInvoicePayment: true,
+            }
+          : undefined;
+      // Do not mutate a stray booking payment when the booking is settled by
+      // an invoice; the invoice remains the single accounting payment event.
+      const payment = companyInvoicePayment ? undefined : bookingPayment;
 
       const linkedMembershipPayment =
         membershipPayment ??
@@ -2544,7 +2591,7 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
             )[0]
           : undefined);
 
-      if (paymentDate !== undefined && !payment && !linkedMembershipPayment) {
+      if (paymentDate !== undefined && !payment && !linkedMembershipPayment && !companyInvoicePayment) {
         throw new Error("PAYMENT_NOT_FOUND");
       }
 
@@ -2595,7 +2642,12 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
           ...(endTime !== undefined ? { endTime } : {}),
           ...(startTime !== undefined || endTime !== undefined ? { durationHours } : {}),
           ...(paymentTimestamp &&
-          (payment != null || linkedMembershipPayment?.status === "confirmed" || before.paidAt != null)
+          (
+            payment != null ||
+            companyInvoicePayment != null ||
+            linkedMembershipPayment?.status === "confirmed" ||
+            before.paidAt != null
+          )
             ? { paidAt: paymentTimestamp }
             : {}),
           updatedAt: new Date(),
@@ -2624,13 +2676,53 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
           })
           .where(eq(membershipPaymentsTable.id, linkedMembershipPayment.id));
       }
+      if (companyInvoicePayment && paymentTimestamp && companyInvoice) {
+        await tx
+          .update(companyInvoicesTable)
+          .set({
+            paidAt: paymentTimestamp,
+          })
+          .where(eq(companyInvoicesTable.id, companyInvoice.id));
+
+        // Keep every booking attached to this invoice aligned with the
+        // canonical invoice payment date, including legacy item-only links.
+        const invoiceItems = await tx
+          .select({ bookingId: companyInvoiceItemsTable.bookingId })
+          .from(companyInvoiceItemsTable)
+          .where(eq(companyInvoiceItemsTable.invoiceId, companyInvoice.id));
+        const relatedBookingIds = new Set<number>([id]);
+        for (const item of invoiceItems) {
+          if (item.bookingId != null) relatedBookingIds.add(item.bookingId);
+        }
+        const directBookings = await tx
+          .select({ id: bookingsTable.id })
+          .from(bookingsTable)
+          .where(eq(bookingsTable.companyInvoiceId, companyInvoice.id));
+        for (const relatedBooking of directBookings) {
+          relatedBookingIds.add(relatedBooking.id);
+        }
+        await tx
+          .update(bookingsTable)
+          .set({
+            paidAt: paymentTimestamp,
+            updatedAt: new Date(),
+          })
+          .where(inArray(bookingsTable.id, [...relatedBookingIds]));
+      }
       return {
         booking,
-        payment: paymentTimestamp
-          ? payment
-            ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp }
-            : undefined
-          : payment,
+        payment: companyInvoicePayment
+          ? {
+              ...companyInvoicePayment,
+              ...(paymentTimestamp
+                ? { paidAt: paymentTimestamp, confirmedAt: paymentTimestamp }
+                : {}),
+            }
+          : paymentTimestamp
+            ? payment
+              ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp }
+              : undefined
+            : payment,
         membershipPayment:
           paymentTimestamp && linkedMembershipPayment
             ? {
@@ -2640,7 +2732,7 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
                   : { submittedAt: paymentTimestamp }),
               }
             : linkedMembershipPayment,
-        paymentDate: paymentTimestamp ?? before.paidAt ?? null,
+        paymentDate: paymentTimestamp ?? before.paidAt ?? companyInvoicePayment?.paidAt ?? null,
       };
     });
 
