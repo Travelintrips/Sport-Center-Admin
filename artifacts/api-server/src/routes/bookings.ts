@@ -365,6 +365,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           paidAt: companyInvoicesTable.paidAt,
         }).from(companyInvoicesTable)
           .where(inArray(companyInvoicesTable.id, companyInvoiceIds))
+          .catch((err) => {
+            req.log.warn({ err }, "Company invoice lookup skipped for booking list");
+            return [];
+          })
       : [];
     const companyInvoiceById = new Map(companyInvoices.map((invoice) => [invoice.id, invoice]));
     const groupRefs = [
@@ -382,6 +386,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         })
         .from(bookingsTable)
         .where(inArray(bookingsTable.groupRef, groupRefs))
+        .catch((err) => {
+          req.log.warn({ err }, "Group charge lookup skipped for booking list");
+          return [];
+        })
       : [];
     const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
     for (const row of groupChargeRows) {
@@ -454,6 +462,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
               ),
             )
             .orderBy(desc(membershipPaymentsTable.id))
+            .catch((err) => {
+              req.log.warn({ err }, "Membership payment lookup skipped for booking list");
+              return [];
+            })
         : [];
     const membershipPaymentById = new Map(
       membershipPayments.map((payment) => [payment.id, payment]),
@@ -517,6 +529,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       ? await db.select({ id: usersTable.id, name: usersTable.name, companyName: usersTable.companyName })
           .from(usersTable)
           .where(inArray(usersTable.id, companyCustomerIds))
+          .catch((err) => {
+            req.log.warn({ err }, "Company customer lookup skipped for booking list");
+            return [];
+          })
       : [];
     const companyNameById: Record<number, string> = {};
     for (const u of companyUsers) {
