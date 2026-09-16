@@ -17,6 +17,9 @@ interface ActionInfo {
     ppnRate?: number | null;
     ppnAmount?: number | null;
     grandTotal?: number | null;
+    pphRate?: number | null;
+    pphAmount?: number | null;
+    netAmount?: number | null;
     status: string;
   };
 }
@@ -123,6 +126,8 @@ export default function WaProofUpload() {
   }
 
   const b = info?.booking;
+  const grossAmount = b ? (b.grandTotal ?? b.totalPrice) : 0;
+  const hasWithholding = !!b && Number(b.pphAmount ?? 0) > 0 && b.netAmount != null;
 
   return (
     <div className="min-h-screen bg-orange-50 pb-8">
@@ -143,7 +148,13 @@ export default function WaProofUpload() {
               <Row label="Fasilitas" value={b.facilityName} />
               <Row label="Tanggal" value={b.bookingDate} />
               <Row label="Jam" value={`${b.startTime} – ${b.endTime}`} />
-              <Row label="Grand Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
+              {hasWithholding && <Row label="Bruto" value={`Rp ${grossAmount.toLocaleString("id-ID")}`} />}
+              {hasWithholding && <Row label={`PPh ${b.pphRate ?? 10}%`} value={`−Rp ${Number(b.pphAmount).toLocaleString("id-ID")}`} />}
+              <Row
+                label={hasWithholding ? "Net Dibayar" : "Grand Total"}
+                value={`Rp ${Number(hasWithholding ? b.netAmount : grossAmount).toLocaleString("id-ID")}`}
+                accent
+              />
             </CardContent>
           </Card>
         )}

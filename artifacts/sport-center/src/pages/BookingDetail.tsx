@@ -491,9 +491,15 @@ export default function BookingDetail() {
             {(booking as any).groupInfo ? (
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-sm text-muted-foreground">
-                  <div>{t("Harga sesi ini", "This session price")}</div>
+                  <div>{t("Harga sesi (bruto)", "Session price (gross)")}</div>
                   <div>Rp {booking.totalPrice.toLocaleString("id-ID")}</div>
                 </div>
+                {bookingWithholding.enabled && (
+                  <div className="flex justify-between items-center text-sm font-semibold text-green-700 dark:text-green-400">
+                    <div>{t("Net sesi setelah PPh", "Session net after withholding")}</div>
+                    <div>Rp {bookingWithholding.netAmount.toLocaleString("id-ID")}</div>
+                  </div>
+                )}
                   {Array.isArray((booking as any).groupInfo?.additionalCharges) && (booking as any).groupInfo.additionalCharges.length > 0 && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
                       <div className="mb-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
@@ -519,8 +525,13 @@ export default function BookingDetail() {
                       Ref: {(booking as any).groupInfo.groupRef}
                     </span>
                   </div>
-                  <div className="text-primary">
-                    Rp {(booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")}
+                  <div className="text-right">
+                    <div className="text-green-600 dark:text-green-400">
+                      Rp {(booking as any).groupInfo.groupNetTotalPayment.toLocaleString("id-ID")}
+                    </div>
+                    <div className="text-xs font-normal text-muted-foreground">
+                      {t("Bruto", "Gross")} Rp {(booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -575,12 +586,18 @@ export default function BookingDetail() {
                         <div className="h-px bg-border" />
                       </>
                     )}
-                    <div className="flex justify-between items-center text-xl font-black">
-                      <div>{t("Total DPP + PPN", "Total DPP + PPN")}</div>
-                      <div className="text-primary">Rp {gt.toLocaleString("id-ID")}</div>
-                    </div>
+                    {!withholding.enabled && (
+                      <div className="flex justify-between items-center text-xl font-black">
+                        <div>{t("Total DPP + PPN", "Total DPP + PPN")}</div>
+                        <div className="text-primary">Rp {gt.toLocaleString("id-ID")}</div>
+                      </div>
+                    )}
                      {withholding.enabled && (
                        <>
+                          <div className="flex justify-between items-center text-sm text-muted-foreground">
+                            <span>{t("Total bruto (DPP + PPN)", "Gross total (DPP + VAT)")}</span>
+                            <span>Rp {gt.toLocaleString("id-ID")}</span>
+                          </div>
                          <div className="flex justify-between items-center text-sm">
                            <span className="text-orange-700 dark:text-orange-300">
                              PPh dipotong {withholding.rate}%

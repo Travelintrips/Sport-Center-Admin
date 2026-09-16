@@ -15,6 +15,9 @@ interface KwitansiData {
   ppnRate: number | null;
   ppnAmount: number | null;
   grandTotal: number | null;
+  pphRate: number | null;
+  pphAmount: number | null;
+  netAmount: number | null;
   status: string;
   confirmedAt: string;
   centerName: string;
@@ -98,6 +101,9 @@ export default function WaKwitansi() {
   const ppn = data.ppnAmount ?? 0;
   const grand = data.grandTotal ?? subtotal;
   const hasPpn = ppn > 0 && data.ppnRate != null;
+  const pph = data.pphAmount ?? 0;
+  const hasWithholding = pph > 0 && data.netAmount != null;
+  const net = hasWithholding ? data.netAmount! : grand;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 to-gray-50 pb-10 print:bg-white print:pb-0">
@@ -162,10 +168,16 @@ export default function WaKwitansi() {
             {hasPpn && (
               <Row label={`PPN ${data.ppnRate}%`} value={formatIDR(ppn)} />
             )}
+            {hasWithholding && (
+              <>
+                <Row label="Bruto" value={formatIDR(grand)} />
+                <Row label={`PPh ${data.pphRate ?? 10}%`} value={`−${formatIDR(pph)}`} />
+              </>
+            )}
             <div className="border-t pt-3 mt-1">
               <div className="flex justify-between items-center">
-                <span className="font-black text-gray-800">Total Dibayar</span>
-                <span className="font-black text-xl text-orange-600">{formatIDR(grand)}</span>
+                <span className="font-black text-gray-800">{hasWithholding ? "Net Dibayar" : "Total Dibayar"}</span>
+                <span className="font-black text-xl text-orange-600">{formatIDR(net)}</span>
               </div>
             </div>
           </div>

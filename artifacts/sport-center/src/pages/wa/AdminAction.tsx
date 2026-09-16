@@ -20,6 +20,10 @@ interface ActionData {
     endTime: string;
     durationHours: number;
     totalPrice: number;
+    grandTotal?: number | null;
+    pphRate?: number | null;
+    pphAmount?: number | null;
+    netAmount?: number | null;
     status: string;
     source: string;
     notes: string | null;
@@ -186,6 +190,8 @@ export default function WaAdminAction() {
 
   const meta = ACTION_META[data.action];
   const b = data.booking;
+  const grossAmount = b.grandTotal ?? b.totalPrice;
+  const hasWithholding = Number(b.pphAmount ?? 0) > 0 && b.netAmount != null;
 
   return (
     <div className="min-h-screen bg-gray-50 pb-8">
@@ -215,7 +221,13 @@ export default function WaAdminAction() {
             <Row label="Fasilitas" value={b.facilityName} />
             <Row label="Tanggal" value={b.bookingDate} />
             <Row label="Jam" value={`${b.startTime} – ${b.endTime}`} />
-            <Row label="Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
+            {hasWithholding && <Row label="Bruto" value={`Rp ${grossAmount.toLocaleString("id-ID")}`} />}
+            {hasWithholding && <Row label={`PPh ${b.pphRate ?? 10}%`} value={`−Rp ${Number(b.pphAmount).toLocaleString("id-ID")}`} />}
+            <Row
+              label={hasWithholding ? "Net Dibayar" : "Total"}
+              value={`Rp ${Number(hasWithholding ? b.netAmount : grossAmount).toLocaleString("id-ID")}`}
+              accent
+            />
             {b.notes && <Row label="Catatan" value={b.notes} />}
             {b.checkedInAt && <Row label="Check-in" value={formatDateTime(b.checkedInAt)} />}
           </CardContent>
