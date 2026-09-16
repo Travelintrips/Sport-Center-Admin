@@ -393,24 +393,31 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
     let reconciledPaymentIds = new Set<number>();
     if (paymentIds.length > 0) {
-      const reconciledMutations = await db
-        .select({
-          paymentId: bankMutationsTable.matchedPaymentId,
-          orderId: bankMutationsTable.matchedOrderId,
-        })
-        .from(bankMutationsTable)
-        .where(and(
-          or(
-            inArray(bankMutationsTable.matchedPaymentId, paymentIds),
-            inArray(bankMutationsTable.matchedOrderId, bookingIds),
-          ),
-          inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
-        ));
-      reconciledPaymentIds = getReconciledPaymentIds(
-        allPayments,
-        bookings,
-        reconciledMutations,
-      );
+      try {
+        const reconciledMutations = await db
+          .select({
+            paymentId: bankMutationsTable.matchedPaymentId,
+            orderId: bankMutationsTable.matchedOrderId,
+          })
+          .from(bankMutationsTable)
+          .where(and(
+            or(
+              inArray(bankMutationsTable.matchedPaymentId, paymentIds),
+              inArray(bankMutationsTable.matchedOrderId, bookingIds),
+            ),
+            inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
+          ));
+        reconciledPaymentIds = getReconciledPaymentIds(
+          allPayments,
+          bookings,
+          reconciledMutations,
+        );
+      } catch (err) {
+        // Bank reconciliation is an enrichment for the admin list. Older
+        // production databases may not have its tables/columns yet; that
+        // must not make the primary booking list unavailable.
+        req.log.warn({ err }, "Bank reconciliation lookup skipped for booking list");
+      }
     }
     const membershipPaymentIds = [
       ...new Set(
