@@ -13,6 +13,7 @@ import { useLang } from "@/lib/i18n";
 import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck, Link2, ShoppingCart, ChevronDown, Search, X } from "lucide-react";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
+import { getBookingDisplayAmount } from "@/lib/tax";
 import { format } from "date-fns";
 import type { Locale } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
@@ -31,7 +32,22 @@ const STATUS_CONFIG: Record<string, { label: string; labelEn: string; stripe: st
 
 const INACTIVE = ["completed", "cancelled", "expired", "rejected", "refunded"];
 
-type BookingItem = { id: number; facilityName: string; facilityCategory: string; status: string; bookingDate: string; startTime: string; endTime: string; totalPrice: number; orderNumber: string; customerName?: string; groupRef?: string | null };
+type BookingItem = {
+  id: number;
+  facilityName: string;
+  facilityCategory: string;
+  status: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: number;
+  grandTotal?: number | string | null;
+  pphAmount?: number | string | null;
+  netAmount?: number | string | null;
+  orderNumber: string;
+  customerName?: string;
+  groupRef?: string | null;
+};
 type ReviewItem = { bookingId: number; rating: number; comment?: string | null };
 type Rs = { rating: number; comment: string; hover: number };
 
@@ -55,6 +71,7 @@ const BookingCard = memo(function BookingCard({
 }: BookingCardProps) {
   const { t } = useLang(); // hook in a top-level memo component — valid
   const cfg = STATUS_CONFIG[b.status] ?? { label: b.status, labelEn: b.status, stripe: "#9ca3af", badge: "bg-gray-100 text-gray-600 border-gray-200" };
+  const amount = getBookingDisplayAmount(b);
 
   return (
     <Card className="overflow-hidden hover:shadow-md transition-shadow">
@@ -90,7 +107,14 @@ const BookingCard = memo(function BookingCard({
             </div>
 
             <div className="flex items-center justify-between">
-              <div className="font-black text-primary">Rp {b.totalPrice.toLocaleString("id-ID")}</div>
+              <div className="text-right">
+                <div className="font-black text-primary">Rp {amount.net.toLocaleString("id-ID")}</div>
+                {amount.hasWithholding && (
+                  <div className="text-[11px] text-muted-foreground">
+                    {t("Bruto", "Gross")} Rp {amount.gross.toLocaleString("id-ID")}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground font-mono hidden sm:inline">#{b.orderNumber}</span>
                 {["pending_payment", "paid", "confirmed", "waiting_confirmation"].includes(b.status) && (
@@ -180,7 +204,9 @@ function CartGroupCard({
   const { t } = useLang();
   const [expanded, setExpanded] = useState(true);
   const { items } = group;
-  const totalPrice = items.reduce((s, b) => s + b.totalPrice, 0);
+  const totalAmount = items.reduce((s, b) => s + getBookingDisplayAmount(b).net, 0);
+  const grossAmount = items.reduce((s, b) => s + getBookingDisplayAmount(b).gross, 0);
+  const hasWithholding = items.some((b) => getBookingDisplayAmount(b).hasWithholding);
   const allStatuses = [...new Set(items.map((b) => b.status))];
   // Warna strip: merah jika ada yang cancelled/expired, hijau jika semua confirmed, kuning selainnya
   const hasInactive = items.some((b) => INACTIVE.includes(b.status));
@@ -218,7 +244,14 @@ function CartGroupCard({
                 </div>
               </div>
               <div className="flex items-center gap-3 shrink-0">
-                <span className="font-black text-primary text-sm">Rp {totalPrice.toLocaleString("id-ID")}</span>
+                <div className="text-right">
+                  <div className="font-black text-primary text-sm">Rp {totalAmount.toLocaleString("id-ID")}</div>
+                  {hasWithholding && (
+                    <div className="text-[11px] text-muted-foreground">
+                      {t("Bruto", "Gross")} Rp {grossAmount.toLocaleString("id-ID")}
+                    </div>
+                  )}
+                </div>
                 <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
               </div>
             </button>

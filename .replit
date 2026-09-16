@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web"]
+modules = ["nodejs-20", "web", "postgresql-16"]
 
 
 [deployment]
@@ -101,6 +101,7 @@ timeoutMs = 90000
 [nix]
 channel = "stable-25_05"
 
+
 [[ports]]
 localPort = 5000
 externalPort = 5000
@@ -108,3 +109,4 @@ externalPort = 5000
 [[ports]]
 localPort = 21089
 externalPort = 80
+

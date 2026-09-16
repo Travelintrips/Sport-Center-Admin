@@ -18,6 +18,9 @@ interface BookingStatus {
   ppnRate?: number | null;
   ppnAmount?: number | null;
   grandTotal?: number | null;
+  pphRate?: number | null;
+  pphAmount?: number | null;
+  netAmount?: number | null;
   status: string;
   source: string;
   notes: string | null;
@@ -126,6 +129,8 @@ export default function WaBookingStatus() {
   }
 
   const canUploadProof = ["pending_payment", "waiting_confirmation"].includes(booking.status) && booking.uploadProofUrl;
+  const grossAmount = booking.grandTotal ?? booking.totalPrice;
+  const hasWithholding = Number(booking.pphAmount ?? 0) > 0 && booking.netAmount != null;
 
   return (
     <div className="min-h-screen bg-orange-50 pb-8">
@@ -180,7 +185,18 @@ export default function WaBookingStatus() {
             <Row label="Fasilitas" value={`${booking.facilityName} (${booking.facilityCategory})`} />
             <Row label="Tanggal" value={formatDate(booking.bookingDate)} />
             <Row label="Jam" value={`${booking.startTime} – ${booking.endTime} (${booking.durationHours} jam)`} />
-            <Row label="Grand Total" value={`Rp ${booking.totalPrice.toLocaleString("id-ID")}`} bold accent />
+            {hasWithholding && (
+              <Row label="Bruto" value={`Rp ${grossAmount.toLocaleString("id-ID")}`} />
+            )}
+            {hasWithholding && (
+              <Row label={`PPh ${booking.pphRate ?? 10}%`} value={`−Rp ${Number(booking.pphAmount).toLocaleString("id-ID")}`} />
+            )}
+            <Row
+              label={hasWithholding ? "Net Dibayar" : "Grand Total"}
+              value={`Rp ${Number(hasWithholding ? booking.netAmount : grossAmount).toLocaleString("id-ID")}`}
+              bold
+              accent
+            />
             {booking.notes && <Row label="Catatan" value={booking.notes} />}
           </CardContent>
         </Card>

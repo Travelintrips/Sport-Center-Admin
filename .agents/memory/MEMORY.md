@@ -10,6 +10,7 @@
 - [Admin login & SESSION_SECRET](admin-login-secret.md) — "Invalid credentials" w/ correct pw = admin hash seeded with a different SESSION_SECRET; dev & prod DBs seed admin independently, reseed the broken one.
 - [.replit merge corruption](dotreplit-merge-corruption.md) — GitHub merges from external repo duplicate `modules` keys → invalid TOML, blocks env/packager tools; agent cannot edit .replit; user must fix via GUI or rollback.
 - [PPN 11% Tax Engine](tax-engine.md) — Centralized tax calc in api-server/src/lib/tax.ts; bookings.ppnRate/ppnAmount/grandTotal nullable; old bookings untouched; tax_settings seeded with PPN_OUT_11 11%; tax_transactions ledger auto-records per booking.
+- [Booking total display](booking-total-display.md) — customer-facing orders show net after PPh while retaining gross totals for audit and accounting.
 - [Bank Recon Accounting Journal](bank-recon-journal.md) — ACCOUNT_MAP + postAccountingJournal() in bankReconciliation.ts; idempotent (skips if accountingPosted=true); journalId format JRN-YYYYMMDD-000001; `matched` status deprecated, kept in enum for backward compat only.
 - [Bank Recon Hardening](bank-recon-hardening.md) — 6-phase hardening: partial invoice settlement, dynamic COA rules table, tax fields on mutations, monthly closing, approval matrix (financeMiddleware/superAdminMiddleware).
 - [Bank Recon Table Naming](bank-recon-table-naming.md) — raw reconciliation SQL must use actual sport_* table names; payment_method is not a matcher filter.

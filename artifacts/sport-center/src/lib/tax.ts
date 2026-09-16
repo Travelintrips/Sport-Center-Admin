@@ -73,3 +73,23 @@ export function isAdditiveLegacyTaxSnapshot(booking: {
     Math.abs(grandTotal - totalPrice - ppnAmount) <= 1
   );
 }
+
+/**
+ * Customer-facing booking total. Keep the stored gross amount intact, but use
+ * the recorded net amount when withholding tax applies.
+ */
+export function getBookingDisplayAmount(booking: {
+  totalPrice?: number | string | null;
+  grandTotal?: number | string | null;
+  pphAmount?: number | string | null;
+  netAmount?: number | string | null;
+}) {
+  const gross = Math.max(0, Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0) || 0));
+  const pphAmount = Math.max(0, Math.round(Number(booking.pphAmount ?? 0) || 0));
+  const storedNet = Number(booking.netAmount);
+  const net = pphAmount > 0 && Number.isFinite(storedNet)
+    ? Math.max(0, Math.round(storedNet))
+    : gross;
+
+  return { gross, pphAmount, net, hasWithholding: pphAmount > 0 };
+}
