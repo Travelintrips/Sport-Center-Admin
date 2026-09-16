@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -347,12 +347,42 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       : [];
 
     const bookingIds = bookings.map((b) => b.id);
-    const companyInvoiceIds = [
+    const directCompanyInvoiceIds = [
       ...new Set(
         bookings
           .map((b) => b.companyInvoiceId)
           .filter((id): id is number => id != null),
       ),
+    ];
+    // Legacy company bookings may have the invoice relation only in
+    // company_invoice_items. Use that relation as a fallback for the admin
+    // booking list so paid invoice metadata is still visible.
+    const companyInvoiceItems = bookingIds.length > 0
+      ? await db.select({
+          bookingId: companyInvoiceItemsTable.bookingId,
+          invoiceId: companyInvoiceItemsTable.invoiceId,
+          totalAmount: companyInvoiceItemsTable.totalAmount,
+        }).from(companyInvoiceItemsTable)
+          .where(inArray(companyInvoiceItemsTable.bookingId, bookingIds))
+          .catch((err) => {
+            req.log.warn({ err }, "Company invoice item lookup skipped for booking list");
+            return [];
+          })
+      : [];
+    const invoiceIdByBookingId = new Map<number, number>();
+    const invoiceItemByBookingId = new Map<number, (typeof companyInvoiceItems)[number]>();
+    for (const item of companyInvoiceItems) {
+      if (item.bookingId == null || item.invoiceId == null) continue;
+      if (!invoiceIdByBookingId.has(item.bookingId)) {
+        invoiceIdByBookingId.set(item.bookingId, item.invoiceId);
+        invoiceItemByBookingId.set(item.bookingId, item);
+      }
+    }
+    const companyInvoiceIds = [
+      ...new Set([
+        ...directCompanyInvoiceIds,
+        ...invoiceIdByBookingId.values(),
+      ]),
     ];
     const companyInvoices = companyInvoiceIds.length > 0
       ? await db.select({
@@ -548,6 +578,11 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const result = bookings.map((b) => {
       const facility = facilities.find((f) => f.id === b.facilityId);
       const bPayments = paymentsByBookingId[b.id] ?? [];
+      const companyInvoiceId = b.companyInvoiceId ?? invoiceIdByBookingId.get(b.id) ?? null;
+      const invoice = companyInvoiceId != null
+        ? companyInvoiceById.get(companyInvoiceId)
+        : undefined;
+      const invoiceItem = invoiceItemByBookingId.get(b.id);
       const membershipPayment =
         (b.membershipPaymentId != null
           ? membershipPaymentById.get(b.membershipPaymentId)
@@ -562,29 +597,31 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
               ) ??
             latestMembershipPaymentByMembership.get(b.membershipId)
           : undefined);
+      // Company invoice settlement is one canonical payment at invoice level.
+      // Expose a read-only synthetic representation per booking for display,
+      // without inserting duplicate booking-level payment rows.
+      const companyInvoicePayment = invoice?.status === "paid" &&
+        (invoice.paymentMethod || invoice.paidAt)
+        ? {
+            id: -invoice.id,
+            bookingId: b.id,
+            amount: Number(invoiceItem?.totalAmount ?? b.grandTotal ?? b.totalPrice),
+            proofUrl: invoice.paymentProofUrl,
+            paymentMethod: invoice.paymentMethod,
+            paymentProvider: "company_invoice",
+            status: "confirmed" as const,
+            settlementStatus: "settled",
+            paidAt: invoice.paidAt ?? b.paidAt,
+            confirmedAt: invoice.paidAt ?? b.paidAt,
+            createdAt: invoice.paidAt ?? b.paidAt,
+            isCompanyInvoicePayment: true,
+          }
+        : null;
       const payment =
+        companyInvoicePayment ??
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
-        (() => {
-          const invoice = b.companyInvoiceId != null
-            ? companyInvoiceById.get(b.companyInvoiceId)
-            : undefined;
-          return invoice?.status === "paid" && invoice.paymentMethod
-            ? {
-                id: -invoice.id,
-                bookingId: b.id,
-                amount: Number(invoice.grandTotal ?? invoice.totalAmount ?? b.totalPrice),
-                proofUrl: invoice.paymentProofUrl,
-                paymentMethod: invoice.paymentMethod,
-                paymentProvider: "unknown",
-                status: "confirmed" as const,
-                paidAt: invoice.paidAt,
-                confirmedAt: invoice.paidAt,
-                createdAt: invoice.paidAt,
-                isCompanyInvoicePayment: true,
-              }
-            : null;
-        })();
+        null;
       const transactionPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
       const paymentMethodCode = String(payment?.paymentMethod ?? "").trim().toLowerCase();
       const configuredPaymentCode = paylabsLabels.some((method) =>
@@ -614,7 +651,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         canUsePaylabsLegacyLabel
         ? { ...payment, paymentMethod: selectedPaylabsLabel }
         : payment;
-      const paymentsForResponse = bPayments.map((p) => {
+      const paymentRowsForResponse = companyInvoicePayment ? [companyInvoicePayment] : bPayments;
+      const paymentsForResponse = paymentRowsForResponse.map((p) => {
         const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
         const isPaylabsQris = p.paymentProvider === "paylabs" &&
           (paymentCode === "qris" || paymentCode === "paylabs - qris");
@@ -645,6 +683,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const dpAmt = Number(b.downPayment ?? 0);
       return {
         ...b,
+        companyInvoiceId: companyInvoiceId ?? b.companyInvoiceId,
+        paidAt: b.paidAt ?? invoice?.paidAt ?? null,
         companyName: b.companyCustomerId ? (companyNameById[b.companyCustomerId] ?? "") : null,
         totalPrice: Number(b.totalPrice),
         discountAmount: Number(b.discountAmount),
