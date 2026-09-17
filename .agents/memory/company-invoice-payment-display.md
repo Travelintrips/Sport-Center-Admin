@@ -31,3 +31,9 @@ only one booking would make list views and reconciliation disagree.
 **How to apply:** Treat a paid invoice as the synthetic payment source in the
 booking date correction endpoint, preserve its method/status/financial values,
 and never insert a booking-level payment row.
+
+Synthetic company-invoice payment IDs are negative display-only identifiers; never send them to booking payment CRUD endpoints. Invoice-level settlement repair must resolve the invoice through the booking relation and update all linked bookings together.
+
+**Why:** The admin booking drawer previously sent a synthetic negative ID to `/payments/:id`, producing a 404 for paid company bookings.
+
+**How to apply:** Keep company-invoice actions on invoice/booking synchronization endpoints, hide payment rejection/proof deletion for the synthetic row, and preserve the invoice as the single settlement event.

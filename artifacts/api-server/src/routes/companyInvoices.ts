@@ -57,6 +57,47 @@ function parseCompanyPaymentDate(value: unknown): Date | null {
     : parsed;
 }
 
+async function markLinkedBookingsPaid(invoiceId: number, paidAt: Date): Promise<void> {
+  const [itemLinks, directLinks] = await Promise.all([
+    db
+      .select({ bookingId: companyInvoiceItemsTable.bookingId })
+      .from(companyInvoiceItemsTable)
+      .where(eq(companyInvoiceItemsTable.invoiceId, invoiceId)),
+    db
+      .select({ id: bookingsTable.id })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.companyInvoiceId, invoiceId)),
+  ]);
+
+  const bookingIds = new Set<number>();
+  for (const item of itemLinks) {
+    if (item.bookingId != null) bookingIds.add(item.bookingId);
+  }
+  for (const booking of directLinks) bookingIds.add(booking.id);
+  if (bookingIds.size === 0) return;
+
+  const ids = [...bookingIds];
+  await db
+    .update(bookingsTable)
+    .set({ billingStatus: "paid", paidAt, updatedAt: new Date() })
+    .where(inArray(bookingsTable.id, ids));
+
+  // A paid invoice is the canonical settlement for all linked bookings.
+  // Do not revive bookings that were explicitly cancelled/refunded/completed.
+  await db
+    .update(bookingsTable)
+    .set({ status: "confirmed", updatedAt: new Date() })
+    .where(and(
+      inArray(bookingsTable.id, ids),
+      inArray(bookingsTable.status, [
+        "pending_payment",
+        "waiting_confirmation",
+        "waiting_admin_approval",
+        "paid",
+      ] as any),
+    ));
+}
+
 // Fallback only for legacy bookings that have no tax snapshot.
 function calcTaxBreakdown(totalAmountInclusive: number) {
   return calculateInclusiveInvoiceTax(totalAmountInclusive);
@@ -958,9 +999,7 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     const userInfo = getUserFromReq(req);
 
     if (status === "paid" && inv.status !== "paid") {
-      await db.update(bookingsTable)
-        .set({ billingStatus: "paid", paidAt: updated.paidAt ?? new Date() })
-        .where(eq(bookingsTable.companyInvoiceId, id));
+      await markLinkedBookingsPaid(id, updated.paidAt ?? new Date());
 
       await logAudit({
         ...userInfo,
@@ -1100,9 +1139,7 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
 
     if (markPaid && inv.status !== "paid") {
-      await db.update(bookingsTable)
-        .set({ billingStatus: "paid", paidAt: updated.paidAt ?? new Date() })
-        .where(eq(bookingsTable.companyInvoiceId, id));
+      await markLinkedBookingsPaid(id, updated.paidAt ?? new Date());
 
       const paidDate = updated.paidAt ?? new Date();
       const paidDay = paidDate.toISOString().split("T")[0]!;

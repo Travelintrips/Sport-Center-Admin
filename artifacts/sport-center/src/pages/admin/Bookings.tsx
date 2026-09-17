@@ -1099,6 +1099,7 @@ function BookingDetailDrawer({
   onUpdateStatus,
   onConfirmPayment,
   onRejectPayment,
+  onSyncCompanyInvoicePayment,
   onConfirmMembershipPayment,
   onRejectMembershipPayment,
   onClearProof,
@@ -1115,6 +1116,7 @@ function BookingDetailDrawer({
   onUpdateStatus: (status: string, notes?: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
+  onSyncCompanyInvoicePayment: (bookingId: number) => void;
   onConfirmMembershipPayment: (membershipId: number) => void;
   onRejectMembershipPayment: (membershipId: number) => void;
   onClearProof: (paymentId: number) => void;
@@ -1730,30 +1732,34 @@ function BookingDetailDrawer({
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
-                            onClick={() =>
-                              pmt.isMembershipPayment
-                                ? onConfirmMembershipPayment(pmt.membershipId)
-                                : onConfirmPayment(pmt.id)
-                            }
+                             onClick={() =>
+                               pmt.isMembershipPayment
+                                 ? onConfirmMembershipPayment(pmt.membershipId)
+                                 : pmt.isCompanyInvoicePayment
+                                   ? onSyncCompanyInvoicePayment(booking.id)
+                                   : onConfirmPayment(pmt.id)
+                             }
                             disabled={isUpdating}
                             className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                           >
                             <CheckCircle2 size={13} />
                             {confirmLabel}
                           </button>
-                          <button
-                            onClick={() =>
-                              pmt.isMembershipPayment
-                                ? onRejectMembershipPayment(pmt.membershipId)
-                                : onRejectPayment(pmt.id)
-                            }
-                            disabled={isUpdating}
-                            className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
-                          >
-                            <XCircle size={13} />
-                            Tolak
-                          </button>
-                          {!pmt.isMembershipPayment && (
+                          {!pmt.isCompanyInvoicePayment && (
+                            <button
+                              onClick={() =>
+                                pmt.isMembershipPayment
+                                  ? onRejectMembershipPayment(pmt.membershipId)
+                                  : onRejectPayment(pmt.id)
+                              }
+                              disabled={isUpdating}
+                              className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                            >
+                              <XCircle size={13} />
+                              Tolak
+                            </button>
+                          )}
+                          {!pmt.isMembershipPayment && !pmt.isCompanyInvoicePayment && (
                             <button
                               onClick={() => onClearProof(pmt.id)}
                               disabled={isUpdating}
@@ -2896,6 +2902,35 @@ export default function AdminBookings() {
     },
   });
 
+  const syncCompanyInvoicePaymentMutation = useMutation({
+    mutationFn: async (bookingId: number) => {
+      const response = await fetch(`${API_BASE}/bookings/${bookingId}/sync-company-invoice`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error ?? `HTTP ${response.status}`);
+      return data;
+    },
+    onSuccess: async (data: any) => {
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      const refreshed = await refetchBookings();
+      setSelectedBooking((current: any) =>
+        (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current?.id) ?? current,
+      );
+      toast({
+        title: "Booking perusahaan berhasil disinkronkan",
+        description: `${data.updatedBookingCount ?? 0} booking terkait invoice diperbarui.`,
+      });
+    },
+    onError: (error: Error) =>
+      toast({
+        title: "Gagal menyinkronkan booking perusahaan",
+        description: error.message,
+        variant: "destructive",
+      }),
+  });
+
   const membershipPaymentMutation = useMutation({
     mutationFn: async ({
       membershipId,
@@ -3288,6 +3323,7 @@ export default function AdminBookings() {
   const isUpdating =
     updateBookingMutation.isPending ||
     updatePaymentMutation.isPending ||
+    syncCompanyInvoicePaymentMutation.isPending ||
     membershipPaymentMutation.isPending ||
     updatePaymentMetadataMutation.isPending ||
     deletingId !== null;
@@ -4356,6 +4392,9 @@ export default function AdminBookings() {
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
           }
+           onSyncCompanyInvoicePayment={(bookingId) =>
+             syncCompanyInvoicePaymentMutation.mutate(bookingId)
+           }
           onConfirmMembershipPayment={(membershipId) =>
             membershipPaymentMutation.mutate({ membershipId, status: "active" })
           }

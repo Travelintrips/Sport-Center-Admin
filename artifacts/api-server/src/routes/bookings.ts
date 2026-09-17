@@ -2454,6 +2454,149 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// POST /bookings/:id/sync-company-invoice — repair a booking whose paid
+// company invoice is represented by a synthetic payment row in the admin UI.
+// Synthetic rows use a negative ID and must never be sent to /payments/:id.
+router.post("/bookings/:id/sync-company-invoice", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "ID booking tidak valid" });
+      return;
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const [booking] = await tx
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.id, id))
+        .limit(1);
+      if (!booking) return { kind: "booking_not_found" as const };
+
+      const [itemLink] = await tx
+        .select({ invoiceId: companyInvoiceItemsTable.invoiceId })
+        .from(companyInvoiceItemsTable)
+        .where(eq(companyInvoiceItemsTable.bookingId, id))
+        .limit(1);
+      const invoiceId = booking.companyInvoiceId ?? itemLink?.invoiceId ?? null;
+      if (invoiceId == null) return { kind: "invoice_not_found" as const };
+
+      const [invoice] = await tx
+        .select()
+        .from(companyInvoicesTable)
+        .where(eq(companyInvoicesTable.id, invoiceId))
+        .limit(1);
+      if (!invoice) return { kind: "invoice_not_found" as const };
+      if (invoice.status !== "paid") {
+        return { kind: "invoice_not_paid" as const, invoiceStatus: invoice.status };
+      }
+
+      const itemLinks = await tx
+        .select({ bookingId: companyInvoiceItemsTable.bookingId })
+        .from(companyInvoiceItemsTable)
+        .where(eq(companyInvoiceItemsTable.invoiceId, invoiceId));
+      const directLinks = await tx
+        .select({ id: bookingsTable.id })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.companyInvoiceId, invoiceId));
+      const linkedIds = new Set<number>([id]);
+      for (const item of itemLinks) {
+        if (item.bookingId != null) linkedIds.add(item.bookingId);
+      }
+      for (const linked of directLinks) linkedIds.add(linked.id);
+
+      const linkedBookings = await tx
+        .select()
+        .from(bookingsTable)
+        .where(inArray(bookingsTable.id, [...linkedIds]));
+      const repairableStatuses = [
+        "pending_payment",
+        "waiting_confirmation",
+        "waiting_admin_approval",
+        "paid",
+      ];
+      const paidAt = invoice.paidAt ?? new Date();
+      const changedIds: number[] = [];
+
+      for (const linkedBooking of linkedBookings) {
+        const nextStatus = repairableStatuses.includes(linkedBooking.status)
+          ? "confirmed"
+          : linkedBooking.status;
+        await tx
+          .update(bookingsTable)
+          .set({
+            billingStatus: "paid",
+            paidAt,
+            ...(nextStatus !== linkedBooking.status ? { status: "confirmed" as const } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(bookingsTable.id, linkedBooking.id));
+        if (nextStatus !== linkedBooking.status || linkedBooking.billingStatus !== "paid") {
+          changedIds.push(linkedBooking.id);
+        }
+      }
+
+      return {
+        kind: "ok" as const,
+        invoice,
+        linkedBookings,
+        changedIds,
+        paidAt,
+      };
+    });
+
+    if (result.kind === "booking_not_found") {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+    if (result.kind === "invoice_not_found") {
+      res.status(404).json({ error: "Invoice perusahaan tidak ditemukan untuk booking ini" });
+      return;
+    }
+    if (result.kind === "invoice_not_paid") {
+      res.status(409).json({ error: `Invoice perusahaan belum lunas (status: ${result.invoiceStatus})` });
+      return;
+    }
+
+    const activeLinkedBookings = result.linkedBookings.filter(
+      (linkedBooking) => !INACTIVE_STATUSES.includes(linkedBooking.status),
+    );
+    for (const linkedBooking of activeLinkedBookings) {
+      const syncedStatus = linkedBooking.status === "completed" ? "completed" : "confirmed";
+      syncStatusToBizportal(
+        linkedBooking.orderNumber,
+        syncedStatus,
+        result.invoice.paymentProofUrl,
+        result.paidAt,
+        { ...linkedBooking, status: syncedStatus, billingStatus: "paid", paidAt: result.paidAt },
+      ).catch((err) =>
+        req.log.warn({ err, orderNumber: linkedBooking.orderNumber }, "Company invoice booking sync failed"),
+      );
+    }
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "COMPANY_INVOICE_BOOKING_SYNCED",
+      entity: "booking",
+      entityId: id,
+      before: { bookingIds: result.linkedBookings.map((linkedBooking) => linkedBooking.id) },
+      after: { invoiceId: result.invoice.id, changedBookingIds: result.changedIds },
+      ...getClientInfo(req),
+    });
+
+    const refreshed = await getBookingWithPayment(id);
+    res.json({
+      success: true,
+      invoiceId: result.invoice.id,
+      updatedBookingCount: result.changedIds.length,
+      booking: refreshed,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync company invoice booking error");
+    res.status(500).json({ error: "Gagal menyinkronkan booking dengan invoice perusahaan" });
+  }
+});
+
 // Koreksi tanggal administratif: tidak mengubah nominal maupun status.
 // Tanggal pembayaran disimpan pada payment dan booking agar seluruh tampilan
 // memakai tanggal pembayaran yang sama.
