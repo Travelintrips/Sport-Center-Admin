@@ -94,9 +94,6 @@ if (IS_DEV) {
   }
 }
 
-const PROJECT_REF = getProjectRef(SERVICE_KEY);
-const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
-
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
@@ -126,13 +123,20 @@ export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | nul
 let client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {
-  if (!SERVICE_KEY || !STORAGE_URL) {
+  const serviceKey =
+    SERVICE_KEY ||
+    (IS_DEV ? process.env.SUPABASE_SERVICE_ROLE_KEY_DEV : process.env.SUPABASE_SERVICE_ROLE_KEY) ||
+    "";
+  const storageUrl =
+    (process.env.SUPABASE_URL ?? "").trim().replace(/\/+$/, "") ||
+    (getProjectRef(serviceKey) ? `https://${getProjectRef(serviceKey)}.supabase.co` : "");
+  if (!serviceKey || !storageUrl) {
     throw new Error(
-      "Supabase Storage is not configured: service role key missing or invalid"
+      "Supabase Storage is not configured: service role key or Supabase URL is missing/invalid"
     );
   }
   if (!client) {
-    client = createClient(STORAGE_URL, SERVICE_KEY, {
+    client = createClient(storageUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
       realtime: { transport: ws as any },
     });
@@ -141,7 +145,14 @@ function getClient(): SupabaseClient {
 }
 
 export function isStorageConfigured(): boolean {
-  return Boolean(SERVICE_KEY && STORAGE_URL);
+  const serviceKey =
+    SERVICE_KEY ||
+    (IS_DEV ? process.env.SUPABASE_SERVICE_ROLE_KEY_DEV : process.env.SUPABASE_SERVICE_ROLE_KEY) ||
+    "";
+  const storageUrl =
+    (process.env.SUPABASE_URL ?? "").trim() ||
+    (getProjectRef(serviceKey) ? `https://${getProjectRef(serviceKey)}.supabase.co` : "");
+  return Boolean(serviceKey && storageUrl);
 }
 
 /**

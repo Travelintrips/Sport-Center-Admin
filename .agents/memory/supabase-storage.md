@@ -11,6 +11,7 @@ Production uploaded files (facility images, payment proofs, QRIS) are stored in 
 
 **How to apply:**
 - Derive the active Storage project from the environment-specific service-role key; never hardcode a historical Supabase project ref.
+- Also use the environment-specific `SUPABASE_URL` when available; newer Supabase secret keys may be opaque and cannot provide a project ref by JWT parsing.
 - Required runtime buckets are `facility-images` and `payment-proofs`. Production startup ensures these exist; historical URLs can still reference deleted buckets and cannot restore missing bytes.
 - Server helper `artifacts/api-server/src/lib/supabaseStorage.ts` wraps upload/delete/getPublicUrl using `@supabase/supabase-js` + service role key. All upload routes use `multer.memoryStorage()` then `uploadToStorage(...)`.
 - Development and production Storage credentials are isolated; never assume an object uploaded in one environment exists in the other.

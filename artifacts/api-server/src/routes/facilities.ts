@@ -19,6 +19,20 @@ const upload = multer({
   },
 });
 
+function parseFacilityImageUpload(req: any, res: any, next: any) {
+  upload.single("image")(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      res.status(413).json({ error: "Ukuran foto terlalu besar. Maksimal 5MB per foto." });
+      return;
+    }
+    res.status(400).json({ error: "Format foto tidak didukung. Gunakan JPG, PNG, atau WebP." });
+  });
+}
+
 const router = Router();
 
 async function getFacilityWithImages(id: number) {
@@ -163,7 +177,7 @@ router.delete("/facilities/:id", adminMiddleware, async (req, res) => {
 router.post(
   "/facilities/:id/images",
   adminMiddleware,
-  upload.single("image"),
+  parseFacilityImageUpload,
   async (req, res) => {
     try {
       if (!req.file) {
@@ -196,7 +210,8 @@ router.post(
       res.status(201).json(image);
     } catch (err) {
       req.log.error({ err }, "Upload facility image error");
-      res.status(500).json({ error: "Internal server error" });
+      const message = err instanceof Error ? err.message : "Internal server error";
+      res.status(500).json({ error: "Gagal menyimpan foto fasilitas", details: message });
     }
   }
 );

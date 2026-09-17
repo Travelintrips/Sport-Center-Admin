@@ -180,7 +180,10 @@ export default function AdminFacilities() {
               headers: token ? { Authorization: `Bearer ${token}` } : {},
               body: formData,
             });
-            if (!resp.ok) throw new Error(`Gagal upload foto: ${resp.status}`);
+            if (!resp.ok) {
+              const error = await resp.json().catch(() => ({}));
+              throw new Error(error?.error ?? error?.details ?? `Gagal upload foto: ${resp.status}`);
+            }
             setUploadProgress(Math.round(((i + 1) / total) * 100));
           }
           setUploadProgress(0);
@@ -208,7 +211,10 @@ export default function AdminFacilities() {
               headers: token ? { Authorization: `Bearer ${token}` } : {},
               body: formData,
             });
-            if (!resp.ok) throw new Error(`Gagal upload foto: ${resp.status}`);
+            if (!resp.ok) {
+              const error = await resp.json().catch(() => ({}));
+              throw new Error(error?.error ?? error?.details ?? `Gagal upload foto: ${resp.status}`);
+            }
             setUploadProgress(Math.round(((i + 1) / total) * 100));
           }
           setUploadProgress(0);
@@ -433,7 +439,7 @@ export default function AdminFacilities() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp"
                       multiple
                       className="hidden"
                       onChange={handleFileSelect}
