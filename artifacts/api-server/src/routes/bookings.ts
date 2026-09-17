@@ -104,6 +104,10 @@ function isMultigunaFacility(facility: { name?: string | null; category?: string
   return normalized.includes("multiguna");
 }
 
+function isCustomPriceFacility(facility: { name?: string | null }): boolean {
+  return /konsumsi/i.test(facility.name ?? "");
+}
+
 function isGymFacility(facility: {
   name?: string | null;
   category?: string | null;
@@ -1033,7 +1037,20 @@ router.post("/bookings", async (req, res) => {
 
     const endTime = addHours(startTime, durationHours);
     // Gym/walk-in pricing is per person; time-slot facilities remain per duration.
-    const basePrice = Number(facility.pricePerHour) * (isWalkIn ? numberOfPeople! : durationHours);
+    const requestedCustomPrice = req.body.customPrice == null || req.body.customPrice === ""
+      ? null
+      : Number(req.body.customPrice);
+    if (isCustomPriceFacility(facility) && (
+      requestedCustomPrice == null ||
+      !Number.isFinite(requestedCustomPrice) ||
+      requestedCustomPrice <= 0
+    )) {
+      res.status(400).json({ error: "Harga Konsumsi wajib diisi dengan nominal lebih dari 0" });
+      return;
+    }
+    const basePrice = isCustomPriceFacility(facility)
+      ? Math.round(requestedCustomPrice!)
+      : Number(facility.pricePerHour) * (isWalkIn ? numberOfPeople! : durationHours);
 
     // ── Auto-verifikasi & diskon member AP2 ─────────────────────────────────
     // Jika customer adalah angkasa_pura dan ID card ditemukan di ap_members (aktif),
@@ -1483,7 +1500,7 @@ function recurringScheduleError(
 // POST /bookings/recurring/check
 router.post("/bookings/recurring/check", async (req, res) => {
   try {
-    const { facilityId, startDate, startTime, durationHours, repeatType, repeatCount } = req.body;
+    const { facilityId, startDate, startTime, durationHours, repeatType, repeatCount, customPrice: rawCustomPrice } = req.body;
     let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
     try {
       additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
@@ -1522,7 +1539,18 @@ router.post("/bookings/recurring/check", async (req, res) => {
       })
     );
 
-    const pricePerSession = Number(facility.pricePerHour) * durationHours;
+    const customPrice = rawCustomPrice == null || rawCustomPrice === "" ? null : Number(rawCustomPrice);
+    if (isCustomPriceFacility(facility) && (
+      customPrice == null ||
+      !Number.isFinite(customPrice) ||
+      customPrice <= 0
+    )) {
+      res.status(400).json({ error: "Harga Konsumsi wajib diisi dengan nominal lebih dari 0" });
+      return;
+    }
+    const pricePerSession = isCustomPriceFacility(facility)
+      ? Math.round(customPrice!)
+      : Number(facility.pricePerHour) * durationHours;
     const validCount = results.filter((r) => r.available).length;
 
     res.json({
@@ -1555,6 +1583,7 @@ router.post("/bookings/recurring", async (req, res) => {
       customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
       bookingType: rawBookingTypeR,
       additionalCharges: rawAdditionalCharges,
+      customPrice: rawCustomPrice,
       // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
       groupRef: externalGroupRefRaw,
     } = req.body;
@@ -1655,7 +1684,18 @@ router.post("/bookings/recurring", async (req, res) => {
       res.status(400).json({ error: scheduleErrors[0] });
       return;
     }
-    const basePrice = Number(facility.pricePerHour) * durationHours;
+    const customPrice = rawCustomPrice == null || rawCustomPrice === "" ? null : Number(rawCustomPrice);
+    if (isCustomPriceFacility(facility) && (
+      customPrice == null ||
+      !Number.isFinite(customPrice) ||
+      customPrice <= 0
+    )) {
+      res.status(400).json({ error: "Harga Konsumsi wajib diisi dengan nominal lebih dari 0" });
+      return;
+    }
+    const basePrice = isCustomPriceFacility(facility)
+      ? Math.round(customPrice!)
+      : Number(facility.pricePerHour) * durationHours;
 
     // ── Diskon Event 21,4% (recurring) ──────────────────────────────────────
     const eventDiscountAmountCalcR = isEventR ? calculateEventDiscount(basePrice) : 0;

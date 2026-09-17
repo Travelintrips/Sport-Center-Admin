@@ -3173,6 +3173,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdditionalCharge"
+        customPrice:
+          type: number
+          minimum: 1
+          description: Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
 
     RecurringDateStatus:
       type: object
@@ -3239,6 +3243,10 @@ components:
           enum: [umum, angkasa_pura]
         idCardNumber:
           type: string
+        customPrice:
+          type: number
+          minimum: 1
+          description: Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
 
     RecurringBookingResult:
       type: object
@@ -3327,6 +3335,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdditionalCharge"
+        customPrice:
+          type: number
+          minimum: 1
+          description: Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
 
     BookingUpdate:
       type: object

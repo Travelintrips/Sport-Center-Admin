@@ -16,11 +16,13 @@ export interface CompanyInvoice {
   companyName?: string;
   periodMonth: string;
   totalAmount: number;
+  dpp: number;
+  dppNilaiLain: number;
   ppnAmount: number;
   grandTotal: number;
-  ppnRate?: number;
-  ppnTreatment?: CompanyInvoicePpnTreatment;
-  ppnCollectedByCustomer?: boolean;
+  ppnRate: number;
+  ppnTreatment: CompanyInvoicePpnTreatment;
+  ppnCollectedByCustomer: boolean;
   pphRate: number;
   pphAmount: number;
   netAmount: number;

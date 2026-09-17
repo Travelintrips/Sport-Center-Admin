@@ -25,4 +25,9 @@ export interface RecurringBookingInput {
   downPaymentAmount?: number;
   customerType?: RecurringBookingInputCustomerType;
   idCardNumber?: string;
+  /**
+     * Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
+     * @minimum 1
+     */
+  customPrice?: number;
 }

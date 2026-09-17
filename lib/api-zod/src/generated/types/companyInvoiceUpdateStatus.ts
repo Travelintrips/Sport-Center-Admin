@@ -11,5 +11,7 @@ export type CompanyInvoiceUpdateStatus = typeof CompanyInvoiceUpdateStatus[keyof
 
 export const CompanyInvoiceUpdateStatus = {
   unpaid: 'unpaid',
+  partial_paid: 'partial_paid',
   paid: 'paid',
+  waiting_verification: 'waiting_verification',
 } as const;

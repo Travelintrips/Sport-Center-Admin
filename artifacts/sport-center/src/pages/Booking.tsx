@@ -89,6 +89,7 @@ export default function Booking() {
     )
   );
   const isWalkIn = mode === "walk_in" || facility?.bookingMode === "walk_in" || isGymFacility;
+  const isCustomPriceFacility = Boolean(facility && /konsumsi/i.test(facility.name ?? ""));
 
   // --- Auth user ---
   const { data: currentUser, isLoading: isLoadingUser } = useGetMe({
@@ -141,6 +142,7 @@ export default function Booking() {
     }
   }, [isAdminBooking, selectedCustomerId, customers, currentUser]);
   const [notes, setNotes] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
   const [additionalCharges, setAdditionalCharges] = useState<{ name: string; amount: string }[]>([]);
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
   const [vendorId, setVendorId] = useState<string>("");
@@ -324,6 +326,7 @@ export default function Booking() {
             durationHours: duration,
             repeatType,
             repeatCount,
+            customPrice: isCustomPriceFacility ? Number(customPrice) : undefined,
             additionalCharges: additionalCharges
               .filter((charge) => charge.name.trim() && Number(charge.amount) > 0)
               .map((charge) => ({ name: charge.name.trim(), amount: Number(charge.amount) })),
@@ -345,7 +348,7 @@ export default function Booking() {
     }, 400);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, additionalCharges, checkRecurringMutate]);
+  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, customPrice, isCustomPriceFacility, additionalCharges, checkRecurringMutate]);
 
   // Redirect if missing params
   useEffect(() => {
@@ -417,6 +420,14 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
+    if (isCustomPriceFacility && (!customPrice || Number(customPrice) <= 0)) {
+      toast({
+        title: t("Harga Konsumsi wajib diisi", "Consumption price is required"),
+        description: t("Masukkan nominal harga lebih dari Rp0.", "Enter a price greater than Rp0."),
+        variant: "destructive",
+      });
+      return;
+    }
     const incompleteCharge = additionalCharges.find(
       (charge) => (charge.name.trim() && Number(charge.amount) <= 0) || (!charge.name.trim() && Number(charge.amount) > 0),
     );
@@ -491,6 +502,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+              customPrice: isCustomPriceFacility ? Number(customPrice) : undefined,
                additionalCharges: additionalChargesPayload,
 
               vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
@@ -519,6 +531,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+              customPrice: isCustomPriceFacility ? Number(customPrice) : undefined,
                additionalCharges: additionalChargesPayload,
               vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
             } as any,
@@ -588,6 +601,7 @@ export default function Booking() {
           specificDates: selectedDates,
           customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
+          customPrice: isCustomPriceFacility ? Number(customPrice) : undefined,
           promoCode: isAP || isEvent ? undefined : couponResult?.code || undefined,
           discountAmountPerSession: isAP || isEvent ? undefined : discountPerSession || undefined,
           bookingType: isEvent ? "event" : "regular",
@@ -616,6 +630,7 @@ export default function Booking() {
           notes,
           customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
+          customPrice: isCustomPriceFacility ? Number(customPrice) : undefined,
           promoCode: isAP || isEvent ? undefined : couponResult?.code || undefined,
           discountAmount: isAP || isEvent ? undefined : discountPerSession || undefined,
           bookingType: isEvent ? "event" : "regular",
@@ -636,7 +651,7 @@ export default function Booking() {
     setOverriddenDates((prev) => ({ ...prev, [idx]: { date: newDate, available: null, checking: true } }));
     setEditingIdx(null);
     checkRecurringMutate(
-      { data: { facilityId, startDate: newDate, startTime, durationHours: duration, repeatType, repeatCount: 1 } },
+      { data: { facilityId, startDate: newDate, startTime, durationHours: duration, repeatType, repeatCount: 1, customPrice: isCustomPriceFacility ? Number(customPrice) : undefined } },
       {
         onSuccess: (data) => {
           const available = data.dates[0]?.available ?? false;
@@ -676,7 +691,9 @@ export default function Booking() {
     ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
     : 1;
   const totalPrice = facility
-    ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+    ? isCustomPriceFacility
+      ? (Number(customPrice) || 0)
+      : facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
     : 0;
   const singlePriceBeforeDiscount = totalPrice + additionalChargesTotal;
   const isMultiguna = facility
@@ -926,6 +943,32 @@ export default function Booking() {
                     <Input id="phone" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08123456789" />
                   </div>
                 </div>
+                {isCustomPriceFacility && (
+                  <div className="space-y-2 rounded-xl border border-orange-200 bg-orange-50/70 p-4 dark:border-orange-900/60 dark:bg-orange-950/20">
+                    <Label htmlFor="customPrice" className="font-semibold">
+                      {t("Harga Konsumsi", "Consumption Price")} <span className="text-destructive">*</span>
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("Masukkan harga total untuk satu sesi booking. Harga ini tidak dikalikan durasi.", "Enter the total price for one booking session. This price is not multiplied by duration.")}
+                    </p>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">Rp</span>
+                      <Input
+                        id="customPrice"
+                        type="text"
+                        inputMode="numeric"
+                        required
+                        value={customPrice ? Number(customPrice).toLocaleString("id-ID") : ""}
+                        onChange={(event) => setCustomPrice(event.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="0"
+                        className="pl-8 bg-background font-mono"
+                      />
+                    </div>
+                    <p className="text-xs text-orange-800 dark:text-orange-200">
+                      {t("Harga default fasilitas hanya sebagai referensi. Nominal booking akan mengikuti harga yang Anda masukkan.", "The facility default price is only a reference. The booking will use the amount you enter.")}
+                    </p>
+                  </div>
+                )}
                 {vendors.length > 0 && (
                   <div className="space-y-2">
                     <Label htmlFor="vendor">{t("Vendor (Opsional)", "Vendor (Optional)")}</Label>

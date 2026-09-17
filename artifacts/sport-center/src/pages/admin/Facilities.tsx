@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Upload, X, WrenchIcon, CheckCircle2, ImageIcon, Clock, DollarSign, Info, Star } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
-const CATEGORIES = ["Futsal", "Basket", "Voli", "Tenis", "Badminton", "Gym", "Biliar", "Lainnya"];
+const CATEGORIES = ["Futsal", "Basket", "Voli", "Tenis", "Badminton", "Gym", "Biliar", "Konsumsi", "Lainnya"];
 
 const emptyForm = {
   name: "", category: "Futsal", description: "",
@@ -388,6 +388,11 @@ export default function AdminFacilities() {
                     </div>
                     {form.pricePerHour && (
                       <p className="text-xs text-muted-foreground">{formatCurrency(Number(form.pricePerHour))} per jam</p>
+                    )}
+                    {/^konsumsi$/i.test(form.name.trim()) && (
+                      <p className="text-xs text-orange-700 dark:text-orange-300">
+                        Fasilitas bernama Konsumsi akan meminta harga total secara manual saat booking.
+                      </p>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">

@@ -331,6 +331,11 @@ export interface RecurringBookingCheckInput {
      */
   repeatCount: number;
   additionalCharges?: AdditionalCharge[];
+  /**
+     * Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
+     * @minimum 1
+     */
+  customPrice?: number;
 }
 
 export interface RecurringDateStatus {
@@ -379,6 +384,11 @@ export interface RecurringBookingInput {
   downPaymentAmount?: number;
   customerType?: RecurringBookingInputCustomerType;
   idCardNumber?: string;
+  /**
+     * Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
+     * @minimum 1
+     */
+  customPrice?: number;
 }
 
 export interface RecurringBookingResult {
@@ -434,6 +444,11 @@ export interface BookingInput {
   notes?: string;
   vendorId?: number | null;
   additionalCharges?: AdditionalCharge[];
+  /**
+     * Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
+     * @minimum 1
+     */
+  customPrice?: number;
 }
 
 export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof BookingUpdateStatus];
@@ -745,7 +760,9 @@ export type CompanyInvoiceStatus = typeof CompanyInvoiceStatus[keyof typeof Comp
 
 export const CompanyInvoiceStatus = {
   unpaid: 'unpaid',
+  partial_paid: 'partial_paid',
   paid: 'paid',
+  waiting_verification: 'waiting_verification',
 } as const;
 
 export interface CompanyInvoice {
@@ -755,11 +772,13 @@ export interface CompanyInvoice {
   companyName?: string;
   periodMonth: string;
   totalAmount: number;
+  dpp: number;
+  dppNilaiLain: number;
   ppnAmount: number;
   grandTotal: number;
-  ppnRate?: number;
-  ppnTreatment?: CompanyInvoicePpnTreatment;
-  ppnCollectedByCustomer?: boolean;
+  ppnRate: number;
+  ppnTreatment: CompanyInvoicePpnTreatment;
+  ppnCollectedByCustomer: boolean;
   pphRate: number;
   pphAmount: number;
   netAmount: number;
@@ -784,7 +803,9 @@ export type CompanyInvoiceUpdateStatus = typeof CompanyInvoiceUpdateStatus[keyof
 
 export const CompanyInvoiceUpdateStatus = {
   unpaid: 'unpaid',
+  partial_paid: 'partial_paid',
   paid: 'paid',
+  waiting_verification: 'waiting_verification',
 } as const;
 
 export interface CompanyInvoiceUpdate {

@@ -487,6 +487,9 @@ export const ListBookingsResponse = zod.array(ListBookingsResponseItem)
 /**
  * @summary Create a new booking
  */
+
+
+
 export const CreateBookingBody = zod.object({
   "customerName": zod.string(),
   "customerEmail": zod.string(),
@@ -504,7 +507,8 @@ export const CreateBookingBody = zod.object({
   "additionalCharges": zod.array(zod.object({
   "name": zod.string(),
   "amount": zod.number()
-})).optional()
+})).optional(),
+  "customPrice": zod.number().min(1).optional().describe('Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.')
 })
 
 
@@ -512,6 +516,7 @@ export const CreateBookingBody = zod.object({
  * @summary Check availability for recurring booking dates
  */
 export const checkRecurringBookingBodyRepeatCountMax = 52;
+
 
 
 
@@ -525,7 +530,8 @@ export const CheckRecurringBookingBody = zod.object({
   "additionalCharges": zod.array(zod.object({
   "name": zod.string(),
   "amount": zod.number()
-})).optional()
+})).optional(),
+  "customPrice": zod.number().min(1).optional().describe('Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.')
 })
 
 export const CheckRecurringBookingResponse = zod.object({
@@ -543,6 +549,9 @@ export const CheckRecurringBookingResponse = zod.object({
 /**
  * @summary Create multiple bookings (recurring)
  */
+
+
+
 export const CreateRecurringBookingBody = zod.object({
   "customerName": zod.string(),
   "customerEmail": zod.string(),
@@ -560,7 +569,8 @@ export const CreateRecurringBookingBody = zod.object({
 })).optional(),
   "downPaymentAmount": zod.number().optional().describe('Total down payment for the recurring payment group. Must be less than the group grand total.'),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
-  "idCardNumber": zod.string().optional()
+  "idCardNumber": zod.string().optional(),
+  "customPrice": zod.number().min(1).optional().describe('Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.')
 })
 
 
@@ -1573,15 +1583,17 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "companyName": zod.string().optional(),
   "periodMonth": zod.string(),
   "totalAmount": zod.number(),
+  "dpp": zod.number(),
+  "dppNilaiLain": zod.number(),
   "ppnAmount": zod.number(),
   "grandTotal": zod.number(),
-  "ppnRate": zod.number().optional(),
-  "ppnTreatment": zod.enum(['none', 'inclusive', 'normal', 'collected_by_customer', 'mixed']).optional(),
-  "ppnCollectedByCustomer": zod.boolean().optional(),
+  "ppnRate": zod.number(),
+  "ppnTreatment": zod.enum(['none', 'inclusive', 'normal', 'collected_by_customer', 'mixed']),
+  "ppnCollectedByCustomer": zod.boolean(),
   "pphRate": zod.number(),
   "pphAmount": zod.number(),
   "netAmount": zod.number(),
-  "status": zod.enum(['unpaid', 'paid']),
+  "status": zod.enum(['unpaid', 'partial_paid', 'paid', 'waiting_verification']),
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -1713,15 +1725,17 @@ export const GetCompanyInvoiceResponse = zod.object({
   "companyName": zod.string().optional(),
   "periodMonth": zod.string(),
   "totalAmount": zod.number(),
+  "dpp": zod.number(),
+  "dppNilaiLain": zod.number(),
   "ppnAmount": zod.number(),
   "grandTotal": zod.number(),
-  "ppnRate": zod.number().optional(),
-  "ppnTreatment": zod.enum(['none', 'inclusive', 'normal', 'collected_by_customer', 'mixed']).optional(),
-  "ppnCollectedByCustomer": zod.boolean().optional(),
+  "ppnRate": zod.number(),
+  "ppnTreatment": zod.enum(['none', 'inclusive', 'normal', 'collected_by_customer', 'mixed']),
+  "ppnCollectedByCustomer": zod.boolean(),
   "pphRate": zod.number(),
   "pphAmount": zod.number(),
   "netAmount": zod.number(),
-  "status": zod.enum(['unpaid', 'paid']),
+  "status": zod.enum(['unpaid', 'partial_paid', 'paid', 'waiting_verification']),
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -1824,7 +1838,7 @@ export const UpdateCompanyInvoiceParams = zod.object({
 })
 
 export const UpdateCompanyInvoiceBody = zod.object({
-  "status": zod.enum(['unpaid', 'paid']).optional(),
+  "status": zod.enum(['unpaid', 'partial_paid', 'paid', 'waiting_verification']).optional(),
   "notes": zod.string().optional()
 })
 
@@ -1835,15 +1849,17 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "companyName": zod.string().optional(),
   "periodMonth": zod.string(),
   "totalAmount": zod.number(),
+  "dpp": zod.number(),
+  "dppNilaiLain": zod.number(),
   "ppnAmount": zod.number(),
   "grandTotal": zod.number(),
-  "ppnRate": zod.number().optional(),
-  "ppnTreatment": zod.enum(['none', 'inclusive', 'normal', 'collected_by_customer', 'mixed']).optional(),
-  "ppnCollectedByCustomer": zod.boolean().optional(),
+  "ppnRate": zod.number(),
+  "ppnTreatment": zod.enum(['none', 'inclusive', 'normal', 'collected_by_customer', 'mixed']),
+  "ppnCollectedByCustomer": zod.boolean(),
   "pphRate": zod.number(),
   "pphAmount": zod.number(),
   "netAmount": zod.number(),
-  "status": zod.enum(['unpaid', 'paid']),
+  "status": zod.enum(['unpaid', 'partial_paid', 'paid', 'waiting_verification']),
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string(),

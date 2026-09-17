@@ -23,4 +23,9 @@ export interface BookingInput {
   notes?: string;
   vendorId?: number | null;
   additionalCharges?: AdditionalCharge[];
+  /**
+     * Harga total per sesi untuk fasilitas Konsumsi yang mengizinkan harga custom.
+     * @minimum 1
+     */
+  customPrice?: number;
 }
