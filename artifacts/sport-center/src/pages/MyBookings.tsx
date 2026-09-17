@@ -47,6 +47,12 @@ type BookingItem = {
   orderNumber: string;
   customerName?: string;
   groupRef?: string | null;
+  recurringSeriesId?: string | null;
+  recurring_series_id?: string | null;
+  groupId?: string | null;
+  group_id?: string | null;
+  memberId?: string | null;
+  member_id?: string | null;
 };
 type ReviewItem = { bookingId: number; rating: number; comment?: string | null };
 type Rs = { rating: number; comment: string; hover: number };
@@ -195,14 +201,20 @@ function CartGroupCard({
   lang,
   dateLocale,
   onReschedule,
+  onPay,
 }: {
   group: { groupRef: string; items: BookingItem[] };
   lang: string;
   dateLocale: Locale;
   onReschedule: (b: BookingItem) => void;
+  onPay: (items: BookingItem[]) => void;
 }) {
   const { t } = useLang();
   const [expanded, setExpanded] = useState(true);
+  const payableItems = group.items.filter((item) => ["pending_payment", "expired"].includes(item.status));
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(
+    () => new Set(payableItems.map((item) => item.id)),
+  );
   const { items } = group;
   const totalAmount = items.reduce((s, b) => s + getBookingDisplayAmount(b).net, 0);
   const grossAmount = items.reduce((s, b) => s + getBookingDisplayAmount(b).gross, 0);
@@ -212,6 +224,31 @@ function CartGroupCard({
   const hasInactive = items.some((b) => INACTIVE.includes(b.status));
   const allConfirmed = items.every((b) => b.status === "confirmed" || b.status === "completed");
   const stripeColor = hasInactive && !allConfirmed ? "#9ca3af" : allConfirmed ? "#10b981" : "#f59e0b";
+  const selectedItems = payableItems.filter((item) => selectedIds.has(item.id));
+  const selectedAmount = selectedItems.reduce(
+    (sum, item) => sum + getBookingDisplayAmount(item).net,
+    0,
+  );
+  const recurringSeriesId =
+    items.find((item) => item.recurringSeriesId || item.recurring_series_id)?.recurringSeriesId ??
+    items.find((item) => item.recurring_series_id)?.recurring_series_id ??
+    group.groupRef;
+  const groupId =
+    items.find((item) => item.groupId || item.group_id)?.groupId ??
+    items.find((item) => item.group_id)?.group_id ??
+    group.groupRef;
+  const memberId =
+    items.find((item) => item.memberId || item.member_id)?.memberId ??
+    items.find((item) => item.member_id)?.member_id ??
+    null;
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const next = new Set(payableItems.map((item) => item.id));
+      const unchanged = current.size === next.size && [...current].every((id) => next.has(id));
+      return unchanged ? current : next;
+    });
+  }, [group.items]);
 
   return (
     <Card className="overflow-hidden hover:shadow-md transition-shadow border-primary/20">
@@ -259,11 +296,32 @@ function CartGroupCard({
             {/* Item list */}
             {expanded && (
               <div className="mt-3 space-y-2">
+                {(recurringSeriesId || groupId || memberId) && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 text-[10px] text-violet-700 dark:border-violet-800 dark:bg-violet-950/20 dark:text-violet-300">
+                    {recurringSeriesId && <span>Series: <span className="font-mono font-semibold">{recurringSeriesId}</span></span>}
+                    {groupId && <span>Group: <span className="font-mono font-semibold">{groupId}</span></span>}
+                    {memberId && <span>Member: <span className="font-mono font-semibold">{memberId}</span></span>}
+                  </div>
+                )}
                 {items.map((b) => {
                   const cfg = STATUS_CONFIG[b.status] ?? { label: b.status, labelEn: b.status, stripe: "#9ca3af", badge: "bg-gray-100 text-gray-600 border-gray-200" };
                   return (
                     <div key={b.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/40">
-                      <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-2 flex-1 min-w-0">
+                        {payableItems.some((item) => item.id === b.id) && (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(b.id)}
+                            onChange={() => setSelectedIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                              return next;
+                            })}
+                            aria-label={t(`Pilih sesi ${b.orderNumber}`, `Select session ${b.orderNumber}`)}
+                            className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                          />
+                        )}
+                        <div className="min-w-0">
                         <div className="font-semibold text-sm truncate">{b.facilityName}</div>
                         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mt-0.5">
                           <span className="flex items-center gap-1">
@@ -274,6 +332,7 @@ function CartGroupCard({
                             <Clock size={11} className="text-primary" />
                             {b.startTime.substring(0, 5)} – {b.endTime.substring(0, 5)}
                           </span>
+                        </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -294,6 +353,23 @@ function CartGroupCard({
                     </div>
                   );
                 })}
+                {selectedItems.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    <div className="text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">{selectedItems.length} sesi dipilih</span>
+                      <span className="mx-1">·</span>
+                      Rp {selectedAmount.toLocaleString("id-ID")}
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => onPay(selectedItems)}
+                    >
+                      <ReceiptText size={13} />
+                      {t("Bayar sekali", "Pay once")}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -416,6 +492,36 @@ export default function MyBookings() {
     }
   }
 
+  const openRecurringPayment = (items: BookingItem[]) => {
+    const canonical = items[0];
+    if (!canonical) return;
+    const recurringSeriesId =
+      canonical.recurringSeriesId ??
+      canonical.recurring_series_id ??
+      canonical.groupId ??
+      canonical.group_id ??
+      canonical.groupRef ??
+      null;
+    const groupId = canonical.groupId ?? canonical.group_id ?? canonical.groupRef ?? null;
+    const memberId = canonical.memberId ?? canonical.member_id ?? null;
+    const sessionData = items.map((item) => ({
+      id: item.id,
+      orderNumber: item.orderNumber,
+      facilityName: item.facilityName,
+      bookingDate: item.bookingDate,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      amount: getBookingDisplayAmount(item).net,
+      grossAmount: getBookingDisplayAmount(item).gross,
+    }));
+    const params = new URLSearchParams();
+    params.set("sessionData", JSON.stringify(sessionData));
+    if (recurringSeriesId) params.set("recurring_series_id", recurringSeriesId);
+    if (groupId) params.set("group_id", groupId);
+    if (memberId) params.set("member_id", memberId);
+    setLocation(`/booking/${encodeURIComponent(canonical.orderNumber)}?${params.toString()}`);
+  };
+
   const active = soloBookings.filter((b) => !INACTIVE.includes(b.status));
   const past   = soloBookings.filter((b) =>  INACTIVE.includes(b.status));
   const activeGroups = cartGroups.filter((g) => g.items.some((b) => !INACTIVE.includes(b.status)));
@@ -527,7 +633,14 @@ export default function MyBookings() {
               </h2>
               <div className="space-y-3">
                 {activeGroups.map((g) => (
-                  <CartGroupCard key={g.groupRef} group={g} lang={lang} dateLocale={dateLocale} onReschedule={setRescheduleTarget} />
+                  <CartGroupCard
+                    key={g.groupRef}
+                    group={g}
+                    lang={lang}
+                    dateLocale={dateLocale}
+                    onReschedule={setRescheduleTarget}
+                    onPay={openRecurringPayment}
+                  />
                 ))}
                 {active.map((b) => (
                   <BookingCard
@@ -561,7 +674,14 @@ export default function MyBookings() {
               </h2>
               <div className="space-y-3">
                 {pastGroups.map((g) => (
-                  <CartGroupCard key={g.groupRef} group={g} lang={lang} dateLocale={dateLocale} onReschedule={setRescheduleTarget} />
+                  <CartGroupCard
+                    key={g.groupRef}
+                    group={g}
+                    lang={lang}
+                    dateLocale={dateLocale}
+                    onReschedule={setRescheduleTarget}
+                    onPay={openRecurringPayment}
+                  />
                 ))}
                 {past.map((b) => (
                   <BookingCard

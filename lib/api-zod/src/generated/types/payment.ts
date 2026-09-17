@@ -39,4 +39,14 @@ export interface Payment {
   notes?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  /** @nullable */
+  paymentNumber?: string | null;
+  /** @nullable */
+  recurring_series_id?: string | null;
+  /** @nullable */
+  group_id?: string | null;
+  /** @nullable */
+  member_id?: string | null;
+  related_payment_count?: number;
+  related_booking_numbers?: string[];
 }

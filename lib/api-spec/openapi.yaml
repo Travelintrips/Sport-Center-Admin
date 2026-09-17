@@ -3400,6 +3400,20 @@ components:
           type: string
         updatedAt:
           type: string
+        paymentNumber:
+          type: ["string", "null"]
+        recurring_series_id:
+          type: ["string", "null"]
+        group_id:
+          type: ["string", "null"]
+        member_id:
+          type: ["string", "null"]
+        related_payment_count:
+          type: integer
+        related_booking_numbers:
+          type: array
+          items:
+            type: string
 
     PaymentInput:
       type: object
@@ -3429,6 +3443,15 @@ components:
         ocrScan:
           type: object
           additionalProperties: true
+        recurring_series_id:
+          type: ["string", "null"]
+          description: Stable identifier shared by all sessions in one recurring payment.
+        group_id:
+          type: ["string", "null"]
+          description: Optional group identifier associated with the recurring booking.
+        member_id:
+          type: ["string", "null"]
+          description: Optional member identifier associated with the recurring booking.
 
     PaymentUpdate:
       type: object

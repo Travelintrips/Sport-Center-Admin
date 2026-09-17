@@ -1,0 +1,70 @@
+Update frontend Sport Center agar mendukung payment untuk rangkaian booking recurring.
+Tujuan:
+Satu rangkaian booking recurring harus dapat dibayar sebagai satu payment. Frontend harus mengirim identifier recurring yang sama ke API BizPortal.
+Field payment yang wajib didukung:
+- recurring_series_id: string | null
+- group_id: string | null
+- member_id: string | null
+Aturan UI:
+1. Pada form pembuatan payment, tambahkan tiga input:
+   - Recurring Series ID
+   - Group ID
+   - Member ID
+2. recurring_series_id adalah identifier utama untuk mengelompokkan beberapa sesi recurring yang dibuat bersama.
+3. Jika payment dibuat dari booking yang merupakan bagian dari recurring series:
+   - Isi recurring_series_id secara otomatis dari data booking.
+   - Isi group_id jika booking memiliki group.
+   - Isi member_id jika booking memiliki member.
+4. Jika booking bukan recurring:
+   - Ketiga field boleh kosong.
+   - Jangan kirim string kosong. Kirim null atau hilangkan field sesuai kontrak API.
+5. Jika user memilih beberapa sesi dalam satu recurring series:
+   - Tampilkan seluruh sesi yang dipilih.
+   - Hitung amount sebagai jumlah total semua sesi.
+   - Kirim hanya satu request payment.
+   - Gunakan recurring_series_id yang sama untuk semua sesi tersebut.
+6. Setelah payment berhasil:
+   - Tampilkan satu nomor payment.
+   - Tampilkan daftar booking/session yang tercakup dalam payment tersebut.
+   - Tandai semua booking dalam recurring series sebagai paid atau sesuai status payment dari API.
+   - Jangan membuat satu payment per sesi.
+7. Pada halaman daftar/detail payment:
+   - Tampilkan recurring_series_id.
+   - Tampilkan group_id dan member_id jika tersedia.
+   - Tampilkan jumlah sesi dan nomor booking yang terkait.
+Kontrak request:
+POST /api/sport-center/payments
+{
+  "company_id": number,
+  "booking_id": number,
+  "amount": number,
+  "method": "cash" | "transfer" | "qris" | "card" | "other",
+  "notes": string,
+  "recurring_series_id"?: string | null,
+  "group_id"?: string | null,
+  "member_id"?: string | null
+}
+Catatan penting:
+- booking_id tetap wajib sebagai booking utama/canonical booking.
+- recurring_series_id menjadi kunci pengelompokan payment recurring.
+- Jangan membuat payment baru jika API mengembalikan conflict bahwa recurring_series_id sudah memiliki payment aktif.
+- Tangani HTTP 409 dengan pesan:
+  "Rangkaian recurring ini sudah memiliki payment."
+- Jangan menghapus payment lama secara langsung.
+- Koreksi payment lama harus memakai endpoint void/reversal yang mempertahankan audit trail dan jurnal accounting.
+Response payment sebaiknya mengembalikan:
+{
+  "id": number,
+  "payment_number": string,
+  "booking_id": number,
+  "amount": number,
+  "status": string,
+  "recurring_series_id": string | null,
+  "group_id": string | null,
+  "member_id": string | null,
+  "related_payment_count": number,
+  "related_booking_numbers": string[]
+}
+Pastikan form, loading state, error state, cache refresh, dan tampilan detail mengikuti kontrak tersebut.
+
+Perlu diperhatikan: field sekarang sudah tersedia dan dikirim dari BizPortal, tetapi aturan satu payment aktif per recurring_series_id tetap harus ditegakkan di layanan Sport Center upstream. Pekerjaan backend tersebut sudah saya pisahkan sebagai follow-up agar tidak membuat solusi frontend-only yang masih bisa menghasilkan duplicate payment.

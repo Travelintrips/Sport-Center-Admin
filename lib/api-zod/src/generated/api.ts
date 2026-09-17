@@ -454,7 +454,13 @@ export const ListBookingsResponseItem = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -476,7 +482,13 @@ export const ListBookingsResponseItem = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -642,7 +654,13 @@ export const GetBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -664,7 +682,13 @@ export const GetBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -748,7 +772,13 @@ export const UpdateBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -770,7 +800,13 @@ export const UpdateBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -853,7 +889,13 @@ export const PayBookingDpResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -875,7 +917,13 @@ export const PayBookingDpResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -950,7 +998,13 @@ export const GetBookingByOrderResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -972,7 +1026,13 @@ export const GetBookingByOrderResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -1006,7 +1066,13 @@ export const ListPaymentsResponseItem = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })
 export const ListPaymentsResponse = zod.array(ListPaymentsResponseItem)
 
@@ -1024,7 +1090,10 @@ export const CreatePaymentBody = zod.object({
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "notes": zod.string().optional(),
   "ocrScanToken": zod.string().optional(),
-  "ocrScan": zod.record(zod.string(), zod.unknown()).optional()
+  "ocrScan": zod.record(zod.string(), zod.unknown()).optional(),
+  "recurring_series_id": zod.string().nullish().describe('Stable identifier shared by all sessions in one recurring payment.'),
+  "group_id": zod.string().nullish().describe('Optional group identifier associated with the recurring booking.'),
+  "member_id": zod.string().nullish().describe('Optional member identifier associated with the recurring booking.')
 })
 
 
@@ -1062,7 +1131,13 @@ export const UpdatePaymentResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })
 
 
@@ -1098,7 +1173,13 @@ export const UpdatePaymentMetadataResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })
 
 
@@ -1658,7 +1739,13 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -1680,7 +1767,13 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -1800,7 +1893,13 @@ export const GetCompanyInvoiceResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -1822,7 +1921,13 @@ export const GetCompanyInvoiceResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -1924,7 +2029,13 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -1946,7 +2057,13 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -2071,7 +2188,13 @@ export const GetDashboardResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -2093,7 +2216,13 @@ export const GetDashboardResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -2614,7 +2743,13 @@ export const CheckInBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -2636,7 +2771,13 @@ export const CheckInBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -2758,7 +2899,13 @@ export const VerifyBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -2780,7 +2927,13 @@ export const VerifyBookingResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
@@ -2866,7 +3019,13 @@ export const VerifyBookingByOrderResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 }).nullish(),
   "payments": zod.array(zod.object({
   "id": zod.number(),
@@ -2888,7 +3047,13 @@ export const VerifyBookingByOrderResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "paymentNumber": zod.string().nullish(),
+  "recurring_series_id": zod.string().nullish(),
+  "group_id": zod.string().nullish(),
+  "member_id": zod.string().nullish(),
+  "related_payment_count": zod.number().optional(),
+  "related_booking_numbers": zod.array(zod.string()).optional()
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()

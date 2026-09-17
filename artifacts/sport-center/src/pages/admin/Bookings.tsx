@@ -1645,6 +1645,34 @@ function BookingDetailDrawer({
                       : pmt.status === "rejected" || pmt.status === "cancelled"
                       ? "Ditolak"
                       : "Menunggu";
+                  const recurringSeriesId =
+                    pmt.recurringSeriesId ??
+                    pmt.recurring_series_id ??
+                    booking.recurringSeriesId ??
+                    booking.recurring_series_id ??
+                    booking.groupRef ??
+                    null;
+                  const groupId =
+                    pmt.groupId ??
+                    pmt.group_id ??
+                    booking.groupId ??
+                    booking.group_id ??
+                    booking.groupRef ??
+                    null;
+                  const memberId =
+                    pmt.memberId ??
+                    pmt.member_id ??
+                    booking.memberId ??
+                    booking.member_id ??
+                    booking.membershipId ??
+                    null;
+                  const rawRelatedBookingNumbers =
+                    pmt.relatedBookingNumbers ??
+                    pmt.related_booking_numbers ??
+                    [];
+                  const relatedBookingNumbers = Array.isArray(rawRelatedBookingNumbers)
+                    ? rawRelatedBookingNumbers.map((number: unknown) => String(number))
+                    : [];
                   const isRepairingBooking =
                     pmt.status === "confirmed" &&
                     pmt.proofUrl &&
@@ -1668,6 +1696,38 @@ function BookingDetailDrawer({
                         </div>
                         <span className="font-bold text-sm">{formatCurrency(pmt.amount)}</span>
                       </div>
+                      {(recurringSeriesId || groupId || memberId || relatedBookingNumbers.length > 0) && (
+                        <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-2.5 dark:border-violet-800 dark:bg-violet-950/20">
+                          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                            Metadata recurring
+                          </div>
+                          <div className="grid gap-1.5 sm:grid-cols-3">
+                            {[
+                              ["Recurring Series ID", recurringSeriesId],
+                              ["Group ID", groupId],
+                              ["Member ID", memberId],
+                            ].map(([label, value]) => (
+                              <div key={label} className="min-w-0">
+                                <div className="text-[9px] font-medium text-violet-700/75 dark:text-violet-300/75">{label}</div>
+                                <div className="truncate font-mono text-[10px] text-violet-900 dark:text-violet-100">
+                                  {value || "—"}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {relatedBookingNumbers.length > 0 && (
+                            <div className="mt-2 text-[10px] text-violet-700 dark:text-violet-300">
+                              Sesi terkait ({relatedBookingNumbers.length}):{" "}
+                              <span className="font-mono">{relatedBookingNumbers.join(", ")}</span>
+                            </div>
+                          )}
+                          {pmt.relatedPaymentCount != null && (
+                            <div className="mt-1 text-[10px] text-violet-700 dark:text-violet-300">
+                              Jumlah payment terkait: {pmt.relatedPaymentCount}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase tracking-wide">
                           Metode Pembayaran

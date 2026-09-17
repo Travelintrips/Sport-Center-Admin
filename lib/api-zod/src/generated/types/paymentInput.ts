@@ -21,4 +21,19 @@ export interface PaymentInput {
   notes?: string;
   ocrScanToken?: string;
   ocrScan?: PaymentInputOcrScan;
+  /**
+     * Stable identifier shared by all sessions in one recurring payment.
+     * @nullable
+     */
+  recurring_series_id?: string | null;
+  /**
+     * Optional group identifier associated with the recurring booking.
+     * @nullable
+     */
+  group_id?: string | null;
+  /**
+     * Optional member identifier associated with the recurring booking.
+     * @nullable
+     */
+  member_id?: string | null;
 }

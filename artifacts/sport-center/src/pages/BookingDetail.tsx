@@ -86,6 +86,154 @@ interface PaylabsPublicConfig {
   title: string;
 }
 
+type PaymentSessionSummary = {
+  id?: number;
+  orderNumber: string;
+  facilityName?: string;
+  bookingDate?: string;
+  startTime?: string;
+  endTime?: string;
+  amount?: number;
+  grossAmount?: number;
+};
+
+type RecurringPaymentSelection = {
+  recurringSeriesId: string | null;
+  groupId: string | null;
+  memberId: string | null;
+  sessions: PaymentSessionSummary[];
+};
+
+function optionalIdentifier(...values: unknown[]): string | null {
+  const value = values.find((candidate) => candidate !== null && candidate !== undefined && String(candidate).trim());
+  const normalized = value == null ? "" : String(value).trim();
+  return normalized || null;
+}
+
+function parseRecurringPaymentSelection(booking: any): RecurringPaymentSelection {
+  const query = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  let querySessions: PaymentSessionSummary[] = [];
+  const rawSessionData = query?.get("sessionData");
+  if (rawSessionData) {
+    try {
+      const parsed = JSON.parse(rawSessionData);
+      if (Array.isArray(parsed)) {
+        querySessions = parsed
+          .filter((session) => session && typeof session.orderNumber === "string")
+          .map((session) => ({
+            id: Number.isFinite(Number(session.id)) ? Number(session.id) : undefined,
+            orderNumber: String(session.orderNumber),
+            facilityName: session.facilityName ? String(session.facilityName) : undefined,
+            bookingDate: session.bookingDate ? String(session.bookingDate) : undefined,
+            startTime: session.startTime ? String(session.startTime) : undefined,
+            endTime: session.endTime ? String(session.endTime) : undefined,
+            amount: Number.isFinite(Number(session.amount)) ? Number(session.amount) : undefined,
+            grossAmount: Number.isFinite(Number(session.grossAmount)) ? Number(session.grossAmount) : undefined,
+          }));
+      }
+    } catch {
+      // Ignore malformed client-side selection data and fall back to the booking.
+    }
+  }
+
+  const serverSessions = [
+    booking?.groupInfo?.sessions,
+    booking?.recurringSessions,
+    booking?.relatedBookings,
+  ].find(Array.isArray) as any[] | undefined;
+  const sessions = querySessions.length > 0
+    ? querySessions
+    : (serverSessions ?? [])
+        .filter((session) => session && typeof session.orderNumber === "string")
+        .map((session) => ({
+          id: session.id ?? session.bookingId,
+          orderNumber: String(session.orderNumber),
+          facilityName: session.facilityName,
+          bookingDate: session.bookingDate,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          amount: Number.isFinite(Number(session.amount ?? session.netAmount))
+            ? Number(session.amount ?? session.netAmount)
+            : undefined,
+          grossAmount: Number.isFinite(Number(session.grossAmount ?? session.grandTotal ?? session.totalPrice))
+            ? Number(session.grossAmount ?? session.grandTotal ?? session.totalPrice)
+            : undefined,
+        }));
+
+  const currentSession: PaymentSessionSummary | null = booking?.orderNumber
+    ? {
+        id: booking.id,
+        orderNumber: String(booking.orderNumber),
+        facilityName: booking.facilityName,
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        amount: Number.isFinite(Number(booking.netAmount)) ? Number(booking.netAmount) : undefined,
+        grossAmount: Number.isFinite(Number(booking.grandTotal ?? booking.totalPrice))
+          ? Number(booking.grandTotal ?? booking.totalPrice)
+          : undefined,
+      }
+    : null;
+
+  return {
+    recurringSeriesId: optionalIdentifier(
+      query?.get("recurring_series_id"),
+      booking?.recurringSeriesId,
+      booking?.recurring_series_id,
+      booking?.groupInfo?.recurringSeriesId,
+      booking?.groupRef,
+    ),
+    groupId: optionalIdentifier(
+      query?.get("group_id"),
+      booking?.groupId,
+      booking?.group_id,
+      booking?.groupInfo?.groupId,
+      booking?.groupRef,
+    ),
+    memberId: optionalIdentifier(
+      query?.get("member_id"),
+      booking?.memberId,
+      booking?.member_id,
+      booking?.membershipId,
+    ),
+    sessions: sessions.length > 0 ? sessions : currentSession ? [currentSession] : [],
+  };
+}
+
+function RecurringPaymentFields({ selection }: { selection: RecurringPaymentSelection }) {
+  const fields = [
+    ["Recurring Series ID", selection.recurringSeriesId],
+    ["Group ID", selection.groupId],
+    ["Member ID", selection.memberId],
+  ] as const;
+
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-800 dark:bg-violet-950/20">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+        Payment grouping
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {fields.map(([label, value]) => (
+          <label key={label} className="space-y-1">
+            <span className="block text-[10px] font-medium text-violet-700/80 dark:text-violet-300/80">{label}</span>
+            <input
+              value={value ?? ""}
+              readOnly
+              aria-readonly="true"
+              className="h-8 w-full rounded-md border border-violet-200 bg-white/80 px-2 text-[11px] font-mono text-violet-900 outline-none dark:border-violet-800 dark:bg-slate-900/60 dark:text-violet-100"
+            />
+          </label>
+        ))}
+      </div>
+      {selection.sessions.length > 1 && (
+        <p className="mt-2 text-[11px] text-violet-700 dark:text-violet-300">
+          {selection.sessions.length} sesi akan dikirim sebagai satu payment.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function BookingDetail() {
   const [, params] = useRoute("/booking/:orderNumber");
   const orderNumber = params?.orderNumber || "";
@@ -116,6 +264,9 @@ export default function BookingDetail() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [hoverRating, setHoverRating] = useState(0);
+  const [createdPayment, setCreatedPayment] = useState<any>(null);
+
+  const paymentSelection = parseRecurringPaymentSelection(booking);
 
   // ── Paylabs config ──────────────────────────────────────────────────────────
   const [paylabsConfig, setPaylabsConfig] = useState<PaylabsPublicConfig | null>(null);
@@ -154,13 +305,23 @@ export default function BookingDetail() {
 
   const submitPayment = useCreatePayment({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (data: any) => {
+        setCreatedPayment(data);
         toast({ title: t("Bukti pembayaran dikirim!", "Payment proof submitted!"), description: t("Admin akan memverifikasi pembayaran Anda segera.", "Admin will verify your payment shortly.") });
         queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) });
         clearFile();
       },
       onError: (error: any) => {
-        toast({ title: t("Gagal mengirim", "Failed to submit"), description: error?.message || t("Terjadi kesalahan", "An error occurred"), variant: "destructive" });
+        const isRecurringConflict = error?.status === 409 || /HTTP 409\b/.test(String(error?.message ?? ""));
+        toast({
+          title: isRecurringConflict
+            ? "Payment recurring sudah ada"
+            : t("Gagal mengirim", "Failed to submit"),
+          description: isRecurringConflict
+            ? "Rangkaian recurring ini sudah memiliki payment."
+            : error?.message || t("Terjadi kesalahan", "An error occurred"),
+          variant: "destructive",
+        });
         setUploadProgress("idle");
       },
     },
@@ -236,7 +397,12 @@ export default function BookingDetail() {
       ppnCollectedByCustomer: (booking as any).ppnCollectedByCustomer,
       ppnTreatment: (booking as any).ppnTreatment,
     });
-    const paymentTotal = groupTotal > 0
+    const selectedSessionTotal = paymentSelection.sessions.length > 1
+      ? paymentSelection.sessions.reduce((sum, session) => sum + Number(session.amount ?? 0), 0)
+      : 0;
+    const paymentTotal = selectedSessionTotal > 0
+      ? selectedSessionTotal
+      : groupTotal > 0
       ? groupTotal
       : bookingWithholding.netAmount;
     // downPayment means a DP has been configured; isDpPaid means the admin
@@ -316,6 +482,9 @@ export default function BookingDetail() {
           ocrScan,
           notes: notes || undefined,
           paymentType: detectedType as any,
+          recurring_series_id: paymentSelection.recurringSeriesId,
+          group_id: paymentSelection.groupId,
+          member_id: paymentSelection.memberId,
         },
       });
     } catch (err: any) {
@@ -396,8 +565,9 @@ export default function BookingDetail() {
     ppnTreatment: (booking as any).ppnTreatment,
   });
   const payableTotal = Number(
-    (booking as any).groupInfo?.groupNetTotalPayment ??
-    bookingWithholding.netAmount,
+    paymentSelection.sessions.length > 1
+      ? paymentSelection.sessions.reduce((sum, session) => sum + Number(session.amount ?? 0), 0)
+      : ((booking as any).groupInfo?.groupNetTotalPayment ?? bookingWithholding.netAmount),
   );
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
@@ -622,6 +792,34 @@ export default function BookingDetail() {
           </CardContent>
         </Card>
 
+        {paymentSelection.recurringSeriesId && paymentSelection.sessions.length > 1 && (
+          <Card className="border-violet-200 dark:border-violet-800">
+            <CardHeader className="bg-violet-50/70 pb-3 dark:bg-violet-950/20">
+              <CardTitle className="text-sm text-violet-800 dark:text-violet-200">
+                Sesi dalam payment ini
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Satu nomor payment mencakup seluruh sesi yang dipilih.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="divide-y divide-violet-100 p-0 dark:divide-violet-900/50">
+              {paymentSelection.sessions.map((session) => (
+                <div key={session.id ?? session.orderNumber} className="flex items-center justify-between gap-3 px-5 py-3 text-xs">
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold">{session.facilityName ?? "Booking"}</div>
+                    <div className="text-muted-foreground">
+                      {session.orderNumber} · {session.bookingDate ?? "—"} · {session.startTime?.slice(0, 5) ?? "—"}–{session.endTime?.slice(0, 5) ?? "—"}
+                    </div>
+                  </div>
+                  <span className="shrink-0 font-bold text-primary">
+                    Rp {Number(session.amount ?? 0).toLocaleString("id-ID")}
+                  </span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {/* AP2 Verification Status */}
         {(booking as any).customerType === "angkasa_pura" && (
           <Card className={`border-2 mt-4 ${
@@ -708,6 +906,44 @@ export default function BookingDetail() {
 
         {/* Right column: Payment Section */}
         <div className="space-y-6">
+          {createdPayment && (
+            <Card className="border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20">
+              <CardContent className="p-5">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={20} />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-emerald-800 dark:text-emerald-200">
+                      Payment berhasil dibuat
+                    </div>
+                    <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                      Nomor payment:{" "}
+                      <span className="font-mono font-bold">
+                        {createdPayment.paymentNumber ?? createdPayment.payment_number ?? `#${createdPayment.id ?? "—"}`}
+                      </span>
+                    </div>
+                    {paymentSelection.sessions.length > 0 && (
+                      <div className="mt-3">
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700/80 dark:text-emerald-300/80">
+                          Booking/session tercakup
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(createdPayment.relatedBookingNumbers ??
+                            createdPayment.related_booking_numbers ??
+                            paymentSelection.sessions.map((session) => session.orderNumber)
+                          ).map((number: string) => (
+                            <span key={number} className="rounded-full border border-emerald-200 bg-white/70 px-2 py-0.5 font-mono text-[10px] text-emerald-800 dark:border-emerald-800 dark:bg-slate-900/50 dark:text-emerald-200">
+                              {number}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {(booking.status === "pending_payment" || booking.status === "expired") && (
             <Card className="border-primary/30 shadow-md">
               <CardHeader className="bg-primary/5 pb-4 border-b border-primary/10">
@@ -1019,6 +1255,7 @@ export default function BookingDetail() {
                     )}
 
                     <UploadProofForm
+                       recurringFields={<RecurringPaymentFields selection={paymentSelection} />}
                       selectedFile={selectedFile}
                       previewUrl={previewUrl}
                       isDragging={isDragging}
@@ -1065,6 +1302,7 @@ export default function BookingDetail() {
                     </div>
 
                     <UploadProofForm
+                       recurringFields={<RecurringPaymentFields selection={paymentSelection} />}
                       selectedFile={selectedFile}
                       previewUrl={previewUrl}
                       isDragging={isDragging}
@@ -1088,6 +1326,9 @@ export default function BookingDetail() {
                     bookingId={booking.id}
                     orderNumber={booking.orderNumber}
                     amount={payableTotal}
+                    recurringSeriesId={paymentSelection.recurringSeriesId}
+                    groupId={paymentSelection.groupId}
+                    memberId={paymentSelection.memberId}
                     paylabsConfig={paylabsConfig!}
                     onBack={() => setPaymentMethod(null)}
                     onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
@@ -1378,11 +1619,14 @@ const VA_BANKS = ["bri","bni","bca","mandiri","permata","cimb","bsi","btn","muam
 const EWALLETS = ["ovo","dana","shopeepay","linkaja","gopay"];
 
 function PaylabsPaymentSection({
-  bookingId, amount, onBack, onSuccess, base,
+  bookingId, amount, recurringSeriesId, groupId, memberId, onBack, onSuccess, base,
 }: {
   bookingId: number;
   orderNumber: string;
   amount: number;
+  recurringSeriesId: string | null;
+  groupId: string | null;
+  memberId: string | null;
   paylabsConfig: PaylabsPublicConfig;   // kept in props signature for caller; component fetches fresh copy
   onBack: () => void;
   onSuccess: () => void;
@@ -1429,7 +1673,14 @@ function PaylabsPaymentSection({
       const res = await fetch(`${base}/api/paylabs/create-payment`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ bookingId, paymentMethod: methodId }),
+        body: JSON.stringify({
+          bookingId,
+          amount,
+          paymentMethod: methodId,
+          recurring_series_id: recurringSeriesId,
+          group_id: groupId,
+          member_id: memberId,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1714,6 +1965,7 @@ function PaylabsPaymentSection({
 /* ─── Upload Proof Form sub-component ──────────────────────────── */
 
 function UploadProofForm({
+  recurringFields,
   selectedFile,
   previewUrl,
   isDragging,
@@ -1728,6 +1980,7 @@ function UploadProofForm({
   isPending,
   uploadProgress,
 }: {
+  recurringFields?: React.ReactNode;
   selectedFile: File | null;
   previewUrl: string | null;
   isDragging: boolean;
@@ -1745,6 +1998,7 @@ function UploadProofForm({
   const { t } = useLang();
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {recurringFields}
       <div className="space-y-2">
         <label className="text-sm font-semibold">{t("Upload Bukti Pembayaran *", "Upload Payment Proof *")}</label>
 
