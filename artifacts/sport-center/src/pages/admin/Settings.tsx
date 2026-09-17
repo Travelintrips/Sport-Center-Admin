@@ -743,7 +743,7 @@ export default function AdminSettings() {
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                Nomor: <strong>{waStatus?.mina.deviceNumber ?? "6282321301338"}</strong>. Payload webhook dengan field device yang berbeda akan ditolak.
+                Nomor: <strong>{waStatus?.mina.deviceNumber ?? "628199293537"}</strong>. Payload webhook dengan field device yang berbeda akan ditolak.
                 Token tidak pernah dikembalikan oleh endpoint status.
               </p>
             </div>
@@ -776,7 +776,7 @@ export default function AdminSettings() {
               </div>
 
               <div className="md:col-span-2 space-y-2">
-                <Label>Token Fonnte — Device Mina/customer (6282321301338)</Label>
+                  <Label>Token Fonnte — Device Mina/customer (628199293537)</Label>
                 <div className="relative">
                   <Input
                     type={showCustomerToken ? "text" : "password"}
@@ -794,7 +794,7 @@ export default function AdminSettings() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Token nomor WhatsApp customer/Mina (<strong>6282321301338</strong>). Digunakan untuk reply Mina dan notifikasi ke customer (booking, konfirmasi, reminder, dll).
+                  Token nomor WhatsApp customer/Mina (<strong>628199293537</strong>). Digunakan untuk reply Mina dan notifikasi ke customer (booking, konfirmasi, reminder, dll).
                   Jika kosong, pengiriman customer dihentikan; sistem tidak memakai token admin sebagai fallback.
                 </p>
               </div>

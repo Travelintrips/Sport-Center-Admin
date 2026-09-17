@@ -1,6 +1,6 @@
 import { db, settingsTable } from "@workspace/db";
 
-export const MINA_FONNTE_DEVICE = "6282321301338";
+export const MINA_FONNTE_DEVICE = "628199293537";
 
 export type FonnteConfig = {
   adminToken: string;
