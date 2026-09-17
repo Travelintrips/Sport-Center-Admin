@@ -6,7 +6,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
-import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
+import { pushInvoicePaymentAsBankMutation, syncStatusToBizportal } from "../lib/bizportalSync";
 import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
@@ -97,6 +97,46 @@ async function markLinkedBookingsPaid(invoiceId: number, paidAt: Date): Promise<
         "paid",
       ] as any),
     ));
+
+  const [invoice] = await db
+    .select({
+      grandTotal: companyInvoicesTable.grandTotal,
+      totalAmount: companyInvoicesTable.totalAmount,
+      ppnAmount: companyInvoicesTable.ppnAmount,
+      ppnRate: companyInvoicesTable.ppnRate,
+      paymentProofUrl: companyInvoicesTable.paymentProofUrl,
+    })
+    .from(companyInvoicesTable)
+    .where(eq(companyInvoicesTable.id, invoiceId))
+    .limit(1);
+  const linkedBookings = await db
+    .select()
+    .from(bookingsTable)
+    .where(inArray(bookingsTable.id, ids));
+  const invoiceTotal = Math.round(Number(invoice?.grandTotal ?? invoice?.totalAmount ?? 0));
+  const invoicePpn = Math.round(Number(invoice?.ppnAmount ?? 0));
+  const invoiceDpp = Math.max(0, invoiceTotal - invoicePpn);
+  const primaryBookingId = Math.min(...ids);
+  if (invoiceTotal > 0) {
+    for (const booking of linkedBookings) {
+      const isPrimary = booking.id === primaryBookingId;
+      syncStatusToBizportal(
+        booking.orderNumber,
+        booking.status === "completed" ? "completed" : "confirmed",
+        invoice?.paymentProofUrl,
+        paidAt,
+        { ...booking, billingStatus: "paid" },
+        {
+          totalPrice: isPrimary ? invoiceTotal : 0,
+          grandTotal: isPrimary ? invoiceTotal : 0,
+          dpp: isPrimary ? invoiceDpp : 0,
+            dppNilaiLain: isPrimary ? Math.round(invoiceDpp * 11 / 12) : 0,
+          ppnRate: isPrimary ? Number(invoice?.ppnRate ?? 0) : 0,
+          ppnAmount: isPrimary ? invoicePpn : 0,
+        },
+      ).catch(() => {});
+    }
+  }
 }
 
 // Fallback only for legacy bookings that have no tax snapshot.

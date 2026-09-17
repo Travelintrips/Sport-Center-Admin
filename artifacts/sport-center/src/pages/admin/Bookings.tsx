@@ -3977,12 +3977,22 @@ export default function AdminBookings() {
                       // The main Total column shows the amount payable after
                       // withholding: DPP + PPN - PPh.
                       const bookingDisplayTotal = bookingTax.netAmount;
+                      const isPaidCompanyInvoice =
+                        b.payerType === "company" &&
+                        b.billingStatus === "paid" &&
+                        Number(b.companyInvoiceTotal ?? 0) > 0;
+                      const companyInvoiceDisplayTotal = isPaidCompanyInvoice
+                        ? Number(b.companyInvoiceTotal)
+                        : 0;
                      const groupDisplayTotal = isMultiSessionGroup
-                       ? groupRows.reduce((sum: number, row: any) => {
+                        ? groupRows.reduce((sum: number, row: any) => {
                            const rowTax = getBookingInvoiceTax(row);
                             return sum + rowTax.netAmount;
                          }, 0)
                        : bookingDisplayTotal;
+                      const displayTotal = isPaidCompanyInvoice
+                        ? companyInvoiceDisplayTotal
+                        : groupDisplayTotal;
 
                     return (
                     <motion.tr
@@ -4140,9 +4150,7 @@ export default function AdminBookings() {
                         <div className="space-y-0.5">
                           {/* Nominal utama: total grup jika group booking, individual jika bukan */}
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                             {b.groupRef && isMultiSessionGroup
-                               ? formatCurrency(groupDisplayTotal)
-                               : formatCurrency(bookingDisplayTotal)}
+                             {formatCurrency(displayTotal)}
                           </span>
                           {b.groupRef && (
                             <div className="flex flex-col gap-0.5 mt-0.5">
@@ -4157,14 +4165,17 @@ export default function AdminBookings() {
                                   </span>
                                 )}
                               </div>
-                              {/* Ref grup + nominal sesi ini */}
+                               {/* Ref grup + nominal per sesi hanya untuk booking personal.
+                                   Invoice perusahaan lunas sudah dibayar satu kali di level invoice. */}
                               <div className="flex items-center gap-1 flex-wrap">
                                 <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700">
                                   <Link2 size={9} /> {b.groupRef}
                                 </span>
-                                <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                                   sesi ini: {formatCurrency(bookingDisplayTotal)}
-                                </span>
+                                 {!isPaidCompanyInvoice && (
+                                   <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                                      sesi ini: {formatCurrency(bookingDisplayTotal)}
+                                   </span>
+                                 )}
                                  {bookingTax.pphAmount > 0 && (
                                    <span className="text-[10px] text-orange-600 dark:text-orange-400">
                                      net setelah PPh: {formatCurrency(bookingTax.netAmount)}

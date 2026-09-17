@@ -1,5 +1,10 @@
 import { db } from "@workspace/db";
-import { bookingsTable, paymentsTable } from "@workspace/db";
+import {
+  bookingsTable,
+  paymentsTable,
+  companyInvoicesTable,
+  companyInvoiceItemsTable,
+} from "@workspace/db";
 import {
   bankMutationsTable,
   bankReconciliationMatchesTable,
@@ -95,7 +100,7 @@ function amountMatches(a: number, b: number): boolean {
 }
 
 interface MatchCandidate {
-  candidateType: "payment" | "order" | "expense";
+  candidateType: "payment" | "order" | "invoice" | "expense";
   candidateId: number;
   score: number;
   reason: string[];         // Format: "deskripsi +N" agar UI bisa parse poin
@@ -469,6 +474,40 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
   const paymentsRows = allPayments.rows as PaymentRow[];
 
+  // Company invoices are settled once for the whole invoice. Keep them as a
+  // separate reconciliation candidate so a paid invoice is never reduced to
+  // one of its individual booking/session items.
+  const paidInvoices = await db
+    .select({
+      id: companyInvoicesTable.id,
+      invoiceNumber: companyInvoicesTable.invoiceNumber,
+      grandTotal: companyInvoicesTable.grandTotal,
+      totalAmount: companyInvoicesTable.totalAmount,
+      paidAt: companyInvoicesTable.paidAt,
+      status: companyInvoicesTable.status,
+    })
+    .from(companyInvoicesTable)
+    .where(eq(companyInvoicesTable.status, "paid"))
+    .catch(() => []);
+  const paidInvoiceIds = paidInvoices.map((invoice) => invoice.id);
+  const invoiceLinks = paidInvoiceIds.length
+    ? await db
+        .select({
+          invoiceId: companyInvoiceItemsTable.invoiceId,
+          bookingId: companyInvoiceItemsTable.bookingId,
+        })
+        .from(companyInvoiceItemsTable)
+        .where(inArray(companyInvoiceItemsTable.invoiceId, paidInvoiceIds))
+        .catch(() => [])
+    : [];
+  const bookingIdsByInvoice = new Map<number, number[]>();
+  for (const link of invoiceLinks) {
+    if (link.invoiceId == null || link.bookingId == null) continue;
+    const ids = bookingIdsByInvoice.get(link.invoiceId) ?? [];
+    ids.push(link.bookingId);
+    bookingIdsByInvoice.set(link.invoiceId, ids);
+  }
+
   // Group payments by bookingId
   const paymentsByBookingId = new Map<number, PaymentRow[]>();
   for (const p of paymentsRows) {
@@ -476,6 +515,54 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
     const existing = paymentsByBookingId.get(p.bookingId) ?? [];
     existing.push(p);
     paymentsByBookingId.set(p.bookingId, existing);
+  }
+
+  for (const invoice of paidInvoices) {
+    const invoiceAmount = Number(invoice.grandTotal ?? invoice.totalAmount ?? 0);
+    if (!amountMatches(invoiceAmount, mutationAmount)) continue;
+    const linkedBookingIds = bookingIdsByInvoice.get(invoice.id) ?? [];
+    const paidDate = invoice.paidAt ? String(invoice.paidAt).slice(0, 10) : null;
+    const dateMatch = paidDate ? dayDiff(mutation.transactionDate, paidDate) <= 45 : true;
+    if (!dateMatch && !linkedBookingIds.some((id) => bookings.some((booking) => booking.id === id))) continue;
+
+    const reason = ["nominal total invoice cocok +40"];
+    let score = 40;
+    let invoiceDateMatch = false;
+    if (paidDate) {
+      const diff = dayDiff(mutation.transactionDate, paidDate);
+      if (diff === 0) {
+        score += 25;
+        invoiceDateMatch = true;
+        reason.push("tanggal pelunasan invoice sama +25");
+      } else if (diff <= 7) {
+        score += 10;
+        invoiceDateMatch = true;
+        reason.push(`tanggal pelunasan invoice selisih ${diff} hari +10`);
+      }
+    }
+    const orderIdMatch = Boolean(
+      invoice.invoiceNumber &&
+      (providerOrderId?.toLowerCase() === invoice.invoiceNumber.toLowerCase() ||
+        normDesc.includes(invoice.invoiceNumber.toLowerCase())),
+    );
+    if (orderIdMatch) {
+      score += 30;
+      reason.push(`nomor invoice cocok: ${invoice.invoiceNumber} +30`);
+    }
+
+    candidates.push({
+      candidateType: "invoice",
+      candidateId: invoice.id,
+      score: Math.min(score, 100),
+      reason,
+      amountMatch: true,
+      dateMatch: invoiceDateMatch,
+      nameMatch: false,
+      orderIdMatch,
+      proofMatch: false,
+      statusValidMatch: true,
+      toleranceUsed: false,
+    });
   }
 
   function bestPayment(payments: PaymentRow[]) {

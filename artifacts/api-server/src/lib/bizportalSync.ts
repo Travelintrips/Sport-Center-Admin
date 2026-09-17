@@ -2289,7 +2289,15 @@ export async function syncStatusToBizportal(
   scStatus: string,
   paymentProofUrl?: string | null,
   paidAt?: Date | null,
-  booking?: Booking
+  booking?: Booking,
+  amountOverride?: {
+    totalPrice: number;
+    grandTotal: number;
+    dpp?: number;
+    dppNilaiLain?: number;
+    ppnRate?: number;
+    ppnAmount?: number;
+  },
 ): Promise<void> {
   if (!shouldRunLegacyFinanceWrites()) return;
   const pool = getProdPool();
@@ -2305,11 +2313,12 @@ export async function syncStatusToBizportal(
              payment_status    = $3,
              payment_proof_url = COALESCE($4, payment_proof_url),
              payment_proof_at  = COALESCE($5, payment_proof_at),
-             ppn_rate          = COALESCE($6, ppn_rate),
-             dpp               = COALESCE($7, dpp),
-             dpp_nilai_lain    = COALESCE($8, dpp_nilai_lain),
-             ppn_amount        = COALESCE($9, ppn_amount),
-             grand_total       = COALESCE($10, grand_total),
+              total_price       = CASE WHEN $11 THEN $12 ELSE total_price END,
+              ppn_rate          = CASE WHEN $11 THEN $13 ELSE COALESCE($6, ppn_rate) END,
+              dpp               = CASE WHEN $11 THEN $14 ELSE COALESCE($7, dpp) END,
+              dpp_nilai_lain    = CASE WHEN $11 THEN $15 ELSE COALESCE($8, dpp_nilai_lain) END,
+              ppn_amount        = CASE WHEN $11 THEN $16 ELSE COALESCE($9, ppn_amount) END,
+              grand_total       = CASE WHEN $11 THEN $17 ELSE COALESCE($10, grand_total) END,
              updated_at        = NOW()
          WHERE booking_code    = $1`,
         [
@@ -2323,6 +2332,13 @@ export async function syncStatusToBizportal(
           tax?.dppNilaiLain ?? null,
           tax?.ppnAmount ?? null,
           tax?.grandTotal ?? null,
+           Boolean(amountOverride),
+           amountOverride?.totalPrice ?? null,
+           amountOverride?.ppnRate ?? null,
+           amountOverride?.dpp ?? null,
+           amountOverride?.dppNilaiLain ?? null,
+           amountOverride?.ppnAmount ?? null,
+           amountOverride?.grandTotal ?? null,
         ]
       );
     }, `syncStatus:${orderNumber}`);

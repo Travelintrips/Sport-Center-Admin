@@ -190,6 +190,40 @@ async function propagateApproval(
         await settleInvoice(invoiceItem.invoiceId!, parseFloat(invoiceItem.totalAmount ?? "0"), ctx);
       }
     }
+  } else if (type === "invoice") {
+    const [invoice] = await db
+      .select()
+      .from(companyInvoicesTable)
+      .where(eq(companyInvoicesTable.id, id))
+      .limit(1);
+    if (!invoice) throw new Error(`Invoice ${id} tidak ditemukan`);
+
+    const links = await db
+      .select({ bookingId: companyInvoiceItemsTable.bookingId })
+      .from(companyInvoiceItemsTable)
+      .where(eq(companyInvoiceItemsTable.invoiceId, id));
+    const bookingIds = links
+      .map((link) => link.bookingId)
+      .filter((bookingId): bookingId is number => bookingId != null);
+    if (bookingIds.length > 0) {
+      await db.update(bookingsTable)
+        .set({ billingStatus: "paid", status: "confirmed", paidAt: invoice.paidAt ?? new Date(), updatedAt: new Date() })
+        .where(and(
+          inArray(bookingsTable.id, bookingIds),
+          ne(bookingsTable.status, "cancelled"),
+        ));
+    }
+    if (invoice.status !== "paid") {
+      await db.update(companyInvoicesTable)
+        .set({ status: "paid", paidAt: invoice.paidAt ?? new Date() })
+        .where(eq(companyInvoicesTable.id, id));
+    }
+    await db.insert(auditLogsTable).values({
+      userId: ctx.userId, userRole: ctx.userRole,
+      action: "invoice_confirmed_via_recon", entity: "company_invoice", entityId: id,
+      after: { status: "paid", source: "bank_reconciliation", bookingIds },
+      ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+    });
   } else if (type === "group_payment") {
     // Konfirmasi semua booking + payment dalam satu grup sekaligus
     const [repBooking] = await db
@@ -417,7 +451,7 @@ async function postAccountingJournal(
   } else if (mutation.direction === "IN") {
     // Fallback ACCOUNT_MAP IN
     debitCode = ACCOUNT_MAP.BANK.code; debitName = ACCOUNT_MAP.BANK.name;
-    if (candidateType === "payment" || candidateType === "order") {
+    if (candidateType === "payment" || candidateType === "order" || candidateType === "invoice") {
       creditCode = ACCOUNT_MAP.BOOKING_REV.code; creditName = ACCOUNT_MAP.BOOKING_REV.name;
     } else {
       creditCode = ACCOUNT_MAP.ADVANCE.code; creditName = ACCOUNT_MAP.ADVANCE.name;
@@ -1042,6 +1076,10 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         bo.status            AS "orderBookingStatus",
         COALESCE(bo.grand_total, bo.total_price)::text AS "orderBookingAmount",
         fo.name              AS "orderFacilityName",
+         ci.invoice_number   AS "invoiceNumber",
+         ci.status            AS "invoiceStatus",
+         ci.paid_at           AS "invoicePaidAt",
+         COALESCE(ci.grand_total, ci.total_amount)::text AS "invoiceAmount",
         -- Group payment enrichment (candidateType = 'group_payment')
         bgp.group_ref        AS "groupRef",
         bgp.customer_name    AS "groupCustomerName",
@@ -1060,6 +1098,8 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         ON bo.id = m.candidate_id AND m.candidate_type = 'order'
       LEFT JOIN sport_center.sport_facilities fo
         ON fo.id = bo.facility_id AND m.candidate_type = 'order'
+       LEFT JOIN sport_center.company_invoices ci
+         ON ci.id = m.candidate_id AND m.candidate_type = 'invoice'
       -- Group payment representative booking join
       LEFT JOIN sport_center.sport_bookings bgp
         ON bgp.id = m.candidate_id AND m.candidate_type = 'group_payment'
@@ -1098,6 +1138,19 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
           reconciliationMissing,
           customerName: r.groupCustomerName ?? r.customerName,
           customerPhone: r.groupCustomerPhone ?? r.customerPhone,
+        };
+      }
+      if (r.candidateType === "invoice") {
+        return {
+          ...r,
+          reconciliationReady: true,
+          reconciliationMissing: [],
+          bookingOrderNumber: r.invoiceNumber,
+          customerName: "Invoice Perusahaan",
+          bookingDate: r.invoicePaidAt,
+          bookingStatus: r.invoiceStatus,
+          bookingAmount: r.invoiceAmount,
+          facilityName: "Invoice Perusahaan",
         };
       }
       return {
@@ -1966,7 +2019,7 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
   try {
     const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
-    const { candidateType, candidateId, note } = req.body as { candidateType: "payment" | "order" | "expense"; candidateId: number; note?: string };
+    const { candidateType, candidateId, note } = req.body as { candidateType: "payment" | "order" | "invoice" | "expense"; candidateId: number; note?: string };
     if (!candidateType || !candidateId) { res.status(400).json({ error: "candidateType dan candidateId diperlukan" }); return; }
 
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);

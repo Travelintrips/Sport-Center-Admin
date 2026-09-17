@@ -617,7 +617,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         ? {
             id: -invoice.id,
             bookingId: b.id,
-            amount: Number(invoiceItem?.totalAmount ?? b.grandTotal ?? b.totalPrice),
+            // The invoice is the only payment at this level. Never expose the
+            // individual invoice item/session amount as the paid payment.
+            amount: Number(invoice.grandTotal ?? invoice.totalAmount ?? 0),
             proofUrl: invoice.paymentProofUrl,
             paymentMethod: invoice.paymentMethod,
             paymentProvider: "company_invoice",
@@ -693,9 +695,14 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
+      const companyInvoiceTotal =
+        invoice?.status === "paid"
+          ? Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)
+          : null;
       return {
         ...b,
         companyInvoiceId: companyInvoiceId ?? b.companyInvoiceId,
+        companyInvoiceTotal: companyInvoiceTotal && companyInvoiceTotal > 0 ? companyInvoiceTotal : null,
         paidAt: b.paidAt ?? invoice?.paidAt ?? null,
         companyName: b.companyCustomerId ? (companyNameById[b.companyCustomerId] ?? "") : null,
         totalPrice: Number(b.totalPrice),

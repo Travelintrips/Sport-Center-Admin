@@ -6,6 +6,8 @@ import {
   paymentsTable,
   usersTable,
   gymMembershipsTable,
+  companyInvoicesTable,
+  companyInvoiceItemsTable,
   facilityCompanyMappingsTable,
   publicCompaniesTable,
 } from "@workspace/db";
@@ -405,6 +407,56 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
 
   try {
     const allBookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
+    const invoiceItemRows = allBookings.length
+      ? await db
+          .select({
+            bookingId: companyInvoiceItemsTable.bookingId,
+            invoiceId: companyInvoiceItemsTable.invoiceId,
+          })
+          .from(companyInvoiceItemsTable)
+          .where(inArray(companyInvoiceItemsTable.bookingId, allBookings.map((booking) => booking.id)))
+      : [];
+    const invoiceIdByBookingId = new Map<number, number>();
+    for (const item of invoiceItemRows) {
+      if (item.bookingId != null && item.invoiceId != null && !invoiceIdByBookingId.has(item.bookingId)) {
+        invoiceIdByBookingId.set(item.bookingId, item.invoiceId);
+      }
+    }
+
+    const companyInvoiceIds = [
+      ...new Set(
+        allBookings
+          .map((booking) => booking.companyInvoiceId ?? invoiceIdByBookingId.get(booking.id) ?? null)
+          .filter((invoiceId): invoiceId is number => invoiceId != null)
+      ),
+    ];
+    const companyInvoices = companyInvoiceIds.length
+      ? await db
+          .select({
+            id: companyInvoicesTable.id,
+            status: companyInvoicesTable.status,
+            grandTotal: companyInvoicesTable.grandTotal,
+            totalAmount: companyInvoicesTable.totalAmount,
+            ppnAmount: companyInvoicesTable.ppnAmount,
+            ppnRate: companyInvoicesTable.ppnRate,
+          })
+          .from(companyInvoicesTable)
+          .where(inArray(companyInvoicesTable.id, companyInvoiceIds))
+      : [];
+    const paidCompanyInvoiceById = new Map(
+      companyInvoices
+        .filter((invoice) => invoice.status === "paid")
+        .map((invoice) => [invoice.id, invoice]),
+    );
+    const companyInvoicePrimaryIds = new Map<number, number>();
+    for (const booking of allBookings) {
+      const invoiceId = booking.companyInvoiceId ?? invoiceIdByBookingId.get(booking.id);
+      if (invoiceId == null || !paidCompanyInvoiceById.has(invoiceId)) continue;
+      const current = companyInvoicePrimaryIds.get(invoiceId);
+      if (current === undefined || booking.id < current) {
+        companyInvoicePrimaryIds.set(invoiceId, booking.id);
+      }
+    }
 
     const facilityIds = [...new Set(allBookings.map((b) => b.facilityId))];
     const facilities = facilityIds.length
@@ -454,7 +506,22 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
 
           // Untuk booking dalam grup: override totalPrice agar tidak double-count di BizPortal
           let bookingToSync = booking;
-          if (booking.groupRef) {
+           const invoiceId = booking.companyInvoiceId ?? invoiceIdByBookingId.get(booking.id);
+           if (invoiceId != null && paidCompanyInvoiceById.has(invoiceId)) {
+             const invoice = paidCompanyInvoiceById.get(invoiceId)!;
+             const isPrimary = companyInvoicePrimaryIds.get(invoiceId) === booking.id;
+             const invoiceTotal = Math.round(Number(invoice.grandTotal ?? invoice.totalAmount ?? 0));
+             const invoicePpn = Math.round(Number(invoice.ppnAmount ?? 0));
+             const invoiceDpp = Math.max(0, invoiceTotal - invoicePpn);
+             bookingToSync = {
+               ...booking,
+               totalPrice: isPrimary ? String(invoiceTotal) : "0",
+               grandTotal: isPrimary ? String(invoiceTotal) : "0",
+               dpp: isPrimary ? String(invoiceDpp) : "0",
+               ppnAmount: isPrimary ? String(invoicePpn) : "0",
+               ppnRate: isPrimary ? invoice.ppnRate : "0",
+             } as any;
+           } else if (booking.groupRef) {
             const isPrimary = groupPrimaryIds.get(booking.groupRef) === booking.id;
             if (isPrimary) {
               // Primary menanggung total seluruh grup
