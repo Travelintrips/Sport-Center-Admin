@@ -19,6 +19,7 @@ import { calculatePrice } from "../lib/pricing";
 
 export interface AiContext {
   facilities: FacilityInfo[];
+  gymMembershipCatalog: GymMembershipCatalog;
   activePromos: PromoInfo[];
   settings: SettingsInfo;
   customerBookings: BookingInfo[];
@@ -42,6 +43,7 @@ interface FacilityInfo {
   name: string;
   category: string;
   pricePerHour: number;
+  bookingMode: string;
   openTime: string;
   closeTime: string;
   minDuration: number;
@@ -107,6 +109,28 @@ interface MembershipInfo {
   status: string;
 }
 
+interface GymMembershipPlan {
+  name: string;
+  months: number;
+  periodLabel: string;
+  totalPrice: number;
+  pricePerMonth: number;
+}
+
+interface GymMembershipCatalog {
+  plans: GymMembershipPlan[];
+  benefits: string[];
+  terms: string[];
+  registrationPath: string;
+  renewalPath: string;
+  walkIn: {
+    facilityName: string;
+    price: number;
+    openTime: string;
+    closeTime: string;
+  } | null;
+}
+
 // ─── Guardrail constants ──────────────────────────────────────────────────────
 
 const ADMIN_ONLY_ACTIONS = [
@@ -116,6 +140,33 @@ const ADMIN_ONLY_ACTIONS = [
 ];
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+
+// These are the benefits and operational rules already presented by the existing
+// /membership flow. Prices and package availability are intentionally not kept
+// here: they must come from sport_center.sport_memberships below.
+const MEMBERSHIP_BENEFITS = [
+  "Akses penuh seluruh peralatan gym tanpa batasan waktu selama jam operasional",
+  "Bebas datang kapan saja selama jam operasional",
+  "Locker pribadi untuk member",
+  "Diskon khusus untuk booking fasilitas lain",
+  "Bergabung dengan komunitas olahraga",
+];
+
+const MEMBERSHIP_TERMS = [
+  "Pendaftaran dan perpanjangan dilakukan melalui halaman Membership",
+  "Setelah pembayaran, upload bukti pembayaran; membership aktif setelah verifikasi admin",
+  "Nomor HP yang sudah memiliki membership aktif atau menunggu konfirmasi menggunakan fitur Perpanjang",
+];
+
+const ACTIVE_MEMBERSHIP_STATUSES = ["active"] as const;
+
+function membershipPeriodLabel(months: number): string {
+  return months === 1 ? "1 bulan" : `${months} bulan`;
+}
+
+function membershipPlanName(months: number): string {
+  return `Membership Gym ${membershipPeriodLabel(months)}`;
+}
 
 // ─── DB Context Loader ────────────────────────────────────────────────────────
 
@@ -131,7 +182,15 @@ export async function loadDbContext(
   const targetDate = requestedDate ?? today;
 
   // Load in parallel
-  const [facilitiesRaw, promosRaw, settingsRaw, bookingsRaw, membershipRaw, pricingRaw] =
+  const [
+    facilitiesRaw,
+    promosRaw,
+    settingsRaw,
+    bookingsRaw,
+    membershipRaw,
+    membershipCatalogRaw,
+    pricingRaw,
+  ] =
     await Promise.all([
       db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true)),
       db.select().from(promosTable).where(eq(promosTable.isActive, true)),
@@ -144,6 +203,11 @@ export async function loadDbContext(
         .where(eq(gymMembershipsTable.phone, customerPhone))
         .orderBy(desc(gymMembershipsTable.createdAt))
         .limit(1),
+      db.select({
+        months: gymMembershipsTable.months,
+        totalPrice: gymMembershipsTable.totalPrice,
+      }).from(gymMembershipsTable)
+        .where(inArray(gymMembershipsTable.status, [...ACTIVE_MEMBERSHIP_STATUSES])),
       db.select().from(pricingRulesTable).where(eq(pricingRulesTable.isActive, true)),
     ]);
 
@@ -166,6 +230,7 @@ export async function loadDbContext(
     name: f.name,
     category: f.category,
     pricePerHour: Number(f.pricePerHour),
+    bookingMode: f.bookingMode,
     openTime: f.openTime,
     closeTime: f.closeTime,
     minDuration: f.minDuration,
@@ -247,6 +312,48 @@ export async function loadDbContext(
     status: mem.status,
   } : null;
 
+  // There is currently no separate plan table. The existing membership flow
+  // records the canonical active price and duration on sport_memberships, so
+  // expose distinct active combinations as the public catalog without leaking
+  // member PII. This also keeps non-members able to see the available plans.
+  const planKeys = new Set<string>();
+  const gymMembershipPlans: GymMembershipPlan[] = membershipCatalogRaw
+    .map((row: typeof membershipCatalogRaw[number]) => {
+      const months = Number(row.months);
+      const totalPrice = Number(row.totalPrice);
+      const key = `${months}:${totalPrice}`;
+      if (!Number.isInteger(months) || months <= 0 || totalPrice < 0 || planKeys.has(key)) return null;
+      planKeys.add(key);
+      return {
+        name: membershipPlanName(months),
+        months,
+        periodLabel: membershipPeriodLabel(months),
+        totalPrice,
+        pricePerMonth: totalPrice / months,
+      };
+    })
+    .filter((plan): plan is GymMembershipPlan => plan !== null)
+    .sort((a, b) => a.months - b.months || a.totalPrice - b.totalPrice);
+
+  const gymFacility = facilities.find((f) =>
+    f.bookingMode === "walk_in" &&
+    /\b(gym|fitness)\b/i.test(`${f.name} ${f.category}`),
+  ) ?? facilities.find((f) => /\b(gym|fitness)\b/i.test(`${f.name} ${f.category}`));
+
+  const gymMembershipCatalog: GymMembershipCatalog = {
+    plans: gymMembershipPlans,
+    benefits: MEMBERSHIP_BENEFITS,
+    terms: MEMBERSHIP_TERMS,
+    registrationPath: "/membership",
+    renewalPath: "/membership",
+    walkIn: gymFacility ? {
+      facilityName: gymFacility.name,
+      price: gymFacility.pricePerHour,
+      openTime: gymFacility.openTime,
+      closeTime: gymFacility.closeTime,
+    } : null,
+  };
+
   // Active promos (filter by date)
   const activePromos: PromoInfo[] = promosRaw
     .filter((p: typeof promosRaw[number]) => {
@@ -268,7 +375,15 @@ export async function loadDbContext(
       usedCount: p.usedCount,
     }));
 
-  return { facilities, activePromos, settings, customerBookings, customerMembership, availabilityNote };
+  return {
+    facilities,
+    gymMembershipCatalog,
+    activePromos,
+    settings,
+    customerBookings,
+    customerMembership,
+    availabilityNote,
+  };
 }
 
 // ─── Intent Detection ────────────────────────────────────────────────────────
@@ -304,6 +419,17 @@ export function detectIntent(msg: string): AiIntent {
 
   // ── Informational — checked BEFORE booking_intent ─────────────────────────
 
+  // Gym walk-in pricing is not a membership inquiry. Keep it ahead of the
+  // membership matcher so "sekali masuk gym" gets the facility tariff.
+  if (/\b(sekali masuk|tiket harian|harian|walk[- ]?in|kunjungan|per kunjungan)\b/.test(lower) &&
+      /\b(gym|fitness|fitnes)\b/.test(lower)) return "price_inquiry";
+
+  // Membership-specific wording must win over the generic price matcher.
+  if (/\b(gym\s*(?:&|dan)\s*membership|membership\s+gym|member\s+gym|harga\s+member|paket\s+member|paket\s+gym|daftar\s+member|perpanjang\s+(membership|member)|renew\s+(membership|member))\b/.test(lower) ||
+      /\b(member|membership|langganan|daftar member|paket member|kartu member|member ship|berlangganan|join member|mau member|daftar berlangganan|paket bulanan|paket tahunan)\b/.test(lower)) {
+    return "membership_inquiry";
+  }
+
   // Price inquiry
   if (/\b(harga|tarif|biaya|berapa|price|cost|sewa berapa|bayar berapa|ongkos|rate|mahal|murah|seberapa)\b/.test(lower)) return "price_inquiry";
 
@@ -324,9 +450,6 @@ export function detectIntent(msg: string): AiIntent {
 
   // Status check — "cek order", "udah dikonfirmasi belum", "booking aku"
   if (/\b(status|order saya|pesanan saya|cek booking|sudah bayar|sudah lunas|booking saya|invoice|sudah diterima|sudah dikonfirmasi|udah konfirmasi|udah lunas|sudah selesai|kapan dikonfirmasi|order aku|booking aku|cek order|nomor order|no order|update dong|update status)\b/.test(lower)) return "status_check";
-
-  // Membership
-  if (/\b(member|membership|langganan|daftar member|paket member|kartu member|member ship|berlangganan|join member|mau member|daftar berlangganan|paket bulanan|paket tahunan)\b/.test(lower)) return "membership_inquiry";
 
   // Facility info — "ada lapangan apa aja", "fasilitas apa"
   if (/\b(fasilitas apa|ada apa aja|list fasilitas|lapangan apa saja|apa saja|ada lapangan|tersedia apa|fasilitas ada|ada gym|ada kolam|ada futsal|ada basket|ada badminton|sport apa|olahraga apa|ada sport|pilihan fasilitas)\b/.test(lower)) return "facility_info";
@@ -362,8 +485,27 @@ function buildSystemPrompt(
           `${r.name}(${r.ruleType}${r.dayType ? "/" + r.dayType : ""}${r.peakStartTime ? " " + r.peakStartTime + "-" + r.peakEndTime : ""}: ${r.priceOverride ? "override " + fmtIDR(r.priceOverride) : ""}${r.priceAddon ? "+addon " + fmtIDR(r.priceAddon) : ""}${r.priceMultiplier ? "×" + r.priceMultiplier : ""})`
         ).join("; ")}`
       : "";
-    return `  • ${f.name} (${f.category}): ${fmtIDR(f.pricePerHour)}/jam | buka ${f.openTime}–${f.closeTime} | min ${f.minDuration}j${f.maxDuration ? " max " + f.maxDuration + "j" : ""}${f.capacity ? " | kap. " + f.capacity + " org" : ""}${rules}`;
+    const priceUnit = f.bookingMode === "walk_in" ? "per kunjungan" : "/jam";
+    return `  • ${f.name} (${f.category}): ${fmtIDR(f.pricePerHour)} ${priceUnit} | buka ${f.openTime}–${f.closeTime} | min ${f.minDuration}j${f.maxDuration ? " max " + f.maxDuration + "j" : ""}${f.capacity ? " | kap. " + f.capacity + " org" : ""}${rules}`;
   }).join("\n");
+
+  const membershipCatalogText = ctx.gymMembershipCatalog.plans.length > 0
+    ? ctx.gymMembershipCatalog.plans.map((plan) =>
+        `  • ${plan.name}: ${plan.periodLabel} | ${fmtIDR(plan.totalPrice)} total (${fmtIDR(plan.pricePerMonth)}/bulan)`
+      ).join("\n")
+    : "  Belum ada paket membership aktif yang tercatat di database.";
+
+  const membershipBenefitsText = ctx.gymMembershipCatalog.benefits
+    .map((benefit) => `  • ${benefit}`)
+    .join("\n");
+
+  const membershipTermsText = ctx.gymMembershipCatalog.terms
+    .map((term) => `  • ${term}`)
+    .join("\n");
+
+  const walkInGymText = ctx.gymMembershipCatalog.walkIn
+    ? `  • ${ctx.gymMembershipCatalog.walkIn.facilityName}: ${fmtIDR(ctx.gymMembershipCatalog.walkIn.price)} per kunjungan/walk-in | buka ${ctx.gymMembershipCatalog.walkIn.openTime}–${ctx.gymMembershipCatalog.walkIn.closeTime}`
+    : "  Tarif walk-in Gym belum tersedia di database fasilitas.";
 
   const promosText = ctx.activePromos.length > 0
     ? ctx.activePromos.map((p) => {
@@ -413,6 +555,18 @@ ${pageContextText}
 
 ━━━ FASILITAS TERSEDIA ━━━
 ${facilitiesText || "Belum ada data fasilitas."}
+
+━━━ GYM & MEMBERSHIP (DATA SISTEM) ━━━
+Paket membership aktif (sumber: data membership aktif di database):
+${membershipCatalogText}
+Benefit yang tersedia pada flow membership:
+${membershipBenefitsText}
+Ketentuan flow:
+${membershipTermsText}
+Tarif kunjungan/walk-in Gym (berbeda dari harga membership):
+${walkInGymText}
+Cara daftar: buka ${ctx.gymMembershipCatalog.registrationPath}, isi data diri dan durasi, selesaikan pembayaran, lalu upload bukti pembayaran.
+Cara perpanjang: buka ${ctx.gymMembershipCatalog.renewalPath}, pilih Perpanjang Membership, lookup dengan nomor HP, pilih durasi, bayar, lalu upload bukti pembayaran.
 
 ━━━ KETERSEDIAAN SLOT ━━━
 ${ctx.availabilityNote}
