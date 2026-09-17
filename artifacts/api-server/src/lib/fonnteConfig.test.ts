@@ -1,6 +1,7 @@
 import {
   MINA_FONNTE_DEVICE,
   normalizeFonnteDevice,
+  resolveFonnteToken,
   selectFonnteToken,
   validateMinaFonnteWebhookDevice,
 } from "./fonnteConfig";
@@ -34,5 +35,11 @@ describe("Fonnte Mina device and token separation", () => {
     const config = { adminToken: "admin-token", customerToken: "" };
     expect(selectFonnteToken(config, true)).toBe("");
     expect(selectFonnteToken(config, false)).toBe("admin-token");
+  });
+
+  it("prioritizes the Admin Settings token over FONNTE_CUSTOMER_TOKEN", () => {
+    expect(resolveFonnteToken("  settings-customer-token  ", "environment-token")).toBe("settings-customer-token");
+    expect(resolveFonnteToken("", "environment-token")).toBe("environment-token");
+    expect(resolveFonnteToken("   ", " ")).toBe("");
   });
 });

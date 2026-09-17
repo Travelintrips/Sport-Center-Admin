@@ -11,6 +11,10 @@ export function selectFonnteToken(config: FonnteConfig, useCustomerToken: boolea
   return useCustomerToken ? config.customerToken : config.adminToken;
 }
 
+export function resolveFonnteToken(settingsValue: unknown, environmentValue: unknown): string {
+  return String(settingsValue ?? "").trim() || String(environmentValue ?? "").trim();
+}
+
 export function normalizeFonnteDevice(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -46,16 +50,13 @@ export async function getFonnteConfig(): Promise<FonnteConfig> {
       .limit(1);
 
     return {
-      adminToken: settings?.adminToken?.trim() || process.env.FONNTE_TOKEN?.trim() || "",
-      customerToken:
-        settings?.customerToken?.trim() ||
-        process.env.FONNTE_CUSTOMER_TOKEN?.trim() ||
-        "",
+      adminToken: resolveFonnteToken(settings?.adminToken, process.env.FONNTE_TOKEN),
+      customerToken: resolveFonnteToken(settings?.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
     };
   } catch {
     return {
-      adminToken: process.env.FONNTE_TOKEN?.trim() || "",
-      customerToken: process.env.FONNTE_CUSTOMER_TOKEN?.trim() || "",
+      adminToken: resolveFonnteToken(undefined, process.env.FONNTE_TOKEN),
+      customerToken: resolveFonnteToken(undefined, process.env.FONNTE_CUSTOMER_TOKEN),
     };
   }
 }

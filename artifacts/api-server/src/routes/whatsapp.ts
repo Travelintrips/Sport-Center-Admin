@@ -488,11 +488,26 @@ router.post("/wa/register/:token", async (req, res) => {
   }
 });
 
-// POST /api/wa/webhook — Fonnte incoming message handler (AI-powered, semua pesan dibalas)
+// POST /api/wa/webhook — legacy Fonnte path kept for compatibility.
+// The canonical production webhook path is /api/wa/fonnte/webhook below.
 router.post("/wa/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
+    const deviceCheck = validateMinaFonnteWebhookDevice(req.body);
+    if (!deviceCheck.accepted) {
+      req.log?.warn?.(
+        { providedDevice: deviceCheck.providedDevice, path: "/api/wa/webhook" },
+        "[wa-webhook] inbound device is not the configured Mina device; message ignored",
+      );
+      await logAudit({
+        action: "mina_webhook_device_rejected",
+        entity: "wa_session",
+        after: { providedDevice: deviceCheck.providedDevice, path: "/api/wa/webhook" },
+      });
+      return;
+    }
+
     if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
     if (!sender || !message) return;
