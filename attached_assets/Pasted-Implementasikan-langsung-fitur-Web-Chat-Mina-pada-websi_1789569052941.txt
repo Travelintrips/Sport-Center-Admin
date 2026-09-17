@@ -1,0 +1,55 @@
+Implementasikan langsung fitur Web Chat Mina pada website Sport Center.
+
+Tujuan:
+Tambahkan floating button "Chat Mina" di dekat tombol WhatsApp yang sudah ada. Saat diklik, buka chat widget/panel di dalam website tanpa redirect ke WhatsApp.
+
+Ketentuan:
+- Jangan ubah atau merusak flow WhatsApp/Fonnte yang existing.
+- Jangan duplikasi business logic Mina.
+- Reuse Mina AI service, DB context, tools, availability, pricing, promo, membership, dan booking service yang sudah ada.
+- Tambahkan channel/source = "web".
+- Buat session chat web agar history percakapan tetap tersimpan selama sesi.
+- Buat endpoint web chat yang aman, misalnya POST /api/mina/web/message.
+- Kirim page context otomatis: current URL/page, facilityId dan facilityName jika sedang di halaman fasilitas.
+- Mina harus menggunakan data DB/tool untuk harga, jadwal, availability, promo, membership dan booking; jangan mengarang data.
+- Jika user sedang di halaman fasilitas, Mina harus memahami fasilitas tersebut tanpa user menyebut ulang.
+- Support percakapan natural Bahasa Indonesia.
+
+UI:
+- Floating "Chat Mina" dekat WhatsApp.
+- Desktop: panel kanan bawah.
+- Mobile: responsive/full-height drawer.
+- Header: "Mina — Asisten Sport Center".
+- Greeting singkat.
+- Quick actions:
+  Booking Fasilitas
+  Cek Jadwal
+  Cek Harga
+  Gym & Membership
+- text input + send
+- typing/loading state
+- error/fallback state
+- tombol tutup/minimize
+- tombol "Lanjutkan di WhatsApp" sebagai opsi, bukan redirect otomatis.
+
+Booking:
+Mina Web harus dapat membantu memilih fasilitas → tanggal → jam/durasi atau jumlah orang untuk Gym → cek availability → hitung harga → kumpulkan data yang diperlukan → membuat/mengarahkan ke booking menggunakan canonical booking flow yang sudah ada.
+
+Jangan membuat database booking, pricing, availability, atau Mina engine baru jika service existing dapat digunakan.
+
+Security:
+- validate input
+- rate limit endpoint public
+- session ID aman
+- jangan expose OpenAI key/Fonnte token/secrets ke frontend
+- server-side tool execution only
+- jangan izinkan Mina melakukan admin action.
+
+Kerjakan end-to-end: implement → typecheck → test → build → runtime smoke test.
+
+Pastikan existing:
+Website booking = PASS
+WhatsApp Mina = PASS
+Web Mina = PASS
+
+Jangan ubah production dan jangan kirim WhatsApp nyata saat testing.

@@ -26,6 +26,17 @@ export interface AiContext {
   availabilityNote: string;
 }
 
+export interface AiPageContext {
+  currentUrl?: string;
+  facilityId?: number;
+  facilityName?: string;
+}
+
+export interface AiReplyOptions {
+  channel?: "whatsapp" | "web";
+  pageContext?: AiPageContext;
+}
+
 interface FacilityInfo {
   id: number;
   name: string;
@@ -337,7 +348,12 @@ export function detectIntent(msg: string): AiIntent {
 
 // ─── System Prompt Builder ───────────────────────────────────────────────────
 
-function buildSystemPrompt(ctx: AiContext, customerPhone: string, today: string): string {
+function buildSystemPrompt(
+  ctx: AiContext,
+  customerPhone: string,
+  today: string,
+  options: AiReplyOptions = {},
+): string {
   const fmtIDR = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
 
   const facilitiesText = ctx.facilities.map((f) => {
@@ -373,13 +389,19 @@ function buildSystemPrompt(ctx: AiContext, customerPhone: string, today: string)
   const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "Admin";
   const maxLen = process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? 900;
 
-  return `Kamu adalah *Mina*, asisten AI resmi ${ctx.settings.centerName} yang melayani customer via WhatsApp. Kamu ramah, cepat tanggap, dan sangat memahami bahasa Indonesia sehari-hari — termasuk singkatan, typo, dan bahasa gaul.
+  const channel = options.channel ?? "whatsapp";
+  const pageContextText = options.pageContext
+    ? `\nKonteks halaman saat ini (gunakan hanya sebagai konteks, tetap verifikasi data lewat database/tool):\n- URL: ${options.pageContext.currentUrl || "tidak tersedia"}\n- Fasilitas: ${options.pageContext.facilityName || "tidak sedang melihat fasilitas tertentu"}${options.pageContext.facilityId ? ` (ID ${options.pageContext.facilityId})` : ""}\n`
+    : "";
+
+  return `Kamu adalah *Mina*, asisten AI resmi ${ctx.settings.centerName} yang melayani customer via ${channel === "web" ? "Web Chat" : "WhatsApp"}. Kamu ramah, cepat tanggap, dan sangat memahami bahasa Indonesia sehari-hari — termasuk singkatan, typo, dan bahasa gaul.
 
 ━━━ KONTEKS HARI INI ━━━
 📅 Hari ini: ${today}
 🕐 Jam operasional: ${ctx.settings.openHour}–${ctx.settings.closeHour} WIB
 📍 Alamat: ${ctx.settings.address || "Belum diisi"}
 📱 Kontak admin: ${adminContact}
+${pageContextText}
 
 ━━━ FASILITAS TERSEDIA ━━━
 ${facilitiesText || "Belum ada data fasilitas."}
@@ -644,7 +666,11 @@ const AI_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
 
 // ─── Tool Executor ────────────────────────────────────────────────────────────
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+async function executeTool(
+  name: string,
+  args: Record<string, unknown>,
+  source: "mina" | "web" = "mina",
+): Promise<string> {
   try {
     if (name === "check_slot_availability") {
       const facility = await getFacilityByName(String(args.facility_name));
@@ -760,7 +786,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
         date: String(args.date),
         startTime: String(args.start_time),
         duration: String(args.duration_hours),
-        source: "mina",
+        source,
       });
       const bookingUrl = `${appUrl}/booking?${params.toString()}`;
       const startMin =
@@ -797,7 +823,8 @@ export interface AiReplyResult {
 export async function generateAiReply(
   customerPhone: string,
   message: string,
-  conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = []
+  conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [],
+  options: AiReplyOptions = {},
 ): Promise<AiReplyResult> {
   const enabled = process.env.AI_SPORTCENTER_ENABLED !== "false";
   const apiKey = process.env.OPENAI_API_KEY;
@@ -836,12 +863,12 @@ export async function generateAiReply(
     return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
   }
 
-  if (intent === "booking_intent") {
+  if (intent === "booking_intent" && options.channel !== "web") {
     return { reply: "", intent, shouldHandoffToBookingFlow: true, fallbackToAdmin: false };
   }
 
   // ── Build OpenAI messages ─────────────────────────────────────────────────
-  const systemPrompt = buildSystemPrompt(ctx, customerPhone, today);
+  const systemPrompt = buildSystemPrompt(ctx, customerPhone, today, options);
   const maxLen = parseInt(process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? "900", 10);
   const baseURL = process.env.OPENAI_BASE_URL || undefined;
   const openai = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
@@ -934,7 +961,7 @@ export async function generateAiReply(
         const fnArgs: string = tcAny.function?.arguments ?? "{}";
         let toolArgs: Record<string, unknown> = {};
         try { toolArgs = JSON.parse(fnArgs); } catch { /* ignore */ }
-        const result = await executeTool(fnName, toolArgs);
+        const result = await executeTool(fnName, toolArgs, options.channel === "web" ? "web" : "mina");
         messages.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
 

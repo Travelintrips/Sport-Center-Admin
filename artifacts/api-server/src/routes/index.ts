@@ -64,6 +64,7 @@ import paylabsSettingsRouter from "./paylabsSettings";
 import paylabsPaymentRouter from "./paylabsPayment";
 import paymentSettlementConfigsRouter from "./paymentSettlementConfigs";
 import corporateSubscriptionsRouter from "./corporateSubscriptions";
+import minaWebRouter from "./minaWeb";
 
 const router: IRouter = Router();
 
@@ -131,5 +132,6 @@ router.use(paylabsSettingsRouter);
 router.use(paylabsPaymentRouter);
 router.use(paymentSettlementConfigsRouter);
 router.use(corporateSubscriptionsRouter);
+router.use(minaWebRouter);
 
 export default router;
