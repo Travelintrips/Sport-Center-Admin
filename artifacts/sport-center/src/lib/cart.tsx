@@ -6,6 +6,8 @@ export interface CartItem {
   facilityName: string;
   facilityCategory: string;
   facilityPricePerHour: number;
+  /** Harga total satu sesi untuk fasilitas Konsumsi. */
+  customPrice?: number;
   date: string;          // "yyyy-MM-dd"
   startTime: string;     // "HH:mm" (kosong jika walk_in)
   duration: number;      // jam
@@ -16,6 +18,7 @@ export interface CartItem {
 interface CartContextValue {
   items: CartItem[];
   addItem: (item: Omit<CartItem, "id">) => void;
+  updateItem: (id: string, updates: Partial<Pick<CartItem, "customPrice">>) => void;
   removeItem: (id: string) => void;
   clearCart: () => void;
   totalItems: number;
@@ -25,6 +28,10 @@ interface CartContextValue {
 const CartContext = createContext<CartContextValue | null>(null);
 
 const STORAGE_KEY = "sc_booking_cart";
+
+export function isCustomPriceFacility(item: Pick<CartItem, "facilityName">) {
+  return /konsumsi/i.test(item.facilityName);
+}
 
 function isValidCartItem(v: unknown): v is CartItem {
   if (!v || typeof v !== "object") return false;
@@ -68,18 +75,24 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setItems((prev) => prev.filter((i) => i.id !== id));
   };
 
+  const updateItem = (id: string, updates: Partial<Pick<CartItem, "customPrice">>) => {
+    setItems((prev) => prev.map((item) => item.id === id ? { ...item, ...updates } : item));
+  };
+
   const clearCart = () => setItems([]);
 
   const totalItems = items.length;
   const totalPrice = items.reduce((sum, item) => {
-    const price = item.mode === "walk_in"
-      ? item.facilityPricePerHour
-      : item.facilityPricePerHour * item.duration;
+    const price = isCustomPriceFacility(item)
+      ? Math.max(0, Number(item.customPrice ?? 0))
+      : item.mode === "walk_in"
+        ? item.facilityPricePerHour
+        : item.facilityPricePerHour * item.duration;
     return sum + price;
   }, 0);
 
   return (
-    <CartContext.Provider value={{ items, addItem, removeItem, clearCart, totalItems, totalPrice }}>
+    <CartContext.Provider value={{ items, addItem, updateItem, removeItem, clearCart, totalItems, totalPrice }}>
       {children}
     </CartContext.Provider>
   );

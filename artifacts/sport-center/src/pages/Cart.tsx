@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { useCart } from "@/lib/cart";
+import { isCustomPriceFacility, useCart } from "@/lib/cart";
 import { useGetMe, getGetMeQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -66,7 +66,7 @@ function normalizePhone(raw: string) {
 
 export default function Cart() {
   const { t, lang } = useLang();
-  const { items, removeItem, clearCart, totalPrice } = useCart();
+  const { items, updateItem, removeItem, clearCart, totalPrice } = useCart();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
@@ -250,6 +250,21 @@ export default function Cart() {
       return;
     }
 
+    const itemMissingCustomPrice = items.find(
+      (item) => isCustomPriceFacility(item) && (!Number.isFinite(Number(item.customPrice)) || Number(item.customPrice) <= 0),
+    );
+    if (itemMissingCustomPrice) {
+      toast({
+        title: t("Harga Konsumsi wajib diisi", "Consumption price is required"),
+        description: t(
+          `Masukkan harga untuk ${itemMissingCustomPrice.facilityName} sebelum checkout.`,
+          `Enter a price for ${itemMissingCustomPrice.facilityName} before checkout.`,
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Guard: company mode tapi companyId tidak tersedia (data belum load / session bermasalah)
     if (isCompanyMode && !companyId) {
       toast({
@@ -301,6 +316,9 @@ export default function Cart() {
           if (item.activityType) body.activityType = item.activityType;
         } else {
           body.numberOfPeople = 1;
+        }
+        if (isCustomPriceFacility(item)) {
+          body.customPrice = Number(item.customPrice);
         }
 
         // ── Tipe Booking ────────────────────────────────────────────
@@ -490,9 +508,12 @@ export default function Cart() {
             </CardHeader>
             <CardContent className="space-y-3">
               {items.map((item) => {
-                const itemPrice = item.mode === "walk_in"
-                  ? item.facilityPricePerHour
-                  : item.facilityPricePerHour * item.duration;
+                const isCustomPrice = isCustomPriceFacility(item);
+                const itemPrice = isCustomPrice
+                  ? Math.max(0, Number(item.customPrice ?? 0))
+                  : item.mode === "walk_in"
+                    ? item.facilityPricePerHour
+                    : item.facilityPricePerHour * item.duration;
                 const endTime = item.mode === "time_slot" && item.startTime
                   ? addHours(item.startTime, item.duration)
                   : null;
@@ -506,6 +527,29 @@ export default function Cart() {
                       <div className="font-bold text-sm text-foreground">{item.facilityName}</div>
                       <Badge variant="outline" className="text-xs mt-1 mb-2">{item.facilityCategory}</Badge>
                       <div className="space-y-1 text-xs text-muted-foreground">
+                        {isCustomPrice && (
+                          <div className="space-y-1.5 pt-1">
+                            <Label htmlFor={`custom-price-${item.id}`} className="text-xs font-semibold text-foreground">
+                              {t("Harga Konsumsi (total 1 sesi)", "Consumption Price (total for 1 session)")}
+                            </Label>
+                            <Input
+                              id={`custom-price-${item.id}`}
+                              inputMode="numeric"
+                              placeholder="Contoh: 500000"
+                              value={item.customPrice ? item.customPrice.toLocaleString("id-ID") : ""}
+                              onChange={(event) => {
+                                const digits = event.target.value.replace(/\D/g, "");
+                                updateItem(item.id, {
+                                  customPrice: digits ? Number(digits) : undefined,
+                                });
+                              }}
+                              className="h-9 max-w-xs bg-background text-sm font-semibold text-foreground"
+                            />
+                            <p className="text-[11px] text-muted-foreground">
+                              {t("Nominal ini tidak dikalikan durasi.", "This amount is not multiplied by duration.")}
+                            </p>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5" />
                           {formatDate(item.date, lang)}
@@ -974,9 +1018,11 @@ export default function Cart() {
                 return (
                   <>
                     {items.map((item) => {
-                      const basePrice = item.mode === "walk_in"
-                        ? item.facilityPricePerHour
-                        : item.facilityPricePerHour * item.duration;
+                      const basePrice = isCustomPriceFacility(item)
+                        ? Math.max(0, Number(item.customPrice ?? 0))
+                        : item.mode === "walk_in"
+                          ? item.facilityPricePerHour
+                          : item.facilityPricePerHour * item.duration;
                       const lineTotal = basePrice * multiplier;
 
                       // Daftar tanggal repeat per lapangan
