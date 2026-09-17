@@ -94,7 +94,7 @@
 - [GSM-loaded test environment](gsm-test-environment.md) — managed API workflows load dev secrets before startup; shell Jest does not inherit them unless explicitly bootstrapped.
 - [Production audit runner](production-audit-runner.md) — isolate optional-query failures with savepoints so final read-only fingerprints remain valid.
 - [Canonical settlement companies](canonical-company-settlement.md) — settlement company IDs come from active public Supabase companies, not Sport Center user identities.
-- [Development migration ordering](startup-migration-order.md) — start the development scheduler only after background schema migrations and seed complete.
+- [Development migration ordering](startup-migration-order.md) — wait for an app route, not the exempt health probe, before runtime feature smoke tests.
 - [Production auditor schema visibility](production-auditor-schema-visibility.md) — primary and auditor connections can show different schema state; resolve target/replica visibility before declaring a migration verified.
 - [WhatsApp fail-closed policy](whatsapp-fail-closed.md) — non-production must never call the provider; absent or false WA_DRY_RUN is blocked, true is simulated, production remains unchanged.
 - [Secret bootstrap write boundary](secret-bootstrap-write-boundary.md) — runtime bootstrap can read GSM but must not be assumed able to add versions; repairs need explicit write authorization.

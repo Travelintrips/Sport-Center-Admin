@@ -8,56 +8,27 @@ import {
 } from "../services/aiSportCenterService";
 import { getHistory, appendTurn } from "../lib/aiConversationMemory";
 import { logAudit } from "../lib/auditLog";
+import {
+  cleanMinaText,
+  createMinaRateLimiter,
+  isValidMinaSessionId,
+  MAX_MESSAGE_LENGTH,
+  MAX_PAGE_URL_LENGTH,
+  MINA_SESSION_COOKIE,
+  normalizeMinaPagePath,
+  readCookieHeader,
+} from "../lib/minaWebSecurity";
 
 const router = Router();
-const SESSION_COOKIE = "mina_web_session";
-const MAX_MESSAGE_LENGTH = 2_000;
-const MAX_PAGE_URL_LENGTH = 2_048;
-const MAX_FACILITY_NAME_LENGTH = 160;
-const RATE_WINDOW_MS = 60_000;
-const MAX_REQUESTS_PER_WINDOW = 20;
-
-interface RateEntry {
-  count: number;
-  resetAt: number;
-}
-
-const rateEntries = new Map<string, RateEntry>();
-
-function readCookie(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) return undefined;
-  const pair = header.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
-  return pair ? decodeURIComponent(pair.slice(name.length + 1)) : undefined;
-}
+const isRateLimited = createMinaRateLimiter();
 
 function getOrCreateSession(req: Request, res: Response): string {
-  const existing = readCookie(req, SESSION_COOKIE);
-  if (existing && /^[0-9a-f-]{36}$/i.test(existing)) return existing;
+  const existing = readCookieHeader(req.headers.cookie, MINA_SESSION_COOKIE);
+  if (isValidMinaSessionId(existing)) return existing;
 
   const sessionId = randomUUID();
   setSessionCookie(res, sessionId);
   return sessionId;
-}
-
-function isRateLimited(key: string): boolean {
-  const now = Date.now();
-  const current = rateEntries.get(key);
-  if (!current || current.resetAt <= now) {
-    rateEntries.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    if (rateEntries.size > 10_000) {
-      for (const [entryKey, entry] of rateEntries) {
-        if (entry.resetAt <= now) rateEntries.delete(entryKey);
-      }
-    }
-    return false;
-  }
-  current.count += 1;
-  return current.count > MAX_REQUESTS_PER_WINDOW;
-}
-
-function cleanText(value: unknown, maxLength: number): string {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
 function getRateKey(req: Request, sessionId: string): string {
@@ -68,7 +39,7 @@ function getRateKey(req: Request, sessionId: string): string {
 
 function setSessionCookie(res: Response, sessionId: string): void {
   if (typeof res.cookie === "function") {
-    res.cookie(SESSION_COOKIE, sessionId, {
+    res.cookie(MINA_SESSION_COOKIE, sessionId, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
@@ -79,7 +50,7 @@ function setSessionCookie(res: Response, sessionId: string): void {
   }
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}; Max-Age=1800`,
+    `${MINA_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}; Max-Age=1800`,
   );
 }
 
@@ -94,21 +65,15 @@ router.post("/mina/web/message", async (req, res) => {
     return;
   }
 
-  const message = cleanText(req.body?.message, MAX_MESSAGE_LENGTH);
+  const message = cleanMinaText(req.body?.message, MAX_MESSAGE_LENGTH);
   if (!message) {
     res.status(400).json({ error: "Pesan wajib diisi.", code: "MINA_MESSAGE_REQUIRED" });
     return;
   }
 
-  const rawCurrentUrl = cleanText(req.body?.pageContext?.currentUrl, MAX_PAGE_URL_LENGTH);
-  let currentUrl = "";
-  try {
-    currentUrl = new URL(rawCurrentUrl, `https://${req.get("host") || "sport-center.local"}`).pathname;
-  } catch {
-    currentUrl = "";
-  }
+  const rawCurrentUrl = cleanMinaText(req.body?.pageContext?.currentUrl, MAX_PAGE_URL_LENGTH);
+  const currentUrl = normalizeMinaPagePath(rawCurrentUrl, req.get("host") || "sport-center.local");
   const requestedFacilityId = Number(req.body?.pageContext?.facilityId);
-  const requestedFacilityName = cleanText(req.body?.pageContext?.facilityName, MAX_FACILITY_NAME_LENGTH);
   let facilityId: number | undefined;
   let facilityName: string | undefined;
 
@@ -143,7 +108,10 @@ router.post("/mina/web/message", async (req, res) => {
       appendTurn(sessionKey, "assistant", "Maaf, Mina sedang tidak tersedia. Silakan lanjutkan melalui WhatsApp untuk bantuan admin.");
       res.status(503).json({
         error: "Mina sedang tidak tersedia.",
-        code: "MINA_UNAVAILABLE",
+        code:
+          result.fallbackReason === "configuration_missing"
+            ? "MINA_CONFIGURATION_UNAVAILABLE"
+            : "MINA_PROVIDER_UNAVAILABLE",
         fallbackToWhatsapp: true,
       });
       return;
@@ -162,7 +130,6 @@ router.post("/mina/web/message", async (req, res) => {
       },
     }).catch(() => {});
 
-    setSessionCookie(res, sessionId);
     res.json({
       reply: result.reply,
       intent: result.intent,

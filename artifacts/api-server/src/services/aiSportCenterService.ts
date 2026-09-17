@@ -391,7 +391,15 @@ function buildSystemPrompt(
 
   const channel = options.channel ?? "whatsapp";
   const pageContextText = options.pageContext
-    ? `\nKonteks halaman saat ini (gunakan hanya sebagai konteks, tetap verifikasi data lewat database/tool):\n- URL: ${options.pageContext.currentUrl || "tidak tersedia"}\n- Fasilitas: ${options.pageContext.facilityName || "tidak sedang melihat fasilitas tertentu"}${options.pageContext.facilityId ? ` (ID ${options.pageContext.facilityId})` : ""}\n`
+    ? `\n━━━ KONTEKS HALAMAN CUSTOMER ━━━
+URL: ${options.pageContext.currentUrl || "tidak tersedia"}
+Fasilitas yang sedang dilihat: ${options.pageContext.facilityName || "tidak sedang melihat fasilitas tertentu"}${options.pageContext.facilityId ? ` (ID ${options.pageContext.facilityId})` : ""}
+ATURAN KONTEKS HALAMAN:
+• Jika fasilitas sedang dilihat, anggap fasilitas itu sebagai pilihan customer untuk pertanyaan harga, jadwal, availability, dan booking.
+• Jangan tanyakan ulang nama fasilitas kecuali customer menyebut fasilitas lain atau meminta pilihan fasilitas lain.
+• Jika customer bertanya availability tanpa menyebut durasi, gunakan durasi minimum fasilitas dari data fasilitas sebagai asumsi dan jelaskan asumsi itu dalam jawaban.
+• Harga, jadwal, dan availability tetap wajib diverifikasi dengan data database/tool; konteks halaman tidak boleh menggantikan tool.
+`
     : "";
 
   return `Kamu adalah *Mina*, asisten AI resmi ${ctx.settings.centerName} yang melayani customer via ${channel === "web" ? "Web Chat" : "WhatsApp"}. Kamu ramah, cepat tanggap, dan sangat memahami bahasa Indonesia sehari-hari — termasuk singkatan, typo, dan bahasa gaul.
@@ -818,6 +826,7 @@ export interface AiReplyResult {
   intent: AiIntent;
   shouldHandoffToBookingFlow: boolean;
   fallbackToAdmin: boolean;
+  fallbackReason?: "configuration_missing" | "provider_error";
 }
 
 export async function generateAiReply(
@@ -830,7 +839,14 @@ export async function generateAiReply(
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!enabled || !apiKey) {
-    return { reply: "", intent: "general_question", shouldHandoffToBookingFlow: false, fallbackToAdmin: true };
+    console.warn("[aiSportCenter] AI provider unavailable: configuration missing or disabled");
+    return {
+      reply: "",
+      intent: "general_question",
+      shouldHandoffToBookingFlow: false,
+      fallbackToAdmin: true,
+      fallbackReason: "configuration_missing",
+    };
   }
 
   const intent = detectIntent(message);
@@ -983,7 +999,13 @@ export async function generateAiReply(
       entity: "wa_ai",
       after: { phone: customerPhone, reason: "openai_error", error: err?.message },
     }).catch(() => {});
-    return { reply: "", intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: true };
+    return {
+      reply: "",
+      intent,
+      shouldHandoffToBookingFlow: false,
+      fallbackToAdmin: true,
+      fallbackReason: "provider_error",
+    };
   }
 }
 
