@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@jest/globals";
-import { detectIntent } from "./aiSportCenterService";
+import {
+  buildCanonicalBookingUrl,
+  canonicalizeBookingReply,
+  detectIntent,
+} from "./aiSportCenterService";
 
 describe("Mina Gym & Membership intent routing", () => {
   it.each([
@@ -9,5 +13,32 @@ describe("Mina Gym & Membership intent routing", () => {
     ["saya mau perpanjang membership", "membership_inquiry"],
   ] as const)("routes %s to %s", (message, expectedIntent) => {
     expect(detectIntent(message)).toBe(expectedIntent);
+  });
+
+  it("builds a deterministic web booking URL with the canonical parameters", () => {
+    expect(
+      buildCanonicalBookingUrl("https://sport-center.replit.dev/", {
+        facilityId: 7,
+        date: "2026-09-20",
+        startTime: "16:00",
+        duration: 2,
+        source: "web",
+      }),
+    ).toBe(
+      "https://sport-center.replit.dev/booking?facilityId=7&date=2026-09-20&startTime=16%3A00&duration=2&source=web",
+    );
+  });
+
+  it("keeps backend booking URLs authoritative over an AI-rewritten URL", () => {
+    const canonicalUrl =
+      "https://sport-center.replit.dev/booking?facilityId=7&date=2026-09-20&startTime=16%3A00&duration=2&source=web";
+    const reply = canonicalizeBookingReply(
+      "✅ Slot tersedia!\n🔗 https://example.com/booking?facilityId=999",
+      [canonicalUrl],
+    );
+
+    expect(reply).toContain(canonicalUrl);
+    expect(reply).not.toContain("example.com");
+    expect(reply).not.toContain("facilityId=999");
   });
 });

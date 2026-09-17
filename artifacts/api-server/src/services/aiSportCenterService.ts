@@ -14,6 +14,7 @@ import { eq, and, gte, lte, desc, not, inArray } from "drizzle-orm";
 import { logAudit } from "../lib/auditLog";
 import { getAvailableSlotsForDay, checkSlotAvailable, getFacilityByName } from "../lib/availability";
 import { calculatePrice } from "../lib/pricing";
+import { getBaseUrl } from "../lib/appUrl";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -828,6 +829,57 @@ const AI_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
 
 // ─── Tool Executor ────────────────────────────────────────────────────────────
 
+export function buildCanonicalBookingUrl(
+  baseUrl: string,
+  params: {
+    facilityId: number | string;
+    date: string;
+    startTime: string;
+    duration: number | string;
+    source: "mina" | "web";
+  },
+): string {
+  const searchParams = new URLSearchParams({
+    facilityId: String(params.facilityId),
+    date: params.date,
+    startTime: params.startTime,
+    duration: String(params.duration),
+    source: params.source,
+  });
+  return `${baseUrl.replace(/\/+$/, "")}/booking?${searchParams.toString()}`;
+}
+
+const BOOKING_URL_PATTERN = /https?:\/\/[^\s<>"'`)]+/g;
+
+export function canonicalizeBookingReply(
+  reply: string,
+  bookingUrls: string[],
+  maxLength = Number.MAX_SAFE_INTEGER,
+): string {
+  if (bookingUrls.length === 0) return reply;
+
+  let nextUrlIndex = 0;
+  const withCanonicalUrls = reply.replace(
+    BOOKING_URL_PATTERN,
+    () => bookingUrls[nextUrlIndex++] ?? "",
+  );
+  const missingUrls = bookingUrls.slice(nextUrlIndex);
+  const combined = [withCanonicalUrls.trim(), ...missingUrls.map((url) => `🔗 ${url}`)]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (combined.length <= maxLength) return combined;
+
+  // Keep canonical URLs intact even if the model's prose exceeds the reply limit.
+  const canonicalBlock = bookingUrls.map((url) => `🔗 ${url}`).join("\n");
+  const prose = combined.replace(BOOKING_URL_PATTERN, "").replace(/\n{2,}/g, "\n").trim();
+  const proseBudget = Math.max(0, maxLength - canonicalBlock.length - 1);
+  const shortenedProse =
+    proseBudget > 3 ? `${prose.slice(0, proseBudget - 3).trimEnd()}...` : "";
+  return [shortenedProse, canonicalBlock].filter(Boolean).join("\n");
+}
+
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
@@ -942,15 +994,13 @@ async function executeTool(
     if (name === "generate_booking_link") {
       const facility = await getFacilityByName(String(args.facility_name));
       if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
-      const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
-      const params = new URLSearchParams({
-        facilityId: String(facility.id),
+      const bookingUrl = buildCanonicalBookingUrl(await getBaseUrl(), {
+        facilityId: facility.id,
         date: String(args.date),
         startTime: String(args.start_time),
         duration: String(args.duration_hours),
         source,
       });
-      const bookingUrl = `${appUrl}/booking?${params.toString()}`;
       const startMin =
         parseInt(String(args.start_time).split(":")[0]) * 60 +
         parseInt(String(args.start_time).split(":")[1] || "0");
@@ -1088,6 +1138,7 @@ export async function generateAiReply(
     // ── Tool-calling loop (max 4 rounds) ──────────────────────────────────
     let toolCallsUsed = 0;
     const MAX_TOOL_ROUNDS = 4;
+    const canonicalBookingUrls: string[] = [];
 
     while (toolCallsUsed < MAX_TOOL_ROUNDS) {
       const completion = await openai.chat.completions.create({
@@ -1105,7 +1156,10 @@ export async function generateAiReply(
       // No tool calls → final answer
       if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
         let reply = assistantMsg.content?.trim() ?? "";
-        if (reply.length > maxLen) reply = reply.slice(0, maxLen - 3) + "...";
+        reply = canonicalizeBookingReply(reply, canonicalBookingUrls, maxLen);
+        if (canonicalBookingUrls.length === 0 && reply.length > maxLen) {
+          reply = reply.slice(0, maxLen - 3) + "...";
+        }
 
         // Admin-action safety net
         if (["saya setujui", "saya konfirmasi", "saya tandai lunas", "saya cancel"].some((kw) => reply.toLowerCase().includes(kw))) {
@@ -1132,6 +1186,16 @@ export async function generateAiReply(
         let toolArgs: Record<string, unknown> = {};
         try { toolArgs = JSON.parse(fnArgs); } catch { /* ignore */ }
         const result = await executeTool(fnName, toolArgs, options.channel === "web" ? "web" : "mina");
+        if (fnName === "generate_booking_link") {
+          try {
+            const parsedResult = JSON.parse(result) as { booking_url?: unknown };
+            if (typeof parsedResult.booking_url === "string" && parsedResult.booking_url) {
+              canonicalBookingUrls.push(parsedResult.booking_url);
+            }
+          } catch {
+            // The tool result is still passed to the model; no URL is trusted unless parsed.
+          }
+        }
         messages.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
 
@@ -1143,7 +1207,10 @@ export async function generateAiReply(
       model, messages, max_tokens: 500, temperature: 0.3,
     });
     let reply = fallbackCompletion.choices[0]?.message?.content?.trim() ?? "";
-    if (reply.length > maxLen) reply = reply.slice(0, maxLen - 3) + "...";
+    reply = canonicalizeBookingReply(reply, canonicalBookingUrls, maxLen);
+    if (canonicalBookingUrls.length === 0 && reply.length > maxLen) {
+      reply = reply.slice(0, maxLen - 3) + "...";
+    }
     return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
 
   } catch (err: any) {
