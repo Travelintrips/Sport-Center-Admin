@@ -3,6 +3,53 @@ import pg from "pg";
 const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
+-- Canonical facility table is sport_center.sport_facilities. Older
+-- migrations accidentally pointed these two foreign keys at the legacy
+-- sport_center.facilities table, which makes newly-created facilities
+-- impossible to book or attach images to.
+DO $$
+DECLARE
+  bookings_target text;
+  images_target text;
+BEGIN
+  IF to_regclass('sport_center.sport_facilities') IS NULL THEN
+    RAISE EXCEPTION 'FACILITY_FK_MIGRATION_BLOCKED: sport_center.sport_facilities is missing';
+  END IF;
+
+  SELECT n.nspname || '.' || c.relname
+    INTO bookings_target
+    FROM pg_constraint fk
+    JOIN pg_class c ON c.oid = fk.confrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE fk.conrelid = 'sport_center.sport_bookings'::regclass
+     AND fk.conname = 'bookings_facility_id_facilities_id_fk';
+
+  IF bookings_target IS DISTINCT FROM 'sport_center.sport_facilities' THEN
+    ALTER TABLE sport_center.sport_bookings
+      DROP CONSTRAINT IF EXISTS bookings_facility_id_facilities_id_fk;
+    ALTER TABLE sport_center.sport_bookings
+      ADD CONSTRAINT bookings_facility_id_facilities_id_fk
+      FOREIGN KEY (facility_id) REFERENCES sport_center.sport_facilities(id);
+  END IF;
+
+  SELECT n.nspname || '.' || c.relname
+    INTO images_target
+    FROM pg_constraint fk
+    JOIN pg_class c ON c.oid = fk.confrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE fk.conrelid = 'sport_center.facility_images'::regclass
+     AND fk.conname = 'facility_images_facility_id_facilities_id_fk';
+
+  IF images_target IS DISTINCT FROM 'sport_center.sport_facilities' THEN
+    ALTER TABLE sport_center.facility_images
+      DROP CONSTRAINT IF EXISTS facility_images_facility_id_facilities_id_fk;
+    ALTER TABLE sport_center.facility_images
+      ADD CONSTRAINT facility_images_facility_id_facilities_id_fk
+      FOREIGN KEY (facility_id) REFERENCES sport_center.sport_facilities(id)
+      ON DELETE CASCADE;
+  END IF;
+END $$;
+
 ALTER TABLE sport_center.users
   ADD COLUMN IF NOT EXISTS ppn_enabled BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE sport_center.sport_bookings
