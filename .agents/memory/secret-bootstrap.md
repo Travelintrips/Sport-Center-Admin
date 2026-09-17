@@ -12,3 +12,9 @@ Replit Autoscale does not provide Google Cloud's `GOOGLE_CLOUD_PROJECT` metadata
 **Why:** Without an explicit project ID the process exits before binding its port; with an authenticated but unauthorized service account, Secret Manager returns 403 and startup still fails closed.
 
 **How to apply:** Keep deployment and package entrypoints pointed at the bootstrap artifact; never restore direct startup through the application entrypoint or add a production database fallback. Never make DEV read production identifiers or use DATABASE_URL as a substitute. For Replit artifact publishing, set the explicit project/secret IDs in the artifact's production environment as well as the root deployment command; do not assume the development workflow's exports carry over. For Replit runtime checks, verify both the explicit project/secret IDs and the service account's secret-level `roles/secretmanager.secretAccessor` grant.
+
+Development secret changes also require restarting the API workflow before runtime behavior can be verified.
+
+**Why:** The DEV bootstrap reads and applies the selected Secret Manager/Replit environment values once during process startup; an already-running process can continue using the previous environment.
+
+**How to apply:** After changing a DEV secret, restart only the affected API workflow, then verify presence through redacted runtime checks before exercising any external side effect.
