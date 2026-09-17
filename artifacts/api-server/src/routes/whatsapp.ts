@@ -1494,9 +1494,6 @@ router.post("/wa/review/:token", async (req, res) => {
 
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<void> {
   if (!phone) return;
-  if (!allowWhatsAppProviderSend()) return;
-  // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
-  trackSentMessage(message);
   const fonnte = await getFonnteConfig();
   const token = selectFonnteToken(fonnte, useCustomerToken);
   if (!token) {
@@ -1506,6 +1503,13 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
     );
     return;
   }
+  if (!allowWhatsAppProviderSend({
+    channel: useCustomerToken ? "mina" : "admin",
+    recipient: phone,
+    customerTokenConfigured: useCustomerToken ? Boolean(fonnte.customerToken) : false,
+  })) return;
+  // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
+  trackSentMessage(message);
   try {
     await fetch("https://api.fonnte.com/send", {
       method: "POST",

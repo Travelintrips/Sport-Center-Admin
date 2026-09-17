@@ -38,6 +38,7 @@ const OPTIONAL: Array<{ name: string; description: string }> = [
 export const FEATURE_SPECIFIC: Array<{ name: string; feature: string }> = [
   { name: "FONNTE_TOKEN",                feature: "WhatsApp notifications via Fonnte" },
   { name: "FONNTE_CUSTOMER_TOKEN",       feature: "WhatsApp customer channel (Fonnte)" },
+  { name: "WA_DEV_MINA_TEST_RECIPIENT",  feature: "Controlled Mina outbound test recipient in development" },
   { name: "FONNTE_ADMIN_WA",             feature: "Admin WhatsApp number override (Fonnte)" },
   { name: "ADMIN_WA_PHONES",             feature: "Comma-separated admin WA numbers override (falls back to DB settings)" },
   { name: "ADMIN_WA_GROUP",             feature: "WhatsApp group ID for admin notifications" },

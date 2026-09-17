@@ -36,6 +36,7 @@ const ENV_KEYS = [
   "SESSION_SECRET",
   "FONNTE_TOKEN",
   "FONNTE_CUSTOMER_TOKEN",
+  "WA_DEV_MINA_TEST_RECIPIENT",
   "OPENAI_API_KEY",
   "GOOGLE_SERVICE_ACCOUNT_JSON",
   "GOOGLE_CLIENT_ID",
@@ -50,7 +51,10 @@ const ENV_KEYS = [
 
 // These values are explicitly global/shared in the existing application.
 // They may remain in the runtime environment when the GCP payload omits them.
-const SHARED_RUNTIME_ENV_KEYS = new Set(["SESSION_SECRET"]);
+const SHARED_RUNTIME_ENV_KEYS = new Set([
+  "SESSION_SECRET",
+  "WA_DEV_MINA_TEST_RECIPIENT",
+]);
 
 // Paylabs credentials can be supplied as direct Replit Secrets. Unlike the
 // database URLs, do not clear them when the shared GCP payload contains only
@@ -84,6 +88,10 @@ const FIELD_ALIASES: Record<string, string[]> = {
   session_secret: ["session_secret", "SESSION_SECRET"],
   fonnte_token: ["fonnte_token", "FONNTE_TOKEN"],
   fonnte_customer_token: ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
+  wa_dev_mina_test_recipient: [
+    "wa_dev_mina_test_recipient",
+    "WA_DEV_MINA_TEST_RECIPIENT",
+  ],
   openai_api_key: ["openai_api_key", "OPENAI_API_KEY"],
   google_service_account_json: [
     "google_service_account_json",
@@ -162,6 +170,7 @@ const SHARED_FIELDS = new Set([
   "SESSION_SECRET",
   "FONNTE_TOKEN",
   "FONNTE_CUSTOMER_TOKEN",
+  "WA_DEV_MINA_TEST_RECIPIENT",
   "OPENAI_API_KEY",
   "GOOGLE_SERVICE_ACCOUNT_JSON",
   "GOOGLE_CLIENT_ID",
@@ -247,6 +256,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
     ["session_secret", "SESSION_SECRET"],
     ["fonnte_token", "FONNTE_TOKEN"],
     ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
+    ["wa_dev_mina_test_recipient", "WA_DEV_MINA_TEST_RECIPIENT"],
     ["openai_api_key", "OPENAI_API_KEY"],
     ["google_service_account_json", "GOOGLE_SERVICE_ACCOUNT_JSON"],
     ["google_client_id", "GOOGLE_CLIENT_ID"],
