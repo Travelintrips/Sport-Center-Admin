@@ -6,9 +6,8 @@ import { logger } from "./logger";
 import { signKwitansiToken } from "./kwitansiToken";
 import { getBaseUrl } from "./appUrl";
 import { allowWhatsAppProviderSend, getWhatsAppDispatchMode } from "./whatsappSafety";
+import { getFonnteConfig } from "./fonnteConfig";
 
-const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-const ENV_FONNTE_CUSTOMER_TOKEN = process.env.FONNTE_CUSTOMER_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
 const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
 const ENV_ADMIN_WA_GROUP = process.env.ADMIN_WA_GROUP || "";
@@ -22,16 +21,7 @@ function interpolate(template: string, vars: Record<string, string>): string {
 async function getWaConfig(): Promise<{ token: string; customerToken: string; adminPhones: string[] }> {
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
-    const token = s?.fonnteToken || ENV_FONNTE_TOKEN;
-    const rawCustomerToken = (s as any)?.fonnteCustomerToken || ENV_FONNTE_CUSTOMER_TOKEN;
-    // Warning #3: jika customer token tidak dikonfigurasi, fallback ke token admin
-    if (!rawCustomerToken) {
-      logger.warn(
-        "[WA] ⚠️  FONNTE_CUSTOMER_TOKEN tidak di-set. Pesan ke customer menggunakan token admin sebagai fallback. " +
-        "Set FONNTE_CUSTOMER_TOKEN di env atau settings DB untuk pengirim terpisah ke customer.",
-      );
-    }
-    const customerToken = rawCustomerToken || token;
+    const fonnte = await getFonnteConfig();
     const phonesRaw = s?.adminWaPhones || ENV_ADMIN_WA_PHONES;
     const adminWa = s?.fonnteAdminWa || ENV_FONNTE_ADMIN_WA;
     const adminPhones = phonesRaw
@@ -44,7 +34,7 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
     if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
       adminPhones.push(ENV_ADMIN_WA_GROUP);
     }
-    return { token, customerToken, adminPhones };
+    return { token: fonnte.adminToken, customerToken: fonnte.customerToken, adminPhones };
   } catch {
     const adminPhones = ENV_ADMIN_WA_PHONES
       ? ENV_ADMIN_WA_PHONES.split(",").map((p) => p.trim()).filter(Boolean)
@@ -55,9 +45,8 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
     if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
       adminPhones.push(ENV_ADMIN_WA_GROUP);
     }
-    const fallbackToken = ENV_FONNTE_TOKEN;
-    const fallbackCustomerToken = ENV_FONNTE_CUSTOMER_TOKEN || fallbackToken;
-    return { token: fallbackToken, customerToken: fallbackCustomerToken, adminPhones };
+    const fonnte = await getFonnteConfig();
+    return { token: fonnte.adminToken, customerToken: fonnte.customerToken, adminPhones };
   }
 }
 
@@ -103,8 +92,9 @@ async function sendWA(
   const config = await getWaConfig();
   const token = useCustomerToken ? config.customerToken : config.token;
   if (!token) {
-    logger.error("[WA] sendWA: FONNTE_TOKEN kosong — pesan tidak dikirim ke " + cleanPhone);
-    if (ctx) logWaSend(cleanPhone, message, "failed", "FONNTE_TOKEN kosong", ctx).catch(() => {});
+    const tokenName = useCustomerToken ? "FONNTE_CUSTOMER_TOKEN" : "FONNTE_TOKEN";
+    logger.error(`[WA] sendWA: ${tokenName} kosong — pesan tidak dikirim ke ${cleanPhone}`);
+    if (ctx) logWaSend(cleanPhone, message, "failed", `${tokenName} kosong`, ctx).catch(() => {});
     return;
   }
   logger.info({ target: cleanPhone, sender: useCustomerToken ? "customer" : "admin" }, "[WA] Mengirim pesan WA via Fonnte");

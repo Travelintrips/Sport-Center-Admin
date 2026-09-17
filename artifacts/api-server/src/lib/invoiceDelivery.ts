@@ -14,7 +14,7 @@
  *   - routes/invoices.ts  → endpoint manual trigger
  */
 
-import { db, bookingsTable, settingsTable, facilitiesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { generatePdfBufferFromUrl } from "./pdfGenerator";
 import { uploadFile } from "./storage";
@@ -23,6 +23,7 @@ import { logAudit } from "./auditLog";
 import { logger } from "./logger";
 import { getBaseUrl } from "./appUrl";
 import { allowWhatsAppProviderSend } from "./whatsappSafety";
+import { getFonnteConfig } from "./fonnteConfig";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,12 +33,11 @@ async function getEmailConfig() {
   return { smtpFrom, smtpPass, configured: Boolean(smtpFrom && smtpPass) };
 }
 
-async function getFonnteToken(): Promise<string | null> {
+async function getFonnteCustomerToken(): Promise<string | null> {
   try {
-    const [s] = await db.select({ fonnteToken: settingsTable.fonnteToken }).from(settingsTable).limit(1);
-    return s?.fonnteToken || process.env.FONNTE_TOKEN || null;
+    return (await getFonnteConfig()).customerToken || null;
   } catch {
-    return process.env.FONNTE_TOKEN || null;
+    return process.env.FONNTE_CUSTOMER_TOKEN || null;
   }
 }
 
@@ -177,9 +177,9 @@ async function sendInvoicePdfWA(params: {
     return;
   }
 
-  const token = await getFonnteToken();
+  const token = await getFonnteCustomerToken();
   if (!token) {
-    logger.warn({ orderNumber: params.orderNumber }, "[InvoiceDelivery] FONNTE_TOKEN tidak tersedia — WA tidak dikirim");
+    logger.warn({ orderNumber: params.orderNumber }, "[InvoiceDelivery] FONNTE_CUSTOMER_TOKEN tidak tersedia — WA tidak dikirim");
     return;
   }
 
@@ -515,8 +515,8 @@ export async function sendGroupInvoiceToCustomer(
     } else {
       if (!phone) throw new Error("Nomor HP customer kosong");
 
-      const token = await getFonnteToken();
-      if (!token) throw new Error("FONNTE_TOKEN tidak tersedia");
+      const token = await getFonnteCustomerToken();
+      if (!token) throw new Error("FONNTE_CUSTOMER_TOKEN tidak tersedia");
 
       const fmtNum = (n: number) => new Intl.NumberFormat("id-ID").format(n);
       const sessionLines = sorted.slice(0, 8)

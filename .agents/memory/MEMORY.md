@@ -100,5 +100,6 @@
 - [Secret bootstrap write boundary](secret-bootstrap-write-boundary.md) — runtime bootstrap can read GSM but must not be assumed able to add versions; repairs need explicit write authorization.
 - [Vendor direction recovery](vendor-direction-recovery.md) — legacy vendor rows need debit evidence and explicit audit-backed recovery; final or posted rows stay immutable.
 - [Mina booking URL authority](mina-booking-url-authority.md) — Web Mina links must use getBaseUrl() and preserve backend-generated domain and canonical query parameters.
+- [Fonnte customer channel separation](fonnte-customer-channel.md) — Mina/customer sends require the dedicated token and device; never fall back to the admin token.
 
 

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, settingsTable } from "@workspace/db";
+import { db, bookingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -9,6 +9,7 @@ import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoic
 import { getInternalPdfToken } from "../lib/internalPdfToken";
 import { logger } from "../lib/logger";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import { getFonnteConfig } from "../lib/fonnteConfig";
 
 // ─── Internal PDF middleware ───────────────────────────────────────────────────
 // Digunakan oleh endpoint yang di-akses puppeteer saat generate PDF.
@@ -382,12 +383,9 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
       return;
     }
 
-    const token =
-      req.body?.fonnteToken ??
-      (await db.select().from(settingsTable).limit(1).then(([s]) => s?.fonnteToken ?? null)) ??
-      process.env.FONNTE_TOKEN;
+    const token = (await getFonnteConfig()).customerToken;
 
-    if (!token) { res.status(400).json({ error: "FONNTE_TOKEN tidak dikonfigurasi" }); return; }
+    if (!token) { res.status(400).json({ error: "FONNTE_CUSTOMER_TOKEN tidak dikonfigurasi" }); return; }
 
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",

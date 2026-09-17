@@ -6,12 +6,11 @@ import { createToken, authMiddleware, hashPassword, isValidPasswordHash, verifyP
 import crypto from "crypto";
 import { logger } from "../lib/logger";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import { getFonnteConfig } from "../lib/fonnteConfig";
 
 const router = Router();
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 const otpStore = new Map<string, { otp: string; expires: number; name?: string }>();
@@ -122,12 +121,13 @@ router.post("/auth/send-otp", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     otpStore.set(cleaned, { otp, expires });
 
-    if (FONNTE_TOKEN && allowWhatsAppProviderSend()) {
+    const fonnteCustomerToken = (await getFonnteConfig()).customerToken;
+    if (fonnteCustomerToken && allowWhatsAppProviderSend()) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
           headers: {
-            Authorization: FONNTE_TOKEN,
+            Authorization: fonnteCustomerToken,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -242,11 +242,12 @@ router.post("/auth/forgot-password", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     resetOtpStore.set(cleaned, { otp, expires, email });
 
-    if (FONNTE_TOKEN && allowWhatsAppProviderSend()) {
+    const fonnteCustomerToken = (await getFonnteConfig()).customerToken;
+    if (fonnteCustomerToken && allowWhatsAppProviderSend()) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
-          headers: { Authorization: FONNTE_TOKEN, "Content-Type": "application/json" },
+          headers: { Authorization: fonnteCustomerToken, "Content-Type": "application/json" },
           body: JSON.stringify({
             target: cleaned,
             message: `Kode reset password Sport Center Anda: *${otp}*\n\nBerlaku 5 menit. Jangan bagikan ke siapapun.`,

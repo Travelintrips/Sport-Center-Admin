@@ -11,6 +11,7 @@ import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from ".
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import { getFonnteConfig } from "../lib/fonnteConfig";
 import { calculateInclusiveInvoiceTax, calculateWithholdingTax } from "../lib/tax";
 
 const uploadMiddleware = multer({
@@ -1236,7 +1237,7 @@ router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) =
       `Sport Center Soekarno-Hatta`
     );
 
-    const token = process.env.FONNTE_TOKEN;
+    const token = (await getFonnteConfig()).customerToken;
     if (token && allowWhatsAppProviderSend()) {
       const phone = picPhone.replace(/^\+/, "").replace(/^0/, "62");
       await fetch("https://api.fonnte.com/send", {

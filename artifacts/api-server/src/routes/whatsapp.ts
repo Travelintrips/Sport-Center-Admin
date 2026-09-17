@@ -62,6 +62,11 @@ import {
 } from "../services/aiSportCenterService";
 import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import {
+  getFonnteConfig,
+  selectFonnteToken,
+  validateMinaFonnteWebhookDevice,
+} from "../lib/fonnteConfig";
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
 import {
   paymentMethodMatchesOcr,
@@ -474,7 +479,7 @@ router.post("/wa/register/:token", async (req, res) => {
 
     // Kirim konfirmasi via WhatsApp
     const firstName = name.trim().split(" ")[0];
-    await sendWAMsg(phone, `✅ Pendaftaran berhasil, *${firstName}*! 🎉\n\nData Anda sudah tersimpan. Sekarang ketik *booking* untuk mulai membuat pesanan. 🏅`);
+    await sendWAMsg(phone, `✅ Pendaftaran berhasil, *${firstName}*! 🎉\n\nData Anda sudah tersimpan. Sekarang ketik *booking* untuk mulai membuat pesanan. 🏅`, true);
 
     return res.json({ success: true, name: name.trim() });
   } catch (err) {
@@ -643,27 +648,7 @@ router.post("/wa/webhook", async (req, res) => {
 });
 
 async function sendWAReply(phone: string, message: string): Promise<void> {
-  const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-  if (!FONNTE_TOKEN || !phone) {
-    console.warn("[wa] sendWAReply: FONNTE_TOKEN kosong atau phone kosong", { phone, hasToken: !!FONNTE_TOKEN });
-    return;
-  }
-  if (!allowWhatsAppProviderSend()) return;
-  try {
-    const resp = await fetch("https://api.fonnte.com/send", {
-      method: "POST",
-      headers: { Authorization: FONNTE_TOKEN, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: phone, message }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || (data as any).status === false) {
-      console.error("[wa] sendWAReply Fonnte error:", resp.status, JSON.stringify(data));
-    } else {
-      logger.info({ phone, httpStatus: resp.status }, "[wa] sendWAReply OK");
-    }
-  } catch (err: any) {
-    console.error("[wa] sendWAReply exception:", err?.message);
-  }
+  await sendWAMsg(phone, message, true);
 }
 
 // POST /api/wa/booking — create booking from mini form
@@ -1492,17 +1477,24 @@ router.post("/wa/review/:token", async (req, res) => {
 
 // ─── Helpers for Fonnte webhook ───────────────────────────────────────────────
 
-async function sendWAMsg(phone: string, message: string): Promise<void> {
+async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<void> {
   if (!phone) return;
   if (!allowWhatsAppProviderSend()) return;
   // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
-  const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-  if (!FONNTE_TOKEN) return;
+  const fonnte = await getFonnteConfig();
+  const token = selectFonnteToken(fonnte, useCustomerToken);
+  if (!token) {
+    logger.warn(
+      { sender: useCustomerToken ? "customer" : "admin" },
+      `[wa] ${useCustomerToken ? "FONNTE_CUSTOMER_TOKEN" : "FONNTE_TOKEN"} kosong; pesan tidak dikirim`,
+    );
+    return;
+  }
   try {
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
-      headers: { Authorization: FONNTE_TOKEN, "Content-Type": "application/json" },
+      headers: { Authorization: token, "Content-Type": "application/json" },
       body: JSON.stringify({ target: phone, message }),
     });
   } catch { /* non-critical */ }
@@ -2116,7 +2108,8 @@ async function execAdminCancel(adminPhone: string, orderNumber: string, reason: 
     `Fasilitas: *${facility?.name ?? ""}*\n` +
     `Tanggal: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*\n\n` +
     (reason ? `Alasan: _${reason}_\n\n` : "") +
-    `Hubungi kami untuk info lebih lanjut.`
+    `Hubungi kami untuk info lebih lanjut.`,
+    true,
   );
 
   await logAudit({
@@ -2211,7 +2204,13 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
 
 // ─── Session conversation handlers ────────────────────────────────────────────
 
-async function startBookingSession(phone: string, msg: string, waName: string): Promise<void> {
+async function startBookingSession(
+  phone: string,
+  msg: string,
+  waName: string,
+  useCustomerToken = false,
+): Promise<void> {
+  const sendReply = (message: string) => sendWAMsg(phone, message, useCustomerToken);
   const intent = parseIntent(msg);
   const customer = await getRegisteredCustomer(phone);
 
@@ -2245,7 +2244,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
 
       await appendMessage(session.id, "customer", msg);
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       await logAudit({ action: "WA_FIRST_TIME_REG_SENT", entity: "wa_booking_session", entityId: session.id, after: { phone, waName } });
       return;
     }
@@ -2279,7 +2278,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
         ? `\n\n🟢 *Slot tersedia tanggal ${intent.bookingDate}:*\n${availSlots.join("  |  ")}`
         : `\n\n⚠️ Tidak ada slot tersedia pada tanggal tersebut. Coba tanggal lain.`;
       const reply = `❌ Slot jam *${intent.startTime}* tanggal *${intent.bookingDate}* untuk *${facilityName}* sudah terisi.${slotsStr}`;
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       return;
     }
   }
@@ -2335,10 +2334,16 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
 
   const reply = availabilityPrefix + baseQuestion + slotsSuffix;
   await appendMessage(session.id, "bot", reply);
-  await sendWAMsg(phone, reply);
+  await sendReply(reply);
 }
 
-async function continueSession(session: WaBookingSessionRow, phone: string, msg: string): Promise<void> {
+async function continueSession(
+  session: WaBookingSessionRow,
+  phone: string,
+  msg: string,
+  useCustomerToken = false,
+): Promise<void> {
+  const sendReply = (message: string) => sendWAMsg(phone, message, useCustomerToken);
   await appendMessage(session.id, "customer", msg);
 
   const step = session.currentStep as WaStep;
@@ -2349,7 +2354,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   if (isExplicitCancel(lower)) {
     logger.info({ phone, step }, "[continueSession] explicit cancel");
     await updateSession(session.id, { status: "cancelled" });
-    await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
+    await sendReply(`❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
     return;
   }
 
@@ -2366,7 +2371,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         `Setelah mengisi, ketik *booking* untuk mulai memesan. 🏅`,
       ].join("\n");
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
@@ -2375,7 +2380,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       if (!fac) {
         const reply = `Fasilitas tidak ditemukan. ${await buildFacilityList()}`;
         await appendMessage(session.id, "bot", reply);
-        await sendWAMsg(phone, reply);
+        await sendReply(reply);
         return;
       }
       const updated = await updateSession(session.id, {
@@ -2391,7 +2396,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_facility", facilityId: fac.id } });
       const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac.name, Number(fac.pricePerHour));
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
@@ -2400,13 +2405,13 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       if (!parsed.bookingDate) {
         const reply = `📅 Tidak bisa mengenali tanggal. Coba format:\n• *besok*\n• *15 Juni*\n• *Senin*\n• *tanggal 20*`;
         await appendMessage(session.id, "bot", reply);
-        await sendWAMsg(phone, reply);
+        await sendReply(reply);
         return;
       }
       if (parsed.bookingDate < todayWIB()) {
         const reply = `📅 Tanggal *${parsed.bookingDate}* sudah lewat. Pilih tanggal hari ini atau yang akan datang.`;
         await appendMessage(session.id, "bot", reply);
-        await sendWAMsg(phone, reply);
+        await sendReply(reply);
         return;
       }
       const updated = await updateSession(session.id, {
@@ -2430,7 +2435,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       const baseQuestion = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
       const reply = baseQuestion + slotsMsg;
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
@@ -2439,7 +2444,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       if (!parsed.startTime) {
         const reply = `⏰ Tidak bisa mengenali jam. Coba format:\n• *jam 8 pagi*\n• *jam 20.00*\n• *19:00*\n• *jam 7 malam*`;
         await appendMessage(session.id, "bot", reply);
-        await sendWAMsg(phone, reply);
+        await sendReply(reply);
         return;
       }
 
@@ -2458,7 +2463,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
               : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
             const reply = `⏰ Jam *${parsed.startTime}* di luar jam operasional *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
             await appendMessage(session.id, "bot", reply);
-            await sendWAMsg(phone, reply);
+            await sendReply(reply);
             return;
           }
 
@@ -2471,7 +2476,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
               : `\n\n⚠️ Tidak ada slot lain yang tersedia. Ketik *batal* dan pilih tanggal berbeda.`;
             const reply = `❌ Slot jam *${parsed.startTime}* pada *${session.bookingDate}* sudah terisi.${slotsStr}\n\nPilih jam lain:`;
             await appendMessage(session.id, "bot", reply);
-            await sendWAMsg(phone, reply);
+            await sendReply(reply);
             return;
           }
         }
@@ -2491,7 +2496,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       const nextQ = await buildStepQuestion(updated.currentStep as WaStep, updated, fac2?.name ?? "", Number(fac2?.pricePerHour ?? 0));
       const reply = availConfirm + nextQ;
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
@@ -2506,7 +2511,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       if (!durationMinutes) {
         const reply = `⏱️ Tidak bisa mengenali durasi. Coba:\n• *2 jam*\n• *1 jam 30 menit*\n• *90 menit*`;
         await appendMessage(session.id, "bot", reply);
-        await sendWAMsg(phone, reply);
+        await sendReply(reply);
         return;
       }
       const updated = await updateSession(session.id, {
@@ -2517,7 +2522,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
       const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
@@ -2537,7 +2542,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
             ? `👤 Siapa nama teman yang akan bermain? Contoh: *Budi Santoso*`
             : `👤 Masukkan nama lengkap yang valid. Contoh: *Budi Santoso*`;
         await appendMessage(session.id, "bot", hint);
-        await sendWAMsg(phone, hint);
+        await sendReply(hint);
         return;
       }
 
@@ -2559,7 +2564,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       const notesQ = await buildStepQuestion("ask_notes", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
       const reply = nameConfirm + notesQ;
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
@@ -2581,26 +2586,26 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       const confirmQ = await buildStepQuestion("confirm", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
       const reply = noteAck + confirmQ;
       await appendMessage(session.id, "bot", reply);
-      await sendWAMsg(phone, reply);
+      await sendReply(reply);
       break;
     }
 
     case "confirm": {
       if (isYes(lower)) {
-        await execCreateBookingFromSession(session, phone);
+        await execCreateBookingFromSession(session, phone, useCustomerToken);
       } else if (isNo(lower)) {
         await updateSession(session.id, { status: "cancelled" });
-        await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* untuk memulai lagi. 🏅`);
+        await sendReply(`❌ Booking dibatalkan. Ketik *booking* untuk memulai lagi. 🏅`);
       } else {
         const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
         const reply = await buildStepQuestion("confirm", session, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
-        await sendWAMsg(phone, `Ketik *ya* untuk konfirmasi atau *batal* untuk membatalkan.\n\n${reply}`);
+        await sendReply(`Ketik *ya* untuk konfirmasi atau *batal* untuk membatalkan.\n\n${reply}`);
       }
       break;
     }
 
     default: {
-      await sendWAMsg(phone, `Ketik *booking* untuk membuat booking baru atau *status* untuk cek pesanan. 🏅`);
+      await sendReply(`Ketik *booking* untuk membuat booking baru atau *status* untuk cek pesanan. 🏅`);
     }
   }
 }
@@ -2834,9 +2839,14 @@ async function ensureCustomer(phone: string, name: string): Promise<{ id: number
 
 // ─── Main: create booking from session with full FASE 2 logic ─────────────────
 
-async function execCreateBookingFromSession(session: WaBookingSessionRow, phone: string): Promise<void> {
+async function execCreateBookingFromSession(
+  session: WaBookingSessionRow,
+  phone: string,
+  useCustomerToken = false,
+): Promise<void> {
+  const sendReply = (message: string) => sendWAMsg(phone, message, useCustomerToken);
   if (!session.facilityId || !session.bookingDate || !session.startTime || !session.durationMinutes || !session.customerName) {
-    await sendWAMsg(phone, `❌ Data booking tidak lengkap. Ketik *batal* dan mulai ulang.`);
+    await sendReply(`❌ Data booking tidak lengkap. Ketik *batal* dan mulai ulang.`);
     return;
   }
 
@@ -2845,7 +2855,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     .where(and(eq(facilitiesTable.id, session.facilityId), eq(facilitiesTable.isActive, true)))
     .limit(1);
   if (!facility) {
-    await sendWAMsg(phone, `❌ Fasilitas tidak ditemukan atau sudah tidak aktif. Ketik *batal* dan mulai ulang.`);
+    await sendReply(`❌ Fasilitas tidak ditemukan atau sudah tidak aktif. Ketik *batal* dan mulai ulang.`);
     return;
   }
 
@@ -2864,7 +2874,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
       `Pilih jam lain. Ketik jam yang kamu inginkan.`;
     await updateSession(session.id, { currentStep: "ask_time" });
     await appendMessage(session.id, "bot", reply);
-    await sendWAMsg(phone, reply);
+    await sendReply(reply);
     return;
   }
 
@@ -2873,7 +2883,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     const reply = `⚠️ Tanggal *${session.bookingDate}* sudah lewat. Pilih tanggal yang akan datang.`;
     await updateSession(session.id, { currentStep: "ask_date" });
     await appendMessage(session.id, "bot", reply);
-    await sendWAMsg(phone, reply);
+    await sendReply(reply);
     return;
   }
 
@@ -2922,7 +2932,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
 
     await updateSession(session.id, { currentStep: "ask_time" });
     await appendMessage(session.id, "bot", reply);
-    await sendWAMsg(phone, reply);
+    await sendReply(reply);
     return;
   }
 
@@ -3140,6 +3150,20 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
   try {
     req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
 
+    const deviceCheck = validateMinaFonnteWebhookDevice(req.body);
+    if (!deviceCheck.accepted) {
+      req.log?.warn?.(
+        { providedDevice: deviceCheck.providedDevice },
+        "[wa-webhook] inbound device is not the configured Mina device; message ignored",
+      );
+      await logAudit({
+        action: "mina_webhook_device_rejected",
+        entity: "wa_session",
+        after: { providedDevice: deviceCheck.providedDevice },
+      });
+      return;
+    }
+
     if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
     if (!sender) return;
@@ -3168,7 +3192,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         entity: "booking",
         after: { phone, message: msg },
       });
-      await sendWAMsg(phone, "⚠️ Maaf, Anda tidak memiliki akses untuk perintah admin ini.");
+      await sendWAMsg(phone, "⚠️ Maaf, Anda tidak memiliki akses untuk perintah admin ini.", true);
       return;
     }
     if (adminPhones.includes(phone)) {
@@ -3183,7 +3207,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         sql`SELECT phone FROM sport_center.wa_blocked_phones WHERE phone = ${phone} AND is_active = true AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`
       );
       if (blockedResult.rows.length > 0) {
-        await sendWAMsg(phone, `⛔ Nomor Anda telah diblokir dari layanan booking WhatsApp kami.\n\nHubungi admin untuk informasi lebih lanjut.`);
+        await sendWAMsg(phone, `⛔ Nomor Anda telah diblokir dari layanan booking WhatsApp kami.\n\nHubungi admin untuk informasi lebih lanjut.`, true);
         await logAudit({ action: "blocked_phone_attempted", entity: "wa_session", after: { phone, msg } });
         return;
       }
@@ -3192,7 +3216,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
     // 3. Active session — continue conversation (always takes priority)
     const session = await getActiveSession(phone);
     if (session) {
-      await continueSession(session, phone, msg);
+      await continueSession(session, phone, msg, true);
       return;
     }
 
@@ -3221,9 +3245,9 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         const reply = uploadUrl
           ? `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, silakan gunakan link berikut:\n\n${uploadUrl}\n\n⚠️ Upload hanya bisa melalui link, tidak bisa via WhatsApp langsung.`
           : `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, ketik *status* untuk mendapatkan link upload.`;
-        await sendWAMsg(phone, reply);
+        await sendWAMsg(phone, reply, true);
       } else {
-        await sendWAMsg(phone, `📎 Bukti pembayaran diunggah melalui link khusus yang dikirimkan setelah booking dikonfirmasi admin.\n\nKetik *status* untuk cek status booking, atau *booking* untuk membuat pesanan baru. 🏅`);
+        await sendWAMsg(phone, `📎 Bukti pembayaran diunggah melalui link khusus yang dikirimkan setelah booking dikonfirmasi admin.\n\nKetik *status* untuk cek status booking, atau *booking* untuk membuat pesanan baru. 🏅`, true);
       }
       await logAudit({ action: "media_message_received", entity: "wa_session", after: { phone, msgType } });
       return;
@@ -3240,7 +3264,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
 
       // booking_intent: go straight to structured booking session
       if (intent === "booking_intent") {
-        await startBookingSession(phone, msg, String(name));
+        await startBookingSession(phone, msg, String(name), true);
         return;
       }
 
@@ -3252,7 +3276,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         const reply = adminContact
           ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${settingsRow?.openHour ?? "06:00"}–${settingsRow?.closeHour ?? "22:00"}*. 🙏`
           : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${await getBaseUrl()}/contact.\n\nKami siap membantu! 🏅`;
-        await sendWAMsg(phone, reply);
+        await sendWAMsg(phone, reply, true);
         await logAudit({ action: "ai_talk_to_admin_handled", entity: "wa_ai", after: { phone, adminContact } });
         return;
       }
@@ -3263,13 +3287,13 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
 
       if (aiResult.shouldHandoffToBookingFlow) {
         clearHistory(phone);
-        await startBookingSession(phone, msg, String(name));
+        await startBookingSession(phone, msg, String(name), true);
         return;
       }
 
       if (!aiResult.fallbackToAdmin && aiResult.reply) {
         appendTurn(phone, "assistant", aiResult.reply);
-        await sendWAMsg(phone, aiResult.reply);
+        await sendWAMsg(phone, aiResult.reply, true);
         return;
       }
       // if AI failed/disabled, fall through to legacy handlers
@@ -3283,7 +3307,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         .limit(8);
 
       if (allBookings.length === 0) {
-        await sendWAMsg(phone, `Tidak ada booking terdaftar untuk nomor ini.\n\nKetik *booking* untuk membuat booking baru. 🏅`);
+        await sendWAMsg(phone, `Tidak ada booking terdaftar untuk nomor ini.\n\nKetik *booking* untuk membuat booking baru. 🏅`, true);
         return;
       }
 
@@ -3314,13 +3338,13 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           `   Status: *${statusLabel}*\n\n`;
       }
       reply += `Detail: ${await getBaseUrl()}/status/${allBookings[0].orderNumber}`;
-      await sendWAMsg(phone, reply);
+      await sendWAMsg(phone, reply, true);
       return;
     }
 
     // 6. Legacy fallback: explicit booking keyword (when AI is off or errored)
     if (isBookingIntent(msg)) {
-      await startBookingSession(phone, msg, String(name));
+      await startBookingSession(phone, msg, String(name), true);
       return;
     }
 
@@ -3336,7 +3360,8 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       `Ketik:\n` +
       `• *booking* — pesan fasilitas olahraga\n` +
       `• *status* — cek status pesanan\n\n` +
-      `Atau kunjungi: ${await getBaseUrl()}/facilities`
+      `Atau kunjungi: ${await getBaseUrl()}/facilities`,
+      true,
     );
   } catch (err) {
     console.error("[wa/fonnte/webhook] error:", err);

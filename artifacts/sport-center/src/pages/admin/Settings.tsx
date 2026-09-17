@@ -12,6 +12,26 @@ import { useToast } from "@/hooks/use-toast";
 import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
+type WhatsAppStatus = {
+  admin: { tokenConfigured: boolean; tokenSource: "settings" | "environment" | "missing" };
+  mina: {
+    deviceNumber: string;
+    tokenConfigured: boolean;
+    tokenSource: "settings" | "environment" | "missing";
+    inboundDeviceValidation: string;
+  };
+};
+
+async function fetchWhatsAppStatus(): Promise<WhatsAppStatus> {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const token = getToken();
+  const response = await fetch(`${base}/api/settings/whatsapp-status`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new Error("Gagal memuat status WhatsApp");
+  return response.json();
+}
+
 function ApDiscountCard() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -456,6 +476,10 @@ export default function AdminSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data: settings, isLoading } = useGetSettings();
+  const { data: waStatus } = useQuery<WhatsAppStatus>({
+    queryKey: ["admin", "whatsapp-status"],
+    queryFn: fetchWhatsAppStatus,
+  });
   const qrisInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
@@ -505,6 +529,7 @@ export default function AdminSettings() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["admin", "whatsapp-status"] });
         toast({ title: "Pengaturan disimpan" });
       },
       onError: () => toast({ title: "Gagal menyimpan", variant: "destructive" }),
@@ -692,18 +717,36 @@ export default function AdminSettings() {
                   Jika kosong, sistem pakai nilai dari environment variable.
                 </p>
               </div>
-              {(settings as any)?.fonnteToken ? (
+              {waStatus?.admin.tokenConfigured ? (
                 <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
-                  <CheckCircle2 size={12} /> Token Terkonfigurasi
+                  <CheckCircle2 size={12} /> Admin siap
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
-                  <AlertCircle size={12} /> Pakai Env Variable
+                  <AlertCircle size={12} /> Token admin belum ada
                 </Badge>
               )}
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border bg-muted/30 p-3 flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-sm">Device Mina / customer</span>
+                {waStatus?.mina.tokenConfigured ? (
+                  <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
+                    <CheckCircle2 size={12} /> Siap
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
+                    <AlertCircle size={12} /> Token belum ada
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Nomor: <strong>{waStatus?.mina.deviceNumber ?? "6282321301338"}</strong>. Payload webhook dengan field device yang berbeda akan ditolak.
+                Token tidak pernah dikembalikan oleh endpoint status.
+              </p>
+            </div>
             <div className="grid md:grid-cols-2 gap-4">
               <div className="md:col-span-2 space-y-2">
                 <Label>Token Fonnte — Nomor Admin (085121073537)</Label>
@@ -733,7 +776,7 @@ export default function AdminSettings() {
               </div>
 
               <div className="md:col-span-2 space-y-2">
-                <Label>Token Fonnte — Nomor Customer (081216104734)</Label>
+                <Label>Token Fonnte — Device Mina/customer (6282321301338)</Label>
                 <div className="relative">
                   <Input
                     type={showCustomerToken ? "text" : "password"}
@@ -751,8 +794,8 @@ export default function AdminSettings() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Token nomor WhatsApp customer (<strong>081216104734</strong>). Digunakan untuk mengirim notifikasi ke customer (booking, konfirmasi, reminder, dll).
-                  Jika kosong, sistem pakai token admin di atas.
+                  Token nomor WhatsApp customer/Mina (<strong>6282321301338</strong>). Digunakan untuk reply Mina dan notifikasi ke customer (booking, konfirmasi, reminder, dll).
+                  Jika kosong, pengiriman customer dihentikan; sistem tidak memakai token admin sebagai fallback.
                 </p>
               </div>
 

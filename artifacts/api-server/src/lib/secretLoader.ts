@@ -35,6 +35,7 @@ const ENV_KEYS = [
   "SUPABASE_STORAGE_BUCKET_DEV",
   "SESSION_SECRET",
   "FONNTE_TOKEN",
+  "FONNTE_CUSTOMER_TOKEN",
   "OPENAI_API_KEY",
   "GOOGLE_SERVICE_ACCOUNT_JSON",
   "GOOGLE_CLIENT_ID",
@@ -82,6 +83,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
   supabase_storage_bucket: ["supabase_storage_bucket", "SUPABASE_STORAGE_BUCKET"],
   session_secret: ["session_secret", "SESSION_SECRET"],
   fonnte_token: ["fonnte_token", "FONNTE_TOKEN"],
+  fonnte_customer_token: ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
   openai_api_key: ["openai_api_key", "OPENAI_API_KEY"],
   google_service_account_json: [
     "google_service_account_json",
@@ -159,6 +161,7 @@ function parseBootstrap(raw: string): BootstrapConfig {
 const SHARED_FIELDS = new Set([
   "SESSION_SECRET",
   "FONNTE_TOKEN",
+  "FONNTE_CUSTOMER_TOKEN",
   "OPENAI_API_KEY",
   "GOOGLE_SERVICE_ACCOUNT_JSON",
   "GOOGLE_CLIENT_ID",
@@ -243,6 +246,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
     ["supabase_storage_bucket", `SUPABASE_STORAGE_BUCKET${suffix}`],
     ["session_secret", "SESSION_SECRET"],
     ["fonnte_token", "FONNTE_TOKEN"],
+    ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
     ["openai_api_key", "OPENAI_API_KEY"],
     ["google_service_account_json", "GOOGLE_SERVICE_ACCOUNT_JSON"],
     ["google_client_id", "GOOGLE_CLIENT_ID"],

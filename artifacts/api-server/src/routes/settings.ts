@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { invalidateBaseUrlCache } from "../lib/appUrl";
+import { MINA_FONNTE_DEVICE } from "../lib/fonnteConfig";
 
 const router = Router();
 
@@ -39,10 +40,42 @@ async function getOrCreateSettings() {
   return newSettings;
 }
 
+function publicSettings(settings: Awaited<ReturnType<typeof getOrCreateSettings>>) {
+  const { fonnteToken: _adminToken, fonnteCustomerToken: _customerToken, ...safeSettings } = settings;
+  return safeSettings;
+}
+
+router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings();
+    const adminFromSettings = Boolean(settings.fonnteToken?.trim());
+    const minaFromSettings = Boolean(settings.fonnteCustomerToken?.trim());
+    res.json({
+      admin: {
+        tokenConfigured: adminFromSettings || Boolean(process.env.FONNTE_TOKEN?.trim()),
+        tokenSource: adminFromSettings ? "settings" : process.env.FONNTE_TOKEN?.trim() ? "environment" : "missing",
+      },
+      mina: {
+        deviceNumber: MINA_FONNTE_DEVICE,
+        tokenConfigured: minaFromSettings || Boolean(process.env.FONNTE_CUSTOMER_TOKEN?.trim()),
+        tokenSource: minaFromSettings
+          ? "settings"
+          : process.env.FONNTE_CUSTOMER_TOKEN?.trim()
+          ? "environment"
+          : "missing",
+        inboundDeviceValidation: "when_fonnte_payload_includes_device",
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "Get WhatsApp status error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/settings", async (req, res) => {
   try {
     const settings = await getOrCreateSettings();
-    res.json(settings);
+    res.json(publicSettings(settings));
   } catch (err) {
     req.log.error({ err }, "Get settings error");
     res.status(500).json({ error: "Internal server error" });
@@ -68,7 +101,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
       invalidateBaseUrlCache();
     }
     const [updated] = await db.select().from(settingsTable).where(eq(settingsTable.id, settings.id)).limit(1);
-    res.json(updated);
+    res.json(publicSettings(updated));
   } catch (err) {
     req.log.error({ err }, "Update settings error");
     res.status(500).json({ error: "Internal server error" });
