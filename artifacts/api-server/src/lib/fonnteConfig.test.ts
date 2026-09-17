@@ -8,9 +8,9 @@ import {
 
 describe("Fonnte Mina device and token separation", () => {
   it("normalizes common WhatsApp device formats", () => {
-    expect(normalizeFonnteDevice("0819 929 3537")).toBe(MINA_FONNTE_DEVICE);
-    expect(normalizeFonnteDevice("+62 819 929 3537")).toBe(MINA_FONNTE_DEVICE);
-    expect(normalizeFonnteDevice("628199293537@c.us")).toBe(MINA_FONNTE_DEVICE);
+    expect(normalizeFonnteDevice("0819 929 35357")).toBe(MINA_FONNTE_DEVICE);
+    expect(normalizeFonnteDevice("+62 819 929 35357")).toBe(MINA_FONNTE_DEVICE);
+    expect(normalizeFonnteDevice("6281992935357@c.us")).toBe(MINA_FONNTE_DEVICE);
   });
 
   it("accepts payloads without device for backward-compatible Fonnte payloads", () => {
