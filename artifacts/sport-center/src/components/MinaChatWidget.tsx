@@ -16,6 +16,12 @@ const QUICK_ACTIONS = [
   "Gym & Membership",
 ];
 
+const MINA_RETRY_DELAYS_MS = [0, 800, 1600];
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 function renderReply(content: string) {
   return content.split(/(https?:\/\/[^\s]+)/g).map((part, index) =>
     /^https?:\/\//.test(part) ? (
@@ -83,26 +89,51 @@ export default function MinaChatWidget() {
     setIsSending(true);
 
     try {
-      const response = await fetch("/api/mina/web/message", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, pageContext }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        reply?: string;
-        error?: string;
-        fallbackToWhatsapp?: boolean;
-      };
+      let lastError = "Mina sedang tidak tersedia.";
 
-      if (!response.ok || !payload.reply) {
-        throw new Error(payload.error || "Mina sedang tidak tersedia.");
+      for (let attempt = 0; attempt < MINA_RETRY_DELAYS_MS.length; attempt += 1) {
+        if (attempt > 0) {
+          await wait(MINA_RETRY_DELAYS_MS[attempt]);
+        }
+
+        try {
+          const response = await fetch("/api/mina/web/message", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message, pageContext }),
+          });
+          const payload = (await response.json().catch(() => ({}))) as {
+            reply?: string;
+            error?: string;
+            code?: string;
+            fallbackToWhatsapp?: boolean;
+          };
+
+          if (response.ok && payload.reply) {
+            setMessages((current) => [
+              ...current,
+              { id: nextMessageId.current++, role: "assistant", content: payload.reply! },
+            ]);
+            return;
+          }
+
+          lastError = payload.error || lastError;
+          const retryableStatus = response.status === 502 || response.status === 503;
+          const retryableCode =
+            payload.code === "STARTUP_MIGRATIONS_PENDING" ||
+            payload.code === "MINA_PROVIDER_UNAVAILABLE" ||
+            payload.code === "MINA_MESSAGE_FAILED";
+
+          if (!retryableStatus && !retryableCode) break;
+        } catch (requestError) {
+          lastError = requestError instanceof Error ? requestError.message : lastError;
+          // A Vite proxy/API restart can fail before a JSON response exists.
+          // Retry those transient network errors just like a temporary 503.
+        }
       }
 
-      setMessages((current) => [
-        ...current,
-        { id: nextMessageId.current++, role: "assistant", content: payload.reply! },
-      ]);
+      throw new Error(lastError);
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Mina sedang tidak tersedia.");
     } finally {
