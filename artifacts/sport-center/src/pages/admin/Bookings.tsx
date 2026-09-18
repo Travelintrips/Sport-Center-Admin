@@ -326,6 +326,117 @@ function formatDate(d: string) {
   });
 }
 
+function getGroupStatus(rows: any[]): string | null {
+  const statuses = [...new Set(rows.map((row) => row.status).filter(Boolean))];
+  if (statuses.length === 0) return null;
+  if (statuses.length === 1) return statuses[0];
+  if (statuses.some((status) => status === "waiting_confirmation" || status === "paid")) {
+    return "waiting_confirmation";
+  }
+  if (statuses.some((status) => status === "pending_payment")) return "pending_payment";
+  if (statuses.every((status) => status === "completed")) return "completed";
+  if (statuses.some((status) => status === "confirmed" || status === "completed")) {
+    return "confirmed";
+  }
+  return null;
+}
+
+function BookingGroupSessionsDialog({
+  groupRef,
+  sessions,
+  open,
+  onClose,
+  onSelectSession,
+}: {
+  groupRef: string | null;
+  sessions: any[];
+  open: boolean;
+  onClose: () => void;
+  onSelectSession: (booking: any) => void;
+}) {
+  const sortedSessions = [...sessions].sort((a, b) => {
+    const aKey = `${a.bookingDate ?? ""} ${a.startTime ?? ""}`;
+    const bKey = `${b.bookingDate ?? ""} ${b.startTime ?? ""}`;
+    return aKey.localeCompare(bKey);
+  });
+  const total = sortedSessions.reduce(
+    (sum, session) =>
+      sum + getBookingInvoiceTax(session).netAmount,
+    0,
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Layers size={17} className="text-violet-600" />
+            Detail Group Booking
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 dark:border-violet-800 dark:bg-violet-950/30">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+                Group Reference
+              </div>
+              <div className="font-mono text-sm font-bold text-violet-800 dark:text-violet-200">
+                {groupRef}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+                Total {sortedSessions.length} sesi
+              </div>
+              <div className="text-sm font-black text-violet-800 dark:text-violet-200">
+                {formatCurrency(total)}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {sortedSessions.map((session, index) => (
+              <div
+                key={session.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-3 dark:border-slate-700"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      Sesi {index + 1}
+                    </span>
+                    <span className="font-mono text-[11px] text-slate-400">
+                      {session.orderNumber}
+                    </span>
+                    <StatusBadge status={session.status} isDpPaid={session.isDpPaid} />
+                  </div>
+                  <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    {formatDate(session.bookingDate)} ·{" "}
+                    {String(session.startTime ?? "").slice(0, 5)} –{" "}
+                    {String(session.endTime ?? "").slice(0, 5)}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-400">
+                    {session.facilityName} · {formatCurrency(getBookingInvoiceTax(session).netAmount)}
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5 text-xs"
+                  onClick={() => onSelectSession(session)}
+                >
+                  <Eye size={12} />
+                  Detail
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type PaymentMethodOption = {
   value: string;
   label: string;
@@ -2756,6 +2867,7 @@ export default function AdminBookings() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [selectedGroupRef, setSelectedGroupRef] = useState<string | null>(null);
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
   const [fixDiscountId, setFixDiscountId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -3246,6 +3358,20 @@ export default function AdminBookings() {
       : sorted;
   }, [bookings, statusFilter, settlementFilter, search, dateFrom, dateTo]);
 
+  // Recurring sessions remain separate in `filtered` for stats, selection, and
+  // audit actions, but the main table shows one representative row per group.
+  const displayRows = useMemo(() => {
+    const seenGroups = new Set<string>();
+    return filtered.filter((booking: any) => {
+      if (!booking.groupRef || (bookingsByGroupRef[booking.groupRef] ?? []).length <= 1) {
+        return true;
+      }
+      if (seenGroups.has(booking.groupRef)) return false;
+      seenGroups.add(booking.groupRef);
+      return true;
+    });
+  }, [filtered, bookingsByGroupRef]);
+
   // Satu groupRef hanya boleh memiliki satu entry aksi verifikasi pada
   // tampilan saat ini. Memilih row dengan bukti pembayaran membuat aksi tetap
   // tersedia walaupun admin sedang memakai pencarian/filter.
@@ -3455,6 +3581,18 @@ export default function AdminBookings() {
     () => filtered.filter((b: any) => selectedIds.has(b.id)),
     [filtered, selectedIds],
   );
+
+  const toggleRowSelection = (booking: any, groupRows: any[]) => {
+    const ids = booking.groupRef && groupRows.length > 1
+      ? groupRows.map((row: any) => row.id)
+      : [booking.id];
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const shouldSelect = ids.some((id) => !next.has(id));
+      ids.forEach((id) => shouldSelect ? next.add(id) : next.delete(id));
+      return next;
+    });
+  };
 
   const canMerge = useMemo(() => {
     if (mergeSelectedBookings.length < 2) return false;
@@ -3941,8 +4079,12 @@ export default function AdminBookings() {
               </button>
             )}
           </div>
-          <span className="text-xs text-slate-400 ml-auto shrink-0">
-            {bookingsError ? "Data tidak tersedia" : `${filtered.length} booking`}
+           <span className="text-xs text-slate-400 ml-auto shrink-0">
+             {bookingsError
+               ? "Data tidak tersedia"
+               : displayRows.length === filtered.length
+                 ? `${filtered.length} booking`
+                 : `${displayRows.length} baris · ${filtered.length} booking`}
           </span>
            <div className="w-full flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-400 lg:w-auto lg:ml-2">
              <span className="inline-flex items-center gap-1">
@@ -3976,10 +4118,32 @@ export default function AdminBookings() {
                     <input
                       type="checkbox"
                       className="rounded border-slate-300 dark:border-slate-600 accent-primary w-3.5 h-3.5 cursor-pointer"
-                      checked={filtered.length > 0 && filtered.every((b: any) => selectedIds.has(b.id))}
+                       checked={
+                         displayRows.length > 0 &&
+                         displayRows.every((row: any) => {
+                           const groupRows = row.groupRef
+                             ? (bookingsByGroupRef[row.groupRef] ?? [])
+                             : [];
+                           const ids = row.groupRef && groupRows.length > 1
+                             ? groupRows.map((groupRow: any) => groupRow.id)
+                             : [row.id];
+                           return ids.every((id: number) => selectedIds.has(id));
+                         })
+                       }
                       onChange={(e) => {
-                        if (e.target.checked) setSelectedIds(new Set(filtered.map((b: any) => b.id)));
-                        else setSelectedIds(new Set());
+                         if (!e.target.checked) {
+                           setSelectedIds(new Set());
+                           return;
+                         }
+                         const ids = new Set<number>();
+                         displayRows.forEach((row: any) => {
+                           const groupRows = row.groupRef
+                             ? (bookingsByGroupRef[row.groupRef] ?? [])
+                             : [];
+                           const rows = row.groupRef && groupRows.length > 1 ? groupRows : [row];
+                           rows.forEach((groupRow: any) => ids.add(groupRow.id));
+                         });
+                         setSelectedIds(ids);
                       }}
                     />
                   </th>
@@ -3995,7 +4159,7 @@ export default function AdminBookings() {
               </thead>
               <tbody>
                 <AnimatePresence mode="popLayout">
-                  {filtered.map((b: any, i: number) => {
+                   {displayRows.map((b: any, i: number) => {
                     const groupRows = b.groupRef ? (bookingsByGroupRef[b.groupRef] ?? []) : [];
                     const isMultiSessionGroup = Boolean(b.groupRef && groupRows.length > 1);
                     const groupPendingRows = groupRows.filter(
@@ -4008,9 +4172,27 @@ export default function AdminBookings() {
                       : undefined;
                     const isGroupVerificationRow =
                       isMultiSessionGroup &&
-                      isPendingVerificationBooking &&
                       groupPendingRows.length > 0 &&
-                      groupVerificationRow?.id === b.id;
+                       Boolean(groupVerificationRow);
+                     const isRowSelected = isMultiSessionGroup
+                       ? groupRows.every((row: any) => selectedIds.has(row.id))
+                       : selectedIds.has(b.id);
+                     const groupTaxRows = groupRows.length > 0 ? groupRows : [b];
+                     const groupFacilityNames = [
+                       ...new Set(groupTaxRows.map((row: any) => row.facilityName).filter(Boolean)),
+                     ];
+                     const groupDates = groupTaxRows
+                       .map((row: any) => row.bookingDate)
+                       .filter(Boolean)
+                       .sort();
+                     const groupPaymentMethods = [
+                       ...new Set(
+                         groupTaxRows
+                           .map((row: any) => row.membershipPayment?.paymentMethod ?? row.payment?.paymentMethod)
+                           .filter(Boolean),
+                       ),
+                     ];
+                     const groupStatus = isMultiSessionGroup ? getGroupStatus(groupRows) : b.status;
                     const listPayment = b.membershipPayment ?? b.payment;
                     const listPaymentDate =
                       listPayment?.confirmedAt ??
@@ -4058,14 +4240,14 @@ export default function AdminBookings() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
                       transition={{ delay: i * 0.03, duration: 0.2 }}
-                      className={`border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors group ${selectedIds.has(b.id) ? "bg-primary/5 dark:bg-primary/10" : ""}`}
+                      className={`border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors group ${isRowSelected ? "bg-primary/5 dark:bg-primary/10" : ""}`}
                     >
                       <td className="px-3 py-3">
                         <input
                           type="checkbox"
                           className="rounded border-slate-300 dark:border-slate-600 accent-primary w-3.5 h-3.5 cursor-pointer"
-                          checked={selectedIds.has(b.id)}
-                          onChange={() => toggleSelect(b.id)}
+                           checked={isRowSelected}
+                           onChange={() => toggleRowSelection(b, groupRows)}
                         />
                       </td>
                         <td className="px-4 py-3">
@@ -4077,7 +4259,7 @@ export default function AdminBookings() {
                                   : "text-slate-600 dark:text-slate-400"
                               }`}
                             >
-                              {b.orderNumber}
+                               {isMultiSessionGroup ? b.groupRef : b.orderNumber}
                             </span>
                             {(isBankReconciled || isSettledOutsideBankReconciliation) && (
                               <div className="flex flex-wrap gap-1">
@@ -4109,7 +4291,7 @@ export default function AdminBookings() {
                             {b.customerName?.charAt(0)?.toUpperCase()}
                           </div>
                           <div>
-                            <div className="font-semibold text-slate-800 dark:text-slate-200 text-xs leading-tight">
+                           <div className="font-semibold text-slate-800 dark:text-slate-200 text-xs leading-tight">
                               {b.payerType === "company" && (b as any).companyName
                                 ? (b as any).companyName
                                 : b.customerName}
@@ -4152,24 +4334,37 @@ export default function AdminBookings() {
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                          {b.facilityName}
+                           {isMultiSessionGroup
+                             ? groupFacilityNames.join(", ") || "Beberapa fasilitas"
+                             : b.facilityName}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                          {b.bookingDate}
+                           {isMultiSessionGroup && groupDates.length > 1
+                             ? `${groupDates[0]} – ${groupDates[groupDates.length - 1]}`
+                             : b.bookingDate}
                         </div>
                         <div className="text-[11px] text-slate-400">
-                          {b.startTime?.slice(0, 5)} – {b.endTime?.slice(0, 5)}
+                          {isMultiSessionGroup
+                            ? `${groupRows.length} sesi recurring`
+                            : `${b.startTime?.slice(0, 5)} – ${b.endTime?.slice(0, 5)}`}
                         </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                          {b.durationHours} jam
+                          {isMultiSessionGroup
+                            ? `${groupRows.reduce((sum: number, row: any) => sum + Number(row.durationHours ?? 0), 0)} jam total`
+                            : `${b.durationHours} jam`}
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                         <PaymentMethodSelect
+                        {isMultiSessionGroup ? (
+                          <span className="text-xs font-medium text-violet-600 dark:text-violet-300">
+                            {groupPaymentMethods.length === 1 ? groupPaymentMethods[0] : "Campuran"}
+                          </span>
+                        ) : (
+                          <PaymentMethodSelect
                             payment={listPayment}
                            options={paymentMethodOptions}
                            onChange={(paymentId, paymentMethod) =>
@@ -4188,6 +4383,7 @@ export default function AdminBookings() {
                                    : undefined
                              }
                          />
+                        )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {listPaymentDate ? (
@@ -4243,14 +4439,22 @@ export default function AdminBookings() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <InlineStatusSelect
-                          bookingId={b.id}
-                          status={b.status}
-                          onUpdate={(id, status) =>
-                            updateBookingMutation.mutate({ id, data: { status: status as any } })
-                          }
-                          isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
-                        />
+                         {isMultiSessionGroup ? (
+                           groupStatus ? (
+                             <StatusBadge status={groupStatus} />
+                           ) : (
+                             <span className="text-xs font-semibold text-slate-500">Campuran</span>
+                           )
+                         ) : (
+                           <InlineStatusSelect
+                             bookingId={b.id}
+                             status={b.status}
+                             onUpdate={(id, status) =>
+                               updateBookingMutation.mutate({ id, data: { status: status as any } })
+                             }
+                             isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
+                           />
+                         )}
                         {b.status === "paid" && b.payment?.proofUrl && (
                           <div className="text-[10px] text-blue-500 mt-0.5 font-medium">
                             Bukti diterima ↗
@@ -4258,10 +4462,10 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {isMultiSessionGroup && isPendingVerificationBooking && groupPendingRows.length > 0 ? (
+                         {isMultiSessionGroup && groupPendingRows.length > 0 ? (
                           isGroupVerificationRow ? (
                             <button
-                              onClick={() => setSelectedBooking(b)}
+                               onClick={() => setSelectedBooking(groupVerificationRow ?? b)}
                               className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/40 transition-colors"
                               title="Verifikasi satu kali untuk seluruh sesi dalam grup"
                             >
@@ -4319,16 +4523,22 @@ export default function AdminBookings() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <motion.button
+                           <motion.button
                             whileHover={{ scale: 1.04 }}
                             whileTap={{ scale: 0.96 }}
-                            onClick={() => setSelectedBooking(b)}
-                            className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100"
+                             onClick={() => {
+                               if (isMultiSessionGroup) {
+                                 setSelectedGroupRef(b.groupRef);
+                               } else {
+                                 setSelectedBooking(b);
+                               }
+                             }}
+                             className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100"
                           >
                             <Eye size={12} />
-                            Detail
+                             {isMultiSessionGroup ? "Detail Grup" : "Detail"}
                           </motion.button>
-                          {(b.status === "confirmed" || b.status === "paid") && (
+                           {!isMultiSessionGroup && (b.status === "confirmed" || b.status === "paid") && (
                             <motion.button
                               whileHover={{ scale: 1.04 }}
                               whileTap={{ scale: 0.96 }}
@@ -4435,7 +4645,7 @@ export default function AdminBookings() {
                               </motion.button>
                             </>
                           )}
-                          {deleteConfirmId === b.id ? (
+                           {!isMultiSessionGroup && (deleteConfirmId === b.id ? (
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={() => { handleDelete(b.id); setDeleteConfirmId(null); }}
@@ -4464,16 +4674,16 @@ export default function AdminBookings() {
                                 <span className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
                               ) : (
                                 <Trash2 size={12} />
-                              )}
-                            </motion.button>
-                          )}
+                               )}
+                             </motion.button>
+                           ))}
                         </div>
                       </td>
                     </motion.tr>
                     );
                   })}
                 </AnimatePresence>
-                {filtered.length === 0 && (
+                {displayRows.length === 0 && (
                   <tr>
                     <td colSpan={13} className="py-16 text-center text-slate-400 text-sm">
                       <CalendarCheck size={32} className="mx-auto mb-3 opacity-30" />
@@ -4506,6 +4716,17 @@ export default function AdminBookings() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <BookingGroupSessionsDialog
+        groupRef={selectedGroupRef}
+        sessions={selectedGroupRef ? (bookingsByGroupRef[selectedGroupRef] ?? []) : []}
+        open={Boolean(selectedGroupRef)}
+        onClose={() => setSelectedGroupRef(null)}
+        onSelectSession={(session) => {
+          setSelectedGroupRef(null);
+          setSelectedBooking(session);
+        }}
+      />
 
       {/* Detail Drawer */}
       {selectedBooking && (
