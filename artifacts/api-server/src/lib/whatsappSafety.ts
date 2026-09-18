@@ -57,6 +57,10 @@ export function allowWhatsAppProviderSend(options: WhatsAppProviderSendOptions =
     return false;
   }
 
+  // Development has one narrowly scoped exception: an explicitly Mina/customer
+  // channel send may reach Fonnte only for the normalized test recipient and
+  // only when the customer token is configured. Every other non-production
+  // dispatch remains fail-closed, including all admin sends.
   const controlledMinaTest =
     options.channel === "mina" &&
     isMinaDevTestRecipient(options.recipient, options.allowlistedRecipient) &&

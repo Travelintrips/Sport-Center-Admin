@@ -241,6 +241,12 @@ function selectedSection(payload: JsonObject, env: "dev" | "prod" | "audit"): Js
 }
 
 function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[] {
+  // DEV may receive the customer-channel token as a scoped Replit Secret while
+  // the shared GSM payload is being repaired. Preserve that DEV-only value as
+  // a fallback; never carry it into the production loader.
+  const directDevCustomerToken =
+    env === "dev" ? stringValue(process.env.FONNTE_CUSTOMER_TOKEN) : undefined;
+
   for (const key of ENV_KEYS) {
     if (!SHARED_RUNTIME_ENV_KEYS.has(key)) delete process.env[key];
   }
@@ -282,6 +288,16 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
       loaded.push(envKey);
     }
   }
+
+  if (
+    env === "dev" &&
+    directDevCustomerToken &&
+    !findField(section, "fonnte_customer_token")
+  ) {
+    process.env.FONNTE_CUSTOMER_TOKEN = directDevCustomerToken;
+    loaded.push("FONNTE_CUSTOMER_TOKEN");
+  }
+
   return loaded;
 }
 
