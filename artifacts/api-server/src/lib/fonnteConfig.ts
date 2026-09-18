@@ -112,34 +112,31 @@ export async function validateMinaFonnteWebhookDevice(
 }
 
 export async function getFonnteConfig(): Promise<FonnteConfig> {
+  const minaDevice = await resolveMinaFonnteDevice();
+  let settingsTokens: {
+    adminToken?: unknown;
+    customerToken?: unknown;
+  } = {};
+
   try {
     const [settings] = await db
       .select({
         adminToken: settingsTable.fonnteToken,
         customerToken: settingsTable.fonnteCustomerToken,
-        customerDevice: settingsTable.fonnteCustomerDevice,
       })
       .from(settingsTable)
       .limit(1);
-    const minaDevice = resolveMinaFonnteDeviceValue(settings?.customerDevice);
-
-    return {
-      adminToken: resolveFonnteToken(settings?.adminToken, process.env.FONNTE_TOKEN),
-      adminTokenSource: resolveFonnteValueSource(settings?.adminToken, process.env.FONNTE_TOKEN),
-      customerToken: resolveFonnteToken(settings?.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
-      customerTokenSource: resolveFonnteValueSource(settings?.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
-      customerDevice: minaDevice.deviceNumber,
-      customerDeviceSource: minaDevice.source,
-    };
+    settingsTokens = settings ?? {};
   } catch {
-    const minaDevice = resolveMinaFonnteDeviceValue(undefined);
-    return {
-      adminToken: resolveFonnteToken(undefined, process.env.FONNTE_TOKEN),
-      adminTokenSource: resolveFonnteValueSource(undefined, process.env.FONNTE_TOKEN),
-      customerToken: resolveFonnteToken(undefined, process.env.FONNTE_CUSTOMER_TOKEN),
-      customerTokenSource: resolveFonnteValueSource(undefined, process.env.FONNTE_CUSTOMER_TOKEN),
-      customerDevice: minaDevice.deviceNumber,
-      customerDeviceSource: minaDevice.source,
-    };
+    // Token schema drift must not hide a valid Settings DB device.
   }
+
+  return {
+    adminToken: resolveFonnteToken(settingsTokens.adminToken, process.env.FONNTE_TOKEN),
+    adminTokenSource: resolveFonnteValueSource(settingsTokens.adminToken, process.env.FONNTE_TOKEN),
+    customerToken: resolveFonnteToken(settingsTokens.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
+    customerTokenSource: resolveFonnteValueSource(settingsTokens.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
+    customerDevice: minaDevice.deviceNumber,
+    customerDeviceSource: minaDevice.source,
+  };
 }
