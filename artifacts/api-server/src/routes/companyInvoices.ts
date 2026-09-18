@@ -104,6 +104,34 @@ function calcTaxBreakdown(totalAmountInclusive: number) {
   return calculateInclusiveInvoiceTax(totalAmountInclusive);
 }
 
+function invoiceItemsAsTaxRows(items: Array<{
+  subtotal?: string | number | null;
+  taxAmount?: string | number | null;
+  totalAmount?: string | number | null;
+  ppnRate?: string | number | null;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean | null;
+  pphAmount?: string | number | null;
+  pphRate?: string | number | null;
+  netAmount?: string | number | null;
+}>) {
+  // company_invoice_items uses subtotal/totalAmount names, while the shared
+  // tax summarizers consume booking-style totalPrice/grandTotal names.
+  // Normalize here so adding sessions to an existing invoice sums every item
+  // instead of treating all item values as zero.
+  return items.map((item) => ({
+    totalPrice: item.subtotal ?? item.totalAmount ?? 0,
+    ppnAmount: item.taxAmount ?? null,
+    grandTotal: item.totalAmount ?? item.subtotal ?? 0,
+    ppnRate: item.ppnRate ?? null,
+    ppnTreatment: item.ppnTreatment ?? null,
+    ppnCollectedByCustomer: item.ppnCollectedByCustomer ?? null,
+    pphAmount: item.pphAmount ?? null,
+    pphRate: item.pphRate ?? null,
+    netAmount: item.netAmount ?? null,
+  }));
+}
+
 function summarizeBookingTax(rows: Array<{
   totalPrice?: string | number | null;
   dpp?: string | number | null;
@@ -565,13 +593,13 @@ async function handleGenerateInvoice(req: any, res: any) {
       const allItems = await db.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
-      const newTax = summarizeBookingTax(allItems);
+      const newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
       const newSubtotal = newTax.totalAmount;
       const {
         pphRate: newPphRate,
         pphAmount: newPphAmount,
         netAmount: newNetAmount,
-      } = summarizeWithholdingTax(allItems);
+      } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems));
 
       const [updated] = await db.update(companyInvoicesTable)
         .set({

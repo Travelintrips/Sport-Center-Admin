@@ -192,7 +192,7 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
       <td style="padding:6px 7px; font-size:11px; text-align:center;">${item.durationHours ?? 0} jam</td>
       <td style="padding:6px 7px; font-size:11px; text-align:right;">${formatCurrency(Math.round((item.subtotal ?? 0) / 1.11))}</td>
       <td style="padding:6px 7px; font-size:11px; text-align:right; color:#6b7280;">${formatCurrency(Math.round(Math.round(Math.round((item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
-      <td style="padding:6px 7px; font-size:11px; text-align:right; font-weight:600;">${formatCurrency(item.subtotal ?? 0)}</td>
+       <td style="padding:6px 7px; font-size:11px; text-align:right; font-weight:600;">${formatCurrency(item.totalAmount ?? item.subtotal ?? 0)}</td>
     </tr>
   `).join("");
 
@@ -265,7 +265,7 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
       <td colspan="7" style="padding:8px 7px;font-size:12px;border-top:2px solid #ea580c;">Total</td>
       <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Number(i.subtotal ?? 0) / 1.11), 0))}</td>
       <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;color:#6b7280;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round(Number(i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
-      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Number(i.subtotal ?? 0), 0))}</td>
+       <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Number(i.totalAmount ?? i.subtotal ?? 0), 0))}</td>
     </tr>
   </tfoot></table>
 
@@ -355,11 +355,10 @@ function printLampiranPemakaian(invoice: any, ds: DocTemplateSettings) {
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:center;">${item.durationHours ?? 0} jam</td>
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;">${formatCurrency(Math.round(Number(item.subtotal ?? 0) / 1.11))}</td>
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;color:#6b7280;">${formatCurrency(Math.round(Math.round(Math.round(Number(item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
-      <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">${formatCurrency(item.subtotal ?? 0)}</td>
+       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">${formatCurrency(item.totalAmount ?? item.subtotal ?? 0)}</td>
     </tr>
   `).join("");
   const totalDurasi = items.reduce((s, i) => s + Number(i.durationHours ?? 0), 0);
-  const totalHarga = items.reduce((s, i) => s + Number(i.subtotal ?? 0), 0);
 
   const html = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"/>
   <title>Lampiran Pemakaian – ${invoice.invoiceNumber}</title>
@@ -407,7 +406,7 @@ function printLampiranPemakaian(invoice: any, ds: DocTemplateSettings) {
       <td style="padding:8px;text-align:center;font-size:12px;font-weight:700;">${totalDurasi.toFixed(1)} jam</td>
       <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Number(i.subtotal ?? 0) / 1.11), 0))}</td>
       <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round(Number(i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
-      <td style="padding:8px;text-align:right;font-size:13px;font-weight:900;color:#ea580c;">${formatCurrency(totalHarga)}</td>
+       <td style="padding:8px;text-align:right;font-size:13px;font-weight:900;color:#ea580c;">${formatCurrency(items.reduce((s, i) => s + Number(i.totalAmount ?? i.subtotal ?? 0), 0))}</td>
     </tr>
   </tfoot></table>
   <div style="margin-top:32px;display:flex;justify-content:flex-end;">
@@ -1560,7 +1559,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                       <td className="p-2.5 text-center whitespace-nowrap">{item.durationHours ?? 0} jam</td>
                       <td className="p-2.5 text-right whitespace-nowrap">{formatCurrency(Math.round((item.subtotal ?? 0) / 1.11))}</td>
                       <td className="p-2.5 text-right whitespace-nowrap text-muted-foreground">{formatCurrency(Math.round(Math.round(Math.round((item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
-                      <td className="p-2.5 text-right whitespace-nowrap font-semibold">{formatCurrency(item.subtotal ?? 0)}</td>
+                       <td className="p-2.5 text-right whitespace-nowrap font-semibold">{formatCurrency(item.totalAmount ?? item.subtotal ?? 0)}</td>
                        <td className="p-2.5 text-right whitespace-nowrap text-orange-700">{Number(item.pphAmount ?? 0) > 0 ? `- ${formatCurrency(item.pphAmount)}` : "—"}</td>
                        <td className="p-2.5 text-right whitespace-nowrap font-semibold text-green-700">
                          {Number(item.pphAmount ?? 0) > 0
@@ -1576,7 +1575,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                      <td colSpan={6} className="p-2.5 text-xs font-semibold text-muted-foreground">{items.length} sesi</td>
                     <td className="p-2.5 text-right text-xs font-semibold">{formatCurrency(items.reduce((s: number, i: any) => s + Math.round((i.subtotal ?? 0) / 1.11), 0))}</td>
                     <td className="p-2.5 text-right text-xs text-muted-foreground">{formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round((i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
-                    <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + (i.subtotal ?? 0), 0))}</td>
+                     <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + Number(i.totalAmount ?? i.subtotal ?? 0), 0))}</td>
                      <td className="p-2.5 text-right text-xs text-orange-700">{formatCurrency(items.reduce((s: number, i: any) => s + Number(i.pphAmount ?? 0), 0))}</td>
                      <td className="p-2.5 text-right text-xs font-bold text-green-700">{formatCurrency(items.reduce((s: number, i: any) => s + Math.max(0, Number(i.totalAmount ?? i.subtotal ?? 0) - Number(i.pphAmount ?? 0)), 0))}</td>
                     <td />
