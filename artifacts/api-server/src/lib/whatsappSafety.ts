@@ -37,10 +37,10 @@ export function isMinaDevTestRecipient(
  * omits WA_DRY_RUN or explicitly sets it to false.
  */
 export function getWhatsAppDispatchMode(
-  nodeEnv = process.env.NODE_ENV,
+  nodeEnv = process.env.APP_ENV ?? process.env.NODE_ENV,
   dryRun = process.env.WA_DRY_RUN,
 ): WhatsAppDispatchMode {
-  if (nodeEnv === "production") return "production";
+  if (nodeEnv === "production" || nodeEnv === "prod") return "production";
   if (dryRun === "true") return "dry-run";
   return "blocked";
 }

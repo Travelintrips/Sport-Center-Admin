@@ -17,6 +17,7 @@ describe("WhatsApp development safety", () => {
 
   it("preserves the existing provider-send mode in production", () => {
     expect(getWhatsAppDispatchMode("production", undefined)).toBe("production");
+    expect(getWhatsAppDispatchMode("prod", "false")).toBe("production");
     expect(getWhatsAppDispatchMode("production", "false")).toBe("production");
   });
 

@@ -37,6 +37,13 @@ WA routes must be placed BEFORE the `<Route path="*">` customer catch-all and WI
 - Facility keywords: basket, futsal, badminton, tennis, gym, voli, renang, squash, golf
 - Non-intent messages are silently ignored (no reply sent)
 
+## Mina AI Failure Boundary
+- An inbound message that has reached intent logging must still attempt a customer-channel fallback if DB context or OpenAI fails; intent logging is observability, not a terminal state.
+
+**Why:** Previously an exception after `ai_intent_detected` escaped to the outer webhook catch and left the customer without any reply.
+
+**How to apply:** Keep the fallback on the Mina/customer token path and preserve the production-only provider guard; never use the admin token to recover a customer reply.
+
 ## Scheduler
 - Day-of reminder sent at 07:00-08:00 WIB (UTC hour 0); uses in-memory Set to avoid duplicates
 - Only WA-sourced (`source = 'whatsapp'`) bookings get staff checkin/finish links on day-of

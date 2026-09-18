@@ -1501,6 +1501,15 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       { sender: useCustomerToken ? "customer" : "admin" },
       `[wa] ${useCustomerToken ? "FONNTE_CUSTOMER_TOKEN" : "FONNTE_TOKEN"} kosong; pesan tidak dikirim`,
     );
+    await logAudit({
+      action: "wa_outbound_skipped_missing_token",
+      entity: "wa_outbound",
+      after: {
+        recipient: phone,
+        channel: useCustomerToken ? "mina" : "admin",
+        customerTokenConfigured: Boolean(fonnte.customerToken),
+      },
+    }).catch(() => {});
     return;
   }
   if (!allowWhatsAppProviderSend({
@@ -1511,12 +1520,69 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
   // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
   try {
-    await fetch("https://api.fonnte.com/send", {
+    const response = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: { Authorization: token, "Content-Type": "application/json" },
       body: JSON.stringify({ target: phone, message }),
     });
-  } catch { /* non-critical */ }
+    let providerStatus: unknown = undefined;
+    try {
+      const body = await response.json() as { status?: unknown };
+      providerStatus = body.status;
+    } catch {
+      // Fonnte may return a non-JSON body; the HTTP status is still useful.
+    }
+
+    if (!response.ok || providerStatus === false) {
+      logger.error(
+        {
+          channel: useCustomerToken ? "mina" : "admin",
+          recipient: phone,
+          httpStatus: response.status,
+          providerStatus,
+        },
+        "[wa] Fonnte outbound rejected",
+      );
+      await logAudit({
+        action: "mina_reply_provider_rejected",
+        entity: "wa_outbound",
+        after: {
+          recipient: phone,
+          channel: useCustomerToken ? "mina" : "admin",
+          httpStatus: response.status,
+          providerStatus,
+        },
+      }).catch(() => {});
+      return;
+    }
+
+    logger.info(
+      {
+        channel: useCustomerToken ? "mina" : "admin",
+        recipient: phone,
+        httpStatus: response.status,
+      },
+      "[wa] Fonnte outbound accepted",
+    );
+  } catch (err) {
+    logger.error(
+      {
+        channel: useCustomerToken ? "mina" : "admin",
+        recipient: phone,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "[wa] Fonnte outbound request failed",
+    );
+    await logAudit({
+      action: "mina_reply_provider_error",
+      entity: "wa_outbound",
+      after: {
+        recipient: phone,
+        channel: useCustomerToken ? "mina" : "admin",
+        error: err instanceof Error ? err.message : String(err),
+      },
+    }).catch(() => {});
+  }
 }
 
 async function getAdminPhones(): Promise<string[]> {
@@ -3304,7 +3370,37 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
 
       const history = getHistory(phone);
       appendTurn(phone, "user", msg);
-      const aiResult = await generateAiReply(phone, msg, history);
+      let aiResult;
+      try {
+        aiResult = await generateAiReply(phone, msg, history, { channel: "whatsapp" });
+      } catch (aiErr) {
+        logger.error(
+          {
+            phone,
+            error: aiErr instanceof Error ? aiErr.message : String(aiErr),
+          },
+          "[wa/fonnte/webhook] Mina AI pipeline failed; sending static fallback",
+        );
+        await logAudit({
+          action: "mina_ai_pipeline_failed",
+          entity: "wa_ai",
+          after: {
+            phone,
+            intent,
+            error: aiErr instanceof Error ? aiErr.message : String(aiErr),
+          },
+        }).catch(() => {});
+
+        const fallback =
+          `Halo! 👋 Terima kasih sudah menghubungi *Sport Center Soekarno-Hatta*.\n\n` +
+          `Untuk bantuan cepat, ketik:\n` +
+          `• *booking* — pesan fasilitas olahraga\n` +
+          `• *status* — cek status pesanan\n\n` +
+          `Atau kunjungi: ${await getBaseUrl()}/facilities`;
+        appendTurn(phone, "assistant", fallback);
+        await sendWAMsg(phone, fallback, true);
+        return;
+      }
 
       if (aiResult.shouldHandoffToBookingFlow) {
         clearHistory(phone);
