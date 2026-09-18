@@ -7,7 +7,6 @@
     "codegen": "orval --config ./orval.config.ts && pnpm run patch-zod-index && pnpm -w run typecheck:libs"
   },
   "devDependencies": {
-    "orval": "^8.9.1"
+    "orval": "^8.21.0"
   }
 }
-

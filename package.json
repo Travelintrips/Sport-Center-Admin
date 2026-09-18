@@ -12,7 +12,19 @@
   },
   "private": true,
   "pnpm": {
-    "onlyBuiltDependencies": ["sharp", "esbuild", "@replit/object-storage"]
+    "onlyBuiltDependencies": [
+      "sharp",
+      "esbuild",
+      "@replit/object-storage"
+    ],
+    "overrides": {
+      "form-data@<2.5.6": "2.5.6",
+      "brace-expansion@>=2.0.0 <2.1.4": "2.1.4",
+      "nanoid@>=4.0.0 <5.1.16": "5.1.16",
+      "uuid@<11.1.1": "11.1.1",
+      "qs@<6.16.0": "6.16.0",
+      "body-parser@>=2.0.0 <2.3.0": "2.3.0"
+    }
   },
   "devDependencies": {
     "prettier": "^3.8.3",
