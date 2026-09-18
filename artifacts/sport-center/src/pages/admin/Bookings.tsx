@@ -1095,6 +1095,7 @@ function WaNotifLogsPanel({ bookingId }: { bookingId: number }) {
 
 function BookingDetailDrawer({
   booking,
+  groupBookings = [],
   onClose,
   onUpdateStatus,
   onConfirmPayment,
@@ -1112,6 +1113,7 @@ function BookingDetailDrawer({
   onUpdateAdditionalCharges,
 }: {
   booking: any;
+  groupBookings?: any[];
   onClose: () => void;
   onUpdateStatus: (status: string, notes?: string) => void;
   onConfirmPayment: (paymentId: number) => void;
@@ -1196,6 +1198,30 @@ function BookingDetailDrawer({
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
   const bookingTax = getBookingInvoiceTax(booking);
+  const isMultiSessionGroup = Boolean(booking.groupRef && groupBookings.length > 1);
+  const groupTax = isMultiSessionGroup
+    ? groupBookings.reduce(
+        (totals: {
+          grandTotal: number;
+          dpp: number;
+          dppNilaiLain: number;
+          ppnAmount: number;
+          pphAmount: number;
+          netAmount: number;
+        }, row: any) => {
+          const rowTax = getBookingInvoiceTax(row);
+          return {
+            grandTotal: totals.grandTotal + rowTax.grandTotal,
+            dpp: totals.dpp + rowTax.dpp,
+            dppNilaiLain: totals.dppNilaiLain + rowTax.dppNilaiLain,
+            ppnAmount: totals.ppnAmount + rowTax.ppnAmount,
+            pphAmount: totals.pphAmount + rowTax.pphAmount,
+            netAmount: totals.netAmount + rowTax.netAmount,
+          };
+        },
+        { grandTotal: 0, dpp: 0, dppNilaiLain: 0, ppnAmount: 0, pphAmount: 0, netAmount: 0 },
+      )
+    : null;
 
   const handleAction = (action: string) => {
     if (confirmAction === action) {
@@ -1516,9 +1542,36 @@ function BookingDetailDrawer({
               )}
               {bookingTax.ppnAmount > 0 || bookingTax.pphAmount > 0 ? (
                 <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1 space-y-1.5">
+                  {groupTax && (
+                    <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 dark:border-violet-800 dark:bg-violet-900/20">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-violet-800 dark:text-violet-200">
+                          Total seluruh grup
+                        </span>
+                        <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+                          {groupBookings.length} sesi
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="text-xs text-violet-700 dark:text-violet-300">Net grup dibayar</span>
+                        <span className="text-base font-black text-violet-800 dark:text-violet-200">
+                          {formatCurrency(groupTax.netAmount)}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-violet-600 dark:text-violet-300">
+                        <span>Total DPP + PPN grup</span>
+                        <span className="font-semibold">{formatCurrency(groupTax.grandTotal)}</span>
+                      </div>
+                    </div>
+                  )}
                   {(() => {
                     const { grandTotal: gt, dpp: dppCard, dppNilaiLain: dppNilaiLainCard, ppnAmount: ppnCard, pphRate, pphAmount, netAmount } = bookingTax;
                     return (<>
+                      {groupTax && (
+                        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Rincian sesi ini
+                        </div>
+                      )}
                       <div className="flex justify-between items-center text-sm">
                         <span className="flex items-center gap-1 text-slate-500"><CreditCard size={11} />DPP</span>
                         <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(dppCard)}</span>
@@ -1542,7 +1595,9 @@ function BookingDetailDrawer({
                             <span className="text-orange-700 dark:text-orange-300 font-semibold">−{formatCurrency(pphAmount)}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1">
-                            <span className="font-bold text-slate-700 dark:text-slate-200">Net dibayar</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-200">
+                              {groupTax ? "Net sesi ini" : "Net dibayar"}
+                            </span>
                             <span className="font-black text-green-700 dark:text-green-400 text-base">{formatCurrency(netAmount)}</span>
                           </div>
                         </>
@@ -4456,6 +4511,11 @@ export default function AdminBookings() {
       {selectedBooking && (
         <BookingDetailDrawer
           booking={selectedBooking}
+          groupBookings={
+            selectedBooking.groupRef
+              ? bookings.filter((row: any) => row.groupRef === selectedBooking.groupRef)
+              : []
+          }
           onClose={() => setSelectedBooking(null)}
           onUpdateStatus={handleStatusUpdate}
           onConfirmPayment={(paymentId) =>
