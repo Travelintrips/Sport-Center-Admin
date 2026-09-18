@@ -3910,6 +3910,8 @@ components:
           type: ["string", "null"]
         fonnteToken:
           type: ["string", "null"]
+        fonnteCustomerDevice:
+          type: ["string", "null"]
         fonnteAdminWa:
           type: ["string", "null"]
         adminWaPhones:
@@ -3945,6 +3947,8 @@ components:
         qrisImageUrl:
           type: string
         fonnteToken:
+          type: string
+        fonnteCustomerDevice:
           type: string
         fonnteAdminWa:
           type: string

@@ -3,6 +3,9 @@ import pg from "pg";
 const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
+ALTER TABLE sport_center.sport_settings
+  ADD COLUMN IF NOT EXISTS fonnte_customer_device text;
+
 -- Canonical facility table is sport_center.sport_facilities. Older
 -- migrations accidentally pointed these two foreign keys at the legacy
 -- sport_center.facilities table, which makes newly-created facilities

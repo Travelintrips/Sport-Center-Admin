@@ -15,7 +15,8 @@ import { getToken } from "@/lib/auth";
 type WhatsAppStatus = {
   admin: { tokenConfigured: boolean; tokenSource: "settings" | "environment" | "missing" };
   mina: {
-    deviceNumber: string;
+    deviceNumber: string | null;
+    deviceSource: "settings" | "environment" | "missing";
     tokenConfigured: boolean;
     tokenSource: "settings" | "environment" | "missing";
     inboundDeviceValidation: string;
@@ -488,7 +489,7 @@ export default function AdminSettings() {
     paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "", fonnteCustomerToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+    fonnteToken: "", fonnteCustomerToken: "", fonnteCustomerDevice: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
   });
   const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -516,6 +517,7 @@ export default function AdminSettings() {
       setWaForm({
         fonnteToken: (settings as any).fonnteToken ?? "",
         fonnteCustomerToken: (settings as any).fonnteCustomerToken ?? "",
+        fonnteCustomerDevice: (settings as any).fonnteCustomerDevice ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
         appUrl: (settings as any).appUrl ?? "",
@@ -524,6 +526,12 @@ export default function AdminSettings() {
       setQrisPreview((settings as any).qrisImageUrl ?? null);
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (!waForm.fonnteCustomerDevice && waStatus?.mina.deviceNumber) {
+      setWaForm((current) => ({ ...current, fonnteCustomerDevice: waStatus.mina.deviceNumber ?? "" }));
+    }
+  }, [waForm.fonnteCustomerDevice, waStatus?.mina.deviceNumber]);
 
   const updateMutation = useUpdateSettings({
     mutation: {
@@ -742,8 +750,10 @@ export default function AdminSettings() {
                   </Badge>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground">
-                Nomor: <strong>{waStatus?.mina.deviceNumber ?? "6281992935357"}</strong>. Payload webhook dengan field device yang berbeda akan ditolak.
+               <p className="text-xs text-muted-foreground">
+                 Nomor aktif: <strong>{waStatus?.mina.deviceNumber ?? "belum dikonfigurasi"}</strong>
+                 {" "}({waStatus?.mina.deviceSource === "settings" ? "Settings DB" : waStatus?.mina.deviceSource === "environment" ? "environment fallback" : "fail-closed"}).
+                 Payload webhook dengan field device yang berbeda akan ditolak.
                 Token tidak pernah dikembalikan oleh endpoint status.
               </p>
             </div>
@@ -776,7 +786,10 @@ export default function AdminSettings() {
               </div>
 
               <div className="md:col-span-2 space-y-2">
-                  <Label>Token Fonnte — Device Mina/customer (6281992935357)</Label>
+                   <Label>
+                     Token Fonnte — Device Mina/customer
+                     {waStatus?.mina.deviceNumber ? ` (${waStatus.mina.deviceNumber})` : ""}
+                   </Label>
                 <div className="relative">
                   <Input
                     type={showCustomerToken ? "text" : "password"}
@@ -794,10 +807,24 @@ export default function AdminSettings() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Token nomor WhatsApp customer/Mina (<strong>6281992935357</strong>). Digunakan untuk reply Mina dan notifikasi ke customer (booking, konfirmasi, reminder, dll).
+                   Token nomor WhatsApp customer/Mina. Digunakan untuk reply Mina dan notifikasi ke customer (booking, konfirmasi, reminder, dll).
                   Jika kosong, pengiriman customer dihentikan; sistem tidak memakai token admin sebagai fallback.
                 </p>
               </div>
+
+               <div className="md:col-span-2 space-y-2">
+                 <Label htmlFor="fonnteCustomerDevice">Nomor Device Mina / customer</Label>
+                 <Input
+                   id="fonnteCustomerDevice"
+                   value={waForm.fonnteCustomerDevice}
+                   onChange={(e) => setWaForm(f => ({ ...f, fonnteCustomerDevice: e.target.value }))}
+                   placeholder="08..., +62..., 628... atau 628...@c.us"
+                   required
+                 />
+                 <p className="text-xs text-muted-foreground">
+                   Disimpan dalam format canonical 628.... Perubahan berlaku langsung setelah disimpan; nomor kosong atau tidak valid ditolak.
+                 </p>
+               </div>
 
               <div className="space-y-2">
                 <Label>Nomor WA Admin Utama</Label>

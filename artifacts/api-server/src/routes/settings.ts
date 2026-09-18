@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 import { deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { invalidateBaseUrlCache } from "../lib/appUrl";
-import { MINA_FONNTE_DEVICE } from "../lib/fonnteConfig";
+import { normalizeFonnteDevice, resolveMinaFonnteDevice } from "../lib/fonnteConfig";
 
 const router = Router();
 
@@ -50,13 +50,15 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
     const settings = await getOrCreateSettings();
     const adminFromSettings = Boolean(settings.fonnteToken?.trim());
     const minaFromSettings = Boolean(settings.fonnteCustomerToken?.trim());
+    const minaDevice = await resolveMinaFonnteDevice();
     res.json({
       admin: {
         tokenConfigured: adminFromSettings || Boolean(process.env.FONNTE_TOKEN?.trim()),
         tokenSource: adminFromSettings ? "settings" : process.env.FONNTE_TOKEN?.trim() ? "environment" : "missing",
       },
       mina: {
-        deviceNumber: MINA_FONNTE_DEVICE,
+        deviceNumber: minaDevice.deviceNumber || null,
+        deviceSource: minaDevice.source,
         tokenConfigured: minaFromSettings || Boolean(process.env.FONNTE_CUSTOMER_TOKEN?.trim()),
         tokenSource: minaFromSettings
           ? "settings"
@@ -89,11 +91,24 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
       "centerName","address","phone","whatsapp","email",
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
       "fonnteToken","fonnteCustomerToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
+      "fonnteCustomerDevice",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        patch[key] = req.body[key] ?? null;
+        if (key === "fonnteCustomerDevice") {
+          const deviceNumber = normalizeFonnteDevice(req.body[key]);
+          if (!deviceNumber) {
+            res.status(400).json({
+              error: "Nomor Device Mina/customer wajib diisi dengan nomor WhatsApp Indonesia yang valid.",
+              code: "INVALID_FONNTE_CUSTOMER_DEVICE",
+            });
+            return;
+          }
+          patch[key] = deviceNumber;
+        } else {
+          patch[key] = req.body[key] ?? null;
+        }
       }
     }
     if (Object.keys(patch).length > 0) {

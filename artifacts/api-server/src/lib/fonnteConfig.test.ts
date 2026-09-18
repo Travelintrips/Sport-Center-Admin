@@ -1,5 +1,4 @@
 import {
-  MINA_FONNTE_DEVICE,
   normalizeFonnteDevice,
   resolveFonnteToken,
   selectFonnteToken,
@@ -7,27 +6,49 @@ import {
 } from "./fonnteConfig";
 
 describe("Fonnte Mina device and token separation", () => {
+  const deviceA = "6281111111111";
+  const deviceB = "6282222222222";
+
   it("normalizes common WhatsApp device formats", () => {
-    expect(normalizeFonnteDevice("0823 2130 1338")).toBe(MINA_FONNTE_DEVICE);
-    expect(normalizeFonnteDevice("+62 823 2130 1338")).toBe(MINA_FONNTE_DEVICE);
-    expect(normalizeFonnteDevice("6282321301338@c.us")).toBe(MINA_FONNTE_DEVICE);
+    expect(normalizeFonnteDevice("0811 1111 1111")).toBe(deviceA);
+    expect(normalizeFonnteDevice("+62 811 1111 1111")).toBe(deviceA);
+    expect(normalizeFonnteDevice("6281111111111@c.us")).toBe(deviceA);
+    expect(normalizeFonnteDevice("not-a-phone")).toBe("");
   });
 
   it("accepts payloads without device for backward-compatible Fonnte payloads", () => {
-    expect(validateMinaFonnteWebhookDevice({ sender: "628123456789" })).toEqual({
+    return expect(validateMinaFonnteWebhookDevice({ sender: "628123456789" }, deviceA)).resolves.toEqual({
       accepted: true,
       providedDevice: null,
+      configuredDevice: deviceA,
+      source: "settings",
     });
   });
 
-  it("accepts only the configured Mina device when device is supplied", () => {
-    expect(validateMinaFonnteWebhookDevice({ device: MINA_FONNTE_DEVICE })).toEqual({
+  it("changes acceptance from device A to device B without restarting", async () => {
+    await expect(validateMinaFonnteWebhookDevice({ device: deviceA }, deviceA)).resolves.toMatchObject({
       accepted: true,
-      providedDevice: MINA_FONNTE_DEVICE,
+      configuredDevice: deviceA,
     });
-    expect(validateMinaFonnteWebhookDevice({ device: "6285112345678" })).toEqual({
+    await expect(validateMinaFonnteWebhookDevice({ device: deviceA }, deviceB)).resolves.toMatchObject({
       accepted: false,
-      providedDevice: "6285112345678",
+      configuredDevice: deviceB,
+    });
+    await expect(validateMinaFonnteWebhookDevice({ device: deviceB }, deviceB)).resolves.toMatchObject({
+      accepted: true,
+      configuredDevice: deviceB,
+    });
+  });
+
+  it("fails closed when the configured device is empty or invalid", async () => {
+    await expect(validateMinaFonnteWebhookDevice({ device: deviceA }, "")).resolves.toMatchObject({
+      accepted: false,
+      configuredDevice: null,
+      source: "settings",
+    });
+    await expect(validateMinaFonnteWebhookDevice({ device: deviceA }, "invalid")).resolves.toMatchObject({
+      accepted: false,
+      configuredDevice: null,
     });
   });
 
