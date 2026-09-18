@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
@@ -3114,7 +3114,9 @@ async function execCreateBookingFromSession(
   });
 }
 
-// ─── POST /api/wa/fonnte/webhook — Fonnte inbound message handler ─────────────
+// ─── Fonnte inbound message handler ───────────────────────────────────────────
+// Canonical URL: /api/wa/fonnte/webhook
+// Compatibility URL used by existing Fonnte devices: /api/webhook/fonnte
 
 // ─── Per-phone message hash dedup (survives ID-less retries) ─────────────────
 const _recentMsgHashes = new Map<string, number>(); // "phone:msgHash" → timestamp
@@ -3162,7 +3164,7 @@ function isDuplicateByContent(phone: string, msg: string): boolean {
   return false;
 }
 
-router.post("/wa/fonnte/webhook", async (req, res) => {
+const handleFonnteWebhook = async (req: Request, res: Response) => {
   // Respond immediately to avoid Fonnte timeout/retry
   res.status(200).json({ status: "ok" });
 
@@ -3385,7 +3387,9 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
   } catch (err) {
     console.error("[wa/fonnte/webhook] error:", err);
   }
-});
+};
+
+router.post(["/wa/fonnte/webhook", "/webhook/fonnte"], handleFonnteWebhook);
 
 // ─── GET /api/wa/booking-approval/:token — load form data (no auth) ──────────
 router.get("/wa/booking-approval/:token", async (req, res) => {
