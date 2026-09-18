@@ -121,13 +121,21 @@ router.post("/auth/send-otp", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     otpStore.set(cleaned, { otp, expires });
 
-    const fonnteCustomerToken = (await getFonnteConfig()).customerToken;
-    if (fonnteCustomerToken && allowWhatsAppProviderSend()) {
+    const fonnte = await getFonnteConfig();
+    if (
+      fonnte.customerToken &&
+      fonnte.customerDevice &&
+      allowWhatsAppProviderSend({
+        channel: "mina",
+        recipient: cleaned,
+        customerTokenConfigured: true,
+      })
+    ) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
           headers: {
-            Authorization: fonnteCustomerToken,
+            Authorization: fonnte.customerToken,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -242,12 +250,20 @@ router.post("/auth/forgot-password", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     resetOtpStore.set(cleaned, { otp, expires, email });
 
-    const fonnteCustomerToken = (await getFonnteConfig()).customerToken;
-    if (fonnteCustomerToken && allowWhatsAppProviderSend()) {
+    const fonnte = await getFonnteConfig();
+    if (
+      fonnte.customerToken &&
+      fonnte.customerDevice &&
+      allowWhatsAppProviderSend({
+        channel: "mina",
+        recipient: cleaned,
+        customerTokenConfigured: true,
+      })
+    ) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
-          headers: { Authorization: fonnteCustomerToken, "Content-Type": "application/json" },
+          headers: { Authorization: fonnte.customerToken, "Content-Type": "application/json" },
           body: JSON.stringify({
             target: cleaned,
             message: `Kode reset password Sport Center Anda: *${otp}*\n\nBerlaku 5 menit. Jangan bagikan ke siapapun.`,

@@ -18,7 +18,12 @@ function interpolate(template: string, vars: Record<string, string>): string {
 
 // getBaseUrl() imported from ./appUrl — reads paymentDomain from settings DB with 5-min cache
 
-async function getWaConfig(): Promise<{ token: string; customerToken: string; adminPhones: string[] }> {
+async function getWaConfig(): Promise<{
+  token: string;
+  customerToken: string;
+  customerDevice: string;
+  adminPhones: string[];
+}> {
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
     const fonnte = await getFonnteConfig();
@@ -34,7 +39,12 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
     if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
       adminPhones.push(ENV_ADMIN_WA_GROUP);
     }
-    return { token: fonnte.adminToken, customerToken: fonnte.customerToken, adminPhones };
+    return {
+      token: fonnte.adminToken,
+      customerToken: fonnte.customerToken,
+      customerDevice: fonnte.customerDevice,
+      adminPhones,
+    };
   } catch {
     const adminPhones = ENV_ADMIN_WA_PHONES
       ? ENV_ADMIN_WA_PHONES.split(",").map((p) => p.trim()).filter(Boolean)
@@ -46,7 +56,12 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       adminPhones.push(ENV_ADMIN_WA_GROUP);
     }
     const fonnte = await getFonnteConfig();
-    return { token: fonnte.adminToken, customerToken: fonnte.customerToken, adminPhones };
+    return {
+      token: fonnte.adminToken,
+      customerToken: fonnte.customerToken,
+      customerDevice: fonnte.customerDevice,
+      adminPhones,
+    };
   }
 }
 
@@ -91,13 +106,22 @@ async function sendWA(
   trackSentMessage(message);
   const config = await getWaConfig();
   const token = useCustomerToken ? config.customerToken : config.token;
+  if (useCustomerToken && !config.customerDevice) {
+    logger.warn("[WA] Device Mina/customer belum dikonfigurasi — pesan customer tidak dikirim");
+    if (ctx) logWaSend(cleanPhone, message, "failed", "Device Mina/customer belum dikonfigurasi", ctx).catch(() => {});
+    return;
+  }
   if (!token) {
     const tokenName = useCustomerToken ? "FONNTE_CUSTOMER_TOKEN" : "FONNTE_TOKEN";
     logger.error(`[WA] sendWA: ${tokenName} kosong — pesan tidak dikirim ke ${cleanPhone}`);
     if (ctx) logWaSend(cleanPhone, message, "failed", `${tokenName} kosong`, ctx).catch(() => {});
     return;
   }
-  logger.info({ target: cleanPhone, sender: useCustomerToken ? "customer" : "admin" }, "[WA] Mengirim pesan WA via Fonnte");
+  logger.info({
+    target: cleanPhone,
+    sender: useCustomerToken ? "customer" : "admin",
+    ...(useCustomerToken ? { deviceSource: "settings-or-environment" } : {}),
+  }, "[WA] Mengirim pesan WA via Fonnte");
   try {
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",

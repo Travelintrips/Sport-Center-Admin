@@ -19,6 +19,7 @@ type WhatsAppStatus = {
     deviceSource: "settings" | "environment" | "missing";
     tokenConfigured: boolean;
     tokenSource: "settings" | "environment" | "missing";
+    active: boolean;
     inboundDeviceValidation: string;
   };
 };
@@ -740,13 +741,18 @@ export default function AdminSettings() {
             <div className="rounded-lg border bg-muted/30 p-3 flex flex-col gap-1">
               <div className="flex items-center justify-between gap-3">
                 <span className="font-medium text-sm">Device Mina / customer</span>
-                {waStatus?.mina.tokenConfigured ? (
+                {waStatus?.mina.active ? (
                   <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
-                    <CheckCircle2 size={12} /> Siap
+                    <CheckCircle2 size={12} /> Device aktif
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
-                    <AlertCircle size={12} /> Token belum ada
+                    <AlertCircle size={12} />
+                    {!waStatus?.mina.deviceNumber
+                      ? "Device belum dikonfigurasi"
+                      : !waStatus?.mina.tokenConfigured
+                      ? "Token customer belum ada"
+                      : "Belum siap"}
                   </Badge>
                 )}
               </div>

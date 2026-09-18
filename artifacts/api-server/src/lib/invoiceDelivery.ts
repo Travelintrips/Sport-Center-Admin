@@ -33,12 +33,15 @@ async function getEmailConfig() {
   return { smtpFrom, smtpPass, configured: Boolean(smtpFrom && smtpPass) };
 }
 
-async function getFonnteCustomerToken(): Promise<string | null> {
-  try {
-    return (await getFonnteConfig()).customerToken || null;
-  } catch {
-    return process.env.FONNTE_CUSTOMER_TOKEN || null;
-  }
+async function getFonnteCustomerChannel(): Promise<{
+  token: string;
+  deviceNumber: string;
+}> {
+  const fonnte = await getFonnteConfig();
+  return {
+    token: fonnte.customerToken,
+    deviceNumber: fonnte.customerDevice,
+  };
 }
 
 function cleanPhone(raw: string): string {
@@ -177,9 +180,13 @@ async function sendInvoicePdfWA(params: {
     return;
   }
 
-  const token = await getFonnteCustomerToken();
-  if (!token) {
+  const customerChannel = await getFonnteCustomerChannel();
+  if (!customerChannel.token) {
     logger.warn({ orderNumber: params.orderNumber }, "[InvoiceDelivery] FONNTE_CUSTOMER_TOKEN tidak tersedia — WA tidak dikirim");
+    return;
+  }
+  if (!customerChannel.deviceNumber) {
+    logger.warn({ orderNumber: params.orderNumber }, "[InvoiceDelivery] Device Mina/customer tidak tersedia — WA tidak dikirim");
     return;
   }
 
@@ -197,7 +204,7 @@ async function sendInvoicePdfWA(params: {
 
   const resp = await fetch("https://api.fonnte.com/send", {
     method: "POST",
-    headers: { Authorization: token, "Content-Type": "application/json" },
+    headers: { Authorization: customerChannel.token, "Content-Type": "application/json" },
     body: JSON.stringify({ target: phone, message }),
   });
 
@@ -515,8 +522,9 @@ export async function sendGroupInvoiceToCustomer(
     } else {
       if (!phone) throw new Error("Nomor HP customer kosong");
 
-      const token = await getFonnteCustomerToken();
-      if (!token) throw new Error("FONNTE_CUSTOMER_TOKEN tidak tersedia");
+      const customerChannel = await getFonnteCustomerChannel();
+      if (!customerChannel.token) throw new Error("FONNTE_CUSTOMER_TOKEN tidak tersedia");
+      if (!customerChannel.deviceNumber) throw new Error("Device Mina/customer tidak tersedia");
 
       const fmtNum = (n: number) => new Intl.NumberFormat("id-ID").format(n);
       const sessionLines = sorted.slice(0, 8)
@@ -535,7 +543,7 @@ export async function sendGroupInvoiceToCustomer(
 
       const resp = await fetch("https://api.fonnte.com/send", {
         method: "POST",
-        headers: { Authorization: token, "Content-Type": "application/json" },
+        headers: { Authorization: customerChannel.token, "Content-Type": "application/json" },
         body: JSON.stringify({ target: phone, message }),
       });
       const body = await resp.json().catch(() => ({}));

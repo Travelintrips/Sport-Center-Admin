@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 import { deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { invalidateBaseUrlCache } from "../lib/appUrl";
-import { normalizeFonnteDevice, resolveMinaFonnteDevice } from "../lib/fonnteConfig";
+import { getFonnteConfig, normalizeFonnteDevice } from "../lib/fonnteConfig";
 
 const router = Router();
 
@@ -47,24 +47,20 @@ function publicSettings(settings: Awaited<ReturnType<typeof getOrCreateSettings>
 
 router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
   try {
-    const settings = await getOrCreateSettings();
-    const adminFromSettings = Boolean(settings.fonnteToken?.trim());
-    const minaFromSettings = Boolean(settings.fonnteCustomerToken?.trim());
-    const minaDevice = await resolveMinaFonnteDevice();
+    const fonnte = await getFonnteConfig();
+    const adminTokenConfigured = Boolean(fonnte.adminToken);
+    const minaTokenConfigured = Boolean(fonnte.customerToken);
     res.json({
       admin: {
-        tokenConfigured: adminFromSettings || Boolean(process.env.FONNTE_TOKEN?.trim()),
-        tokenSource: adminFromSettings ? "settings" : process.env.FONNTE_TOKEN?.trim() ? "environment" : "missing",
+        tokenConfigured: adminTokenConfigured,
+        tokenSource: fonnte.adminTokenSource,
       },
       mina: {
-        deviceNumber: minaDevice.deviceNumber || null,
-        deviceSource: minaDevice.source,
-        tokenConfigured: minaFromSettings || Boolean(process.env.FONNTE_CUSTOMER_TOKEN?.trim()),
-        tokenSource: minaFromSettings
-          ? "settings"
-          : process.env.FONNTE_CUSTOMER_TOKEN?.trim()
-          ? "environment"
-          : "missing",
+        deviceNumber: fonnte.customerDevice || null,
+        deviceSource: fonnte.customerDeviceSource,
+        tokenConfigured: minaTokenConfigured,
+        tokenSource: fonnte.customerTokenSource,
+        active: Boolean(fonnte.customerDevice && minaTokenConfigured),
         inboundDeviceValidation: "when_fonnte_payload_includes_device",
       },
     });

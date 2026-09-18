@@ -36,6 +36,7 @@ const ENV_KEYS = [
   "SESSION_SECRET",
   "FONNTE_TOKEN",
   "FONNTE_CUSTOMER_TOKEN",
+  "FONNTE_CUSTOMER_DEVICE",
   "WA_DEV_MINA_TEST_RECIPIENT",
   "OPENAI_API_KEY",
   "GOOGLE_SERVICE_ACCOUNT_JSON",
@@ -88,6 +89,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
   session_secret: ["session_secret", "SESSION_SECRET"],
   fonnte_token: ["fonnte_token", "FONNTE_TOKEN"],
   fonnte_customer_token: ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
+  fonnte_customer_device: ["fonnte_customer_device", "FONNTE_CUSTOMER_DEVICE"],
   wa_dev_mina_test_recipient: [
     "wa_dev_mina_test_recipient",
     "WA_DEV_MINA_TEST_RECIPIENT",

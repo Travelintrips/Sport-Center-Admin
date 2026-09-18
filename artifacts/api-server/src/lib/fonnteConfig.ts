@@ -4,8 +4,14 @@ export const CUSTOMER_DEVICE_ENV = "FONNTE_CUSTOMER_DEVICE";
 
 export type FonnteConfig = {
   adminToken: string;
+  adminTokenSource: FonnteValueSource;
   customerToken: string;
+  customerTokenSource: FonnteValueSource;
+  customerDevice: string;
+  customerDeviceSource: MinaDeviceResolution["source"];
 };
+
+export type FonnteValueSource = "settings" | "environment" | "missing";
 
 export type MinaDeviceResolution = {
   deviceNumber: string;
@@ -20,6 +26,12 @@ export function resolveFonnteToken(settingsValue: unknown, environmentValue: unk
   return String(settingsValue ?? "").trim() || String(environmentValue ?? "").trim();
 }
 
+export function resolveFonnteValueSource(settingsValue: unknown, environmentValue: unknown): FonnteValueSource {
+  if (String(settingsValue ?? "").trim()) return "settings";
+  if (String(environmentValue ?? "").trim()) return "environment";
+  return "missing";
+}
+
 export function normalizeFonnteDevice(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -31,29 +43,38 @@ export function normalizeFonnteDevice(value: unknown): string {
   return /^628\d{8,11}$/.test(digits) ? digits : "";
 }
 
+export function resolveMinaFonnteDeviceValue(
+  settingsValue: unknown,
+  environmentValue: unknown = process.env[CUSTOMER_DEVICE_ENV],
+): MinaDeviceResolution {
+  const configured = String(settingsValue ?? "").trim();
+  if (configured) {
+    const deviceNumber = normalizeFonnteDevice(configured);
+    return {
+      deviceNumber,
+      source: deviceNumber ? "settings" : "missing",
+    };
+  }
+
+  const deviceNumber = normalizeFonnteDevice(environmentValue);
+  return {
+    deviceNumber,
+    source: deviceNumber ? "environment" : "missing",
+  };
+}
+
 export async function resolveMinaFonnteDevice(): Promise<MinaDeviceResolution> {
   try {
     const [settings] = await db
       .select({ device: settingsTable.fonnteCustomerDevice })
       .from(settingsTable)
       .limit(1);
-    const configured = String(settings?.device ?? "").trim();
-    if (configured) {
-      const deviceNumber = normalizeFonnteDevice(configured);
-      return {
-        deviceNumber,
-        source: deviceNumber ? "settings" : "missing",
-      };
-    }
+    return resolveMinaFonnteDeviceValue(settings?.device);
   } catch {
     // A missing/older schema must not prevent the env fallback from working.
   }
 
-  const deviceNumber = normalizeFonnteDevice(process.env[CUSTOMER_DEVICE_ENV]);
-  return {
-    deviceNumber,
-    source: deviceNumber ? "environment" : "missing",
-  };
+  return resolveMinaFonnteDeviceValue(undefined);
 }
 
 export async function validateMinaFonnteWebhookDevice(
@@ -96,18 +117,29 @@ export async function getFonnteConfig(): Promise<FonnteConfig> {
       .select({
         adminToken: settingsTable.fonnteToken,
         customerToken: settingsTable.fonnteCustomerToken,
+        customerDevice: settingsTable.fonnteCustomerDevice,
       })
       .from(settingsTable)
       .limit(1);
+    const minaDevice = resolveMinaFonnteDeviceValue(settings?.customerDevice);
 
     return {
       adminToken: resolveFonnteToken(settings?.adminToken, process.env.FONNTE_TOKEN),
+      adminTokenSource: resolveFonnteValueSource(settings?.adminToken, process.env.FONNTE_TOKEN),
       customerToken: resolveFonnteToken(settings?.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
+      customerTokenSource: resolveFonnteValueSource(settings?.customerToken, process.env.FONNTE_CUSTOMER_TOKEN),
+      customerDevice: minaDevice.deviceNumber,
+      customerDeviceSource: minaDevice.source,
     };
   } catch {
+    const minaDevice = resolveMinaFonnteDeviceValue(undefined);
     return {
       adminToken: resolveFonnteToken(undefined, process.env.FONNTE_TOKEN),
+      adminTokenSource: resolveFonnteValueSource(undefined, process.env.FONNTE_TOKEN),
       customerToken: resolveFonnteToken(undefined, process.env.FONNTE_CUSTOMER_TOKEN),
+      customerTokenSource: resolveFonnteValueSource(undefined, process.env.FONNTE_CUSTOMER_TOKEN),
+      customerDevice: minaDevice.deviceNumber,
+      customerDeviceSource: minaDevice.source,
     };
   }
 }

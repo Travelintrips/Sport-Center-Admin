@@ -40,14 +40,18 @@ router.get("/companies", async (req, res) => {
 });
 
 async function sendWA(phone: string, message: string): Promise<void> {
-  const fonnteToken = (await getFonnteConfig()).customerToken;
-  if (!fonnteToken || !phone) return;
-  if (!allowWhatsAppProviderSend()) return;
+  const fonnte = await getFonnteConfig();
+  if (!fonnte.customerToken || !fonnte.customerDevice || !phone) return;
+  if (!allowWhatsAppProviderSend({
+    channel: "mina",
+    recipient: phone,
+    customerTokenConfigured: Boolean(fonnte.customerToken),
+  })) return;
   try {
     const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
-      headers: { Authorization: fonnteToken, "Content-Type": "application/json" },
+      headers: { Authorization: fonnte.customerToken, "Content-Type": "application/json" },
       body: JSON.stringify({ target: cleanPhone, message }),
     });
   } catch { /* non-critical */ }

@@ -383,13 +383,20 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
       return;
     }
 
-    const token = (await getFonnteConfig()).customerToken;
+    const fonnte = await getFonnteConfig();
 
-    if (!token) { res.status(400).json({ error: "FONNTE_CUSTOMER_TOKEN tidak dikonfigurasi" }); return; }
+    if (!fonnte.customerToken) {
+      res.status(400).json({ error: "FONNTE_CUSTOMER_TOKEN tidak dikonfigurasi" });
+      return;
+    }
+    if (!fonnte.customerDevice) {
+      res.status(400).json({ error: "Nomor Device Mina/customer belum dikonfigurasi" });
+      return;
+    }
 
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
+      headers: { Authorization: fonnte.customerToken, "Content-Type": "application/json" },
       body: JSON.stringify({ target: phone, message }),
     });
 

@@ -65,7 +65,6 @@ import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import {
   getFonnteConfig,
   selectFonnteToken,
-  resolveMinaFonnteDevice,
   validateMinaFonnteWebhookDevice,
 } from "../lib/fonnteConfig";
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
@@ -1496,13 +1495,12 @@ router.post("/wa/review/:token", async (req, res) => {
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<void> {
   if (!phone) return;
   const fonnte = await getFonnteConfig();
-  const minaDevice = useCustomerToken ? await resolveMinaFonnteDevice() : null;
-  if (useCustomerToken && !minaDevice?.deviceNumber) {
+  if (useCustomerToken && !fonnte.customerDevice) {
     logger.warn("[wa] Device Mina/customer belum dikonfigurasi; pesan customer tidak dikirim");
     await logAudit({
       action: "wa_outbound_skipped_missing_device",
       entity: "wa_outbound",
-      after: { recipient: phone, channel: "mina", deviceSource: minaDevice?.source ?? "missing" },
+      after: { recipient: phone, channel: "mina", deviceSource: fonnte.customerDeviceSource },
     }).catch(() => {});
     return;
   }

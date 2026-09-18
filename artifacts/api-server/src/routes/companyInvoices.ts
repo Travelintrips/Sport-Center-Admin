@@ -1305,12 +1305,20 @@ router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) =
       `Sport Center Soekarno-Hatta`
     );
 
-    const token = (await getFonnteConfig()).customerToken;
-    if (token && allowWhatsAppProviderSend()) {
+    const fonnte = await getFonnteConfig();
+    if (
+      fonnte.customerToken &&
+      fonnte.customerDevice &&
+      allowWhatsAppProviderSend({
+        channel: "mina",
+        recipient: picPhone,
+        customerTokenConfigured: true,
+      })
+    ) {
       const phone = picPhone.replace(/^\+/, "").replace(/^0/, "62");
       await fetch("https://api.fonnte.com/send", {
         method: "POST",
-        headers: { Authorization: token, "Content-Type": "application/json" },
+        headers: { Authorization: fonnte.customerToken, "Content-Type": "application/json" },
         body: JSON.stringify({ target: phone, message: decodeURIComponent(message) }),
       });
     }
