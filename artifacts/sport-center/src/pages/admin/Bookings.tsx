@@ -3990,9 +3990,11 @@ export default function AdminBookings() {
                             return sum + rowTax.netAmount;
                          }, 0)
                        : bookingDisplayTotal;
-                      const displayTotal = isPaidCompanyInvoice
+                      const groupSummaryTotal = isPaidCompanyInvoice
                         ? companyInvoiceDisplayTotal
                         : groupDisplayTotal;
+                      const isGroupTotalRow =
+                        isMultiSessionGroup && groupRows[0]?.id === b.id;
 
                     return (
                     <motion.tr
@@ -4148,9 +4150,9 @@ export default function AdminBookings() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="space-y-0.5">
-                          {/* Nominal utama: total grup jika group booking, individual jika bukan */}
+                          {/* Nominal utama selalu nominal sesi ini. Total group ditampilkan sekali di bawah. */}
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                             {formatCurrency(displayTotal)}
+                             {formatCurrency(bookingDisplayTotal)}
                           </span>
                           {b.groupRef && (
                             <div className="flex flex-col gap-0.5 mt-0.5">
@@ -4165,15 +4167,14 @@ export default function AdminBookings() {
                                   </span>
                                 )}
                               </div>
-                               {/* Ref grup + nominal per sesi hanya untuk booking personal.
-                                   Invoice perusahaan lunas sudah dibayar satu kali di level invoice. */}
+                               {/* Ref grup + ringkasan total group. */}
                               <div className="flex items-center gap-1 flex-wrap">
                                 <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700">
                                   <Link2 size={9} /> {b.groupRef}
                                 </span>
-                                 {!isPaidCompanyInvoice && (
-                                   <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                                      sesi ini: {formatCurrency(bookingDisplayTotal)}
+                                 {isGroupTotalRow && (
+                                   <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+                                     total group: {formatCurrency(groupSummaryTotal)}
                                    </span>
                                  )}
                                  {bookingTax.pphAmount > 0 && (
