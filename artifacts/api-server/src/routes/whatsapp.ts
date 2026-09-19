@@ -2632,7 +2632,7 @@ async function presentBookingSession(
         current.durationMinutes ?? 60,
       );
       reply += slots.length
-        ? `\n\n🟢 *Slot tersedia tanggal ${current.bookingDate}:*\n${slots.join("  | ")}`
+        ? `\n\n🟢 *Slot tersedia di ${facility.name} tanggal ${current.bookingDate}:*\n${slots.join("  | ")}`
         : `\n\n⚠️ Semua slot tanggal *${current.bookingDate}* sudah penuh. Coba tanggal lain.`;
     }
     await appendMessage(current.id, "bot", reply);
@@ -2900,9 +2900,59 @@ async function continueSession(
         session.startTime,
         minutesToHours(session.durationMinutes),
       );
+      const keepCurrentFacilityChoice = alternatives.length + 1;
+      const chooseAnotherDateChoice = alternatives.length + 2;
+      const wantsAnotherTime =
+        lower === String(keepCurrentFacilityChoice) ||
+        /^(tetap|pilih|ganti).*(jam|waktu)|jam lain|pilih jam lain/i.test(lower);
+      const wantsAnotherDate =
+        lower === String(chooseAnotherDateChoice) ||
+        /tanggal lain|ganti tanggal|pilih tanggal lain/i.test(lower);
+
+      if (wantsAnotherTime) {
+        const [facility] = await db
+          .select()
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, session.facilityId))
+          .limit(1);
+        const slots = facility
+          ? await getAvailableSlotsForDay(
+            facility.id,
+            session.bookingDate,
+            facility.openTime,
+            facility.closeTime,
+            session.durationMinutes,
+          )
+          : [];
+        const updated = await updateSession(session.id, {
+          startTime: null,
+          currentStep: "ask_time",
+        });
+        const reply = facility && slots.length > 0
+          ? `⏰ Baik, tetap di *${facility.name}*. Silakan pilih jam lain untuk durasi *${minutesToHours(session.durationMinutes)} jam*:\n\n🟢 *Slot tersedia di ${facility.name} tanggal ${session.bookingDate}:*\n${slots.join("  |  ")}`
+          : `⚠️ Tidak ada slot lain yang tersedia di *${facility?.name ?? "fasilitas ini"}* pada tanggal tersebut. Silakan pilih tanggal lain.`;
+        await appendMessage(updated.id, "bot", reply);
+        await sendReply(reply);
+        return;
+      }
+
+      if (wantsAnotherDate) {
+        const updated = await updateSession(session.id, {
+          bookingDate: null,
+          startTime: null,
+          currentStep: "ask_date",
+        });
+        const reply = `📅 Baik, silakan pilih tanggal lain untuk *${minutesToHours(session.durationMinutes)} jam* di fasilitas yang sama.`;
+        await appendMessage(updated.id, "bot", reply);
+        await sendReply(reply);
+        return;
+      }
+
       const selectedIndex = lower.match(/^(\d+)$/)?.[1];
       const selected = selectedIndex
-        ? alternatives[Number(selectedIndex) - 1]
+        ? Number(selectedIndex) <= alternatives.length
+          ? alternatives[Number(selectedIndex) - 1]
+          : null
         : alternatives.find((candidate) => {
           const candidateName = candidate.name.toLowerCase();
           const requestedName = lower.replace(/^(pilih|mau|ambil)\s+/, "").trim();
@@ -2911,10 +2961,21 @@ async function continueSession(
 
       if (!selected) {
         const reply = alternatives.length > 0
-          ? `Silakan pilih lapangan yang tersedia:\n\n${alternatives
-            .map((candidate, index) => `${index + 1}. *${candidate.name}*`)
-            .join("\n")}\n\nKetik nomor atau nama lapangan.`
+          ? buildAlternativeFacilityChoiceReply({
+            facilityName: (await db
+              .select({ name: facilitiesTable.name })
+              .from(facilitiesTable)
+              .where(eq(facilitiesTable.id, session.facilityId))
+              .limit(1))[0]?.name ?? "fasilitas pilihan",
+            bookingDate: session.bookingDate,
+            startTime: session.startTime,
+            endTime: addHoursToTime(session.startTime, minutesToHours(session.durationMinutes)),
+            alternatives,
+          })
           : `Maaf, slot tersebut sudah tidak tersedia di lapangan lain. Silakan ketik jam lain atau *batal*.`;
+        if (alternatives.length === 0) {
+          await updateSession(session.id, { startTime: null, currentStep: "ask_time" });
+        }
         await appendMessage(session.id, "bot", reply);
         await sendReply(reply);
         return;
@@ -2985,7 +3046,7 @@ async function continueSession(
               session.durationMinutes ?? 60,
             );
             const slotsStr = availSlots.length > 0
-              ? `\n\n🟢 *Slot tersedia:*\n${availSlots.join("  |  ")}`
+              ? `\n\n🟢 *Slot tersedia di ${fac.name}:*\n${availSlots.join("  | ")}`
               : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
             const reply = `⏰ Jam *${parsed.startTime}* di luar jam operasional *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
             await appendMessage(session.id, "bot", reply);
@@ -3011,14 +3072,17 @@ async function continueSession(
               session.durationMinutes ?? 60,
             );
             const slotsStr = availSlots.length > 0
-              ? `\n\n🟢 *Slot tersedia tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}`
-              : `\n\n⚠️ Tidak ada slot lain yang tersedia. Ketik *batal* dan pilih tanggal berbeda.`;
-            const facilitySwitch = alternativeFacilities.length > 0
-              ? `\n\n🔁 *Slot yang sama tersedia di lapangan lain:*\n${alternativeFacilities
-                .map((candidate, index) => `${index + 1}. *${candidate.name}*`)
-                .join("\n")}\n\nBalas nomor/nama lapangan untuk pindah, atau ketik jam lain.`
-              : "";
-            const reply = `❌ Slot jam *${parsed.startTime}* pada *${session.bookingDate}* sudah terisi.${facilitySwitch}${slotsStr}`;
+              ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}\n\nPilih jam lain:`
+              : `\n\n⚠️ Tidak ada slot lain yang tersedia. Pilih tanggal berbeda atau ketik *batal*.`;
+            const reply = alternativeFacilities.length > 0
+              ? buildAlternativeFacilityChoiceReply({
+                facilityName: fac.name,
+                bookingDate: session.bookingDate,
+                startTime: parsed.startTime,
+                endTime: addHoursToTime(parsed.startTime, durationHours),
+                alternatives: alternativeFacilities,
+              })
+              : `❌ Slot jam *${parsed.startTime}* pada *${session.bookingDate}* sudah terisi di *${fac.name}*.${slotsStr}`;
             await updateSession(session.id, {
               startTime: parsed.startTime,
               currentStep: alternativeFacilities.length > 0 ? "choose_alternative_facility" : "ask_time",
@@ -3078,7 +3142,7 @@ async function continueSession(
           updated.durationMinutes ?? 60,
         );
         reply += slots.length
-          ? `\n\n🟢 *Slot tersedia tanggal ${updated.bookingDate}:*\n${slots.join("  |  ")}`
+          ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${updated.bookingDate}:*\n${slots.join("  | ")}`
           : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.`;
       }
       await appendMessage(session.id, "bot", reply);
@@ -3209,7 +3273,8 @@ async function buildStepQuestion(
         ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
         : null;
       const hours = fac ? ` (jam operasional: *${fac.openTime}–${fac.closeTime}*)` : "";
-      return `⏰ Jam berapa mau mulai?${hours}\nContoh: *jam 8 pagi*, *jam 20.00*, *19:00*`;
+      const facilityLabel = fac?.name ? ` di *${fac.name}*` : "";
+      return `⏰ Jam berapa mau mulai${facilityLabel}?${hours}\nContoh: *jam 8 pagi*, *jam 20.00*, *19:00*`;
     }
 
     case "ask_duration":
@@ -3403,6 +3468,31 @@ async function getAvailableAlternativeFacilities(
   return available;
 }
 
+function buildAlternativeFacilityChoiceReply(params: {
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  alternatives: Array<typeof facilitiesTable.$inferSelect>;
+}): string {
+  const switchOptions = params.alternatives
+    .map((candidate, index) => `${index + 1}. Ya, pindah ke *${candidate.name}*`)
+    .join("\n");
+  const keepCurrentFacilityChoice = params.alternatives.length + 1;
+  const chooseAnotherDateChoice = params.alternatives.length + 2;
+
+  return [
+    `❌ Slot *${params.startTime}–${params.endTime}* di *${params.facilityName}* pada *${params.bookingDate}* sudah penuh.`,
+    ``,
+    `✅ Slot yang sama masih tersedia di:`,
+    switchOptions,
+    `${keepCurrentFacilityChoice}. Tetap di *${params.facilityName}*, pilih jam lain`,
+    `${chooseAnotherDateChoice}. Pilih tanggal lain`,
+    ``,
+    `Silakan balas nomor pilihan kamu.`,
+  ].join("\n");
+}
+
 async function checkSlotAvailable(
   facilityId: number,
   date: string,
@@ -3563,9 +3653,13 @@ async function execCreateBookingFromSession(
       `Slot *${session.startTime}–${endTime}* pada *${session.bookingDate}* sudah terisi untuk *${facility.name}*.`;
 
     if (alternativeFacilities.length > 0) {
-      reply += `\n\n🔁 *Slot yang sama tersedia di lapangan lain:*\n` +
-        alternativeFacilities.map((candidate, index) => `${index + 1}. *${candidate.name}*`).join("\n") +
-        `\n\nBalas nomor/nama lapangan untuk pindah, atau ketik *batal* untuk membatalkan.`;
+      reply = buildAlternativeFacilityChoiceReply({
+        facilityName: facility.name,
+        bookingDate: session.bookingDate,
+        startTime: session.startTime,
+        endTime,
+        alternatives: alternativeFacilities,
+      });
       await updateSession(session.id, { currentStep: "choose_alternative_facility" });
     } else if (alternatives.length > 0) {
       reply += `\n\n🕐 *Alternatif jam yang tersedia pada tanggal yang sama:*\n` +
@@ -3705,9 +3799,13 @@ async function execCreateBookingFromSession(
       durationHours,
     );
     if (alternativeFacilities.length > 0) {
-      reply += `\n\n🔁 *Slot yang sama tersedia di lapangan lain:*\n${alternativeFacilities
-        .map((candidate, index) => `${index + 1}. *${candidate.name}*`)
-        .join("\n")}\n\nBalas nomor/nama lapangan untuk pindah, atau *batal* untuk membatalkan.`;
+      reply = buildAlternativeFacilityChoiceReply({
+        facilityName: facility.name,
+        bookingDate: session.bookingDate,
+        startTime: session.startTime,
+        endTime,
+        alternatives: alternativeFacilities,
+      });
       await updateSession(session.id, { currentStep: "choose_alternative_facility" });
     } else {
       reply += alternatives.length
