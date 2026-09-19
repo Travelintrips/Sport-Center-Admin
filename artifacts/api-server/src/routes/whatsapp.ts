@@ -2549,7 +2549,13 @@ async function presentBookingSession(
   if (nextStep !== "confirm") {
     let reply = await buildStepQuestion(nextStep, current, facility?.name ?? "", Number(facility?.pricePerHour ?? 0));
     if (nextStep === "ask_time" && facility && current.bookingDate && facility.bookingMode !== "walk_in") {
-      const slots = await getAvailableSlotsForDay(current.facilityId!, current.bookingDate, facility.openTime, facility.closeTime);
+      const slots = await getAvailableSlotsForDay(
+        current.facilityId!,
+        current.bookingDate,
+        facility.openTime,
+        facility.closeTime,
+        current.durationMinutes ?? 60,
+      );
       reply += slots.length
         ? `\n\n🟢 *Slot tersedia tanggal ${current.bookingDate}:*\n${slots.join("  | ")}`
         : `\n\n⚠️ Semua slot tanggal *${current.bookingDate}* sudah penuh. Coba tanggal lain.`;
@@ -3156,7 +3162,8 @@ async function getAvailableSlotsForDay(
     .where(and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date)));
 
   const openMin = timeToMinutes(openTime);
-  const closeMin = timeToMinutes(closeTime);
+  const rawCloseMin = timeToMinutes(closeTime);
+  const closeMin = rawCloseMin === 0 ? 24 * 60 : rawCloseMin;
   const available: string[] = [];
 
   for (let t = openMin; t + durationMinutes <= closeMin; t += 60) {
