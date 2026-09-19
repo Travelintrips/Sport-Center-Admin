@@ -3344,6 +3344,9 @@ async function continueSession(
          reply += slots.length
            ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${updated.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`
            : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.\n\n📅 *Silakan pilih tanggal lain* atau ketik *batal*.`;
+         if (slots.length) {
+           reply += `\n\n❓ Apakah slot jam di *${fac.name}* sudah cocok, atau mau saya cek *Badminton Court B*?`;
+         }
       }
       await appendMessage(session.id, "bot", reply);
       await sendReply(reply);
