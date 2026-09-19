@@ -2596,6 +2596,26 @@ async function presentBookingSession(
   await sendReply(reply);
 }
 
+async function startGreetingSession(
+  phone: string,
+  msg: string,
+  waName: string,
+  useCustomerToken = false,
+): Promise<void> {
+  const customer = await getRegisteredCustomer(phone);
+  const greeting = "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?";
+  const greetingSession = await createSession({
+    phone,
+    customerId: customer?.id ?? null,
+    bookerName: String(waName) || null,
+    customerName: customer?.name ?? (String(waName) || null),
+    currentStep: "ask_facility",
+  });
+  await appendMessage(greetingSession.id, "customer", msg);
+  await appendMessage(greetingSession.id, "bot", greeting);
+  await sendWAMsg(phone, greeting, useCustomerToken);
+}
+
 async function startBookingSession(
   phone: string,
   msg: string,
@@ -2676,36 +2696,6 @@ async function continueSession(
     logger.info({ phone, step }, "[continueSession] explicit cancel");
     await updateSession(session.id, { status: "cancelled" });
     await sendReply(`❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
-    return;
-  }
-
-  // A customer may return to an unfinished booking after a pause by saying
-  // "halo". Do not treat the greeting as an invalid answer for the current
-  // field; repeat the question for the persisted step instead.
-  if (isMinaGreeting(lower) && step !== "wait_registration" && step !== "ask_facility") {
-    const fac = session.facilityId
-      ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
-      : null;
-    let reply = await buildStepQuestion(
-      step,
-      session,
-      fac?.name ?? "",
-      Number(fac?.pricePerHour ?? 0),
-    );
-    if (step === "ask_time" && fac && session.bookingDate && fac.bookingMode !== "walk_in") {
-      const slots = await getAvailableSlotsForDay(
-        fac.id,
-        session.bookingDate,
-        fac.openTime,
-        fac.closeTime,
-        session.durationMinutes ?? 60,
-      );
-      reply += slots.length
-        ? `\n\n🟢 *Slot tersedia tanggal ${session.bookingDate}:*\n${slots.join("  | ")}`
-        : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.`;
-    }
-    await appendMessage(session.id, "bot", reply);
-    await sendReply(reply);
     return;
   }
 
@@ -3758,6 +3748,21 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // 3. Active session — continue conversation (always takes priority)
     const session = await getActiveSession(phone);
     if (session) {
+      // A greeting after a pause means the customer is starting over, not
+      // answering the previous booking field. Close the stale flow and create
+      // a fresh one so Mina does not send a confusing validation error.
+      if (isMinaGreeting(msg)) {
+        await updateSession(session.id, { status: "expired" });
+        await logAudit({
+          action: "booking_session_restarted",
+          entity: "wa_booking_session",
+          entityId: session.id,
+          after: { reason: "new_greeting", message: msg },
+        });
+        await startGreetingSession(phone, msg, String(name), true);
+        return;
+      }
+
       // A correction can contain several fields ("jamnya ganti jam 8,
       // jadi 1 jam saja", "besoknya lusa"). Merge every field first so the
       // flow never forces the customer back through the old sequential steps.
@@ -3770,22 +3775,10 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       return;
     }
 
-    // Mina's first greeting is intentionally a short welcome. The next
-    // message (including another greeting variant) is handled by the
-    // persisted facility-selection step.
+    // Mina's first greeting starts a fresh persisted conversation. A greeting
+    // received while a session is active is handled above as a restart.
     if (isMinaGreeting(msg)) {
-      const customer = await getRegisteredCustomer(phone);
-      const greeting = "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?";
-      const greetingSession = await createSession({
-        phone,
-        customerId: customer?.id ?? null,
-        bookerName: String(name) || null,
-        customerName: customer?.name ?? (String(name) || null),
-        currentStep: "ask_facility",
-      });
-      await appendMessage(greetingSession.id, "customer", msg);
-      await appendMessage(greetingSession.id, "bot", greeting);
-      await sendWAMsg(phone, greeting, true);
+      await startGreetingSession(phone, msg, String(name), true);
       return;
     }
 
