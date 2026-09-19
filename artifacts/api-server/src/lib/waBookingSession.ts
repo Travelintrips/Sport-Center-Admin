@@ -259,7 +259,18 @@ const FACILITY_KEYWORDS: Record<string, string[]> = {
 };
 
 export function detectFacilityKeyword(msg: string): string | null {
-  const lower = msg.toLowerCase();
+  const lower = msg.toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Keep an explicit court variant instead of collapsing it into the generic
+  // "badminton" category. Without this, the DB resolver returns the first
+  // badminton facility, which can silently turn Court B into Court A.
+  const badmintonVariant = lower.match(
+    /\b(?:badminton|bulutangkis|bulu tangkis)\s+(?:(?:court|lapangan)\s*)?([a-z])\b/,
+  );
+  if (badmintonVariant) {
+    return `badminton court ${badmintonVariant[1]}`;
+  }
+
   for (const [key, kws] of Object.entries(FACILITY_KEYWORDS)) {
     if (kws.some((kw) => lower.includes(kw))) return key;
   }

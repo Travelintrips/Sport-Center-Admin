@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@jest/globals";
 import {
+  detectFacilityKeyword,
   getNextStep,
   parseIntent,
   resolveBookingCustomerName,
@@ -16,6 +17,14 @@ describe("Mina natural-language booking session", () => {
     expect(parsed.startTime).toBe("19:00");
     expect(parsed.durationMinutes).toBe(120);
     expect(parsed.personName).toBe("Alif");
+  });
+
+  it("preserves the explicit badminton court variant", () => {
+    expect(detectFacilityKeyword("badminton court b")).toBe("badminton court b");
+    expect(parseIntent("mau booking badminton court b besok").facilityKeyword).toBe(
+      "badminton court b",
+    );
+    expect(detectFacilityKeyword("mau badminton")).toBe("badminton");
   });
 
   it("keeps partial booking input focused on only the missing required fields", () => {

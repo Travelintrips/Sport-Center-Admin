@@ -1643,9 +1643,15 @@ async function getFacilityByKeyword(keyword: string) {
     serbaguna: ["serbaguna", "multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
     billiard: ["billiard", "biliar", "bilyard"],
   };
+  const normalizedKeyword = keyword.toLowerCase().replace(/\s+/g, " ").trim();
   const kws = FACILITY_KEYWORDS[keyword] ?? [keyword];
   type FRow = typeof facilities[number];
   return (
+    // Explicit facility names/variants must win over category matching. This
+    // prevents "badminton court b" from resolving to the first badminton row.
+    facilities.find((f: FRow) =>
+      f.name.toLowerCase().replace(/\s+/g, " ").trim() === normalizedKeyword
+    ) ??
     facilities.find((f: FRow) => kws.some((kw) => f.name.toLowerCase().includes(kw) || f.category.toLowerCase().includes(kw))) ??
     facilities.find((f: FRow) => f.category.toLowerCase() === keyword.toLowerCase()) ??
     facilities.find((f: FRow) => f.name.toLowerCase().includes(keyword.toLowerCase())) ??
