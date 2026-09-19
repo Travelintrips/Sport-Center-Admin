@@ -2433,7 +2433,6 @@ async function startBookingSession(
     }
   }
 
-    } else {
         ? `\n\n🟢 *Slot tersedia tanggal ${intent.bookingDate}:*\n${availSlots.join("  |  ")}`
         : `\n\n⚠️ Tidak ada slot tersedia pada tanggal tersebut. Coba tanggal lain.`;
       const reply = `❌ Slot jam *${intent.startTime}* tanggal *${intent.bookingDate}* untuk *${facilityName}* sudah terisi.${slotsStr}`;
