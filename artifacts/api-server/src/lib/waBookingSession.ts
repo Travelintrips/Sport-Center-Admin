@@ -478,7 +478,8 @@ export function getNextStep(data: {
   if (!data.startTime) return "ask_time";
   if (!data.durationMinutes) return "ask_duration";
   if (!data.customerName) return "ask_name";
-  if ("notes" in data && data.notes === null) return "ask_notes";
+  // Notes are intentionally optional. Mina only stores them when the customer
+  // mentions a note; it must never create an extra question in the flow.
   return "confirm";
 }
 
