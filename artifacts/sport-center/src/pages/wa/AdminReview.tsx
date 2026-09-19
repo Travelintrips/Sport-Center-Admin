@@ -26,11 +26,14 @@ interface ReviewData {
       confirmedAt: string | null;
       amount: number;
       paymentMethod?: string | null;
+        ocrAmount?: string | number | null;
+        ocrDate?: string | null;
       ocrData?: {
         paymentMethod?: string;
         confidence?: number;
         signals?: string[];
         methodMatch?: boolean | null;
+          amountMatch?: boolean;
         engine?: string;
       } | null;
     } | null;
@@ -267,6 +270,33 @@ export default function WaAdminReview() {
                     ? " — tidak cocok, konfirmasi diblokir."
                     : " — cocok."}
                 </div>
+              </div>
+            )}
+            {b.payment?.ocrData?.engine === "tesseract" && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                <div className="font-bold">Detail yang terbaca OCR</div>
+                <div className="mt-1">
+                  Nominal bukti:{" "}
+                  <strong>
+                    {b.payment.ocrAmount == null
+                      ? "Belum terbaca"
+                      : formatIDR(Number(b.payment.ocrAmount))}
+                  </strong>
+                  {b.payment.ocrData.amountMatch === true
+                    ? " — sama dengan tagihan"
+                    : b.payment.ocrData.amountMatch === false
+                      ? " — berbeda dari tagihan"
+                      : ""}
+                </div>
+                {b.payment.ocrDate && (
+                  <div>
+                    Tanggal pada bukti: <strong>{b.payment.ocrDate}</strong>
+                  </div>
+                )}
+                <p className="mt-2 text-slate-600">
+                  Cocokkan rekening penerima, nama penerima, tanggal transaksi,
+                  dan detail bukti secara manual sebelum menyetujui.
+                </p>
               </div>
             )}
           </CardContent>

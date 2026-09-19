@@ -25,7 +25,6 @@ import {
 import {
   notifyWaBookingCreated,
   notifyWaProofUploaded,
-  notifyWaProofAutoConfirmed,
   notifyWaBookingConfirmed,
   notifyWaPaymentRejected,
   notifyWaStaffCheckin,
@@ -886,6 +885,15 @@ router.get("/wa/action/:token", async (req, res) => {
 
     const booking = await getBookingFull(tokenRow.bookingId);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (
+      tokenRow.action === "upload_proof" &&
+      !["pending_payment", "expired"].includes(booking.status)
+    ) {
+      res.status(409).json({
+        error: "Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.",
+      });
+      return;
+    }
 
     let paymentOptions: {
       transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
@@ -1112,6 +1120,10 @@ router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
       res.status(404).json({ error: "Booking tidak ditemukan" });
       return;
     }
+    if (!["pending_payment", "expired"].includes(booking.status)) {
+      res.status(404).json({ error: "Link upload tidak tersedia untuk status booking ini" });
+      return;
+    }
 
     const [tokenRow] = await db
       .select({ token: waActionTokensTable.token, expiresAt: waActionTokensTable.expiresAt })
@@ -1125,7 +1137,7 @@ router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
       return;
     }
 
-    if (["pending_payment", "waiting_confirmation"].includes(booking.status)) {
+    if (["pending_payment", "expired"].includes(booking.status)) {
       const newToken = await createWaToken(booking.id, "upload_proof", 7);
       res.json({ token: newToken, orderNumber: booking.orderNumber });
       return;
@@ -1137,7 +1149,32 @@ router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
   }
 });
 
-// POST /api/wa/proof/upload — multer file upload, returns URL
+// POST /api/wa/proof/scan — preview OCR before the customer submits the proof.
+// The final submit endpoint always scans again and never trusts this preview.
+router.post("/wa/proof/scan", uploadProof.single("proof"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: "Tidak ada file" });
+      return;
+    }
+    const scan = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    res.json({
+      ocrScan: {
+        paymentMethod: scan.paymentMethod,
+        confidence: scan.confidence,
+        signals: scan.signals,
+        amount: scan.amount,
+        date: scan.date,
+        engine: scan.engine,
+      },
+    });
+  } catch (err) {
+    req.log?.error?.({ err }, "Proof OCR preview error");
+    res.status(500).json({ error: "Pengecekan bukti gagal" });
+  }
+});
+
+// POST /api/wa/proof/upload — legacy upload helper, returns URL
 router.post("/wa/proof/upload", uploadProof.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "Tidak ada file" }); return; }
@@ -1162,15 +1199,23 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     let proofUrl: string | undefined = req.body?.proofUrl;
     let proofOcr = null;
     if (req.file) {
-      proofUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
       proofOcr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
     }
-    if (!proofUrl) { res.status(400).json({ error: "Tidak ada bukti yang diupload" }); return; }
+    if (!req.file && !proofUrl) {
+      res.status(400).json({ error: "Tidak ada bukti yang diupload" });
+      return;
+    }
 
     const bookingId = tokenRow.bookingId;
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, bookingId)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (!["pending_payment", "expired"].includes(booking.status)) {
+      res.status(409).json({
+        error: "Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.",
+      });
+      return;
+    }
 
     const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
@@ -1212,12 +1257,59 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const detectedQris = proofOcr?.paymentMethod === "QRIS";
     const resolvedPaymentMethod = selectedPaymentMethod ?? (detectedQris ? "QRIS" : "Transfer Bank");
     const resolvedProvider = resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
+    const ocrMethodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr);
+    const methodMismatch = ocrMethodMatch === false;
+    const amountMatch =
+      proofOcr?.engine === "tesseract" &&
+      proofOcr.amount != null &&
+      Number(proofOcr.amount) === payableTotal;
+    const amountMismatch =
+      proofOcr?.engine === "tesseract" &&
+      proofOcr.amount != null &&
+      Number(proofOcr.amount) !== payableTotal;
+
+    // A confident contradiction is rejected before creating/replacing a
+    // payment. Unknown/unreadable OCR is allowed through to manual review.
+    if (methodMismatch || amountMismatch) {
+      const reasons = [
+        methodMismatch
+          ? `metode pembayaran tidak sesuai (terbaca ${proofOcr?.paymentMethod})`
+          : null,
+        amountMismatch
+          ? `nominal pada bukti Rp ${Number(proofOcr?.amount).toLocaleString("id-ID")} tidak sama dengan tagihan Rp ${payableTotal.toLocaleString("id-ID")}`
+          : null,
+      ].filter(Boolean);
+      res.status(422).json({
+        error: `Bukti pembayaran belum dapat diterima: ${reasons.join(" dan ")}. Silakan upload bukti yang benar.`,
+        code: methodMismatch
+          ? "PAYMENT_METHOD_PROOF_MISMATCH"
+          : "PAYMENT_AMOUNT_PROOF_MISMATCH",
+        ocrScan: {
+          paymentMethod: proofOcr?.paymentMethod,
+          confidence: proofOcr?.confidence,
+          amount: proofOcr?.amount,
+          signals: proofOcr?.signals,
+        },
+      });
+      return;
+    }
+
+    if (req.file) {
+      proofUrl = await uploadProofWithFallback(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+      );
+    }
+    if (!proofUrl) {
+      res.status(400).json({ error: "Tidak ada bukti yang diupload" });
+      return;
+    }
     let paymentForFlow: typeof paymentsTable.$inferSelect | undefined;
 
     if (existing) {
       const paymentBooking = groupBookings.find((member) => member.id === existing.bookingId) ?? booking;
       await ensurePaymentBankAccount(existing, paymentBooking as typeof booking);
-      const ocrMethodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr);
       await db.update(paymentsTable).set({
         proofUrl,
         paymentMethod: resolvedPaymentMethod,
@@ -1233,6 +1325,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           engine: proofOcr.engine,
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
+          amountMatch,
         } : null,
         status: "pending",
         updatedAt: new Date(),
@@ -1254,6 +1347,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           engine: proofOcr.engine,
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
+          amountMatch,
         } : null,
         status: "pending",
       };
@@ -1282,7 +1376,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           signals: proofOcr.signals,
           engine: proofOcr.engine,
           scannedAt: proofOcr.scannedAt,
-          methodMatch: paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr),
+          methodMatch: ocrMethodMatch,
+          amountMatch,
         } : null,
         status: "pending",
       }).returning();
@@ -1292,24 +1387,14 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       await insertGroupPaymentAllocations(allocationPaymentId, groupBookings, payableTotal);
     }
 
-    const methodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr) === true;
-    const amountMatch =
-      proofOcr?.engine === "tesseract" &&
-      proofOcr.amount != null &&
-      Number(proofOcr.amount) === payableTotal;
-    const ocrPassed = methodMatch && amountMatch;
-    const nextStatus = ocrPassed ? "confirmed" : "pending_payment";
-
-    if (ocrPassed && paymentForFlow) {
-      await db.update(paymentsTable).set({
-        status: "confirmed",
-        confirmedAt: new Date(),
-        paidAt: paymentForFlow.paidAt ?? new Date(),
-      }).where(eq(paymentsTable.id, paymentForFlow.id));
-    }
+    const methodMatch = ocrMethodMatch === true;
+    // OCR is evidence for the admin, not an automatic payment confirmation.
+    // Every accepted proof waits in the same review state, including a proof
+    // whose OCR fields are unreadable.
+    const nextStatus = "waiting_confirmation" as const;
     await db.update(bookingsTable).set({
       status: nextStatus,
-      paidAt: ocrPassed ? new Date() : null,
+      paidAt: null,
       updatedAt: new Date(),
     })
       .where(eq(bookingsTable.id, bookingId));
@@ -1317,9 +1402,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     await db.insert(bookingHistoryTable).values({
       bookingId, fromStatus: booking.status, toStatus: nextStatus,
       changedByName: booking.customerName,
-      note: ocrPassed
-        ? "Bukti pembayaran cocok dengan metode dan nominal; booking dikonfirmasi otomatis via WhatsApp."
-        : "Pesanan butuh preview dan approval,scan bukti pembayaran gagal.",
+      note: "Bukti pembayaran diterima dan menunggu verifikasi admin. OCR hanya digunakan sebagai bukti pendukung.",
     });
 
     if (booking.groupRef) {
@@ -1343,102 +1426,51 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       }
     }
 
-    // Create a review link for failed OCR; successful OCR does not need approval.
+    // Every accepted proof gets a review link. Admin approval is mandatory even
+    // when OCR found a matching method and amount.
     const reviewToken = await createWaToken(bookingId, "review_payment", 7);
 
     const fullProofUrl = proofUrl;
-
-    if (ocrPassed) {
-      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
-      const checkinToken = await createWaToken(booking.id, "checkin", 30);
-      const finishToken = await createWaToken(booking.id, "finish", 30);
-      notifyWaBookingConfirmed({
-        customerName: booking.customerName,
-        customerPhone: booking.customerPhone,
-        orderNumber: booking.orderNumber,
-        facilityName: facility?.name ?? "",
-        bookingDate: booking.bookingDate,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
-        statusUrl,
-        proofUrl: fullProofUrl,
-      });
-      notifyWaProofAutoConfirmed({
-        orderNumber: booking.orderNumber,
-        customerName: booking.customerName,
-        customerPhone: booking.customerPhone,
-        facilityName: facility?.name ?? "",
-        bookingDate: booking.bookingDate,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
-        proofUrl: fullProofUrl,
-        statusUrl,
-      });
-      notifyWaStaffCheckin({
-        orderNumber: booking.orderNumber,
-        customerName: booking.customerName,
-        facilityName: facility?.name ?? "",
-        bookingDate: booking.bookingDate,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
-        finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
-      }).catch(() => {});
-      const { dpp, ppnAmount, ppnCollectedByCustomer } = extractBookingDpp(booking);
-      postConfirmedPaymentAccounting({
-        bookingId: booking.id,
-        orderNumber: booking.orderNumber,
-        dpp,
-        ppnAmount,
-        ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
-        ppnTreatment: booking.ppnTreatment,
-        ppnCollectedByCustomer,
-        facilityId: booking.facilityId,
-        journalDate: new Date().toISOString().slice(0, 10),
-        paymentMethod: paymentForFlow?.paymentMethod ?? resolvedPaymentMethod,
-        paymentId: paymentForFlow?.id,
-      }).catch((err) => logAccountingError({
-        operation: "postConfirmedPaymentAccounting",
-        orderNumber: booking.orderNumber,
-        bookingId: booking.id,
-        error: err,
-      }));
-    } else {
-      const note = "Pesanan butuh preview dan approval,scan bukti pembayaran gagal.";
-      notifyWaProofUploaded({
-        customerName: booking.customerName, customerPhone: booking.customerPhone,
-        orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
-        bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
-        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
-        proofUrl: fullProofUrl,
-        reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
-        note,
-      });
-      notifyWaProofReceived({
-        customerName: booking.customerName,
-        customerPhone: booking.customerPhone,
-        orderNumber: booking.orderNumber,
-        facilityName: facility?.name ?? "",
-        bookingDate: booking.bookingDate,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
-        statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
-      });
-    }
+    const ocrNote = methodMatch && amountMatch
+      ? "OCR mendeteksi metode dan nominal sesuai. Tetap wajib diverifikasi admin."
+      : "OCR belum dapat memastikan seluruh detail. Bukti menunggu pemeriksaan admin.";
+    notifyWaProofUploaded({
+      customerName: booking.customerName, customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
+      totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
+      proofUrl: fullProofUrl,
+      reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
+      note: ocrNote,
+    });
+    notifyWaProofReceived({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+    });
 
     await logAudit({
       action: "wa_proof_uploaded",
       entity: "booking",
       entityId: bookingId,
-      after: { proofUrl, status: nextStatus, ocrPassed, methodMatch, amountMatch },
+      after: { proofUrl, status: nextStatus, ocrMatched: methodMatch && amountMatch, methodMatch, amountMatch },
     });
 
-    syncStatusToBizportal(booking.orderNumber, nextStatus, proofUrl, ocrPassed ? new Date() : null, booking).catch(() => {});
+    syncStatusToBizportal(booking.orderNumber, nextStatus, proofUrl, null, booking).catch(() => {});
 
-    res.json({ success: true, orderNumber: booking.orderNumber, status: nextStatus, ocrPassed });
+    res.json({
+      success: true,
+      orderNumber: booking.orderNumber,
+      status: nextStatus,
+      ocrPassed: methodMatch && amountMatch,
+      message: "Bukti pembayaran diterima dan menunggu verifikasi admin.",
+    });
   } catch (err) {
     console.error("[wa/proof] error:", err);
     res.status(500).json({ error: "Internal server error" });

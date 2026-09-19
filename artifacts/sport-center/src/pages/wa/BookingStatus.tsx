@@ -128,7 +128,10 @@ export default function WaBookingStatus() {
     );
   }
 
-  const canUploadProof = ["pending_payment", "waiting_confirmation"].includes(booking.status) && booking.uploadProofUrl;
+  // A proof that is already waiting for admin review must not be replaced
+  // before the review decision. Rejected proofs return to pending_payment and
+  // receive a fresh upload link.
+  const canUploadProof = booking.status === "pending_payment" && booking.uploadProofUrl;
   const grossAmount = booking.grandTotal ?? booking.totalPrice;
   const hasWithholding = Number(booking.pphAmount ?? 0) > 0 && booking.netAmount != null;
 

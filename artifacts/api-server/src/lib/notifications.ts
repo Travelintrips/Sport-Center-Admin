@@ -691,6 +691,7 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
     `• Fasilitas: *${data.facilityName}*\n` +
     `• Tanggal: *${data.bookingDate}*\n` +
     `• Jam: *${data.startTime} – ${data.endTime}*\n\n` +
+      `• Total: *Rp ${data.totalPrice}*\n\n` +
     (data.proofUrl ? `📎 Bukti pembayaran: ${data.proofUrl}\n\n` : "") +
     `Sampai jumpa di lapangan! 🏆\n\n` +
     `🧾 Kwitansi: ${kwitansiUrl}`;
@@ -936,6 +937,11 @@ export async function notifyWaProofReceived(data: WaProofReceivedData): Promise<
   const msg =
     `📥 *Bukti Pembayaran Diterima*\n\n` +
     `Halo *${data.customerName}*, bukti pembayaran untuk booking *${data.orderNumber}* sudah berhasil diterima.\n\n` +
+    `📋 *Detail Booking:*\n` +
+    `• Fasilitas: *${data.facilityName}*\n` +
+    `• Tanggal: *${data.bookingDate}*\n` +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Total: *Rp ${data.totalPrice}*\n\n` +
     `Status: *Menunggu verifikasi admin* 🔍\n` +
     `Booking belum final sampai pembayaran selesai diverifikasi.\n\n` +
     `🔍 Cek status booking: ${data.statusUrl}`;

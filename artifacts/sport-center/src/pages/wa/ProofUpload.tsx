@@ -4,6 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, CheckCircle, Upload, Image as ImageIcon } from "lucide-react";
 
+interface OcrPreview {
+  paymentMethod: "QRIS" | "Transfer Bank" | "unknown";
+  confidence: number;
+  signals: string[];
+  amount: number | null;
+  date: string | null;
+  engine: "tesseract" | "unsupported" | "failed";
+}
+
 interface ActionInfo {
   action: string;
   booking: {
@@ -40,6 +49,9 @@ export default function WaProofUpload() {
   const [confirmed, setConfirmed] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"QRIS" | "Transfer Bank">("Transfer Bank");
   const [orderNumber, setOrderNumber] = useState("");
+  const [ocrPreview, setOcrPreview] = useState<OcrPreview | null>(null);
+  const [scanningOcr, setScanningOcr] = useState(false);
+  const [ocrError, setOcrError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -57,12 +69,30 @@ export default function WaProofUpload() {
       .finally(() => setLoading(false));
   }, [params.token]);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
     setFile(f);
+    setOcrPreview(null);
+    setOcrError("");
+    setScanningOcr(true);
     const url = URL.createObjectURL(f);
     setPreview(url);
+
+    try {
+      const fd = new FormData();
+      fd.append("proof", f);
+      const resp = await fetch("/api/wa/proof/scan", { method: "POST", body: fd });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? "Pengecekan bukti gagal");
+      setOcrPreview(data.ocrScan);
+    } catch {
+      // The final submit still performs a server-side scan. A preview outage
+      // must not prevent a customer from submitting an otherwise valid proof.
+      setOcrError("Pengecekan awal belum tersedia. Bukti akan diperiksa saat dikirim.");
+    } finally {
+      setScanningOcr(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -113,7 +143,7 @@ export default function WaProofUpload() {
               <p className="text-gray-600 text-sm mt-1">
                 {confirmed
                   ? "Bukti pembayaran cocok dan booking kamu otomatis dikonfirmasi."
-                  : "Bukti pembayaran tersimpan. Status masih menunggu pembayaran dan preview/approval admin."}
+                  : "Bukti pembayaran diterima. Status menunggu verifikasi admin sebelum booking menjadi final."}
               </p>
             </div>
             <a
@@ -212,17 +242,24 @@ export default function WaProofUpload() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*"
+                 accept="image/*,.pdf,application/pdf"
                 className="hidden"
                 onChange={handleFileChange}
               />
-              {preview ? (
+               {preview ? (
                 <div className="space-y-3">
-                  <img
-                    src={preview}
-                    alt="Preview bukti"
-                    className="w-full max-h-64 object-contain rounded-lg border bg-gray-50"
-                  />
+                   {file?.type === "application/pdf" ? (
+                     <div className="rounded-lg border bg-gray-50 px-4 py-8 text-center text-sm text-gray-700">
+                       <p className="font-semibold">File PDF siap diperiksa</p>
+                       <p className="mt-1 text-xs text-gray-500">{file.name}</p>
+                     </div>
+                   ) : (
+                     <img
+                       src={preview}
+                       alt="Preview bukti"
+                       className="w-full max-h-64 object-contain rounded-lg border bg-gray-50"
+                     />
+                   )}
                   <Button
                     type="button"
                     variant="outline"
@@ -239,15 +276,46 @@ export default function WaProofUpload() {
                   className="w-full border-2 border-dashed border-orange-300 rounded-xl p-8 text-center hover:border-orange-500 hover:bg-orange-50 transition-colors">
                   <Upload className="w-10 h-10 text-orange-400 mx-auto mb-2" />
                   <p className="font-semibold text-gray-700">Tap untuk pilih foto</p>
-                  <p className="text-xs text-gray-500 mt-1">JPG, PNG, atau PDF (maks 10MB)</p>
+                   <p className="text-xs text-gray-500 mt-1">JPG, PNG, atau PDF (maks 10MB)</p>
                 </button>
               )}
+               {scanningOcr && (
+                 <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                   Memeriksa bukti pembayaran...
+                 </div>
+               )}
+               {ocrError && (
+                 <div className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                   {ocrError}
+                 </div>
+               )}
+               {ocrPreview && !scanningOcr && (
+                 <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                   ocrPreview.paymentMethod === "unknown" || ocrPreview.amount == null
+                     ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                     : "border-green-200 bg-green-50 text-green-800"
+                 }`}>
+                   <p className="font-bold">Hasil pengecekan awal</p>
+                   <p className="mt-1">
+                     Metode: <strong>{ocrPreview.paymentMethod === "unknown" ? "Belum terbaca" : ocrPreview.paymentMethod}</strong>
+                   </p>
+                   <p>
+                     Nominal: <strong>{ocrPreview.amount == null ? "Belum terbaca" : `Rp ${Number(ocrPreview.amount).toLocaleString("id-ID")}`}</strong>
+                   </p>
+                   {ocrPreview.date && <p>Tanggal terbaca: <strong>{ocrPreview.date}</strong></p>}
+                   <p className="mt-1">
+                     {ocrPreview.paymentMethod === "unknown" || ocrPreview.amount == null
+                       ? "Bukti akan tetap dikirim untuk pemeriksaan manual admin."
+                       : "Server akan memeriksa ulang bukti saat dikirim."}
+                   </p>
+                 </div>
+               )}
             </CardContent>
           </Card>
 
           <Button
             type="submit"
-            disabled={!file || uploading}
+             disabled={!file || uploading || scanningOcr}
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
             {uploading ? (
               <span className="flex items-center gap-2">
