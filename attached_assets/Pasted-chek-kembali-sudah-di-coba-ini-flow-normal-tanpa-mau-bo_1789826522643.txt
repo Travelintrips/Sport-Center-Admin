@@ -1,0 +1,90 @@
+chek kembali sudah di coba,ini flow normal tanpa "mau booking/pesan badminton".
+
+user/customer: halo
+
+mina ai jawab: Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?
+
+user/customer: mau booking
+
+mina ai jawab: 🏟️ Fasilitas tersedia:
+
+Lapangan Multiguna — Rp 350.000/jam
+Billiard Coins (Self-Service) — Rp 50.000/jam
+Badminton Court A — Rp 100.000/jam
+Badminton Court B — Rp 100.000/jam
+Konsumsi — Rp 0/jam
+Gym / Fitness Center — Rp 30.000/jam
+Lapangan Tennis Outdoor — Rp 100.000/jam
+Sebutkan nama fasilitas yang ingin kamu booking.
+
+user/customer: badminton court a
+
+mina ai jawab: ✅ Fasilitas Badminton Court A dipilih.
+
+Mau lanjut pesan/booking di sini atau dibuatkan form?
+
+Lanjut di sini
+Buatkan form
+user/customer: lanjut disini
+
+mina ai jawab: 👤 Pesan/Booking atas nama siapa? Contoh: Andi
+
+user/customer: Mus
+
+mina ai jawab: 📅 Tanggal berapa mau booking Badminton Court A? Contoh: besok, 15 Juni, Sabtu, tanggal 20
+
+user/customer: besok,tanggal 20
+
+mina ai jawab: ⏱️ Berapa lama? (min 1 jam) Contoh: 1 jam, 2 jam, 3 jam
+
+user/customer: 2 jam
+
+mina ai jawab: ⏰ Jam berapa mau mulai di Badminton Court A? (jam operasional: 06:00–23:00) Contoh: jam 8 pagi, jam 20.00, 19:00
+
+🟢 Slot tersedia di Badminton Court A tanggal 2026-09-20: 11:00 | 12:00 | 13:00 | 14:00 | 15:00 | 16:00 | 17:00 | 18:00 | 19:00 | 20:00 | 21:00
+
+user/customer: jam 6 pagi
+
+sampai sini stuck tidak ada respon.
+
+percobaan ke 2. memakai mau pesan badminton.
+
+user/customer: mau pesan badminton
+
+mina ai jawab: 🏸 Ada beberapa lapangan badminton yang bisa dipilih:
+
+Badminton Court A — Rp 100.000/jam
+Badminton Court B — Rp 100.000/jam
+Ketik nomor atau nama lapangan, misalnya 1 untuk Badminton Court A.
+
+user/customer: 1
+
+mina ai jawab: ✅ Fasilitas Badminton Court A dipilih.
+
+Mau lanjut pesan/booking di sini atau dibuatkan form?
+
+Lanjut di sini
+Buatkan form
+user/customer: lanjut disini
+
+mina ai jawab: 👤 Pesan/Booking atas nama siapa? Contoh: Andi
+
+user/customer: Mus
+
+mina ai jawab: 📅 Tanggal berapa mau booking Badminton Court A? Contoh: besok, 15 Juni, Sabtu, tanggal 20
+
+user/customer: besok,tanggal 20
+
+mina ai jawab: ⏱️ Berapa lama? (min 1 jam) Contoh: 1 jam, 2 jam, 3 jam
+
+user/customer: 2 jam
+
+mina ai jawab: ⏰ Jam berapa mau mulai di Badminton Court A? (jam operasional: 06:00–23:00) Contoh: jam 8 pagi, jam 20.00, 19:00
+
+🟢 Slot tersedia di Badminton Court A tanggal 2026-09-20: 11:00 | 12:00 | 13:00 | 14:00 | 15:00 | 16:00 | 17:00 | 18:00 | 19:00 | 20:00 | 21:00
+
+user/customer: jam 6 pagi
+
+sampai sini stuck/no respon.
+
+dari ke dua case di atas,apa yang perlu di perbaiki? silahkan perbaiki.

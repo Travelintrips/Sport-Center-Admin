@@ -3932,7 +3932,7 @@ const BOT_MESSAGE_PATTERNS = [
   /^✅ Fasilitas \*/,
   /^Mau lanjut pesan\/booking di sini/,
   /^📅 Tanggal berapa mau booking/,
-  /^⏰ Jam berapa mau mulai\?/,
+  /^⏰ Jam berapa mau mulai(?: di \*)?/,
   /^⏱️ Berapa lama\? \(min 1 jam\)/,
   /^👤 Atas nama siapa booking ini\?/,
   /^📋 Berikut ringkasan booking/,
@@ -4113,6 +4113,17 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
           after: { reason: "new_greeting", message: msg },
         });
         await startGreetingSession(phone, msg, String(name), true);
+        return;
+      }
+
+      // A time input at the time step must go through continueSession so the
+      // requested facility's operating hours, blocked schedules, bookings,
+      // and same-slot alternative facilities are checked before replying.
+      // Otherwise the generic merge path jumps directly to the summary and
+      // can leave an out-of-hours/full-slot request without the right prompt.
+      const parsedMessage = parseIntent(msg);
+      if (session.currentStep === "ask_time" && parsedMessage.startTime) {
+        await continueSession(session, phone, msg, true);
         return;
       }
 
