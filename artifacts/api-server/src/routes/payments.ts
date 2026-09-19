@@ -7,6 +7,7 @@ import {
   facilitiesTable,
   bookingGroupsTable,
   bankMutationsTable,
+  bankReconciliationMatchesTable,
 } from "@workspace/db";
 import { eq, and, ne, inArray, or, sql } from "drizzle-orm";
 import { adminMiddleware, verifyToken } from "../lib/auth";
@@ -124,6 +125,7 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
 }
 import { isBookingConfirmableStatus } from "../lib/bookingLifecycle";
 import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
+import { runMatching } from "../lib/bankMatcher";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -1056,6 +1058,348 @@ router.post("/payments/:id/repair-qris", adminMiddleware, async (req, res) => {
   }
 });
 
+class ReconciliationSyncError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = "ReconciliationSyncError";
+  }
+}
+
+/**
+ * Rebuild the bank-reconciliation candidate for an existing payment after an
+ * administrative payment-date correction. This is deliberately separate from
+ * payment metadata edits: it may replace only non-final candidate evidence,
+ * never posted accounting or an approved reconciliation decision.
+ */
+router.post("/payments/:id/reconciliation-sync", adminMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "ID pembayaran tidak valid", code: "INVALID_PAYMENT_ID" });
+    return;
+  }
+
+  try {
+    const prepared = await db.transaction(async (tx) => {
+      // Serialize resyncs for one payment so two admin clicks cannot create
+      // two stable bank mutations when the payment has no candidate yet.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(917054, ${id})`);
+      const [payment] = await tx
+        .select()
+        .from(paymentsTable)
+        .where(eq(paymentsTable.id, id))
+        .for("update");
+      if (!payment) {
+        throw new ReconciliationSyncError("Pembayaran tidak ditemukan", 404, "PAYMENT_NOT_FOUND");
+      }
+
+      const [booking] = await tx
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.id, payment.bookingId))
+        .for("update");
+      if (!booking) {
+        throw new ReconciliationSyncError("Booking pembayaran tidak ditemukan", 404, "BOOKING_NOT_FOUND");
+      }
+
+      if (String(payment.settlementStatus ?? "").trim().toLowerCase() === "settled") {
+        throw new ReconciliationSyncError(
+          "Rekonsiliasi terkunci: settlement sudah final/settled dan posting final tidak boleh diubah diam-diam.",
+          423,
+          "RECONCILIATION_LOCKED",
+        );
+      }
+
+      const stableKey = `SC-PAY-${payment.id}`;
+      const legacyKey = `SC-${booking.orderNumber}`;
+      const linkedRows = await tx
+        .select()
+        .from(bankMutationsTable)
+        .where(eq(bankMutationsTable.matchedPaymentId, payment.id));
+      for (const linked of linkedRows) {
+        const [approvedLinkedMatch] = await tx
+          .select({ id: bankReconciliationMatchesTable.id })
+          .from(bankReconciliationMatchesTable)
+          .where(
+            and(
+              eq(bankReconciliationMatchesTable.mutationId, linked.id),
+              eq(bankReconciliationMatchesTable.status, "approved"),
+            ),
+          )
+          .limit(1);
+        if (
+          ["matched", "approved", "rejected"].includes(linked.status) ||
+          linked.accountingPosted ||
+          linked.journalId != null ||
+          approvedLinkedMatch
+        ) {
+          throw new ReconciliationSyncError(
+            "Rekonsiliasi terkunci: transaksi bank terkait sudah final/approved atau posting jurnal sudah dibuat. Posting final tidak boleh diubah diam-diam.",
+            423,
+            "RECONCILIATION_LOCKED",
+          );
+        }
+      }
+      const stableRows = await tx
+        .select()
+        .from(bankMutationsTable)
+        .where(eq(bankMutationsTable.mutationKey, stableKey));
+      const legacyRows = await tx
+        .select()
+        .from(bankMutationsTable)
+        .where(eq(bankMutationsTable.mutationKey, legacyKey));
+
+      const candidateRows = Array.from(
+        new Map(
+          [...stableRows, ...legacyRows].map((row) => [row.id, row]),
+        ).values(),
+      );
+      if (candidateRows.length > 1) {
+        throw new ReconciliationSyncError(
+          "Rekonsiliasi tidak dapat disinkronkan karena ditemukan lebih dari satu mutation bank yang terkait payment ini.",
+          409,
+          "RECONCILIATION_AMBIGUOUS",
+        );
+      }
+
+      const existing = candidateRows[0];
+      if (existing) {
+        if (
+          existing.matchedPaymentId != null &&
+          existing.matchedPaymentId !== payment.id
+        ) {
+          throw new ReconciliationSyncError(
+            "Rekonsiliasi tidak dapat disinkronkan karena mutation bank sudah terikat ke payment lain.",
+            409,
+            "RECONCILIATION_AMBIGUOUS",
+          );
+        }
+        const [approvedMatch] = await tx
+          .select({ id: bankReconciliationMatchesTable.id })
+          .from(bankReconciliationMatchesTable)
+          .where(
+            and(
+              eq(bankReconciliationMatchesTable.mutationId, existing.id),
+              eq(bankReconciliationMatchesTable.status, "approved"),
+            ),
+          )
+          .limit(1);
+        if (
+          ["matched", "approved", "rejected"].includes(existing.status) ||
+          existing.accountingPosted ||
+          existing.journalId != null ||
+          approvedMatch
+        ) {
+          throw new ReconciliationSyncError(
+            "Rekonsiliasi terkunci: mutation bank sudah final/approved atau posting jurnal sudah dibuat. Posting final tidak boleh diubah diam-diam.",
+            423,
+            "RECONCILIATION_LOCKED",
+          );
+        }
+      }
+
+      const paymentDate =
+        payment.paidAt ??
+        payment.confirmedAt ??
+        payment.createdAt ??
+        new Date();
+      const transactionDate = paymentDate.toISOString().slice(0, 10);
+      const amount = String(payment.amount);
+      const paymentMethod = String(payment.paymentMethod ?? "Transfer Bank");
+      const providerName = payment.providerName ?? payment.paymentProvider ?? null;
+      const providerOrderId =
+        payment.providerOrderId ??
+        payment.merchantTradeNo ??
+        payment.providerReference ??
+        null;
+      const description = `SPORT CENTER | ${booking.orderNumber} | ${booking.customerName}`;
+      const normalizedDescription = description
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      let mutationId: number;
+      let created = false;
+      const before = existing
+        ? {
+            id: existing.id,
+            mutationKey: existing.mutationKey,
+            transactionDate: existing.transactionDate,
+            amount: existing.amount,
+            status: existing.status,
+            matchedPaymentId: existing.matchedPaymentId,
+            matchedOrderId: existing.matchedOrderId,
+          }
+        : null;
+
+      if (existing) {
+        mutationId = existing.id;
+        // Candidate rows are disposable evidence. Rejected rows remain history,
+        // while the matcher will replace active candidates after this commit.
+        await tx
+          .delete(bankReconciliationMatchesTable)
+          .where(
+            and(
+              eq(bankReconciliationMatchesTable.mutationId, existing.id),
+              eq(bankReconciliationMatchesTable.status, "candidate"),
+            ),
+          );
+        const [updated] = await tx
+          .update(bankMutationsTable)
+          .set({
+            companyId: payment.companyId,
+            bankAccountId: payment.bankAccountId,
+            transactionDate,
+            description,
+            creditAmount: amount,
+            debitAmount: "0",
+            amount,
+            direction: "IN",
+            mutationKey: stableKey,
+            normalizedDescription,
+            providerName,
+            providerOrderId,
+            uploadedProofUrl: payment.proofUrl,
+            status: "unmatched",
+            matchedPaymentId: payment.id,
+            matchedOrderId: booking.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(bankMutationsTable.id, existing.id))
+          .returning({ id: bankMutationsTable.id });
+        if (!updated) {
+          throw new ReconciliationSyncError(
+            "Mutation bank berubah bersamaan dengan sinkronisasi. Silakan coba lagi.",
+            409,
+            "RECONCILIATION_CONCURRENCY_CONFLICT",
+          );
+        }
+      } else if (linkedRows.length > 0) {
+        // A real imported bank mutation is already linked to this payment.
+        // Refresh its candidates below, but never rewrite the bank statement
+        // row with payment-side date, amount, or description.
+        mutationId = linkedRows[0]!.id;
+      } else {
+        const [inserted] = await tx
+          .insert(bankMutationsTable)
+          .values({
+            companyId: payment.companyId,
+            bankAccountId: payment.bankAccountId,
+            transactionDate,
+            description,
+            creditAmount: amount,
+            debitAmount: "0",
+            amount,
+            direction: "IN",
+            mutationKey: stableKey,
+            normalizedDescription,
+            providerName,
+            providerOrderId,
+            uploadedProofUrl: payment.proofUrl,
+            status: "unmatched",
+            matchedPaymentId: payment.id,
+            matchedOrderId: booking.id,
+          })
+          .returning({ id: bankMutationsTable.id });
+        if (!inserted) {
+          throw new ReconciliationSyncError(
+            "Mutation bank tidak dapat dibuat.",
+            409,
+            "RECONCILIATION_MUTATION_CREATE_FAILED",
+          );
+        }
+        mutationId = inserted.id;
+        created = true;
+      }
+
+      return {
+        payment,
+        booking,
+        mutationId,
+        matchingMutationIds: [
+          ...new Set([mutationId, ...linkedRows.map((row) => row.id)]),
+        ],
+        created,
+        before,
+        after: {
+          mutationKey: stableKey,
+          transactionDate,
+          amount,
+          paymentMethod,
+          providerName,
+          settlementStatus: payment.settlementStatus,
+        },
+      };
+    });
+
+    let matchingResult: Awaited<ReturnType<typeof runMatching>>;
+    try {
+      matchingResult = await runMatching(prepared.matchingMutationIds);
+    } catch (error) {
+      await logAudit({
+        ...getUserFromReq(req),
+        action: "PAYMENT_RECONCILIATION_RESYNC",
+        entity: "payment",
+        entityId: id,
+        before: prepared.before,
+        after: { ...prepared.after, mutationId: prepared.mutationId, matchingError: String(error) },
+        ...getClientInfo(req),
+      });
+      throw error;
+    }
+
+    const [refreshedMutation] = await db
+      .select({
+        status: bankMutationsTable.status,
+      })
+      .from(bankMutationsTable)
+      .where(eq(bankMutationsTable.id, prepared.mutationId))
+      .limit(1);
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "PAYMENT_RECONCILIATION_RESYNC",
+      entity: "payment",
+      entityId: id,
+      before: prepared.before,
+      after: {
+        ...prepared.after,
+        mutationId: prepared.mutationId,
+        status: refreshedMutation?.status ?? "unmatched",
+        matchingResult,
+      },
+      ...getClientInfo(req),
+    });
+
+    res.json({
+      ok: true,
+      paymentId: id,
+      mutationId: prepared.mutationId,
+      created: prepared.created,
+      status: refreshedMutation?.status ?? "unmatched",
+      settlementStatus: prepared.payment.settlementStatus ?? "unsettled",
+      matchingResult,
+      message:
+        "Rekonsiliasi payment disinkronkan ulang menggunakan tanggal, nominal, dan metode pembayaran terbaru.",
+    });
+  } catch (err: any) {
+    if (err instanceof ReconciliationSyncError) {
+      res.status(err.statusCode).json({
+        error: err.message,
+        code: err.code,
+        ...(err.code === "RECONCILIATION_LOCKED" ? { lockReason: err.message } : {}),
+      });
+      return;
+    }
+    req.log.error({ err, paymentId: id }, "Payment reconciliation sync error");
+    res.status(500).json({ error: "Gagal menyinkronkan rekonsiliasi payment." });
+  }
+});
+
 /**
  * Metadata-only payment edit.
  *
@@ -1411,7 +1755,14 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     }
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, before.bookingId)).limit(1);
-    if (status === "confirmed" && booking && !isBookingConfirmableStatus(booking.status)) {
+    const bookingAlreadyConfirmed =
+      status === "confirmed" && booking?.status === "confirmed";
+    if (
+      status === "confirmed" &&
+      booking &&
+      !bookingAlreadyConfirmed &&
+      !isBookingConfirmableStatus(booking.status)
+    ) {
       res.status(409).json({
         error: `Booking dengan status ${booking.status} tidak dapat dikonfirmasi melalui pembayaran.`,
       });
@@ -1678,7 +2029,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         if (status === "confirmed") {
           const isDP = claimed.paymentType === "dp";
           const prevStatus = booking?.status ?? "waiting_confirmation";
-          if (isDP) {
+          if (bookingAlreadyConfirmed) {
+            // Repair the narrow split-state where a previous workaround or
+            // partial confirmation already confirmed the booking while the
+            // payment remained pending. Keep the booking lifecycle untouched;
+            // the confirmed payment still continues to accounting below.
+          } else if (isDP) {
             await tx
               .update(bookingsTable)
               .set({
@@ -1812,35 +2168,38 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       } else {
         // Pelunasan / full_payment dikonfirmasi → booking confirmed
         if (booking) {
-          const [facility] = await db
-            .select({ name: facilitiesTable.name })
-            .from(facilitiesTable)
-            .where(eq(facilitiesTable.id, booking.facilityId))
-            .limit(1);
+          if (!bookingAlreadyConfirmed) {
+            const [facility] = await db
+              .select({ name: facilitiesTable.name })
+              .from(facilitiesTable)
+              .where(eq(facilitiesTable.id, booking.facilityId))
+              .limit(1);
 
-          logger.info({ orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
-          notifyPaymentConfirmed({
-            customerName: booking.customerName,
-            customerPhone: booking.customerPhone,
-            orderNumber: booking.orderNumber,
-            facilityName: facility?.name ?? "",
-            bookingDate: booking.bookingDate,
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-            totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-            bookingId: booking.id,
-            groupRef: booking.groupRef,
-          }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
+            logger.info({ orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
+            notifyPaymentConfirmed({
+              customerName: booking.customerName,
+              customerPhone: booking.customerPhone,
+              orderNumber: booking.orderNumber,
+              facilityName: facility?.name ?? "",
+              bookingDate: booking.bookingDate,
+              startTime: booking.startTime,
+              endTime: booking.endTime,
+              totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+              bookingId: booking.id,
+              groupRef: booking.groupRef,
+            }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
 
-          // Kirim invoice PDF ke customer via email & WA (fire-and-forget)
-          // Jika booking bagian dari grup, kirim invoice gabungan
-          const invoiceAudit = { userId: userInfo.userId, userName: userInfo.userName ?? "admin", ...clientInfo };
-          if (booking.groupRef) {
-            sendGroupInvoiceToCustomer(booking.groupRef, invoiceAudit)
-              .catch((err) => logger.error({ err, groupRef: booking.groupRef }, "[InvoiceDelivery] Gagal kirim invoice grup setelah payment confirmed"));
-          } else {
-            sendInvoiceToCustomer(booking.orderNumber, invoiceAudit)
-              .catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
+            // Kirim invoice PDF ke customer via email & WA (fire-and-forget).
+            // Split-state recovery skips delivery because booking confirmation
+            // already ran those side effects.
+            const invoiceAudit = { userId: userInfo.userId, userName: userInfo.userName ?? "admin", ...clientInfo };
+            if (booking.groupRef) {
+              sendGroupInvoiceToCustomer(booking.groupRef, invoiceAudit)
+                .catch((err) => logger.error({ err, groupRef: booking.groupRef }, "[InvoiceDelivery] Gagal kirim invoice grup setelah payment confirmed"));
+            } else {
+              sendInvoiceToCustomer(booking.orderNumber, invoiceAudit)
+                .catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
+            }
           }
           const today = new Date().toISOString().split("T")[0];
           const paymentMethodLabel = payment.paymentMethod ?? "Transfer Bank";
@@ -1874,8 +2233,10 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           }
 
           // Sync ke BizPortal pakai total grup (bukan per-sesi) agar nominal tidak terbelah
-          syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), bookingForFinancial).catch(() => {});
-          pushConfirmedPaymentAsBankMutation(bookingForFinancial, new Date()).catch(() => {});
+          if (!bookingAlreadyConfirmed) {
+            syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), bookingForFinancial).catch(() => {});
+            pushConfirmedPaymentAsBankMutation(bookingForFinancial, new Date()).catch(() => {});
+          }
           if (booking.groupRef) {
             // Group bookings still represent one payment event. Keep the
             // accounting identity at payment level; never create sc_group_*
@@ -1927,7 +2288,9 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
         await logAudit({
           ...userInfo,
-          action: "FINAL_PAYMENT_APPROVED",
+          action: bookingAlreadyConfirmed
+            ? "RECONCILE_PENDING_PAYMENT_CONFIRMATION"
+            : "FINAL_PAYMENT_APPROVED",
           entity: "payment",
           entityId: id,
           before: { status: before.status },

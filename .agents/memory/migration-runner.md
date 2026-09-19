@@ -8,6 +8,8 @@ The root `scripts/migrate.ts` file uses `pg` directly. To run it:
 1. `pg` must be in `scripts/package.json` dependencies (not just in lib/db)
 2. Use `scripts/node_modules/.bin/tsx scripts/migrate.ts` (not `npx tsx` or `pnpm tsx`)
 3. The migration connects via session pooler (port 5432), swapping 6543→5432 in the URL
+4. Inline `tsx -e` runs as CJS here, so async probes must use an async IIFE instead of top-level `await`.
+5. Production bootstrap commands must supply the configured GCP project and secret IDs unless the package script already sets them.
 
 **Why:** `drizzle-kit push` hangs on Supabase shared instance introspection of ~150 public tables. Direct pg client on port 5432 (session pooler) is the only reliable migration path.
 

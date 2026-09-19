@@ -14,6 +14,7 @@ DECLARE
   v_booking_tax_rate numeric;
   v_facility_id integer;
   v_company_id integer;
+  v_payment_company_id integer;
   v_company_count integer;
   v_external_bank_account_id text;
   v_internal_bank_account_id integer;
@@ -108,6 +109,8 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
+  v_payment_company_id := NEW.company_id;
+
   SELECT COUNT(*)::integer, MIN(fcm.company_id)
     INTO v_company_count, v_company_id
     FROM sport_center.facility_company_mappings fcm
@@ -115,19 +118,44 @@ BEGIN
      AND fcm.is_active = TRUE
      AND fcm.approval_status = 'OWNER_APPROVED';
 
-  IF v_company_count = 0 OR v_company_id IS NULL THEN
-    RAISE EXCEPTION 'MIRROR_COMPANY_UNRESOLVED: facility % has no active company mapping',
-      v_facility_id
-      USING ERRCODE = 'P0001';
-  ELSIF v_company_count > 1 THEN
+  IF v_company_count > 1 THEN
     RAISE EXCEPTION 'MIRROR_COMPANY_UNRESOLVED: facility % has % active company mappings',
       v_facility_id, v_company_count
       USING ERRCODE = 'P0001';
   END IF;
 
+  -- Canonical enrichment runs before confirmation and stores the validated
+  -- owner on the payment row. Auxiliary facilities such as consumption or
+  -- other one-off charges may intentionally have no facility-company mapping,
+  -- so prefer that payment snapshot after validating it against public.company.
+  IF v_payment_company_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.companies c
+      WHERE c.id = v_payment_company_id
+        AND c.is_active = TRUE
+    ) THEN
+      RAISE EXCEPTION 'MIRROR_COMPANY_UNRESOLVED: canonical payment % references inactive or missing company %',
+        NEW.id, v_payment_company_id
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    IF v_company_count = 1 AND v_company_id <> v_payment_company_id THEN
+      RAISE EXCEPTION 'MIRROR_COMPANY_CONFLICT: payment % company % differs from facility % owner %',
+        NEW.id, v_payment_company_id, v_facility_id, v_company_id
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    v_company_id := v_payment_company_id;
+  ELSIF v_company_count = 0 OR v_company_id IS NULL THEN
+    RAISE EXCEPTION 'MIRROR_COMPANY_UNRESOLVED: payment % and facility % have no validated company evidence',
+      NEW.id, v_facility_id
+      USING ERRCODE = 'P0001';
+  END IF;
+
   -- Older Sport Center bookings can predate the public accounting projection.
-  -- Build the missing one only after the source booking and its owner-approved
-  -- company mapping have both been validated.
+  -- Build the missing one only after the source booking and its canonical
+  -- payment/facility company evidence have been validated.
   IF v_public_booking_count = 0 THEN
     INSERT INTO public.sport_bookings
       (company_id, booking_number, customer_name, customer_phone, facility_name,

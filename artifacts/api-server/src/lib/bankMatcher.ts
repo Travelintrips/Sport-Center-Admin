@@ -442,6 +442,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       p.proof_url AS "proofUrl",
       p.status,
       p.created_at AS "createdAt",
+      p.paid_at AS "paidAt",
       p.confirmed_at AS "confirmedAt",
       p.ocr_name AS "ocrName",
       p.ocr_amount AS "ocrAmount",
@@ -461,6 +462,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
     proofUrl: string | null;
     status: string;
     createdAt: string | null;
+    paidAt: string | null;
     confirmedAt: string | null;
     ocrName: string | null;
     ocrAmount: number | null;
@@ -620,8 +622,9 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       return d.toISOString().slice(0, 10);
     };
     const paymentDateStr =
-      toDateStr(payment?.createdAt) ??
+      toDateStr(payment?.paidAt) ??
       toDateStr(payment?.confirmedAt) ??
+      toDateStr(payment?.createdAt) ??
       (["confirmed", "paid", "completed"].includes(booking.status ?? "")
         ? toDateStr(booking.updatedAt)
         : null);

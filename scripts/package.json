@@ -10,7 +10,7 @@
     "migrate": "tsx ../migrate.ts",
     "migrate:dev": "tsx ./src/db-migrate.ts",
     "migrate:prod": "NODE_ENV=production GCP_SECRET_ID=sport-center tsx ./src/db-migrate.ts --prod --apply",
-    "migrate:payment-accounting:prod": "NODE_ENV=production tsx ./src/apply-payment-accounting-sync-prod.ts --prod --apply",
+    "migrate:payment-accounting:prod": "NODE_ENV=production GCP_PROJECT_ID=sport-center-506306 GCP_SECRET_ID=sport-center tsx ./src/apply-payment-accounting-sync-prod.ts --prod --apply",
     "repair:missing-payment-journals:prod": "NODE_ENV=production GCP_SECRET_ID=sport-center tsx ./src/repair-missing-payment-journals-prod.ts --prod --apply",
     "backfill:legacy-journal-payment-metadata:prod": "NODE_ENV=production GCP_SECRET_ID=sport-center tsx ./src/backfill-legacy-journal-payment-metadata-prod.ts --prod --apply",
     "audit:schema": "tsx ./src/schema-diff-full.ts",

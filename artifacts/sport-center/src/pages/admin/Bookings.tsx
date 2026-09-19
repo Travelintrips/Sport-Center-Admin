@@ -1215,6 +1215,10 @@ function BookingDetailDrawer({
   onConfirmMembershipPayment,
   onRejectMembershipPayment,
   onClearProof,
+  onSyncReconciliation,
+  reconciliationSyncingPaymentId,
+  reconciliationLockedPayments,
+  paymentDateChangedIds,
   onDelete,
   paymentMethodOptions,
   onUpdatePaymentMethod,
@@ -1233,6 +1237,10 @@ function BookingDetailDrawer({
   onConfirmMembershipPayment: (membershipId: number) => void;
   onRejectMembershipPayment: (membershipId: number) => void;
   onClearProof: (paymentId: number) => void;
+  onSyncReconciliation: (paymentId: number) => void;
+  reconciliationSyncingPaymentId: number | null;
+  reconciliationLockedPayments: Record<number, string>;
+  paymentDateChangedIds: Set<number>;
   onDelete: (id: number) => void;
   paymentMethodOptions: PaymentMethodOption[];
   onUpdatePaymentMethod: (paymentId: number, paymentMethod: string) => void;
@@ -1849,6 +1857,20 @@ function BookingDetailDrawer({
                     : pmt.paymentType === "dp"
                       ? "Konfirmasi DP"
                       : "Konfirmasi → Selesai";
+                   const isSyntheticPayment =
+                     Boolean(pmt.isMembershipPayment || pmt.isCompanyInvoicePayment);
+                   const paymentDate = pmt.paidAt ?? pmt.confirmedAt ?? pmt.submittedAt;
+                   const canSyncReconciliation =
+                     !isSyntheticPayment &&
+                     Boolean(paymentDate) &&
+                     (pmt.status === "confirmed" || paymentDateChangedIds.has(Number(pmt.id)));
+                    const settlementLocked =
+                      String(pmt.settlementStatus ?? "").toLowerCase() === "settled";
+                    const reconciliationLockReason =
+                      reconciliationLockedPayments[Number(pmt.id)] ??
+                      (settlementLocked
+                        ? "Settlement sudah final/settled"
+                        : undefined);
                   return (
                     <div key={pmt.id} className="p-4 space-y-3">
                       <div className="flex items-center justify-between gap-2">
@@ -1970,6 +1992,41 @@ function BookingDetailDrawer({
                           )}
                         </>
                       )}
+                       {!isSyntheticPayment && canSyncReconciliation && (
+                         <div className="space-y-1.5 pt-1">
+                           {reconciliationLockReason && (
+                             <div
+                               data-testid={`status-reconciliation-locked-${pmt.id}`}
+                               className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                             >
+                               <LockIcon size={12} className="mt-0.5 shrink-0" />
+                               <span>
+                                 Rekonsiliasi terkunci: {reconciliationLockReason}. Posting final tidak
+                                 diubah otomatis.
+                               </span>
+                             </div>
+                           )}
+                           <button
+                             type="button"
+                             data-testid={`button-sync-reconciliation-${pmt.id}`}
+                             onClick={() => onSyncReconciliation(Number(pmt.id))}
+                              disabled={
+                                isUpdating ||
+                                settlementLocked ||
+                                reconciliationSyncingPaymentId === Number(pmt.id)
+                              }
+                             className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300 dark:hover:bg-indigo-950/50"
+                           >
+                             <RefreshCw
+                               size={13}
+                               className={reconciliationSyncingPaymentId === Number(pmt.id) ? "animate-spin" : ""}
+                             />
+                             {reconciliationSyncingPaymentId === Number(pmt.id)
+                               ? "Menyinkronkan rekonsiliasi..."
+                               : "Sinkronkan Rekonsiliasi"}
+                           </button>
+                         </div>
+                       )}
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
@@ -2895,6 +2952,9 @@ export default function AdminBookings() {
   const [reapplyingRef, setReapplyingRef] = useState<string | null>(null);
   const [waAlertOpen, setWaAlertOpen] = useState(true);
   const [sendingWaId, setSendingWaId] = useState<number | null>(null);
+  const [reconciliationSyncingPaymentId, setReconciliationSyncingPaymentId] = useState<number | null>(null);
+  const [reconciliationLockedPayments, setReconciliationLockedPayments] = useState<Record<number, string>>({});
+  const [paymentDateChangedIds, setPaymentDateChangedIds] = useState<Set<number>>(new Set());
 
   const {
     data: rawBookings,
@@ -3258,6 +3318,21 @@ export default function AdminBookings() {
     startTime?: string,
     endTime?: string,
   ) => {
+    const paymentAffectedByDateChange =
+      paymentDate !== undefined
+        ? [...getBookingPayments(selectedBooking)]
+            .filter(
+              (payment) =>
+                !payment.isMembershipPayment &&
+                !payment.isCompanyInvoicePayment &&
+                Number.isInteger(Number(payment.id)),
+            )
+            .sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))
+            .find(
+              (payment) =>
+                payment.status === "pending" || payment.status === "confirmed",
+            )
+        : undefined;
     const response = await fetch(`${API_BASE}/bookings/${bookingId}/dates`, {
       method: "PATCH",
       headers: {
@@ -3283,8 +3358,82 @@ export default function AdminBookings() {
         : current,
     );
     setSelectedBooking(data);
+    if (paymentAffectedByDateChange) {
+      setPaymentDateChangedIds((current) => {
+        const next = new Set(current);
+        next.add(Number(paymentAffectedByDateChange.id));
+        return next;
+      });
+    }
     toast({ title: "Tanggal berhasil diperbarui" });
   };
+
+  const syncReconciliationMutation = useMutation({
+    mutationFn: async (paymentId: number) => {
+      const response = await fetch(`${API_BASE}/payments/${paymentId}/reconciliation-sync`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(data?.error ?? `HTTP ${response.status}`) as Error & {
+          status?: number;
+          code?: string;
+          lockReason?: string;
+        };
+        error.status = response.status;
+        error.code = data?.code;
+        error.lockReason = data?.lockReason;
+        throw error;
+      }
+      return data;
+    },
+    onMutate: (paymentId) => {
+      setReconciliationSyncingPaymentId(paymentId);
+    },
+    onSuccess: async (data: any, paymentId) => {
+      setReconciliationLockedPayments((current) => {
+        if (!(paymentId in current)) return current;
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      await queryClient.invalidateQueries({ queryKey: ["bank-reconciliation"] });
+      const refreshed = await refetchBookings();
+      setSelectedBooking((current: any) =>
+        (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current?.id) ?? current,
+      );
+      toast({
+        title: "Rekonsiliasi berhasil disinkronkan",
+        description:
+          data?.message ??
+          `Payment #${paymentId} diproses ulang dengan tanggal, nominal, dan metode terbaru.`,
+      });
+    },
+    onError: (error: any, paymentId) => {
+      if (error?.status === 423 || error?.code === "RECONCILIATION_LOCKED") {
+        const reason = error.lockReason || error.message || "transaksi sudah final";
+        setReconciliationLockedPayments((current) => ({ ...current, [paymentId]: reason }));
+        toast({
+          title: "Rekonsiliasi terkunci",
+          description:
+            "Transaksi final/approved/posted/reconciled tidak dapat diubah diam-diam. " +
+            reason,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Gagal menyinkronkan rekonsiliasi",
+        description: error?.message ?? "Terjadi kesalahan pada server.",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setReconciliationSyncingPaymentId(null);
+    },
+  });
 
   const clearProofMutation = useMutation({
     mutationFn: async (paymentId: number) => {
@@ -4774,6 +4923,10 @@ export default function AdminBookings() {
              updatePaymentMetadataMutation.mutate({ id: paymentId, data: { paymentMethod } })
            }
           onClearProof={(paymentId) => clearProofMutation.mutate(paymentId)}
+          onSyncReconciliation={(paymentId) => syncReconciliationMutation.mutate(paymentId)}
+          reconciliationSyncingPaymentId={reconciliationSyncingPaymentId}
+          reconciliationLockedPayments={reconciliationLockedPayments}
+           paymentDateChangedIds={paymentDateChangedIds}
           onDelete={handleDelete}
           isUpdating={isUpdating || clearProofMutation.isPending}
            onUpdateDates={updateDates}
