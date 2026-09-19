@@ -2660,7 +2660,7 @@ async function continueSession(
         durationMinutes = Math.round(parseFloat(directNum[1].replace(",", ".")) * 60);
       }
       if (!durationMinutes) {
-        const reply = `⏱️ Tidak bisa mengenali durasi. Coba:\n• *2 jam*\n• *1 jam 30 menit*\n• *90 menit*`;
+        const reply = `⏱️ Tidak bisa mengenali durasi. Coba:\n• *1 jam*\n• *2 jam*\n• *3 jam*`;
         await appendMessage(session.id, "bot", reply);
         await sendReply(reply);
         return;
@@ -2788,7 +2788,7 @@ async function buildStepQuestion(
     }
 
     case "ask_duration":
-      return `⏱️ Berapa lama? (min 1 jam)\nContoh: *1 jam*, *2 jam*, *90 menit*`;
+      return `⏱️ Berapa lama? (min 1 jam)\nContoh: *1 jam*, *2 jam*, *3 jam*`;
 
     case "ask_name":
       return [
