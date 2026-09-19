@@ -1845,7 +1845,11 @@ function isExplicitCancel(msg: string): boolean {
 }
 
 function isMinaGreeting(msg: string): boolean {
-  return /^(halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?$|^(?:mau|mao)\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?$/i.test(msg.trim());
+  return /^(halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?$/i.test(msg.replace(/\s+/g, " ").trim());
+}
+
+function isBookingRequest(msg: string): boolean {
+  return /^(?:mau|mao)\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?$/i.test(msg.replace(/\s+/g, " ").trim());
 }
 
 function isContinueHere(msg: string): boolean {
@@ -2719,7 +2723,7 @@ async function continueSession(
     case "ask_facility": {
       const fac = await resolveFacilityFromMsg(msg);
       if (!fac) {
-        const reply = isMinaGreeting(msg)
+        const reply = isMinaGreeting(msg) || isBookingRequest(msg)
           ? await buildFacilityList()
           : `Fasilitas tidak ditemukan. ${await buildFacilityList()}`;
         await appendMessage(session.id, "bot", reply);
