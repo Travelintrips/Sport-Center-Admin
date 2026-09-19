@@ -3042,6 +3042,56 @@ async function continueSession(
 
     case "ask_time": {
       const parsed = parseIntent(msg);
+
+      // A customer may reject the suggested availability instead of sending
+      // another time immediately. Treat that as a scheduling choice, not as
+      // an unrecognized time, so Mina keeps the conversation moving.
+      const wantsAnotherDate =
+        /(?:tanggal|hari).*(?:lain|berbeda|berikutnya)|(?:ganti|pilih|mau).*(?:tanggal|hari)/i.test(lower);
+      const wantsAnotherTime =
+        /(?:jam|waktu).*(?:lain|berbeda)|(?:ganti|pilih|mau|cari).*(?:jam|waktu)/i.test(lower) ||
+        /^(?:tidak|nggak|ngga|gak|ga)\b/i.test(lower);
+
+      if (!parsed.startTime && (wantsAnotherDate || wantsAnotherTime)) {
+        if (wantsAnotherDate) {
+          const updated = await updateSession(session.id, {
+            bookingDate: null,
+            startTime: null,
+            currentStep: "ask_date",
+          });
+          const reply = `📅 Baik, kita cari tanggal lain untuk *${session.facilityId ? "fasilitas yang sama" : "booking ini"}*.\n\n` +
+            `Silakan sebutkan tanggal lain, misalnya *lusa* atau *tanggal 21*.`;
+          await appendMessage(updated.id, "bot", reply);
+          await sendReply(reply);
+          return;
+        }
+
+        const fac = session.facilityId
+          ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
+          : null;
+        const slots = fac && session.bookingDate
+          ? await getAvailableSlotsForDay(
+            fac.id,
+            session.bookingDate,
+            fac.openTime,
+            fac.closeTime,
+            session.durationMinutes ?? 60,
+          )
+          : [];
+        const updated = await updateSession(session.id, {
+          startTime: null,
+          currentStep: "ask_time",
+        });
+        const reply = fac && slots.length > 0
+          ? `⏰ Baik, tetap di *${fac.name}*. Pilih jam lain untuk durasi *${minutesToHours(session.durationMinutes ?? 60)} jam* pada tanggal *${session.bookingDate}*:\n\n` +
+            `🟢 ${slots.join("  | ")}\n\nKamu juga bisa langsung mengetik, misalnya *jam 11*.`
+          : `⚠️ Tidak ada jam lain yang tersedia di *${fac?.name ?? "fasilitas ini"}* pada tanggal tersebut.\n\n` +
+            `Ketik *tanggal lain* atau *batal*.`;
+        await appendMessage(updated.id, "bot", reply);
+        await sendReply(reply);
+        return;
+      }
+
       if (!parsed.startTime) {
         const reply = `⏰ Tidak bisa mengenali jam. Coba format:\n• *jam 8 pagi*\n• *jam 20.00*\n• *19:00*\n• *jam 7 malam*`;
         await appendMessage(session.id, "bot", reply);
