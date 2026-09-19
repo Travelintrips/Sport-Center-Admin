@@ -20,3 +20,9 @@ Development may preserve a Replit-scoped `FONNTE_CUSTOMER_TOKEN` when the shared
 **Why:** A DEV bootstrap can otherwise delete the newly configured customer secret before the Mina path reads it, while allowing an unrestricted fallback would weaken the outbound safety boundary.
 
 **How to apply:** Keep the DEV fallback scoped to the development loader, require the customer token and exact normalized allowlisted recipient at the provider guard, and continue blocking dry-run, admin, and non-allowlisted sends.
+
+Shared notification helpers must pass the Mina/customer channel, normalized recipient, and customer-token presence into the provider safety guard; a blanket non-production simulation check silently drops payment links in DEV even when ordinary Mina replies are allowed.
+
+**Why:** Direct booking replies and payment notifications use different send helpers. Without the channel context, the payment URL was recorded in the booking but never reached the configured development test recipient.
+
+**How to apply:** Preserve fail-closed behavior for admin and non-allowlisted recipients, but allow the same controlled Mina test exception for customer payment, status, and confirmation notifications.

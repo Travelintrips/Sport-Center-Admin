@@ -94,16 +94,6 @@ async function sendWA(
     return;
   }
   const dispatchMode = getWhatsAppDispatchMode();
-  if (dispatchMode !== "production") {
-    allowWhatsAppProviderSend();
-    logger.info({ target: cleanPhone, event: ctx?.event, mode: dispatchMode }, "[WA] simulated dispatch — pesan tidak dikirim ke Fonnte");
-    logger.info({ target: cleanPhone, preview: message.slice(0, 200) }, "[WA] DRY RUN message preview");
-    if (ctx) logWaSend(cleanPhone, message, "sent", `${dispatchMode} — tidak dikirim ke Fonnte`, ctx).catch(() => {});
-    return;
-  }
-  if (!allowWhatsAppProviderSend()) return;
-  // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
-  trackSentMessage(message);
   const config = await getWaConfig();
   const token = useCustomerToken ? config.customerToken : config.token;
   if (useCustomerToken && !config.customerDevice) {
@@ -117,6 +107,26 @@ async function sendWA(
     if (ctx) logWaSend(cleanPhone, message, "failed", `${tokenName} kosong`, ctx).catch(() => {});
     return;
   }
+  const providerAllowed = allowWhatsAppProviderSend({
+    channel: useCustomerToken ? "mina" : "admin",
+    recipient: cleanPhone,
+    customerTokenConfigured: useCustomerToken ? Boolean(config.customerToken) : false,
+  });
+  if (!providerAllowed) {
+    logger.info({ target: cleanPhone, event: ctx?.event, mode: dispatchMode }, "[WA] dispatch blocked by safety policy");
+    if (ctx) {
+      logWaSend(
+        cleanPhone,
+        message,
+        "sent",
+        `${dispatchMode} — tidak dikirim ke Fonnte`,
+        ctx,
+      ).catch(() => {});
+    }
+    return;
+  }
+  // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat provider request pending
+  trackSentMessage(message);
   logger.info({
     target: cleanPhone,
     sender: useCustomerToken ? "customer" : "admin",
