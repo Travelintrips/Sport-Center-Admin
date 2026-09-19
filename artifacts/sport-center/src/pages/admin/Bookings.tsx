@@ -4357,11 +4357,26 @@ export default function AdminBookings() {
                        ),
                      ];
                      const groupStatus = isMultiSessionGroup ? getGroupStatus(groupRows) : b.status;
-                    const listPayment = b.membershipPayment ?? b.payment;
+                    const groupPayments = isMultiSessionGroup
+                      ? groupRows.flatMap((row: any) => [
+                          ...(Array.isArray(row.payments) ? row.payments : []),
+                          row.membershipPayment,
+                          row.payment,
+                        ]).filter(Boolean)
+                      : [];
+                    const groupPayment = groupPayments
+                      .sort((a: any, z: any) =>
+                        new Date(z.paidAt ?? z.confirmedAt ?? z.submittedAt ?? z.updatedAt ?? z.createdAt ?? 0).getTime() -
+                        new Date(a.paidAt ?? a.confirmedAt ?? a.submittedAt ?? a.updatedAt ?? a.createdAt ?? 0).getTime()
+                      )[0];
+                    const listPayment = isMultiSessionGroup
+                      ? (groupPayment ?? b.membershipPayment ?? b.payment)
+                      : (b.membershipPayment ?? b.payment);
                     const listPaymentDate =
+                      listPayment?.paidAt ??
                       listPayment?.confirmedAt ??
                       listPayment?.submittedAt ??
-                      listPayment?.paidAt ??
+                      b.paidAt ??
                       listPayment?.updatedAt ??
                       listPayment?.createdAt;
                     const isMembershipPayment = Boolean(b.membershipPayment);
@@ -4605,7 +4620,18 @@ export default function AdminBookings() {
                       <td className="px-4 py-3">
                          {isMultiSessionGroup ? (
                            groupStatus ? (
-                             <StatusBadge status={groupStatus} />
+                             <InlineStatusSelect
+                               bookingId={(groupVerificationRow ?? b).id}
+                               status={groupStatus}
+                               onUpdate={(_id, status) => {
+                                 groupRows.forEach((row: any) => {
+                                   if (row.status !== status) {
+                                     updateBookingMutation.mutate({ id: row.id, data: { status: status as any } });
+                                   }
+                                 });
+                               }}
+                               isUpdating={updateBookingMutation.isPending}
+                             />
                            ) : (
                              <span className="text-xs font-semibold text-slate-500">Campuran</span>
                            )
