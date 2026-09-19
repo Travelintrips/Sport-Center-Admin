@@ -20,6 +20,7 @@ import {
   formatSessionSummary,
   formatIDR,
   todayWIB,
+  resolveBookingCustomerName,
   type WaStep,
   type WaBookingSessionRow,
 } from "../lib/waBookingSession";
@@ -2433,17 +2434,13 @@ async function startBookingSession(
     }
   }
 
-        ? `\n\n🟢 *Slot tersedia tanggal ${intent.bookingDate}:*\n${availSlots.join("  |  ")}`
-        : `\n\n⚠️ Tidak ada slot tersedia pada tanggal tersebut. Coba tanggal lain.`;
-      const reply = `❌ Slot jam *${intent.startTime}* tanggal *${intent.bookingDate}* untuk *${facilityName}* sudah terisi.${slotsStr}`;
-      await sendReply(reply);
-      return;
-    }
-  }
-
   // Prefer an explicit person/company name, then the verified customer profile,
   // then the WhatsApp profile name. A name is only asked when none is usable.
-  const resolvedName = intent.personName ?? customer?.name ?? waName.trim() || null;
+  const resolvedName = resolveBookingCustomerName(
+    intent.personName,
+    customer?.name,
+    waName,
+  );
 
   const step = getNextStep({
     facilityId,
@@ -2474,7 +2471,7 @@ async function startBookingSession(
     after: { phone, step, facilityId, bookingDate: intent.bookingDate, startTime: intent.startTime },
   });
 
-  await presentBookingSession(session, phone, useCustomerToken, availabilityPrefix);
+  await presentBookingSession(session, phone, useCustomerToken);
 }
 
 async function continueSession(
@@ -2688,8 +2685,9 @@ async function continueSession(
 
       const updated = await updateSession(session.id, {
         customerName: rawName,
-        notes: null,            // null = not yet asked → triggers ask_notes step
-        currentStep: "ask_notes",
+        // Notes are optional and are only persisted when the customer
+        // mentioned them in natural language. Do not add an extra question.
+        currentStep: getNextStep({ ...session, customerName: rawName }),
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName, bookingContext: ctx } });
       const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
@@ -2701,8 +2699,12 @@ async function continueSession(
         ctx === "friend"    ? "👥 Booking atas nama teman" :
         "✅ Booking atas nama";
       const nameConfirm = extracted ? `${ctxLabel} *${rawName}*\n\n` : "";
-      const notesQ = await buildStepQuestion("ask_notes", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
-      const reply = nameConfirm + notesQ;
+      const reply = nameConfirm + await buildStepQuestion(
+        updated.currentStep as WaStep,
+        updated,
+        fac?.name ?? "",
+        Number(fac?.pricePerHour ?? 0),
+      );
       await appendMessage(session.id, "bot", reply);
       await sendReply(reply);
       break;
@@ -3103,40 +3105,108 @@ async function execCreateBookingFromSession(
   const orderNumber = await generateBookingOrderNumber();
 
   // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
-  const [booking] = await db.insert(bookingsTable).values({
-    orderNumber,
-    customerName: session.customerName,
-    customerEmail: customer.email,
-    customerPhone: phone,
-    customerId: customer.id,
-    facilityId: facility.id,
-    bookingDate: session.bookingDate,
-    startTime: session.startTime,
-    endTime,
-    durationHours,
-    totalPrice: String(totalPrice),
-    discountAmount: String(discountAmount),
-    apDiscountAmount: "0",
-    basePrice: String(basePrice),
-    source: "whatsapp_ai",
-    status: "waiting_admin_approval",
-    bookerName: session.bookerName || null,
-    notes: session.notes || null,
-    ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
-    dpp: String(taxCalc.dpp),
-    ppnAmount: String(taxCalc.taxAmount),
-    grandTotal: String(taxCalc.grandTotal),
-    ppnTreatment: taxCalc.ppnTreatment,
-    ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
-  }).returning();
+  let booking: typeof bookingsTable.$inferSelect;
+  try {
+    await db.transaction(async (tx) => {
+      // Serialize only booking attempts for the same facility/day. This
+      // closes the check-then-insert race without changing the canonical
+      // booking lifecycle or requiring a broad database constraint migration.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(
+        hashtextextended(${`sport-center:${facility.id}:${session.bookingDate}`}, 0)
+      )`);
 
-  await db.insert(bookingHistoryTable).values({
-    bookingId: booking.id,
-    fromStatus: null,
-    toStatus: "waiting_admin_approval",
-    changedByName: session.customerName,
-    note: "Booking dibuat via WhatsApp AI — menunggu persetujuan admin",
-  });
+      const [sameDayBookings, blocked] = await Promise.all([
+        tx.select({
+          startTime: bookingsTable.startTime,
+          endTime: bookingsTable.endTime,
+          status: bookingsTable.status,
+        }).from(bookingsTable).where(and(
+          eq(bookingsTable.facilityId, facility.id),
+          eq(bookingsTable.bookingDate, session.bookingDate),
+        )),
+        tx.select({
+          startTime: blockedSchedulesTable.startTime,
+          endTime: blockedSchedulesTable.endTime,
+        }).from(blockedSchedulesTable).where(and(
+          eq(blockedSchedulesTable.facilityId, facility.id),
+          eq(blockedSchedulesTable.date, session.bookingDate),
+        )),
+      ]);
+
+      const requestedStart = timeToMinutes(session.startTime);
+      const requestedEnd = timeToMinutes(endTime);
+      const overlaps = (startTime: string, existingEndTime: string) =>
+        requestedStart < timeToMinutes(existingEndTime) &&
+        requestedEnd > timeToMinutes(startTime);
+      const hasActiveConflict = sameDayBookings
+        .filter((row) => !INACTIVE_STATUSES.includes(row.status))
+        .some((row) => overlaps(row.startTime, row.endTime));
+      const hasBlockedConflict = blocked.some((row) => overlaps(row.startTime, row.endTime));
+
+      if (hasActiveConflict || hasBlockedConflict) {
+        throw new Error("WA_SLOT_CONFLICT_AFTER_LOCK");
+      }
+
+      const [created] = await tx.insert(bookingsTable).values({
+        orderNumber,
+        customerName: session.customerName,
+        customerEmail: customer.email,
+        customerPhone: phone,
+        customerId: customer.id,
+        facilityId: facility.id,
+        bookingDate: session.bookingDate,
+        startTime: session.startTime,
+        endTime,
+        durationHours,
+        totalPrice: String(totalPrice),
+        discountAmount: String(discountAmount),
+        apDiscountAmount: "0",
+        basePrice: String(basePrice),
+        source: "whatsapp_ai",
+        status: "waiting_admin_approval",
+        bookerName: session.bookerName || null,
+        notes: session.notes || null,
+        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+        dpp: String(taxCalc.dpp),
+        ppnAmount: String(taxCalc.taxAmount),
+        grandTotal: String(taxCalc.grandTotal),
+        ppnTreatment: taxCalc.ppnTreatment,
+        ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
+      }).returning();
+      booking = created;
+
+      await tx.insert(bookingHistoryTable).values({
+        bookingId: created.id,
+        fromStatus: null,
+        toStatus: "waiting_admin_approval",
+        changedByName: session.customerName,
+        note: "Booking dibuat via WhatsApp AI — menunggu persetujuan admin",
+      });
+    });
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "WA_SLOT_CONFLICT_AFTER_LOCK") {
+      throw error;
+    }
+
+    const alternatives = await getAlternativeSlots(
+      facility.id,
+      session.bookingDate,
+      session.startTime,
+      durationHours,
+      facility.openTime,
+      facility.closeTime,
+    );
+    let reply =
+      `⚠️ *Jadwal Tidak Tersedia*\n\n` +
+      `Slot *${session.startTime}–${endTime}* pada *${session.bookingDate}* sudah diambil atau diblokir untuk *${facility.name}*.`;
+    reply += alternatives.length
+      ? `\n\n🕐 *Alternatif terdekat:*\n${alternatives.map((alt, i) => `${i + 1}. *${alt}*`).join("\n")}\n\nKetik jam pilihan kamu atau *batal* untuk membatalkan.`
+      : `\n\nTidak ada alternatif pada tanggal tersebut. Ketik tanggal lain atau *batal*.`;
+    await updateSession(session.id, { currentStep: "ask_time" });
+    await appendMessage(session.id, "bot", reply);
+    await sendReply(reply);
+    return;
+  }
 
   broadcastAvailabilityChange(facility.id, session.bookingDate);
 
@@ -3358,7 +3428,15 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // 3. Active session — continue conversation (always takes priority)
     const session = await getActiveSession(phone);
     if (session) {
-      await continueSession(session, phone, msg, true);
+      // A correction can contain several fields ("jamnya ganti jam 8,
+      // jadi 1 jam saja", "besoknya lusa"). Merge every field first so the
+      // flow never forces the customer back through the old sequential steps.
+      const merged = await mergeSessionFromMessage(session, msg);
+      if (merged.changed) {
+        await presentBookingSession(merged.session, phone, true);
+      } else {
+        await continueSession(session, phone, msg, true);
+      }
       return;
     }
 

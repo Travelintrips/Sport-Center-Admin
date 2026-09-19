@@ -1028,8 +1028,9 @@ export default function AdminSettings() {
         </CardContent>
       </Card>
     </div>
-  );
-}
+  ); 
+} // FIRST_COPY_END
+/*
 import { useState, useEffect, useRef } from "react";
 import { useGetSettings, useUpdateSettings, getGetSettingsQueryKey, useListDiscountSettings, useUpdateDiscountSetting, getListDiscountSettingsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";

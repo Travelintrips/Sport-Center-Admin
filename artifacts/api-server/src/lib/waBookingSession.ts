@@ -464,6 +464,29 @@ export function parseIntent(msg: string): ParsedIntent {
   };
 }
 
+function isUsableCustomerName(value: string): boolean {
+  const normalized = value.trim();
+  if (normalized.length < 2 || normalized.length > 150) return false;
+  if (/^(?:unknown|undefined|null|user|customer|guest)$/i.test(normalized)) return false;
+  return !/^\+?[\d\s().-]+$/.test(normalized);
+}
+
+/**
+ * Resolve the required booking name without asking again for data Mina already
+ * knows. Explicit natural-language names win, then a verified customer
+ * profile, then a non-phone WhatsApp display name.
+ */
+export function resolveBookingCustomerName(
+  explicitName: string | null | undefined,
+  registeredName: string | null | undefined,
+  whatsappProfileName: string | null | undefined,
+): string | null {
+  for (const candidate of [explicitName, registeredName, whatsappProfileName]) {
+    if (candidate && isUsableCustomerName(candidate)) return candidate.trim();
+  }
+  return null;
+}
+
 export function getNextStep(data: {
   facilityId?: number | null;
   bookingDate?: string | null;
