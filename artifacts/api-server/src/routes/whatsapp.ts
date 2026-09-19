@@ -2990,7 +2990,28 @@ async function continueSession(
 
     case "confirm": {
       if (isYes(lower)) {
-        await execCreateBookingFromSession(session, phone, useCustomerToken);
+        try {
+          await execCreateBookingFromSession(session, phone, useCustomerToken);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error(
+            { phone, sessionId: session.id, error: errorMessage },
+            "[continueSession] booking confirmation failed",
+          );
+          await logAudit({
+            action: "wa_booking_confirmation_failed",
+            entity: "wa_booking_session",
+            entityId: session.id,
+            after: { phone, error: errorMessage },
+          }).catch(() => {});
+
+          const reply =
+            `⚠️ Booking belum berhasil diproses karena ada gangguan sementara.\n\n` +
+            `Data booking belum kami konfirmasi. Silakan ketik *ya* lagi untuk mencoba ulang ` +
+            `atau *batal* untuk membatalkan.`;
+          await appendMessage(session.id, "bot", reply);
+          await sendReply(reply);
+        }
       } else if (isNo(lower)) {
         await updateSession(session.id, { status: "cancelled" });
         await sendReply(`❌ Booking dibatalkan. Ketik *booking* untuk memulai lagi. 🏅`);
@@ -3539,7 +3560,7 @@ async function execCreateBookingFromSession(
   await db.update(bookingsTable).set({ paymentDeadline, updatedAt: new Date() }).where(eq(bookingsTable.id, booking.id));
 
   // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
-  notifyWaBookingPaymentRequired({
+  await notifyWaBookingPaymentRequired({
     customerName: session.customerName,
     customerPhone: phone,
     orderNumber,
