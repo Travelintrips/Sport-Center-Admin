@@ -4364,13 +4364,17 @@ export default function AdminBookings() {
                           row.payment,
                         ]).filter(Boolean)
                       : [];
-                    const groupPayment = groupPayments
-                      .sort((a: any, z: any) =>
-                        new Date(z.paidAt ?? z.confirmedAt ?? z.submittedAt ?? z.updatedAt ?? z.createdAt ?? 0).getTime() -
-                        new Date(a.paidAt ?? a.confirmedAt ?? a.submittedAt ?? a.updatedAt ?? a.createdAt ?? 0).getTime()
-                      )[0];
+                    // A group payment is duplicated onto each session for legacy compatibility.
+                    // The admin correction is written to the canonical/representative booking payment,
+                    // so the group row must prefer that payment instead of picking the latest timestamp
+                    // from a sibling session (which can preserve an old paidAt value).
+                    const representativePayment =
+                      b.membershipPayment ??
+                      b.payment ??
+                      (Array.isArray(b.payments) ? b.payments[0] : null);
+                    const groupPayment = representativePayment ?? groupPayments[0] ?? null;
                     const listPayment = isMultiSessionGroup
-                      ? (groupPayment ?? b.membershipPayment ?? b.payment)
+                      ? groupPayment
                       : (b.membershipPayment ?? b.payment);
                     const listPaymentDate =
                       listPayment?.paidAt ??
