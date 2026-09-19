@@ -5,6 +5,7 @@ export type WaStep =
   | "wait_registration"
   | "ask_facility"
   | "choose_mode"
+  | "choose_alternative_facility"
   | "ask_date"
   | "ask_time"
   | "ask_duration"
