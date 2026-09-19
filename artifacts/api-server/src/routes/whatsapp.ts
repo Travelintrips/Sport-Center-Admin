@@ -1849,7 +1849,10 @@ function isMinaGreeting(msg: string): boolean {
 }
 
 function isContinueHere(msg: string): boolean {
-  return /^(?:1|lanjut(?:\s+di\s+sini)?|lanjutkan(?:\s+di\s+sini)?)$/i.test(msg.trim());
+  // Accept both natural WhatsApp spellings: "lanjut di sini" and
+  // "lanjut disini". Keep the match strict so unrelated messages do not
+  // accidentally advance the booking flow.
+  return /^(?:1|lanjut(?:\s+di\s*sini)?|lanjutkan(?:\s+di\s*sini)?)$/i.test(msg.replace(/\s+/g, " ").trim());
 }
 
 function isMakeForm(msg: string): boolean {
