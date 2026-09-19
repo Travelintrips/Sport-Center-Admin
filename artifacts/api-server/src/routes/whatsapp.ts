@@ -2783,9 +2783,12 @@ async function continueSession(
   phone: string,
   msg: string,
   useCustomerToken = false,
+  appendCustomerMessage = true,
 ): Promise<void> {
   const sendReply = (message: string) => sendWAMsg(phone, message, useCustomerToken);
-  await appendMessage(session.id, "customer", msg);
+  if (appendCustomerMessage) {
+    await appendMessage(session.id, "customer", msg);
+  }
 
   const step = session.currentStep as WaStep;
   const lower = msg.toLowerCase().trim();
@@ -2895,6 +2898,19 @@ async function continueSession(
         await updateSession(session.id, { currentStep: "ask_facility" });
         await appendMessage(session.id, "bot", reply);
         await sendReply(reply);
+        return;
+      }
+
+      // After Mina offers Court B/current-court/date choices, accept a direct
+      // replacement time as well (e.g. "jam 11" or "jam 8 pagi"). This keeps
+      // the customer from having to send the menu number first.
+      const directTime = parseIntent(msg).startTime;
+      if (directTime && !/^\d+$/.test(lower)) {
+        const timeStep = await updateSession(session.id, {
+          startTime: null,
+          currentStep: "ask_time",
+        });
+        await continueSession(timeStep, phone, msg, useCustomerToken, false);
         return;
       }
 
@@ -3091,6 +3107,7 @@ async function continueSession(
                 startTime: parsed.startTime,
                 endTime: addHoursToTime(parsed.startTime, durationHours),
                 alternatives: alternativeFacilities,
+                sameFacilitySlots: availSlots,
               })
               : `❌ Slot jam *${parsed.startTime}* pada *${session.bookingDate}* sudah terisi di *${fac.name}*.${slotsStr}`;
             await updateSession(session.id, {
@@ -3484,12 +3501,20 @@ function buildAlternativeFacilityChoiceReply(params: {
   startTime: string;
   endTime: string;
   alternatives: Array<typeof facilitiesTable.$inferSelect>;
+  sameFacilitySlots?: string[];
 }): string {
   const switchOptions = params.alternatives
     .map((candidate, index) => `${index + 1}. Ya, pindah ke *${candidate.name}*`)
     .join("\n");
   const keepCurrentFacilityChoice = params.alternatives.length + 1;
   const chooseAnotherDateChoice = params.alternatives.length + 2;
+  const sameFacilitySlots = params.sameFacilitySlots?.length
+    ? [
+      ``,
+      `🟢 Jika tetap di *${params.facilityName}*, slot lain yang tersedia untuk durasi yang sama:`,
+      params.sameFacilitySlots.join("  | "),
+    ].join("\n")
+    : `\n\n⚠️ Tidak ada jam lain yang tersedia di *${params.facilityName}* untuk tanggal tersebut.`;
 
   return [
     `❌ Slot *${params.startTime}–${params.endTime}* di *${params.facilityName}* pada *${params.bookingDate}* sudah penuh.`,
@@ -3498,8 +3523,9 @@ function buildAlternativeFacilityChoiceReply(params: {
     switchOptions,
     `${keepCurrentFacilityChoice}. Tetap di *${params.facilityName}*, pilih jam lain`,
     `${chooseAnotherDateChoice}. Pilih tanggal lain`,
+    sameFacilitySlots,
     ``,
-    `Silakan balas nomor pilihan kamu.`,
+    `Balas nomor pilihan kamu. Jika memilih jam lain, ketik *${keepCurrentFacilityChoice}* dulu lalu pilih jamnya.`,
   ].join("\n");
 }
 
@@ -3669,6 +3695,7 @@ async function execCreateBookingFromSession(
         startTime: session.startTime,
         endTime,
         alternatives: alternativeFacilities,
+        sameFacilitySlots: alternatives.map((alternative) => alternative.split("–")[0]),
       });
       await updateSession(session.id, { currentStep: "choose_alternative_facility" });
     } else if (alternatives.length > 0) {
@@ -3815,6 +3842,7 @@ async function execCreateBookingFromSession(
         startTime: session.startTime,
         endTime,
         alternatives: alternativeFacilities,
+        sameFacilitySlots: alternatives.map((alternative) => alternative.split("–")[0]),
       });
       await updateSession(session.id, { currentStep: "choose_alternative_facility" });
     } else {
