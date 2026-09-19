@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
-import { db, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
+import { db, auditLogsTable, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import { getBaseUrl } from "../lib/appUrl";
@@ -3375,13 +3375,72 @@ function isDuplicateByContent(phone: string, msg: string): boolean {
   // Layer 2: pattern-based — pesan yang jelas dari bot, blokir tanpa cache
   if (isBotGeneratedMessage(msg)) return true;
 
-  const hash = `${phone}:${msg.trim().toLowerCase().substring(0, 80)}`;
+  const hash = `${phone}:${normalizeInboundMessage(msg).substring(0, 160)}`;
   const now = Date.now();
   if (isRecentMessageDuplicate(_recentMsgHashes, hash, now)) {
     return true; // same msg from same phone within 8 detik → duplicate
   }
   setTimeout(() => _recentMsgHashes.delete(hash), 30 * 1000);
   return false;
+}
+
+const WEBHOOK_DEDUP_WINDOW_SECONDS = 60;
+
+function normalizeInboundMessage(msg: string): string {
+  return msg.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * Claim an inbound webhook in the shared database.
+ *
+ * Fonnte can retry a delivery without a stable message id. The in-memory
+ * caches above protect a single process, but they cannot coordinate two
+ * instances. Advisory transaction locks serialize the check-and-insert for
+ * each fingerprint so only the first request is allowed through.
+ */
+async function claimDistributedWebhook(
+  phone: string,
+  msg: string,
+  messageId: string | null,
+): Promise<boolean> {
+  const keys = [
+    `content:${phone}:${normalizeInboundMessage(msg)}`,
+    ...(messageId ? [`id:${messageId}`] : []),
+  ];
+
+  return db.transaction(async (tx) => {
+    for (const key of keys) {
+      await tx.execute(sql`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`sport-center:wa-webhook:${key}`}, 0)
+        )
+      `);
+
+      const existing = await tx.execute<{ id: number }>(sql`
+        SELECT id
+        FROM sport_center.audit_logs
+        WHERE action = 'mina_webhook_dedup_claim'
+          AND created_at >= NOW() - make_interval(secs => ${WEBHOOK_DEDUP_WINDOW_SECONDS})
+          AND after->>'dedupKey' = ${key}
+        LIMIT 1
+      `);
+      if (existing.rows.length > 0) return false;
+    }
+
+    for (const key of keys) {
+      await tx.insert(auditLogsTable).values({
+        action: "mina_webhook_dedup_claim",
+        entity: "wa_webhook",
+        after: {
+          dedupKey: key,
+          phone,
+          message: msg,
+          messageId,
+        },
+      });
+    }
+    return true;
+  });
 }
 
 const handleFonnteWebhook = async (req: Request, res: Response) => {
@@ -3415,6 +3474,16 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
 
     // Dedup berdasarkan konten (cegah Fonnte retry tanpa message_id)
     if (isDuplicateByContent(phone, msg)) return;
+    const inboundMessageId = req.body.id ?? req.body.message_id ?? req.body.msg_id ?? req.body.msgId;
+    const claimed = await claimDistributedWebhook(
+      phone,
+      msg,
+      inboundMessageId ? String(inboundMessageId) : null,
+    );
+    if (!claimed) {
+      req.log?.info?.({ phone, message: msg }, "[wa-webhook] duplicate inbound message ignored");
+      return;
+    }
 
     // 1. Audit log — every inbound message
     await logAiMessageReceived(phone, msg, String(name));

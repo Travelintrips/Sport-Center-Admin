@@ -102,6 +102,7 @@
 - [Mina booking URL authority](mina-booking-url-authority.md) — Web Mina links must use getBaseUrl() and preserve backend-generated domain and canonical query parameters.
 
 - [Fonnte customer channel separation](fonnte-customer-channel.md) — Mina/customer sends require the dedicated token and device; never fall back to the admin token.
+- [WhatsApp webhook deduplication](wa-webhook-deduplication.md) — Fonnte retries require shared DB claims; in-memory deduplication alone fails across API instances.
 - [WhatsApp cancellation policy](wa-cancellation-policy.md) — cancellation requests use dedicated admin 081386210415; Mina must not state a 50% fee or refund percentage.
 
 - [Canonical facility foreign keys](canonical-facility-fks.md) — production booking/image FKs must reference sport_center.sport_facilities, not the legacy sport_center.facilities table.
