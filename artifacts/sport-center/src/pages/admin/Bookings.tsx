@@ -1950,10 +1950,25 @@ function BookingDetailDrawer({
                         })()}
                       </div>
                       {pmt.proofUrl && (
-                        <ProofImage
-                          paymentId={pmt.id}
-                          membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
-                        />
+                        <>
+                          <ProofImage
+                            paymentId={pmt.id}
+                            membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
+                          />
+                          {paymentDate && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full gap-1.5 text-xs"
+                              disabled={isUpdating || savingDates}
+                              onClick={() => onUpdateDates(booking.id, undefined, paymentDate)}
+                            >
+                              <RefreshCw size={13} className={savingDates ? "animate-spin" : ""} />
+                              Sinkronkan Rekonsiliasi
+                            </Button>
+                          )}
+                        </>
                       )}
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
