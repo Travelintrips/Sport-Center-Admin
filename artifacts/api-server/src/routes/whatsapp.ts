@@ -32,6 +32,8 @@ import {
   notifyWaStaffCheckin,
   notifyWaCustomerRegistered,
   notifyWaBookingPendingApproval,
+  notifyWaBookingPaymentRequired,
+  notifyWaProofReceived,
   notifyWaAdminNewBooking,
   notifyWaBookingApproved,
   notifyWaBookingRejectedByAdmin,
@@ -884,10 +886,34 @@ router.get("/wa/action/:token", async (req, res) => {
     const booking = await getBookingFull(tokenRow.bookingId);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
+    let paymentOptions: {
+      transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
+      qris: { imageUrl: string } | null;
+    } | undefined;
+    if (tokenRow.action === "upload_proof") {
+      const [settings] = await db.select({
+        bankName: settingsTable.bankName,
+        bankAccount: settingsTable.bankAccount,
+        bankAccountName: settingsTable.bankAccountName,
+        qrisImageUrl: settingsTable.qrisImageUrl,
+      }).from(settingsTable).limit(1);
+      paymentOptions = {
+        transferBank: settings?.bankName && settings.bankAccount
+          ? {
+              bankName: settings.bankName,
+              bankAccount: settings.bankAccount,
+              bankAccountName: settings.bankAccountName ?? "",
+            }
+          : null,
+        qris: settings?.qrisImageUrl ? { imageUrl: settings.qrisImageUrl } : null,
+      };
+    }
+
     res.json({
       action: tokenRow.action,
       booking,
       expiresAt: tokenRow.expiresAt,
+      paymentOptions,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });

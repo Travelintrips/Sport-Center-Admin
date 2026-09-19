@@ -859,6 +859,49 @@ export async function notifyWaBookingPendingApproval(data: WaBookingPendingAppro
   await sendWAToCustomer(data.customerPhone, msg);
 }
 
+export interface WaBookingPaymentRequiredData extends BookingNotifData {
+  durationHours: number;
+  paymentUrl: string;
+  statusUrl: string;
+  paymentDeadline?: string;
+}
+
+export async function notifyWaBookingPaymentRequired(data: WaBookingPaymentRequiredData): Promise<void> {
+  const msg =
+    `✅ *Permintaan Booking Berhasil Dibuat!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Data booking kamu sudah tercatat dan menunggu verifikasi pembayaran.\n\n` +
+    `📋 *Detail Booking:*\n` +
+    `• Kode: *${data.orderNumber}*\n` +
+    `• Fasilitas: *${data.facilityName}*\n` +
+    `• Tanggal: *${data.bookingDate}*\n` +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Durasi: *${data.durationHours} jam*\n` +
+    `• Total: *Rp ${data.totalPrice}*\n\n` +
+    `💳 *Langkah selanjutnya:*\n` +
+    `Buka halaman pembayaran untuk memilih metode pembayaran dan upload bukti:\n` +
+    `${data.paymentUrl}\n\n` +
+    (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
+    `Status saat ini: *Menunggu pembayaran dan verifikasi admin* ⏳\n` +
+    `Booking menjadi final setelah bukti pembayaran diverifikasi.\n\n` +
+    `🔍 Cek status booking: ${data.statusUrl}`;
+  await sendWAToCustomer(data.customerPhone, msg);
+}
+
+export interface WaProofReceivedData extends BookingNotifData {
+  statusUrl: string;
+}
+
+export async function notifyWaProofReceived(data: WaProofReceivedData): Promise<void> {
+  const msg =
+    `📥 *Bukti Pembayaran Diterima*\n\n` +
+    `Halo *${data.customerName}*, bukti pembayaran untuk booking *${data.orderNumber}* sudah berhasil diterima.\n\n` +
+    `Status: *Menunggu verifikasi admin* 🔍\n` +
+    `Booking belum final sampai pembayaran selesai diverifikasi.\n\n` +
+    `🔍 Cek status booking: ${data.statusUrl}`;
+  await sendWAToCustomer(data.customerPhone, msg);
+}
+
 export interface WaAdminNewBookingData {
   orderNumber: string;
   customerName: string;
