@@ -1744,7 +1744,7 @@ export default function AdminSettings() {
 
       <SeedDemoCard />
 
-      {/* ─── WhatsApp Notification Settings ─────────────────────── */}
+      {/* ─── WhatsApp Notification Settings ─────────────────────── * /}
       <form onSubmit={handleWaSubmit}>
         <Card>
           <CardHeader className="pb-3">
@@ -1930,7 +1930,7 @@ export default function AdminSettings() {
         </Card>
       </form>
 
-      {/* ─── Domain Link Pembayaran ─────────────────────────────── */}
+      {/* ─── Domain Link Pembayaran ─────────────────────────────── * /}
       <form onSubmit={handlePaymentDomainSubmit}>
         <Card>
           <CardHeader className="pb-3">
@@ -1977,7 +1977,7 @@ export default function AdminSettings() {
         </Card>
       </form>
 
-      {/* ─── Kirim Rekap Pemakaian ke Grup WA Admin ─────────────────────────── */}
+      {/* ─── Kirim Rekap Pemakaian ke Grup WA Admin ─────────────────────────── * /}
       <RekapPemakaianCard />
 
       <Card>
@@ -2063,3 +2063,4 @@ export default function AdminSettings() {
     </div>
   );
 }
+*/

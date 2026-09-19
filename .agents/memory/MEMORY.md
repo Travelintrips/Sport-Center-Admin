@@ -105,6 +105,7 @@
 
 - [Canonical facility foreign keys](canonical-facility-fks.md) — production booking/image FKs must reference sport_center.sport_facilities, not the legacy sport_center.facilities table.
 - [API test bootstrap](api-test-bootstrap.md) — direct Jest runs need explicit ESM/bootstrap handling before importing the database layer.
+- [Settings comment block](settings-comment-block.md) — disabled duplicate JSX must not contain an unescaped `*/` that closes its outer block comment early.
 
 
 
