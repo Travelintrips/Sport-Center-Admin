@@ -3325,6 +3325,7 @@ const BOT_MESSAGE_PATTERNS = [
   /^❌ \*Booking Ditolak\*/,
   /^💳 \*Pembayaran Dikonfirmasi\*/,
   /^⏰ \*Booking Expired\*/,
+  /^❌ Booking dibatalkan\. Ketik \*booking\* kapan saja untuk memulai lagi\./,
   /^📎 Untuk upload bukti pembayaran/,
   /^⚠️ \*Jadwal Tidak Tersedia\*/,
   /^✅ Slot jam \*\d{2}:\d{2}\* tersedia!/,
