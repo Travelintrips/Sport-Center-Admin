@@ -1904,6 +1904,25 @@ function minutesToHours(min: number): number {
   return Math.max(1, Math.round(min / 60));
 }
 
+/**
+ * Accept the time formats Mina displays in the slot list.
+ *
+ * The natural-language parser intentionally does not treat a bare number as
+ * a time because the same input is used for facility/menu choices elsewhere.
+ * At the ask_time step, however, `11` is an unambiguous answer to a displayed
+ * `11:00` slot.
+ */
+function parseSlotStartTime(msg: string): string | null {
+  const parsed = parseIntent(msg).startTime;
+  if (parsed) return parsed;
+
+  const bareHour = msg.trim().toLowerCase().match(
+    /^(?:pilih\s+)?(?:jam\s*)?([01]?\d|2[0-3])(?:\s*:?\s*00)?(?:\s*wib)?$/,
+  );
+  if (!bareHour) return null;
+  return `${String(Number(bareHour[1])).padStart(2, "0")}:00`;
+}
+
 function isYes(msg: string): boolean {
   return /^ya$/i.test(msg.trim());
 }
@@ -2901,19 +2920,6 @@ async function continueSession(
         return;
       }
 
-      // After Mina offers Court B/current-court/date choices, accept a direct
-      // replacement time as well (e.g. "jam 11" or "jam 8 pagi"). This keeps
-      // the customer from having to send the menu number first.
-      const directTime = parseIntent(msg).startTime;
-      if (directTime && !/^\d+$/.test(lower)) {
-        const timeStep = await updateSession(session.id, {
-          startTime: null,
-          currentStep: "ask_time",
-        });
-        await continueSession(timeStep, phone, msg, useCustomerToken, false);
-        return;
-      }
-
       const alternatives = await getAvailableAlternativeFacilities(
         session.facilityId,
         session.bookingDate,
@@ -2922,6 +2928,25 @@ async function continueSession(
       );
       const keepCurrentFacilityChoice = alternatives.length + 1;
       const chooseAnotherDateChoice = alternatives.length + 2;
+
+      // After Mina offers Court B/current-court/date choices, accept a direct
+      // replacement time as well (including a bare displayed hour such as
+      // "11"). Only the actual menu numbers keep their menu meaning.
+      const directTime = parseSlotStartTime(msg);
+      const numericChoice = lower.match(/^\d+$/)?.[0];
+      const isAlternativeMenuChoice =
+        numericChoice !== undefined &&
+        Number(numericChoice) >= 1 &&
+        Number(numericChoice) <= chooseAnotherDateChoice;
+      if (directTime && !isAlternativeMenuChoice) {
+        const timeStep = await updateSession(session.id, {
+          startTime: null,
+          currentStep: "ask_time",
+        });
+        await continueSession(timeStep, phone, msg, useCustomerToken, false);
+        return;
+      }
+
       const wantsAnotherTime =
         lower === String(keepCurrentFacilityChoice) ||
         /^(tetap|pilih|ganti).*(jam|waktu)|jam lain|pilih jam lain/i.test(lower);
@@ -3042,6 +3067,7 @@ async function continueSession(
 
     case "ask_time": {
       const parsed = parseIntent(msg);
+      const requestedStartTime = parseSlotStartTime(msg);
 
       // A customer may reject the suggested availability instead of sending
       // another time immediately. Treat that as a scheduling choice, not as
@@ -3052,7 +3078,7 @@ async function continueSession(
         /(?:jam|waktu).*(?:lain|berbeda)|(?:ganti|pilih|mau|cari).*(?:jam|waktu)/i.test(lower) ||
         /^(?:tidak|nggak|ngga|gak|ga)\b/i.test(lower);
 
-      if (!parsed.startTime && (wantsAnotherDate || wantsAnotherTime)) {
+      if (!requestedStartTime && (wantsAnotherDate || wantsAnotherTime)) {
         if (wantsAnotherDate) {
           const updated = await updateSession(session.id, {
             bookingDate: null,
@@ -3083,8 +3109,8 @@ async function continueSession(
           currentStep: "ask_time",
         });
         const reply = fac && slots.length > 0
-          ? `⏰ Baik, tetap di *${fac.name}*. Pilih jam lain untuk durasi *${minutesToHours(session.durationMinutes ?? 60)} jam* pada tanggal *${session.bookingDate}*:\n\n` +
-            `🟢 ${slots.join("  | ")}\n\nKamu juga bisa langsung mengetik, misalnya *jam 11*.`
+           ? `⏰ Baik, tetap di *${fac.name}*. Jam berapa yang cocok untuk durasi *${minutesToHours(session.durationMinutes ?? 60)} jam* pada tanggal *${session.bookingDate}*?\n\n` +
+             `🟢 Slot yang bisa dipilih:\n${slots.join("  | ")}\n\nBalas dengan *11*, *11:00*, atau *jam 11*.`
           : `⚠️ Tidak ada jam lain yang tersedia di *${fac?.name ?? "fasilitas ini"}* pada tanggal tersebut.\n\n` +
             `Ketik *tanggal lain* atau *batal*.`;
         await appendMessage(updated.id, "bot", reply);
@@ -3092,7 +3118,7 @@ async function continueSession(
         return;
       }
 
-      if (!parsed.startTime) {
+      if (!requestedStartTime) {
         const reply = `⏰ Tidak bisa mengenali jam. Coba format:\n• *jam 8 pagi*\n• *jam 20.00*\n• *19:00*\n• *jam 7 malam*`;
         await appendMessage(session.id, "bot", reply);
         await sendReply(reply);
@@ -3104,7 +3130,7 @@ async function continueSession(
         const fac = (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null;
         if (fac && fac.bookingMode !== "walk_in") {
           // Cek jam operasional dulu
-          const reqMin = timeToMinutes(parsed.startTime);
+           const reqMin = timeToMinutes(requestedStartTime);
           const openMin = timeToMinutes(fac.openTime);
           const rawCloseMin = timeToMinutes(fac.closeTime);
           const closeMin = rawCloseMin === 0 ? 24 * 60 : rawCloseMin;
@@ -3121,9 +3147,9 @@ async function continueSession(
             const slotsStr = availSlots.length > 0
               ? `\n\n🟢 *Slot tersedia di ${fac.name}:*\n${availSlots.join("  | ")}`
               : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
-            const reason = reqMin < openMin
-              ? `Jam mulai *${parsed.startTime}* berada sebelum jam buka`
-              : `Booking ${durationMinutes / 60} jam dari *${parsed.startTime}* melewati jam tutup`;
+             const reason = reqMin < openMin
+               ? `Jam mulai *${requestedStartTime}* berada sebelum jam buka`
+             : `Booking ${durationMinutes / 60} jam dari *${requestedStartTime}* melewati jam tutup`;
             const reply = `⏰ ${reason} *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
             await appendMessage(session.id, "bot", reply);
             await sendReply(reply);
@@ -3132,12 +3158,12 @@ async function continueSession(
 
           // Cek seluruh rentang sesuai durasi yang dipilih customer.
           const durationHours = minutesToHours(session.durationMinutes ?? 60);
-          const isAvail = await checkSlotAvailable(session.facilityId, session.bookingDate, parsed.startTime, durationHours);
+           const isAvail = await checkSlotAvailable(session.facilityId, session.bookingDate, requestedStartTime, durationHours);
           if (!isAvail) {
             const alternativeFacilities = await getAvailableAlternativeFacilities(
               session.facilityId,
               session.bookingDate,
-              parsed.startTime,
+             requestedStartTime,
               durationHours,
             );
             const availSlots = await getAvailableSlotsForDay(
@@ -3148,20 +3174,20 @@ async function continueSession(
               session.durationMinutes ?? 60,
             );
             const slotsStr = availSlots.length > 0
-              ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}\n\nPilih jam lain:`
+             ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}\n\n⏰ *Jam berapa yang cocok?* Balas dengan *11*, *11:00*, atau *jam 11*.`
               : `\n\n⚠️ Tidak ada slot lain yang tersedia. Pilih tanggal berbeda atau ketik *batal*.`;
             const reply = alternativeFacilities.length > 0
               ? buildAlternativeFacilityChoiceReply({
                 facilityName: fac.name,
                 bookingDate: session.bookingDate,
-                startTime: parsed.startTime,
-                endTime: addHoursToTime(parsed.startTime, durationHours),
+                 startTime: requestedStartTime,
+                 endTime: addHoursToTime(requestedStartTime, durationHours),
                 alternatives: alternativeFacilities,
                 sameFacilitySlots: availSlots,
               })
-              : `❌ Slot jam *${parsed.startTime}* pada *${session.bookingDate}* sudah terisi di *${fac.name}*.${slotsStr}`;
+               : `❌ Slot jam *${requestedStartTime}* pada *${session.bookingDate}* sudah terisi di *${fac.name}*.${slotsStr}`;
             await updateSession(session.id, {
-              startTime: parsed.startTime,
+               startTime: requestedStartTime,
               currentStep: alternativeFacilities.length > 0 ? "choose_alternative_facility" : "ask_time",
             });
             await appendMessage(session.id, "bot", reply);
@@ -3172,15 +3198,15 @@ async function continueSession(
       }
 
       const updated = await updateSession(session.id, {
-        startTime: parsed.startTime,
-        currentStep: getNextStep({ ...session, startTime: parsed.startTime }),
+         startTime: requestedStartTime,
+         currentStep: getNextStep({ ...session, startTime: requestedStartTime }),
       });
-      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_time", startTime: parsed.startTime } });
+       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_time", startTime: requestedStartTime } });
       const fac2 = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
       // Konfirmasi slot tersedia ke customer
       const availConfirm = session.facilityId && session.bookingDate
-        ? `✅ Slot jam *${parsed.startTime}* tersedia!\n\n`
+         ? `✅ Slot jam *${requestedStartTime}* tersedia!\n\n`
         : "";
       const nextQ = await buildStepQuestion(updated.currentStep as WaStep, updated, fac2?.name ?? "", Number(fac2?.pricePerHour ?? 0));
       const reply = availConfirm + nextQ;
@@ -3218,9 +3244,9 @@ async function continueSession(
           fac.closeTime,
           updated.durationMinutes ?? 60,
         );
-        reply += slots.length
-          ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${updated.bookingDate}:*\n${slots.join("  | ")}`
-          : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.`;
+         reply += slots.length
+           ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${updated.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`
+           : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.\n\n📅 *Silakan pilih tanggal lain* atau ketik *batal*.`;
       }
       await appendMessage(session.id, "bot", reply);
       await sendReply(reply);
