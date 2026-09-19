@@ -542,6 +542,7 @@ export async function createSession(params: {
   durationMinutes?: number | null;
   bookerName?: string | null;
   customerName?: string | null;
+  notes?: string | null;
   currentStep: WaStep;
 }): Promise<WaBookingSessionRow> {
   const [row] = await db
@@ -556,6 +557,7 @@ export async function createSession(params: {
       durationMinutes: params.durationMinutes ?? null,
       bookerName: params.bookerName ?? null,
       customerName: params.customerName ?? null,
+      notes: params.notes ?? null,
       status: "active",
       rawMessages: [],
       expiredAt: sessionExpiry(),

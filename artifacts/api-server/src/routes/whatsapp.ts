@@ -75,6 +75,11 @@ import {
   storedPaymentProofOcr,
 } from "../lib/paymentProofOcr";
 import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
+import {
+  getNearestAvailableSlots,
+  hasSlotConflict,
+  isRecentMessageDuplicate,
+} from "../lib/waBookingFlow";
 
 const router = Router();
 
@@ -488,9 +493,10 @@ router.post("/wa/register/:token", async (req, res) => {
   }
 });
 
-// POST /api/wa/webhook — legacy Fonnte path kept for compatibility.
-// The canonical production webhook path is /api/wa/fonnte/webhook below.
-router.post("/wa/webhook", async (req, res) => {
+// POST /api/wa/webhook — legacy handler kept only under a private compatibility
+// path. The public compatibility path is registered with the canonical Mina
+// handler below, so it gets the same natural-language booking UX.
+router.post("/wa/webhook-legacy", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
@@ -2441,6 +2447,7 @@ async function startBookingSession(
     customer?.name,
     waName,
   );
+  const notes = extractMentionedNote(msg);
 
   const step = getNextStep({
     facilityId,
@@ -2459,6 +2466,7 @@ async function startBookingSession(
     durationMinutes: intent.durationMinutes,
     bookerName: waName || null,
     customerName: resolvedName,
+    notes,
     currentStep: step,
   });
 
@@ -2847,35 +2855,20 @@ async function getAlternativeSlots(
     status: bookingsTable.status,
   }).from(bookingsTable)
     .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date)));
+  const blockedSchedules = await db.select({
+    startTime: blockedSchedulesTable.startTime,
+    endTime: blockedSchedulesTable.endTime,
+  }).from(blockedSchedulesTable)
+    .where(and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date)));
 
-  const activeBookings = existingBookings.filter((b: typeof existingBookings[number]) => !INACTIVE_STATUSES.includes(b.status));
-  const openMin = timeToMinutes(openTime);
-  const closeMin = timeToMinutes(closeTime);
-  const requestedMin = timeToMinutes(requestedStartTime);
-  const durMin = durationHours * 60;
-
-  const candidates: number[] = [];
-  for (let t = openMin; t + durMin <= closeMin; t += 60) {
-    candidates.push(t);
-  }
-
-  candidates.sort((a, b) => Math.abs(a - requestedMin) - Math.abs(b - requestedMin));
-
-  const alternatives: string[] = [];
-  for (const startMin of candidates) {
-    if (startMin === requestedMin) continue;
-    const endMin = startMin + durMin;
-    const hasConflict = activeBookings.some((b: typeof activeBookings[number]) => {
-      const bS = timeToMinutes(b.startTime);
-      const bE = timeToMinutes(b.endTime);
-      return startMin < bE && endMin > bS;
-    });
-    if (!hasConflict) {
-      alternatives.push(`${minutesToTimeStr(startMin)}–${minutesToTimeStr(endMin)}`);
-      if (alternatives.length >= 3) break;
-    }
-  }
-  return alternatives;
+  return getNearestAvailableSlots({
+    requestedStartTime,
+    durationMinutes: durationHours * 60,
+    openTime,
+    closeTime,
+    bookings: existingBookings,
+    blockedSchedules,
+  });
 }
 
 // ─── Availability helpers (cek DB termasuk blocked schedules) ────────────────
@@ -2991,6 +2984,14 @@ async function execCreateBookingFromSession(
     await sendReply(`❌ Data booking tidak lengkap. Ketik *batal* dan mulai ulang.`);
     return;
   }
+  // Capture the narrowed values before entering the transaction callback.
+  // Drizzle's callback type does not preserve property narrowing from the
+  // session guard across the closure.
+  const facilityId = session.facilityId;
+  const bookingDate = session.bookingDate;
+  const startTime = session.startTime;
+  const durationMinutes = session.durationMinutes;
+  const customerName = session.customerName;
 
   // ── 1. Validasi fasilitas ──────────────────────────────────────────────────
   const [facility] = await db.select().from(facilitiesTable)
@@ -3105,7 +3106,7 @@ async function execCreateBookingFromSession(
   const orderNumber = await generateBookingOrderNumber();
 
   // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
-  let booking: typeof bookingsTable.$inferSelect;
+  let booking = null as unknown as typeof bookingsTable.$inferSelect;
   try {
     await db.transaction(async (tx) => {
       // Serialize only booking attempts for the same facility/day. This
@@ -3122,40 +3123,35 @@ async function execCreateBookingFromSession(
           status: bookingsTable.status,
         }).from(bookingsTable).where(and(
           eq(bookingsTable.facilityId, facility.id),
-          eq(bookingsTable.bookingDate, session.bookingDate),
+        eq(bookingsTable.bookingDate, bookingDate),
         )),
         tx.select({
           startTime: blockedSchedulesTable.startTime,
           endTime: blockedSchedulesTable.endTime,
         }).from(blockedSchedulesTable).where(and(
           eq(blockedSchedulesTable.facilityId, facility.id),
-          eq(blockedSchedulesTable.date, session.bookingDate),
+        eq(blockedSchedulesTable.date, bookingDate),
         )),
       ]);
 
-      const requestedStart = timeToMinutes(session.startTime);
-      const requestedEnd = timeToMinutes(endTime);
-      const overlaps = (startTime: string, existingEndTime: string) =>
-        requestedStart < timeToMinutes(existingEndTime) &&
-        requestedEnd > timeToMinutes(startTime);
-      const hasActiveConflict = sameDayBookings
-        .filter((row) => !INACTIVE_STATUSES.includes(row.status))
-        .some((row) => overlaps(row.startTime, row.endTime));
-      const hasBlockedConflict = blocked.some((row) => overlaps(row.startTime, row.endTime));
-
-      if (hasActiveConflict || hasBlockedConflict) {
+      if (hasSlotConflict({
+        startTime,
+        endTime,
+        bookings: sameDayBookings,
+        blockedSchedules: blocked,
+      })) {
         throw new Error("WA_SLOT_CONFLICT_AFTER_LOCK");
       }
 
       const [created] = await tx.insert(bookingsTable).values({
         orderNumber,
-        customerName: session.customerName,
+        customerName,
         customerEmail: customer.email,
         customerPhone: phone,
         customerId: customer.id,
         facilityId: facility.id,
-        bookingDate: session.bookingDate,
-        startTime: session.startTime,
+        bookingDate,
+        startTime,
         endTime,
         durationHours,
         totalPrice: String(totalPrice),
@@ -3348,9 +3344,9 @@ function isDuplicateByContent(phone: string, msg: string): boolean {
 
   const hash = `${phone}:${msg.trim().toLowerCase().substring(0, 80)}`;
   const now = Date.now();
-  const last = _recentMsgHashes.get(hash);
-  if (last && now - last < 8000) return true; // same msg from same phone within 8 detik → duplicate
-  _recentMsgHashes.set(hash, now);
+  if (isRecentMessageDuplicate(_recentMsgHashes, hash, now)) {
+    return true; // same msg from same phone within 8 detik → duplicate
+  }
   setTimeout(() => _recentMsgHashes.delete(hash), 30 * 1000);
   return false;
 }
@@ -3618,7 +3614,7 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
   }
 };
 
-router.post(["/wa/fonnte/webhook", "/webhook/fonnte"], handleFonnteWebhook);
+router.post(["/wa/fonnte/webhook", "/webhook/fonnte", "/wa/webhook"], handleFonnteWebhook);
 
 // ─── GET /api/wa/booking-approval/:token — load form data (no auth) ──────────
 router.get("/wa/booking-approval/:token", async (req, res) => {
