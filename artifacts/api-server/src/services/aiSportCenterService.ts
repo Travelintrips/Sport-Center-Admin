@@ -585,9 +585,8 @@ Transfer bank: ${paymentText}
 Setelah transfer, customer upload bukti di link yang dikirim bot. Admin akan konfirmasi dalam 1×24 jam.
 
 ━━━ KEBIJAKAN RESCHEDULE & PEMBATALAN ━━━
-• Reschedule: hubungi admin min. 24 jam sebelum jadwal main via WA (${adminContact})
-• Batal < 24 jam sebelum jadwal: kena biaya admin 50%
-• Batal H-1 atau lebih awal: booking hangus, tidak ada refund
+• Untuk pembatalan booking, arahkan customer menghubungi admin pembatalan minimal 24 jam sebelum jadwal main via WhatsApp di 081386210415.
+• Jangan menyebut biaya admin 50%, penalti, atau persentase refund dalam jawaban pembatalan.
 • Admin bantu carikan slot alternatif yang kosong
 
 ━━━ CARA MINA BERPIKIR (REASONING STEPS) ━━━
