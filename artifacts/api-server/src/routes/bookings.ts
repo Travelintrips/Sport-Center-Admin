@@ -26,7 +26,7 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
-import { calculateWithholdingTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
+import { calculateBookingWithholdingTax, calculateWithholdingTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
@@ -285,19 +285,7 @@ async function getBookingWithPayment(id: number) {
     }
   }
 
-  const bookingGrandTotal = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
-  const bookingDpp = Math.max(
-    0,
-    Number(booking.dpp ?? bookingGrandTotal - Number(booking.ppnAmount ?? 0)),
-  );
-  const bookingPphAmount = Math.max(0, Number(booking.pphAmount ?? 0));
-  const bookingPphRate = Math.max(0, Number(booking.pphRate ?? 0));
-  const bookingWithholding = calculateWithholdingTax(
-    bookingGrandTotal,
-    bookingDpp,
-    booking.companyCustomerId != null && (bookingPphRate > 0 || bookingPphAmount > 0),
-    bookingPphRate > 0 ? bookingPphRate : 10,
-  );
+  const bookingWithholding = calculateBookingWithholdingTax(booking);
   const payableTotal = groupInfo?.groupNetTotalPayment ?? bookingWithholding.netAmount;
 
   // idCardNumber adalah PII — jangan ekspos di endpoint publik (customer invoice).
@@ -695,6 +683,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
+      const bookingWithholding = calculateBookingWithholdingTax(b);
       const companyInvoiceTotal =
         invoice?.status === "paid"
           ? Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)
@@ -715,8 +704,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         dpp: b.dpp == null ? null : Number(b.dpp),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
-         pphRate: b.companyCustomerId == null || b.pphRate == null ? null : Number(b.pphRate),
-         pphAmount: b.companyCustomerId == null || b.pphAmount == null ? null : Number(b.pphAmount),
+        pphRate: bookingWithholding.enabled ? bookingWithholding.rate : null,
+        pphAmount: bookingWithholding.enabled ? bookingWithholding.amount : null,
+        netAmount: bookingWithholding.netAmount,
         additionalCharges: normalizeAdditionalCharges(b.additionalCharges),
         groupAdditionalCharges: b.groupRef
           ? (groupAdditionalCharges.get(b.groupRef) ?? [])

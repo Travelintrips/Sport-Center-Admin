@@ -30,8 +30,12 @@ export function calculateBookingWithholdingTax(input: BookingWithholdingTaxInput
   const rate = configuredRate > 0
     ? configuredRate
     : (storedAmount > 0 && dpp > 0 ? Math.round((storedAmount / dpp) * 100) : 0);
+  const preciseInclusiveDpp = grossAmount / 1.11;
+  const isRoundedInclusiveDpp =
+    dpp > 0 && Math.abs(dpp - preciseInclusiveDpp) <= 2;
+  const withholdingBase = isRoundedInclusiveDpp ? preciseInclusiveDpp : dpp;
   const amount = configuredRate > 0
-    ? Math.round(dpp * configuredRate / 100)
+    ? Math.round(withholdingBase * configuredRate / 100)
     : storedAmount;
   // PPh is withheld from DPP, but the customer still settles DPP + PPN.
   // PPN collection ownership must not remove PPN from the net invoice amount.

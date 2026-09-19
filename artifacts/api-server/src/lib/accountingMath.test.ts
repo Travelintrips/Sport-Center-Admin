@@ -32,6 +32,7 @@ jest.unstable_mockModule("drizzle-orm", () => ({
 const { extractBookingDpp } = await import("./accountingMath.js");
 const { createJournalEntry } = await import("./accounting.js");
 const {
+  calculateBookingWithholdingTax,
   calculateWithholdingTax,
   calculateTaxFromTreatment,
   calculateInclusiveInvoiceTax,
@@ -87,6 +88,17 @@ describe("confirmed booking payment accounting", () => {
     });
   });
 
+  it("rounds PPh from the precise inclusive DPP, not the displayed DPP", () => {
+    expect(calculateWithholdingTax(6000000, 5405405, true, 10)).toEqual({
+      enabled: true,
+      rate: 10,
+      amount: 540541,
+      grossAmount: 6000000,
+      netAmount: 5459459,
+    });
+    expect(calculateWithholdingTax(6000000, 5405404, true, 10).netAmount).toBe(5459459);
+  });
+
   it("returns zero PPh when withholding is disabled", () => {
     expect(calculateWithholdingTax(200000, 180180, false, 10)).toMatchObject({
       enabled: false,
@@ -94,6 +106,23 @@ describe("confirmed booking payment accounting", () => {
       amount: 0,
       grossAmount: 200000,
       netAmount: 200000,
+    });
+  });
+
+  it("recalculates a company booking snapshot from gross and DPP", () => {
+    expect(calculateBookingWithholdingTax({
+      companyCustomerId: 42,
+      grandTotal: "6000000",
+      dpp: "5405405",
+      ppnAmount: "594595",
+      pphRate: "10",
+      pphAmount: "540540",
+    })).toMatchObject({
+      enabled: true,
+      rate: 10,
+      amount: 540541,
+      grossAmount: 6000000,
+      netAmount: 5459459,
     });
   });
 

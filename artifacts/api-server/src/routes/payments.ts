@@ -33,7 +33,7 @@ import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoic
 import { normalizePaymentProvider, resolveManualPaymentPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { validatePaymentMetadataUpdate } from "../lib/paymentMetadataUpdate";
-import { calculateWithholdingTax } from "../lib/tax";
+import { calculateBookingWithholdingTax } from "../lib/tax";
 import {
   ensurePaymentBankAccount,
   resolveRequiredPaymentEnrichment,
@@ -53,8 +53,9 @@ import { readPaymentProofOcr } from "../lib/paymentOcr";
 async function postPaymentAccountingProjection(payment: any, booking: any): Promise<void> {
   let dpp = extractBookingDpp(booking).dpp;
   let ppnAmount = extractBookingDpp(booking).ppnAmount;
-  let pphAmount = booking.companyCustomerId == null ? 0 : Number(booking.pphAmount ?? 0);
-  let pphRate = booking.companyCustomerId == null || booking.pphRate == null ? null : Number(booking.pphRate);
+  const bookingWithholding = calculateBookingWithholdingTax(booking);
+  let pphAmount = bookingWithholding.enabled ? bookingWithholding.amount : 0;
+  let pphRate = bookingWithholding.enabled ? bookingWithholding.rate : null;
   let ppnTreatment = booking.ppnTreatment ?? null;
   let ppnCollectedByCustomer = booking.ppnCollectedByCustomer === true;
 
@@ -85,8 +86,11 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
       dpp += extracted.dpp;
       ppnAmount += extracted.ppnAmount;
       if (groupBooking.companyCustomerId != null) {
-        pphAmount += Number(groupBooking.pphAmount ?? 0);
-        pphRate ??= groupBooking.pphRate == null ? null : Number(groupBooking.pphRate);
+        const groupWithholding = calculateBookingWithholdingTax(groupBooking);
+        if (groupWithholding.enabled) {
+          pphAmount += groupWithholding.amount;
+          pphRate ??= groupWithholding.rate;
+        }
       }
       ppnTreatment ??= groupBooking.ppnTreatment;
       ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
@@ -548,14 +552,7 @@ router.post("/payments", async (req, res) => {
     for (const row of groupRows) {
       const gross = Number(row.grandTotal ?? row.totalPrice ?? 0);
       const dpp = Math.max(0, Number(row.dpp ?? gross - Number(row.ppnAmount ?? 0)));
-      const storedPphAmount = Math.max(0, Number(row.pphAmount ?? 0));
-      const configuredPphRate = Math.max(0, Number(row.pphRate ?? 0));
-      const withholding = calculateWithholdingTax(
-        gross,
-        dpp,
-        row.companyCustomerId != null && (configuredPphRate > 0 || storedPphAmount > 0),
-        configuredPphRate > 0 ? configuredPphRate : 10,
-      );
+      const withholding = calculateBookingWithholdingTax(row);
       netTotal += withholding.netAmount;
     }
     const total = Math.round(netTotal || grossTotal);

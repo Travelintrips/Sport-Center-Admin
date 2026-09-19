@@ -21,6 +21,16 @@ export interface WithholdingTaxCalculation {
   netAmount: number;
 }
 
+export interface BookingWithholdingTaxInput {
+  companyCustomerId?: number | null;
+  grandTotal?: number | string | null;
+  totalPrice?: number | string | null;
+  dpp?: number | string | null;
+  ppnAmount?: number | string | null;
+  pphRate?: number | string | null;
+  pphAmount?: number | string | null;
+}
+
 export interface InclusiveInvoiceTaxBreakdown {
   dpp: number;
   dppNilaiLain: number;
@@ -56,14 +66,56 @@ export function calculateWithholdingTax(
   rate = 10,
 ): WithholdingTaxCalculation {
   const normalizedRate = enabled ? Math.max(0, Math.min(100, Number(rate) || 0)) : 0;
-  const amount = normalizedRate > 0 ? Math.round(Math.max(0, dpp) * normalizedRate / 100) : 0;
+  const roundedDpp = Math.max(0, Math.round(Number(dpp) || 0));
+  const roundedGross = Math.max(0, Math.round(Number(grossAmount) || 0));
+  // For PPN-inclusive prices, DPP is stored/displayed as a rounded integer.
+  // PPh must use the exact inclusive base before rounding; otherwise a
+  // Rp6,000,000 invoice uses Rp5,405,405 × 10% = Rp540,540 instead of
+  // round((Rp6,000,000 / 1.11) × 10%) = Rp540,541.
+  const preciseInclusiveDpp = roundedGross / 1.11;
+  const isRoundedInclusiveDpp =
+    roundedDpp > 0 && Math.abs(roundedDpp - preciseInclusiveDpp) <= 2;
+  const withholdingBase = isRoundedInclusiveDpp ? preciseInclusiveDpp : roundedDpp;
+  const amount = normalizedRate > 0 ? Math.round(withholdingBase * normalizedRate / 100) : 0;
   return {
     enabled: normalizedRate > 0,
     rate: normalizedRate,
     amount,
-    grossAmount: Math.max(0, Math.round(grossAmount)),
+    grossAmount: roundedGross,
     netAmount: Math.max(0, Math.round(grossAmount) - amount),
   };
+}
+
+/**
+ * Recalculate the stored booking PPh snapshot from the booking's gross and
+ * DPP. The existing snapshot is only used to preserve whether an older
+ * company booking had withholding enabled when the company configuration is
+ * no longer available in the row being read.
+ */
+export function calculateBookingWithholdingTax(
+  booking: BookingWithholdingTaxInput,
+): WithholdingTaxCalculation {
+  const grossAmount = Math.max(
+    0,
+    Number(booking.grandTotal ?? booking.totalPrice ?? 0),
+  );
+  const ppnAmount = Math.max(0, Number(booking.ppnAmount ?? 0));
+  const dpp = Math.max(
+    0,
+    Number(booking.dpp ?? grossAmount - ppnAmount),
+  );
+  const configuredRate = Math.max(0, Number(booking.pphRate ?? 0));
+  const storedAmount = Math.max(0, Number(booking.pphAmount ?? 0));
+  const enabled =
+    booking.companyCustomerId != null &&
+    (configuredRate > 0 || storedAmount > 0);
+
+  return calculateWithholdingTax(
+    grossAmount,
+    dpp,
+    enabled,
+    configuredRate > 0 ? configuredRate : 10,
+  );
 }
 
 export async function resolveWithholdingTax(

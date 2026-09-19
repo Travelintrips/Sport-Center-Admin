@@ -41,6 +41,7 @@ import {
   notifyCustomerBookingRejectedByAdmin,
 } from "../lib/notifications";
 import { calculatePrice } from "../lib/pricing";
+import { calculateBookingWithholdingTax } from "../lib/tax";
 import { logAudit, logAccountingError } from "../lib/auditLog";
 import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
@@ -832,6 +833,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
     const proofToken = tokens[0]?.token ?? null;
 
     const baseUrl = await getBaseUrl();
+    const withholding = calculateBookingWithholdingTax(booking);
     res.json({
       orderNumber: booking.orderNumber,
       customerName: booking.customerName,
@@ -846,9 +848,9 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       dpp: booking.dpp == null ? null : Number(booking.dpp),
       ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
       grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
-      pphRate: booking.pphRate == null ? null : Number(booking.pphRate),
-      pphAmount: booking.pphAmount == null ? null : Number(booking.pphAmount),
-      netAmount: booking.netAmount == null ? null : Number(booking.netAmount),
+      pphRate: withholding.enabled ? withholding.rate : null,
+      pphAmount: withholding.enabled ? withholding.amount : null,
+      netAmount: withholding.netAmount,
       status: booking.status,
       source: booking.source,
       notes: booking.notes,

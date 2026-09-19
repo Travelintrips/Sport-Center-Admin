@@ -12,7 +12,11 @@ import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { getFonnteConfig } from "../lib/fonnteConfig";
-import { calculateInclusiveInvoiceTax, calculateWithholdingTax } from "../lib/tax";
+import {
+  calculateBookingWithholdingTax,
+  calculateInclusiveInvoiceTax,
+  calculateWithholdingTax,
+} from "../lib/tax";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -298,6 +302,8 @@ function summarizeWithholdingTax(
 const invoiceBookingSelection = {
   id: bookingsTable.id,
   orderNumber: bookingsTable.orderNumber,
+  companyCustomerId: bookingsTable.companyCustomerId,
+  billingStatus: bookingsTable.billingStatus,
   customerName: bookingsTable.customerName,
   customerPhone: bookingsTable.customerPhone,
   facilityId: bookingsTable.facilityId,
@@ -404,7 +410,41 @@ function mapInvoice(
 }
 
 async function buildAndInsertItems(invoiceId: number, companyId: number, bookings: any[], facilityMap: Record<number, string>) {
-  const items = bookings.map((b) => ({
+  const normalizedBookings = [];
+  for (const booking of bookings) {
+    const withholding = calculateBookingWithholdingTax(booking);
+    const normalizedBooking = {
+      ...booking,
+      pphRate: withholding.enabled ? withholding.rate : null,
+      pphAmount: withholding.enabled ? withholding.amount : null,
+      netAmount: withholding.netAmount,
+    };
+
+    // Invoice generation consumes unbilled bookings. Persist the corrected
+    // snapshot before creating invoice items so the booking and invoice use
+    // the same PPh rounding. Never rewrite billed/paid legacy bookings here.
+    if (
+      booking.billingStatus === "unbilled" &&
+      booking.companyCustomerId === companyId &&
+      (
+        Number(booking.pphRate ?? 0) !== Number(normalizedBooking.pphRate ?? 0) ||
+        Number(booking.pphAmount ?? 0) !== Number(normalizedBooking.pphAmount ?? 0) ||
+        Number(booking.netAmount ?? 0) !== normalizedBooking.netAmount
+      )
+    ) {
+      await db.update(bookingsTable)
+        .set({
+          pphRate: normalizedBooking.pphRate == null ? null : String(normalizedBooking.pphRate),
+          pphAmount: normalizedBooking.pphAmount == null ? null : String(normalizedBooking.pphAmount),
+          netAmount: String(normalizedBooking.netAmount),
+          updatedAt: new Date(),
+        })
+        .where(eq(bookingsTable.id, booking.id));
+    }
+    normalizedBookings.push(normalizedBooking);
+  }
+
+  const items = normalizedBookings.map((b) => ({
     invoiceId,
     bookingId: b.id,
     companyId,
