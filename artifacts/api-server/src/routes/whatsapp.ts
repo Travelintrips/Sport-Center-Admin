@@ -2679,6 +2679,36 @@ async function continueSession(
     return;
   }
 
+  // A customer may return to an unfinished booking after a pause by saying
+  // "halo". Do not treat the greeting as an invalid answer for the current
+  // field; repeat the question for the persisted step instead.
+  if (isMinaGreeting(lower) && step !== "wait_registration" && step !== "ask_facility") {
+    const fac = session.facilityId
+      ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
+      : null;
+    let reply = await buildStepQuestion(
+      step,
+      session,
+      fac?.name ?? "",
+      Number(fac?.pricePerHour ?? 0),
+    );
+    if (step === "ask_time" && fac && session.bookingDate && fac.bookingMode !== "walk_in") {
+      const slots = await getAvailableSlotsForDay(
+        fac.id,
+        session.bookingDate,
+        fac.openTime,
+        fac.closeTime,
+        session.durationMinutes ?? 60,
+      );
+      reply += slots.length
+        ? `\n\n🟢 *Slot tersedia tanggal ${session.bookingDate}:*\n${slots.join("  | ")}`
+        : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.`;
+    }
+    await appendMessage(session.id, "bot", reply);
+    await sendReply(reply);
+    return;
+  }
+
   switch (step) {
     case "wait_registration": {
       // Kirim ulang link registrasi — belum selesai mengisi form
