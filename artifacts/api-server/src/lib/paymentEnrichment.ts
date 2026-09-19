@@ -250,6 +250,57 @@ export async function resolvePaymentCompany(
     );
   }
 
+  // Personal bookings do not carry a company-customer relation. Resolve their
+  // merchant company from the active settlement configuration for the center's
+  // configured receiving account instead of rejecting the payment with a
+  // missing-company error. This remains deterministic: only one active public
+  // company may own the effective receiving-account configuration.
+  if (candidates.length === 0 && options?.effectiveDate) {
+    const [settings] = await db
+      .select({ bankAccount: settingsTable.bankAccount })
+      .from(settingsTable)
+      .limit(1);
+    const receivingAccount = settings?.bankAccount?.trim();
+    if (receivingAccount) {
+      const settlementRows = await db.execute(sql`
+        SELECT
+          psc.company_id,
+          c.code AS company_code,
+          COALESCE(c.name, c.company_name, c.code) AS company_name
+        FROM sport_center.payment_settlement_configs psc
+        JOIN public.companies c
+          ON c.id = psc.company_id
+         AND c.is_active = true
+        WHERE psc.bank_account_id = ${receivingAccount}
+          AND psc.is_active = true
+          AND psc.effective_from <= ${options.effectiveDate}::date
+          AND (
+            psc.effective_until IS NULL
+            OR psc.effective_until >= ${options.effectiveDate}::date
+          )
+      `).catch(() => ({ rows: [] }));
+      const rows = ((settlementRows as any).rows ?? []) as Array<{
+        company_id: number;
+        company_code: string;
+        company_name: string;
+      }>;
+      const uniqueCompanyIds = [...new Set(rows.map((row) => Number(row.company_id)))];
+      if (uniqueCompanyIds.length === 1) {
+        const row = rows.find((candidate) => Number(candidate.company_id) === uniqueCompanyIds[0]);
+        if (row) {
+          candidates.push({
+            companyId: Number(row.company_id),
+            companyCode: String(row.company_code),
+            companyName: String(row.company_name),
+            evidenceSource: "merchant_settlement_configuration",
+            evidenceReference: `active_receiving_account:${options.effectiveDate}`,
+            effectiveDate: options.effectiveDate,
+          });
+        }
+      }
+    }
+  }
+
   return resolvePaymentCompanyEvidence(candidates);
 }
 

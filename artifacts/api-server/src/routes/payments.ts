@@ -847,6 +847,21 @@ router.post("/payments", async (req, res) => {
     res.status(201).json({ ...payment, amount: Number(payment.amount) });
   } catch (err) {
     req.log.error({ err }, "Create payment error");
+    const message = String((err as { message?: unknown })?.message ?? err);
+    if (message === "PAYMENT_COMPANY_ID_REQUIRED") {
+      res.status(409).json({
+        error: "Perusahaan penerima pembayaran belum terkonfigurasi. Hubungi admin.",
+        code: "PAYMENT_COMPANY_ID_REQUIRED",
+      });
+      return;
+    }
+    if (message === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED") {
+      res.status(409).json({
+        error: "Rekening penerima pembayaran belum terkonfigurasi. Hubungi admin.",
+        code: "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED",
+      });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });

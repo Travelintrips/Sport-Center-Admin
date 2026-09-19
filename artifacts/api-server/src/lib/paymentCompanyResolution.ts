@@ -4,7 +4,8 @@ export type PaymentCompanyEvidenceSource =
   | "booking_company_invoice"
   | "validated_explicit_configuration"
   | "facility_company_mapping"
-  | "facility_ownership";
+  | "facility_ownership"
+  | "merchant_settlement_configuration";
 
 export type PaymentCompanyEvidence = {
   companyId: number;
