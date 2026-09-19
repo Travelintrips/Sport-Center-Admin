@@ -8,8 +8,6 @@ import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../
 import { getBaseUrl } from "../lib/appUrl";
 import {
   parseIntent,
-  parseName,
-  detectBookingContext,
   detectFacilityKeyword,
   getNextStep,
   getActiveSession,
@@ -2903,20 +2901,13 @@ async function continueSession(
     }
 
     case "ask_name": {
-      // Smart extraction: personal name, member, or company name
-      const extracted = parseName(msg);
-      const rawName = extracted ?? msg.trim();
-      const ctx = detectBookingContext(msg);
+      // This step intentionally captures the customer's direct answer as the
+      // booking customer_name. Mina asks for one simple name; no role or
+      // relationship prefix is required.
+      const rawName = msg.trim();
 
       if (rawName.length < 2 || rawName.length > 150) {
-        const hint =
-          ctx === "corporate"
-            ? `🏢 Nama instansi/perusahaan tidak valid. Contoh: *PT Maju Jaya* atau *CV Berkah Abadi*`
-            : ctx === "member"
-            ? `👤 Siapa nama member yang akan bermain? Contoh: *Budi Santoso*`
-            : ctx === "friend"
-            ? `👤 Siapa nama teman yang akan bermain? Contoh: *Budi Santoso*`
-            : `👤 Masukkan nama lengkap yang valid. Contoh: *Budi Santoso*`;
+        const hint = `👤 Nama booking belum valid. Contoh: *Andi*`;
         await appendMessage(session.id, "bot", hint);
         await sendReply(hint);
         return;
@@ -2928,17 +2919,10 @@ async function continueSession(
         // mentioned them in natural language. Do not add an extra question.
         currentStep: getNextStep({ ...session, customerName: rawName }),
       });
-      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName, bookingContext: ctx } });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName } });
       const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
-      // Confirm who the booking is for with context-specific label
-      const ctxLabel =
-        ctx === "corporate" ? "🏢 Booking atas nama instansi" :
-        ctx === "member"    ? "🎫 Booking atas nama member" :
-        ctx === "friend"    ? "👥 Booking atas nama teman" :
-        "✅ Booking atas nama";
-      const nameConfirm = extracted ? `${ctxLabel} *${rawName}*\n\n` : "";
-      const reply = nameConfirm + await buildStepQuestion(
+      const reply = await buildStepQuestion(
         updated.currentStep as WaStep,
         updated,
         fac?.name ?? "",
@@ -3026,13 +3010,9 @@ async function buildStepQuestion(
 
     case "ask_name":
       return [
-        `👤 *Atas nama siapa booking ini?*`,
+        `👤 *Pesan/Booking atas nama siapa?*`,
         ``,
-        `Ketik salah satu:`,
-        `• Nama pribadi: *Budi Santoso*`,
-        `• Untuk teman: *untuk teman Andi*`,
-        `• Member: *member Sinta Dewi*`,
-        `• Perusahaan/instansi: *PT Maju Jaya* atau *a/n CV Berkah*`,
+        `Contoh: *Andi*`,
       ].join("\n");
 
     case "ask_notes":

@@ -38,7 +38,7 @@ describe("Mina natural-language booking session", () => {
       startTime: parsed.startTime,
       durationMinutes: parsed.durationMinutes,
       customerName: null,
-    })).toBe("ask_time");
+    })).toBe("ask_duration");
   });
 
   it("uses an existing customer or WhatsApp profile name before asking again", () => {
