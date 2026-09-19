@@ -1711,11 +1711,15 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
   // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     const response = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: { Authorization: token, "Content-Type": "application/json" },
       body: JSON.stringify({ target: phone, message }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     let providerStatus: unknown = undefined;
     try {
       const body = await response.json() as { status?: unknown };
@@ -3036,19 +3040,25 @@ async function continueSession(
           // Cek jam operasional dulu
           const reqMin = timeToMinutes(parsed.startTime);
           const openMin = timeToMinutes(fac.openTime);
-          const closeMin = timeToMinutes(fac.closeTime);
-          if (reqMin < openMin || reqMin >= closeMin) {
+          const rawCloseMin = timeToMinutes(fac.closeTime);
+          const closeMin = rawCloseMin === 0 ? 24 * 60 : rawCloseMin;
+          const durationMinutes = session.durationMinutes ?? 60;
+          const requestedEndMin = reqMin + durationMinutes;
+          if (reqMin < openMin || requestedEndMin > closeMin) {
             const availSlots = await getAvailableSlotsForDay(
               session.facilityId,
               session.bookingDate,
               fac.openTime,
               fac.closeTime,
-              session.durationMinutes ?? 60,
+              durationMinutes,
             );
             const slotsStr = availSlots.length > 0
               ? `\n\n🟢 *Slot tersedia di ${fac.name}:*\n${availSlots.join("  | ")}`
               : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
-            const reply = `⏰ Jam *${parsed.startTime}* di luar jam operasional *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
+            const reason = reqMin < openMin
+              ? `Jam mulai *${parsed.startTime}* berada sebelum jam buka`
+              : `Booking ${durationMinutes / 60} jam dari *${parsed.startTime}* melewati jam tutup`;
+            const reply = `⏰ ${reason} *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
             await appendMessage(session.id, "bot", reply);
             await sendReply(reply);
             return;
@@ -4122,19 +4132,48 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       // Otherwise the generic merge path jumps directly to the summary and
       // can leave an out-of-hours/full-slot request without the right prompt.
       const parsedMessage = parseIntent(msg);
-      if (session.currentStep === "ask_time" && parsedMessage.startTime) {
-        await continueSession(session, phone, msg, true);
-        return;
-      }
+      try {
+        if (session.currentStep === "ask_time" && parsedMessage.startTime) {
+          await continueSession(session, phone, msg, true);
+          return;
+        }
 
-      // A correction can contain several fields ("jamnya ganti jam 8,
-      // jadi 1 jam saja", "besoknya lusa"). Merge every field first so the
-      // flow never forces the customer back through the old sequential steps.
-      const merged = await mergeSessionFromMessage(session, msg);
-      if (merged.changed) {
-        await presentBookingSession(merged.session, phone, true);
-      } else {
-        await continueSession(session, phone, msg, true);
+        // A correction can contain several fields ("jamnya ganti jam 8,
+        // jadi 1 jam saja", "besoknya lusa"). Merge every field first so the
+        // flow never forces the customer back through the old sequential steps.
+        const merged = await mergeSessionFromMessage(session, msg);
+        if (merged.changed) {
+          await presentBookingSession(merged.session, phone, true);
+        } else {
+          await continueSession(session, phone, msg, true);
+        }
+      } catch (err) {
+        logger.error(
+          {
+            phone,
+            sessionId: session.id,
+            step: session.currentStep,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "[wa-webhook] booking session processing failed",
+        );
+        await logAudit({
+          action: "mina_booking_session_failed",
+          entity: "wa_booking_session",
+          entityId: session.id,
+          after: {
+            phone,
+            step: session.currentStep,
+            message: msg,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        }).catch(() => {});
+        await sendWAMsg(
+          phone,
+          `⚠️ Maaf, pengecekan booking sedang bermasalah. Data kamu belum hilang.\n\n` +
+          `Coba kirim ulang jamnya, misalnya *jam 08:00*, atau ketik *batal* untuk mulai ulang.`,
+          true,
+        ).catch(() => {});
       }
       return;
     }
@@ -4320,7 +4359,10 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       true,
     );
   } catch (err) {
-    console.error("[wa/fonnte/webhook] error:", err);
+    logger.error(
+      { error: err instanceof Error ? err.message : String(err) },
+      "[wa/fonnte/webhook] error",
+    );
   }
 };
 

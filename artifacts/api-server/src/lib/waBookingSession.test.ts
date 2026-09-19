@@ -55,6 +55,13 @@ describe("Mina natural-language booking session", () => {
     expect(parsed.durationMinutes).toBe(60);
   });
 
+  it("parses prefixed morning times used by the sequential WhatsApp flow", () => {
+    expect(parseIntent("jam 6 pagi")).toMatchObject({
+      startTime: "06:00",
+      durationMinutes: null,
+    });
+  });
+
   it("does not make optional notes a required step", () => {
     expect(getNextStep({
       facilityId: 12,
