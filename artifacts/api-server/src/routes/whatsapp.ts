@@ -27,6 +27,7 @@ import {
 import {
   notifyWaBookingCreated,
   notifyWaProofUploaded,
+  notifyWaProofAutoConfirmed,
   notifyWaBookingConfirmed,
   notifyWaPaymentRejected,
   notifyWaStaffCheckin,
@@ -1203,12 +1204,17 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const [existing] = groupPayments.filter((candidate) =>
       candidate.status === "pending" || candidate.status === "waiting_confirmation",
     );
+    const requestedPaymentMethod = String(req.body?.paymentMethod ?? "").trim();
+    const selectedPaymentMethod =
+      /qris/i.test(requestedPaymentMethod) ? "QRIS" :
+      /transfer|bank|va/i.test(requestedPaymentMethod) ? "Transfer Bank" :
+      null;
+    // Keep the legacy upload page working when it does not send a selection,
+    // while the new payment page always sends one and therefore fails closed.
     const detectedQris = proofOcr?.paymentMethod === "QRIS";
-    // WhatsApp is only the submission/notification channel. It is not a payment
-    // method, so keep the accounting label as the actual bank transfer method.
-    const resolvedPaymentMethod = detectedQris ? "QRIS" : "Transfer Bank";
-    const resolvedProvider = detectedQris ? "mandiri_direct" : "unknown";
-    let createdPayment: typeof paymentsTable.$inferSelect | undefined;
+    const resolvedPaymentMethod = selectedPaymentMethod ?? (detectedQris ? "QRIS" : "Transfer Bank");
+    const resolvedProvider = resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
+    let paymentForFlow: typeof paymentsTable.$inferSelect | undefined;
 
     if (existing) {
       const paymentBooking = groupBookings.find((member) => member.id === existing.bookingId) ?? booking;
@@ -1234,8 +1240,28 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         updatedAt: new Date(),
       })
         .where(eq(paymentsTable.id, existing.id));
+      paymentForFlow = {
+        ...existing,
+        proofUrl,
+        paymentMethod: resolvedPaymentMethod,
+        paymentProvider: resolvedProvider,
+        ocrName: proofOcr?.name ?? null,
+        ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+        ocrDate: proofOcr?.date ?? null,
+        ocrRaw: proofOcr?.rawText ?? null,
+        ocrData: proofOcr ? {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          signals: proofOcr.signals,
+          engine: proofOcr.engine,
+          scannedAt: proofOcr.scannedAt,
+          methodMatch: ocrMethodMatch,
+        } : null,
+        status: "pending",
+      };
+    } else {
       const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, resolvedProvider, new Date());
-      [createdPayment] = await db.insert(paymentsTable).values({
+      [paymentForFlow] = await db.insert(paymentsTable).values({
         bookingId,
         amount: String(payableTotal),
         proofUrl,
@@ -1263,17 +1289,39 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         status: "pending",
       }).returning();
     }
-    const allocationPaymentId = existing?.id ?? createdPayment?.id;
+    const allocationPaymentId = paymentForFlow?.id;
     if (booking.groupRef && allocationPaymentId) {
       await insertGroupPaymentAllocations(allocationPaymentId, groupBookings, payableTotal);
     }
 
-    await db.update(bookingsTable).set({ status: "waiting_confirmation", updatedAt: new Date() })
+    const methodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr) === true;
+    const amountMatch =
+      proofOcr?.engine === "tesseract" &&
+      proofOcr.amount != null &&
+      Number(proofOcr.amount) === payableTotal;
+    const ocrPassed = methodMatch && amountMatch;
+    const nextStatus = ocrPassed ? "confirmed" : "pending_payment";
+
+    if (ocrPassed && paymentForFlow) {
+      await db.update(paymentsTable).set({
+        status: "confirmed",
+        confirmedAt: new Date(),
+        paidAt: paymentForFlow.paidAt ?? new Date(),
+      }).where(eq(paymentsTable.id, paymentForFlow.id));
+    }
+    await db.update(bookingsTable).set({
+      status: nextStatus,
+      paidAt: ocrPassed ? new Date() : null,
+      updatedAt: new Date(),
+    })
       .where(eq(bookingsTable.id, bookingId));
 
     await db.insert(bookingHistoryTable).values({
-      bookingId, fromStatus: booking.status, toStatus: "waiting_confirmation",
-      changedByName: booking.customerName, note: "Bukti pembayaran diupload via WhatsApp",
+      bookingId, fromStatus: booking.status, toStatus: nextStatus,
+      changedByName: booking.customerName,
+      note: ocrPassed
+        ? "Bukti pembayaran cocok dengan metode dan nominal; booking dikonfirmasi otomatis via WhatsApp."
+        : "Pesanan butuh preview dan approval,scan bukti pembayaran gagal.",
     });
 
     if (booking.groupRef) {
@@ -1283,44 +1331,116 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       ));
       for (const sibling of siblings) {
         if (INACTIVE_STATUSES.includes(sibling.status)) continue;
-        await db.update(bookingsTable).set({
-          status: "waiting_confirmation",
+      await db.update(bookingsTable).set({
+          status: nextStatus,
           updatedAt: new Date(),
         }).where(eq(bookingsTable.id, sibling.id));
         await db.insert(bookingHistoryTable).values({
           bookingId: sibling.id,
           fromStatus: sibling.status,
-          toStatus: "waiting_confirmation",
+          toStatus: nextStatus,
           changedByName: booking.customerName,
           note: `Bukti pembayaran diupload via WhatsApp (grup ${booking.groupRef})`,
         });
       }
     }
 
-    // Create single review token for admin (shows proof + approve/reject buttons in one page)
+    // Create a review link for failed OCR; successful OCR does not need approval.
     const reviewToken = await createWaToken(bookingId, "review_payment", 7);
 
     const fullProofUrl = proofUrl;
 
-    notifyWaProofUploaded({
-      customerName: booking.customerName, customerPhone: booking.customerPhone,
-      orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
-      bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
-      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      proofUrl: fullProofUrl,
-      reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
-    });
+    if (ocrPassed) {
+      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+      const checkinToken = await createWaToken(booking.id, "checkin", 30);
+      const finishToken = await createWaToken(booking.id, "finish", 30);
+      notifyWaBookingConfirmed({
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facility?.name ?? "",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
+        statusUrl,
+        proofUrl: fullProofUrl,
+      });
+      notifyWaProofAutoConfirmed({
+        orderNumber: booking.orderNumber,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        facilityName: facility?.name ?? "",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
+        proofUrl: fullProofUrl,
+        statusUrl,
+      });
+      notifyWaStaffCheckin({
+        orderNumber: booking.orderNumber,
+        customerName: booking.customerName,
+        facilityName: facility?.name ?? "",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+        finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
+      }).catch(() => {});
+      const { dpp, ppnAmount, ppnCollectedByCustomer } = extractBookingDpp(booking);
+      postConfirmedPaymentAccounting({
+        bookingId: booking.id,
+        orderNumber: booking.orderNumber,
+        dpp,
+        ppnAmount,
+        ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+        ppnTreatment: booking.ppnTreatment,
+        ppnCollectedByCustomer,
+        facilityId: booking.facilityId,
+        journalDate: new Date().toISOString().slice(0, 10),
+        paymentMethod: paymentForFlow?.paymentMethod ?? resolvedPaymentMethod,
+        paymentId: paymentForFlow?.id,
+      }).catch((err) => logAccountingError({
+        operation: "postConfirmedPaymentAccounting",
+        orderNumber: booking.orderNumber,
+        bookingId: booking.id,
+        error: err,
+      }));
+    } else {
+      const note = "Pesanan butuh preview dan approval,scan bukti pembayaran gagal.";
+      notifyWaProofUploaded({
+        customerName: booking.customerName, customerPhone: booking.customerPhone,
+        orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
+        bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
+        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
+        proofUrl: fullProofUrl,
+        reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
+        note,
+      });
+      notifyWaProofReceived({
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facility?.name ?? "",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID"),
+        statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+      });
+    }
 
     await logAudit({
       action: "wa_proof_uploaded",
       entity: "booking",
       entityId: bookingId,
-      after: { proofUrl, status: "waiting_confirmation" },
+      after: { proofUrl, status: nextStatus, ocrPassed, methodMatch, amountMatch },
     });
 
-    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
+    syncStatusToBizportal(booking.orderNumber, nextStatus, proofUrl, ocrPassed ? new Date() : null, booking).catch(() => {});
 
-    res.json({ success: true, orderNumber: booking.orderNumber });
+    res.json({ success: true, orderNumber: booking.orderNumber, status: nextStatus, ocrPassed });
   } catch (err) {
     console.error("[wa/proof] error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -1693,6 +1813,8 @@ async function resolveFacilityFromMsg(msg: string) {
   if (kw) return getFacilityByKeyword(kw);
   // Direct name search
   const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+  const number = msg.trim().match(/^(\d+)$/);
+  if (number) return facilities[Number(number[1]) - 1] ?? null;
   const lower = msg.toLowerCase();
   return facilities.find((f: typeof facilities[number]) => f.name.toLowerCase().includes(lower)) ?? null;
 }
@@ -1710,7 +1832,7 @@ function minutesToHours(min: number): number {
 }
 
 function isYes(msg: string): boolean {
-  return /^(ya|iya|ok|oke|yes|lanjut|betul|benar|confirm|konfirm)/i.test(msg.trim());
+  return /^ya$/i.test(msg.trim());
 }
 
 function isNo(msg: string): boolean {
@@ -1722,6 +1844,18 @@ function isNo(msg: string): boolean {
 // Dipakai di global cancel agar tidak salah cancel di step awal
 function isExplicitCancel(msg: string): boolean {
   return /^(batal|cancel|hapus|batalkan|stop|keluar|quit|abort)$/i.test(msg.trim());
+}
+
+function isMinaGreeting(msg: string): boolean {
+  return /^(halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?$|^(?:mau|mao)\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?$/i.test(msg.trim());
+}
+
+function isContinueHere(msg: string): boolean {
+  return /^(?:1|lanjut(?:\s+di\s+sini)?|lanjutkan(?:\s+di\s+sini)?)$/i.test(msg.trim());
+}
+
+function isMakeForm(msg: string): boolean {
+  return /^(?:2|buat(?:kan)?\s+form|form(?:ulir)?|buatkan form)$/i.test(msg.trim());
 }
 
 // ─── Admin command handler ─────────────────────────────────────────────────────
@@ -2364,13 +2498,16 @@ async function mergeSessionFromMessage(
   if (Object.keys(patch).length === 0) return { session, changed: false };
 
   const candidate = { ...session, ...patch };
-  patch.currentStep = getNextStep({
-    facilityId: candidate.facilityId,
-    bookingDate: candidate.bookingDate,
-    startTime: candidate.startTime,
-    durationMinutes: candidate.durationMinutes,
-    customerName: candidate.customerName,
-  });
+  patch.currentStep =
+    session.currentStep === "ask_facility" && patch.facilityId
+      ? "choose_mode"
+      : getNextStep({
+          facilityId: candidate.facilityId,
+          bookingDate: candidate.bookingDate,
+          startTime: candidate.startTime,
+          durationMinutes: candidate.durationMinutes,
+          customerName: candidate.customerName,
+        });
   const updated = await updateSession(session.id, patch);
   await logAudit({
     action: "booking_session_updated",
@@ -2390,13 +2527,15 @@ async function presentBookingSession(
   const facility = session.facilityId
     ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
     : null;
-  const nextStep = getNextStep({
-    facilityId: session.facilityId,
-    bookingDate: session.bookingDate,
-    startTime: session.startTime,
-    durationMinutes: session.durationMinutes,
-    customerName: session.customerName,
-  });
+  const nextStep = session.currentStep === "choose_mode"
+    ? "choose_mode"
+    : getNextStep({
+      facilityId: session.facilityId,
+      bookingDate: session.bookingDate,
+      startTime: session.startTime,
+      durationMinutes: session.durationMinutes,
+      customerName: session.customerName,
+    });
   let current = session;
   if (current.currentStep !== nextStep) {
     current = await updateSession(current.id, { currentStep: nextStep });
@@ -2483,13 +2622,15 @@ async function startBookingSession(
   );
   const notes = extractMentionedNote(msg);
 
-  const step = getNextStep({
+  const step = facilityId
+    ? "choose_mode"
+    : getNextStep({
     facilityId,
     bookingDate: intent.bookingDate,
     startTime: intent.startTime,
     durationMinutes: intent.durationMinutes,
     customerName: resolvedName,
-  });
+    });
 
   const session = await createSession({
     phone,
@@ -2557,26 +2698,68 @@ async function continueSession(
     case "ask_facility": {
       const fac = await resolveFacilityFromMsg(msg);
       if (!fac) {
-        const reply = `Fasilitas tidak ditemukan. ${await buildFacilityList()}`;
+        const reply = isMinaGreeting(msg)
+          ? await buildFacilityList()
+          : `Fasilitas tidak ditemukan. ${await buildFacilityList()}`;
         await appendMessage(session.id, "bot", reply);
         await sendReply(reply);
         return;
       }
       const updated = await updateSession(session.id, {
         facilityId: fac.id,
-        currentStep: getNextStep({
-          facilityId: fac.id,
-          bookingDate: session.bookingDate,
-          startTime: session.startTime,
-          durationMinutes: session.durationMinutes,
-          customerName: session.customerName,
-        }),
+        currentStep: "choose_mode",
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_facility", facilityId: fac.id } });
       const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac.name, Number(fac.pricePerHour));
       await appendMessage(session.id, "bot", reply);
       await sendReply(reply);
       break;
+    }
+
+    case "choose_mode": {
+      const fac = session.facilityId
+        ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
+        : null;
+
+      if (isContinueHere(lower)) {
+        // The new Mina flow explicitly asks for the booking name even when a
+        // registered WhatsApp profile already has one.
+        const updated = await updateSession(session.id, {
+          customerName: null,
+          currentStep: "ask_name",
+        });
+        const reply = await buildStepQuestion("ask_name", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+        await appendMessage(session.id, "bot", reply);
+        await sendReply(reply);
+        return;
+      }
+
+      if (isMakeForm(lower)) {
+        if (!fac) {
+          const reply = await buildFacilityList();
+          await updateSession(session.id, { currentStep: "ask_facility" });
+          await appendMessage(session.id, "bot", reply);
+          await sendReply(reply);
+          return;
+        }
+        const query = new URLSearchParams({ phone });
+        if (session.bookingDate) query.set("date", session.bookingDate);
+        if (session.startTime) query.set("startTime", session.startTime);
+        if (session.durationMinutes) query.set("duration", String(minutesToHours(session.durationMinutes)));
+        const formUrl = `${await getBaseUrl()}/wa/booking/${fac.id}?${query.toString()}`;
+        const reply =
+          `📝 Baik, silakan isi form booking berikut:\n\n${formUrl}\n\n` +
+          `Detail yang sudah kamu sebutkan akan kami isi otomatis jika tersedia.`;
+        await updateSession(session.id, { status: "completed", currentStep: "done" });
+        await appendMessage(session.id, "bot", reply);
+        await sendReply(reply);
+        return;
+      }
+
+      const reply = `Pilih salah satu:\n\n1. *Lanjut di sini*\n2. *Buatkan form*`;
+      await appendMessage(session.id, "bot", reply);
+      await sendReply(reply);
+      return;
     }
 
     case "ask_date": {
@@ -2600,19 +2783,8 @@ async function continueSession(
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_date", bookingDate: parsed.bookingDate } });
       const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
-      // Cek dan tampilkan slot yang tersedia untuk tanggal yang dipilih
-      let slotsMsg = "";
-      if (fac && fac.bookingMode !== "walk_in") {
-        const availSlots = await getAvailableSlotsForDay(session.facilityId!, parsed.bookingDate, fac.openTime, fac.closeTime);
-        if (availSlots.length === 0) {
-          slotsMsg = `\n\n⚠️ Semua slot pada *${parsed.bookingDate}* sudah penuh. Coba pilih tanggal lain (ketik *batal* dulu).`;
-        } else {
-          slotsMsg = `\n\n🟢 *Slot tersedia tanggal ${parsed.bookingDate}:*\n${availSlots.join("  |  ")}`;
-        }
-      }
-
       const baseQuestion = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
-      const reply = baseQuestion + slotsMsg;
+      const reply = baseQuestion;
       await appendMessage(session.id, "bot", reply);
       await sendReply(reply);
       break;
@@ -2636,7 +2808,13 @@ async function continueSession(
           const openMin = timeToMinutes(fac.openTime);
           const closeMin = timeToMinutes(fac.closeTime);
           if (reqMin < openMin || reqMin >= closeMin) {
-            const availSlots = await getAvailableSlotsForDay(session.facilityId, session.bookingDate, fac.openTime, fac.closeTime);
+            const availSlots = await getAvailableSlotsForDay(
+              session.facilityId,
+              session.bookingDate,
+              fac.openTime,
+              fac.closeTime,
+              session.durationMinutes ?? 60,
+            );
             const slotsStr = availSlots.length > 0
               ? `\n\n🟢 *Slot tersedia:*\n${availSlots.join("  |  ")}`
               : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
@@ -2646,10 +2824,17 @@ async function continueSession(
             return;
           }
 
-          // Cek apakah slot tersedia di DB (1 jam sebagai pengecekan awal)
-          const isAvail = await checkSlotAvailable(session.facilityId, session.bookingDate, parsed.startTime, 1);
+          // Cek seluruh rentang sesuai durasi yang dipilih customer.
+          const durationHours = minutesToHours(session.durationMinutes ?? 60);
+          const isAvail = await checkSlotAvailable(session.facilityId, session.bookingDate, parsed.startTime, durationHours);
           if (!isAvail) {
-            const availSlots = await getAvailableSlotsForDay(session.facilityId, session.bookingDate, fac.openTime, fac.closeTime);
+            const availSlots = await getAvailableSlotsForDay(
+              session.facilityId,
+              session.bookingDate,
+              fac.openTime,
+              fac.closeTime,
+              session.durationMinutes ?? 60,
+            );
             const slotsStr = availSlots.length > 0
               ? `\n\n🟢 *Slot tersedia tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}`
               : `\n\n⚠️ Tidak ada slot lain yang tersedia. Ketik *batal* dan pilih tanggal berbeda.`;
@@ -2699,7 +2884,19 @@ async function continueSession(
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_duration", durationMinutes } });
       const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
-      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      let reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      if (fac && updated.bookingDate && fac.bookingMode !== "walk_in" && updated.currentStep === "ask_time") {
+        const slots = await getAvailableSlotsForDay(
+          fac.id,
+          updated.bookingDate,
+          fac.openTime,
+          fac.closeTime,
+          updated.durationMinutes ?? 60,
+        );
+        reply += slots.length
+          ? `\n\n🟢 *Slot tersedia tanggal ${updated.bookingDate}:*\n${slots.join("  |  ")}`
+          : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.`;
+      }
       await appendMessage(session.id, "bot", reply);
       await sendReply(reply);
       break;
@@ -2804,6 +3001,15 @@ async function buildStepQuestion(
     case "ask_facility":
       return await buildFacilityList();
 
+    case "choose_mode":
+      return [
+        `✅ Fasilitas *${facilityName}* dipilih.`,
+        ``,
+        `Mau lanjut pesan/booking di sini atau dibuatkan form?`,
+        `1. *Lanjut di sini*`,
+        `2. *Buatkan form*`,
+      ].join("\n");
+
     case "ask_date":
       return `📅 Tanggal berapa mau booking${facilityName ? ` *${facilityName}*` : ""}?\nContoh: *besok*, *15 Juni*, *Sabtu*, *tanggal 20*`;
 
@@ -2844,7 +3050,24 @@ async function buildStepQuestion(
       }
       const durationHours = minutesToHours(session.durationMinutes);
       const endTime = addHoursToTime(session.startTime, durationHours);
-      const totalPrice = pricePerHour * durationHours;
+      let totalPrice = pricePerHour * durationHours;
+      try {
+        const priceCalc = await calculatePrice(
+          session.facilityId,
+          session.bookingDate,
+          session.startTime,
+          endTime,
+          durationHours,
+        );
+        const taxCalc = await resolveCustomerTax(priceCalc.finalPrice, {
+          customerId: session.customerId,
+          bookingDate: session.bookingDate,
+        });
+        totalPrice = taxCalc.grandTotal;
+      } catch {
+        // The final create path revalidates and recalculates; keep the prompt
+        // usable if a pricing rule is temporarily unavailable.
+      }
       return formatSessionSummary({
         facilityName,
         bookingDate: session.bookingDate,
@@ -2912,6 +3135,7 @@ async function getAvailableSlotsForDay(
   date: string,
   openTime: string,
   closeTime: string,
+  durationMinutes = 60,
 ): Promise<string[]> {
   const bookings = await db
     .select({ startTime: bookingsTable.startTime, endTime: bookingsTable.endTime, status: bookingsTable.status })
@@ -2928,8 +3152,8 @@ async function getAvailableSlotsForDay(
   const closeMin = timeToMinutes(closeTime);
   const available: string[] = [];
 
-  for (let t = openMin; t < closeMin; t += 60) {
-    const slotEnd = t + 60;
+  for (let t = openMin; t + durationMinutes <= closeMin; t += 60) {
+    const slotEnd = t + durationMinutes;
     const timeStr = minutesToTimeStr(t);
     const isBooked = activeBookings.some((b: typeof activeBookings[number]) => {
       const bS = timeToMinutes(b.startTime);
@@ -3139,7 +3363,7 @@ async function execCreateBookingFromSession(
   const grandTotal = taxCalc.grandTotal;
   const orderNumber = await generateBookingOrderNumber();
 
-  // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
+  // ── 10. Buat booking dengan status pending_payment ─────────────────────────
   let booking = null as unknown as typeof bookingsTable.$inferSelect;
   try {
     await db.transaction(async (tx) => {
@@ -3193,7 +3417,7 @@ async function execCreateBookingFromSession(
         apDiscountAmount: "0",
         basePrice: String(basePrice),
         source: "whatsapp_ai",
-        status: "waiting_admin_approval",
+         status: "pending_payment",
         bookerName: session.bookerName || null,
         notes: session.notes || null,
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -3208,9 +3432,9 @@ async function execCreateBookingFromSession(
       await tx.insert(bookingHistoryTable).values({
         bookingId: created.id,
         fromStatus: null,
-        toStatus: "waiting_admin_approval",
+         toStatus: "pending_payment",
         changedByName: session.customerName,
-        note: "Booking dibuat via WhatsApp AI — menunggu persetujuan admin",
+         note: "Booking dibuat via WhatsApp Mina — menunggu pembayaran",
       });
     });
   } catch (error) {
@@ -3282,7 +3506,7 @@ async function execCreateBookingFromSession(
       orderNumber,
       source: "whatsapp_chat",
       sessionId: session.id,
-      status: "waiting_admin_approval",
+       status: "pending_payment",
       facilityId: facility.id,
       bookingDate: session.bookingDate,
       startTime: session.startTime,
@@ -3295,9 +3519,13 @@ async function execCreateBookingFromSession(
 
   const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
   const weekend = isWeekendDate(session.bookingDate);
+  const paymentToken = await createWaToken(booking.id, "upload_proof", 7);
+  const paymentUrl = `${await getBaseUrl()}/bayar/${paymentToken}`;
+  const paymentDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await db.update(bookingsTable).set({ paymentDeadline, updatedAt: new Date() }).where(eq(bookingsTable.id, booking.id));
 
   // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
-  notifyWaBookingPendingApproval({
+  notifyWaBookingPaymentRequired({
     customerName: session.customerName,
     customerPhone: phone,
     orderNumber,
@@ -3308,30 +3536,17 @@ async function execCreateBookingFromSession(
     durationHours,
     totalPrice: grandTotal.toLocaleString("id-ID"),
     statusUrl,
+    paymentUrl,
+    paymentDeadline: paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false }),
   });
 
-  // ── 13. Kirim WA ke semua admin ────────────────────────────────────────────
-  notifyWaAdminNewBooking({
-    orderNumber,
-    customerName: session.customerName,
-    customerPhone: phone,
-    facilityName: facility.name,
-    bookingDate: session.bookingDate,
-    startTime: booking.startTime,
-    endTime: booking.endTime,
-    durationHours,
-    totalPrice: grandTotal.toLocaleString("id-ID"),
-    isWeekend: weekend,
-    appliedRules: appliedRulesStr || undefined,
-    statusUrl,
-  });
-
-  // ── 14. Audit: notifikasi admin dikirim ────────────────────────────────────
+  // The customer sends the proof through the payment page; staff notification
+  // is sent only after OCR succeeds or fails, so the admin queue is actionable.
   await logAudit({
-    action: "admin_approval_sent",
+    action: "wa_payment_required_sent",
     entity: "booking",
     entityId: booking.id,
-    after: { orderNumber, sentToAdmins: true, bookingDate: session.bookingDate, facilityName: facility.name },
+    after: { orderNumber, paymentUrl, bookingDate: session.bookingDate, facilityName: facility.name },
   });
 }
 
@@ -3358,6 +3573,8 @@ const BOT_MESSAGE_PATTERNS = [
   /^⚠️ \*Jadwal Tidak Tersedia\*/,
   /^✅ Slot jam \*\d{2}:\d{2}\* tersedia!/,
   /^🏟️ \*Fasilitas tersedia:\*/,
+  /^✅ Fasilitas \*/,
+  /^Mau lanjut pesan\/booking di sini/,
   /^📅 Tanggal berapa mau booking/,
   /^⏰ Jam berapa mau mulai\?/,
   /^⏱️ Berapa lama\? \(min 1 jam\)/,
@@ -3537,6 +3754,25 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       } else {
         await continueSession(session, phone, msg, true);
       }
+      return;
+    }
+
+    // Mina's first greeting is intentionally a short welcome. The next
+    // message (including another greeting variant) is handled by the
+    // persisted facility-selection step.
+    if (isMinaGreeting(msg)) {
+      const customer = await getRegisteredCustomer(phone);
+      const greeting = "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?";
+      const greetingSession = await createSession({
+        phone,
+        customerId: customer?.id ?? null,
+        bookerName: String(name) || null,
+        customerName: customer?.name ?? (String(name) || null),
+        currentStep: "ask_facility",
+      });
+      await appendMessage(greetingSession.id, "customer", msg);
+      await appendMessage(greetingSession.id, "bot", greeting);
+      await sendWAMsg(phone, greeting, true);
       return;
     }
 

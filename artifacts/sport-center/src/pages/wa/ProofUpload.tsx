@@ -22,6 +22,10 @@ interface ActionInfo {
     netAmount?: number | null;
     status: string;
   };
+  paymentOptions?: {
+    transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
+    qris: { imageUrl: string } | null;
+  };
 }
 
 export default function WaProofUpload() {
@@ -33,6 +37,8 @@ export default function WaProofUpload() {
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"QRIS" | "Transfer Bank">("Transfer Bank");
   const [orderNumber, setOrderNumber] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -42,7 +48,10 @@ export default function WaProofUpload() {
       .then((data) => {
         if (data.error) setError(data.error);
         else if (data.action !== "upload_proof") setError("Link ini bukan untuk upload bukti");
-        else setInfo(data);
+        else {
+          setInfo(data);
+          if (!data.paymentOptions?.transferBank && data.paymentOptions?.qris) setPaymentMethod("QRIS");
+        }
       })
       .catch(() => setError("Link tidak valid atau sudah kedaluwarsa"))
       .finally(() => setLoading(false));
@@ -64,6 +73,7 @@ export default function WaProofUpload() {
     try {
       const fd = new FormData();
       fd.append("proof", file);
+      fd.append("paymentMethod", paymentMethod);
       const resp = await fetch(`/api/wa/proof/${params.token}`, {
         method: "POST",
         body: fd,
@@ -71,6 +81,7 @@ export default function WaProofUpload() {
       const data = await resp.json();
       if (!resp.ok) { setError(data.error ?? "Upload gagal"); return; }
       setOrderNumber(data.orderNumber);
+      setConfirmed(data.status === "confirmed");
       setSuccess(true);
     } catch {
       setError("Gagal mengupload. Coba lagi.");
@@ -96,9 +107,13 @@ export default function WaProofUpload() {
               <CheckCircle className="w-9 h-9 text-green-600" />
             </div>
             <div>
-              <h2 className="font-black text-xl text-green-700">Bukti Terkirim!</h2>
+              <h2 className="font-black text-xl text-green-700">
+                {confirmed ? "Booking Dikonfirmasi!" : "Bukti Terkirim!"}
+              </h2>
               <p className="text-gray-600 text-sm mt-1">
-                Bukti pembayaran berhasil diupload. Admin akan memverifikasi dalam waktu singkat.
+                {confirmed
+                  ? "Bukti pembayaran cocok dan booking kamu otomatis dikonfirmasi."
+                  : "Bukti pembayaran tersimpan. Status masih menunggu pembayaran dan preview/approval admin."}
               </p>
             </div>
             <a
@@ -169,9 +184,31 @@ export default function WaProofUpload() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Pilih Foto Bukti Transfer</CardTitle>
+              <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Pembayaran</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {info?.paymentOptions?.transferBank && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod("Transfer Bank")}
+                    className={`rounded-lg border p-3 text-left text-sm ${paymentMethod === "Transfer Bank" ? "border-orange-500 bg-orange-50" : "border-gray-200"}`}>
+                    <div className="font-bold">Transfer Bank</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {info.paymentOptions.transferBank.bankName} · {info.paymentOptions.transferBank.bankAccount}
+                    </div>
+                  </button>
+                )}
+                {info?.paymentOptions?.qris && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod("QRIS")}
+                    className={`rounded-lg border p-3 text-left text-sm ${paymentMethod === "QRIS" ? "border-orange-500 bg-orange-50" : "border-gray-200"}`}>
+                    <div className="font-bold">QRIS</div>
+                    <img src={info.paymentOptions.qris.imageUrl} alt="QRIS Sport Center" className="mt-2 h-24 w-24 object-contain" />
+                  </button>
+                )}
+              </div>
               <input
                 ref={fileRef}
                 type="file"

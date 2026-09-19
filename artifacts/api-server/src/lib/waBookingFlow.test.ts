@@ -44,7 +44,7 @@ describe("WhatsApp Mina booking flow regressions", () => {
         durationMinutes: parsed.durationMinutes,
         customerName: "Robby",
       }),
-    ).toBe("ask_time");
+    ).toBe("ask_duration");
   });
 
   it("prefers an existing customer identity and accepts a natural correction", async () => {

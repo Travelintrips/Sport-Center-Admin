@@ -4,6 +4,7 @@ import { eq, and, gt } from "drizzle-orm";
 export type WaStep =
   | "wait_registration"
   | "ask_facility"
+  | "choose_mode"
   | "ask_date"
   | "ask_time"
   | "ask_duration"
@@ -509,8 +510,8 @@ export function getNextStep(data: {
 }): WaStep {
   if (!data.facilityId) return "ask_facility";
   if (!data.bookingDate) return "ask_date";
-  if (!data.startTime) return "ask_time";
   if (!data.durationMinutes) return "ask_duration";
+  if (!data.startTime) return "ask_time";
   if (!data.customerName) return "ask_name";
   // Notes are intentionally optional. Mina only stores them when the customer
   // mentions a note; it must never create an extra question in the flow.

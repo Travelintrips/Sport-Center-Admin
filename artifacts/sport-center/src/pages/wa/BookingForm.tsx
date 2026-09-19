@@ -62,6 +62,9 @@ export default function WaBookingForm() {
   const search = useSearch();
   const searchParams = new URLSearchParams(search);
   const phoneFromWA = searchParams.get("phone") ?? "";
+  const dateFromWA = searchParams.get("date") ?? "";
+  const startTimeFromWA = searchParams.get("startTime") ?? "";
+  const durationFromWA = searchParams.get("duration") ?? "1";
 
   const [facility, setFacility] = useState<Facility | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,9 +75,9 @@ export default function WaBookingForm() {
   const [form, setForm] = useState({
     customerName: "",
     customerPhone: phoneFromWA,
-    bookingDate: "",
-    startTime: "",
-    durationHours: "1",
+    bookingDate: dateFromWA,
+    startTime: startTimeFromWA,
+    durationHours: durationFromWA,
     notes: "",
   });
 

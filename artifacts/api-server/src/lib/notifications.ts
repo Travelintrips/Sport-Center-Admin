@@ -622,6 +622,7 @@ export async function notifyWaBookingCreated(data: WaBookingCreatedData): Promis
 export interface WaProofUploadedData extends BookingNotifData {
   proofUrl: string;
   reviewUrl: string;
+  note?: string;
 }
 
 export async function notifyWaProofUploaded(data: WaProofUploadedData): Promise<void> {
@@ -631,13 +632,41 @@ export async function notifyWaProofUploaded(data: WaProofUploadedData): Promise<
     `Customer: *${data.customerName}*\n` +
     `Fasilitas: *${data.facilityName}*\n` +
     `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
-    `Total: *Rp ${data.totalPrice}*\n\n` +
+    `Total: *Rp ${data.totalPrice}*\n` +
+    (data.note ? `\n📝 *Note:* ${data.note}\n` : "") +
+    `\n` +
     `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
   await sendWAToAdmins(msg);
 }
 
+export async function notifyWaProofAutoConfirmed(data: {
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: string;
+  proofUrl: string;
+  statusUrl: string;
+}): Promise<void> {
+  await sendWAToAdmins(
+    `✅ *PEMBAYARAN OTOMATIS TERKONFIRMASI*\n\n` +
+    `Order: *${data.orderNumber}*\n` +
+    `Customer: *${data.customerName}* (${data.customerPhone})\n` +
+    `Fasilitas: *${data.facilityName}*\n` +
+    `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
+    `Total: *Rp ${data.totalPrice}*\n` +
+    `Status: *DIKONFIRMASI* ✅\n\n` +
+    `Bukti pembayaran: ${data.proofUrl}\n` +
+    `Detail: ${data.statusUrl}`,
+  );
+}
+
 export interface WaBookingConfirmedData extends BookingNotifData {
   statusUrl: string;
+  proofUrl?: string;
 }
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
@@ -652,6 +681,7 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
     `• Fasilitas: *${data.facilityName}*\n` +
     `• Tanggal: *${data.bookingDate}*\n` +
     `• Jam: *${data.startTime} – ${data.endTime}*\n\n` +
+    (data.proofUrl ? `📎 Bukti pembayaran: ${data.proofUrl}\n\n` : "") +
     `Sampai jumpa di lapangan! 🏆\n\n` +
     `🧾 Kwitansi: ${kwitansiUrl}`;
   await sendWAToCustomer(data.customerPhone, msg);

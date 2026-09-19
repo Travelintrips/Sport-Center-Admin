@@ -240,6 +240,7 @@ function Router() {
       <Route path="/wa/status/:orderNumber" component={WaBookingStatus} />
       <Route path="/wa/upload/:orderNumber" component={WaUploadRedirect} />
       <Route path="/wa/proof/:token" component={WaProofUpload} />
+      <Route path="/bayar/:token" component={WaProofUpload} />
       <Route path="/wa/action/:token" component={WaAdminAction} />
       <Route path="/wa/review/:token" component={WaAdminReview} />
       <Route path="/wa/register/:token" component={WaRegister} />

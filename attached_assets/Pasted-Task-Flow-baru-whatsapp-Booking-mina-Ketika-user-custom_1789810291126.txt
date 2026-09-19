@@ -1,0 +1,55 @@
+Task Flow baru whatsapp Booking mina. Ketika user/customer mengetik : halo,hallo,halo mina,hallo mina,hi,hi mina,hai,hai mina,halo kak,hallo kak,halo ka,hallo ka,mau pesan,mau booking,mau pesan ka,mau pesan kak,mau booking ka,mau booking kak,mau boking ka,mau boking kak.
+
+Mina menjawab: Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?
+
+user/customer menjawab/ketik : halo,hallo,halo mina,hallo mina,hi,hi mina,hai,hai mina,halo kak,hallo kak,halo ka,hallo ka,mau pesan,mau booking,mau boking,mau pesan ka,mau pesan kak,mau booking ka,mau booking kak,mau boking ka,mau boking kak. halo,hallo,halo mina,hallo mina,hi,hi mina,hai,hai mina,halo kak,hallo kak,halo ka,hallo ka,mau pesan,mau booking,mau pesan ka,mau pesan kak,mau booking ka,mau booking kak,mau boking ka,mau boking kak.
+
+munculkan fasilitas: 🏟️ Fasilitas tersedia:
+
+Lapangan Multiguna — Rp 350.000/jam
+Billiard Coins (Self-Service) — Rp 50.000/jam
+Badminton Court A — Rp 100.000/jam
+Badminton Court B — Rp 100.000/jam
+Konsumsi — Rp 0/jam
+Gym / Fitness Center — Rp 30.000/jam
+Lapangan Tennis Outdoor — Rp 100.000/jam
+Sebutkan nama fasilitas yang ingin kamu booking.
+
+setelah user/customer menjawab dan memilih/mengetik fasilitas, tampilkan pesan mina: Mau lanjut pesan/booking di sini atau di buatkan form? 1.Lanjut di sini 2.Buatkan form.
+
+Ketika user/customer Ketik: lanjut di sini,maka mulai pertanyaan dengan memunculkan:
+
+mina tanya: Pesan/Booking atas nama siapa? Contoh : Andi
+
+user/customer jawab: Andi (simpan ke customer_name)
+
+lanjut ke bagian ini:
+
+📅 Tanggal berapa mau (fasilitas yang sudah di pilih/diketik user/customer)? Contoh: besok, 15 Juni, Sabtu, tanggal 20
+
+user/customer jawab: tanggal sesuai contoh di atas,contoh “besok,tanggal 20”
+
+munculkan : ⏱️ Berapa lama? (min 1 jam) Contoh: 1 jam, 2 jam, 3 jam
+
+lanjut ke step berikutnya,pemilihan jam dan chek slot sesuai durasi lama yang di ketik user/customer: ⏰ Jam berapa mau mulai? (jam operasional: 06:00–23:00) Contoh: jam 8 pagi, jam 20.00, 19:00 🟢 Slot yang di tampilkan sesuaikan dengan durasi yang di pilih user/customer misal 1 jam “tersedia tanggal 2026-09-20: 06:00 | 07:00 | 08:00 | 09:00 | 10:00 | 11:00 | 12:00 | 13:00 | 14:00 | 15:00 | 16:00 | 17:00 | 18:00 | 19:00 | 20:00 | 21:00 | 22:00 | 23:00
+
+Setelah selesai pengecekan tanggal dan slot,lalu munculkan : ✅ Saya cek tersedia. Berikut detail booking:
+
+Fasilitas: Badminton Court B Tanggal: 2026-09-20 Jam: 06:00 – 08:00 Durasi: 2 jam Nama: Robby Rahman Total: Rp 200.000
+
+Balas YA untuk lanjut dibuatkan booking. (Ketik BATAL untuk membatalkan)
+
+step selanjutnya : halaman url untuk pembayaran,pilih metode pembayaran,upload bukti pembayaran (scan OCR) jika upload OCR cocok lolos sama dengan pesanan/booking (OCR harus ketat/strict).
+
+kirim ke group dan ke user/cutomer detail pesanan beserta url bukti pembayaran yang di simpan dan pastikan url bisa di buka dengan 8 karakter dari url dev dan url produksi,pastikan status pesanan/booking auto “Dikonfirmasi”.
+
+namun jika bukti upload gagal dan tidak lolos OCR,data tetap insert dengan status “menunggu pembayaran”.
+
+kirim ke group dan ke admin (081386210415) detail pesanan dan tambahkan Note di details pesanan:
+
+Pesanan butuh preview dan approval,scan bukti pembayaran gagal.
+
+ini task setelah flow untuk pembuatan lanjut disini:
+
+silahkan lanjut ke pembuatan url dev dan produksi untuk halaman “pesanan/booking” yang akan di isi user/customer,namun untuk sementara cukup url dev saja karna masih tahap uji coba.
+
