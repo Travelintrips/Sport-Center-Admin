@@ -129,9 +129,9 @@ describe("WhatsApp Mina booking flow regressions", () => {
     expect(switched).not.toBe(draft);
   });
 
-  it("keeps the WhatsApp alternative menu fixed and parses natural replies", () => {
+  it("keeps the WhatsApp alternative menu compact and parses natural replies", () => {
     expect(formatAlternativeFacilityOptions(["Badminton Court B"])).toBe(
-      "1. Lihat slot Badminton Court B\n2. Ganti tanggal\n3. Ganti durasi",
+      "1. Lihat slot Badminton Court B",
     );
     expect(parseAlternativeBookingChoice("1", ["Badminton Court B"], { allowNumericMenu: true })).toBe("facility");
     expect(parseAlternativeBookingChoice("tidak cocok", ["Badminton Court B"])).toBe("facility");
