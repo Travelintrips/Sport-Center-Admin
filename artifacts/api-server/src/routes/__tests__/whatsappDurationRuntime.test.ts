@@ -153,20 +153,27 @@ describe("Mina WhatsApp duration runtime regression", () => {
         return {
           target: String(body.get("target") ?? ""),
           message: String(body.get("message") ?? ""),
-          connectOnly: String(body.get("connectOnly") ?? ""),
+          connectOnly: body.get("connectOnly"),
         };
       }
       return JSON.parse(String(body ?? "{}")) as {
         target?: string;
         message?: string;
-        connectOnly?: string;
+        connectOnly?: unknown;
       };
     });
-    const lastOutbound = sentMessages.at(-1);
-    expect(lastOutbound?.target).toBe(phone);
-    expect(lastOutbound?.message).toContain("Slot tersedia");
-    expect(lastOutbound?.message).toMatch(/Silakan pilih jam mulai|pilih jam/i);
-    expect(lastOutbound?.connectOnly).toBe("false");
+    const finalOutbounds = sentMessages.slice(setupMessages.length);
+    const combinedFinalMessage = finalOutbounds
+      .map((outbound: { message?: string }) => outbound.message ?? "")
+      .join("\n\n");
+
+    expect(finalOutbounds.length).toBeGreaterThanOrEqual(2);
+    expect(finalOutbounds.every((outbound: { target?: string }) => outbound.target === phone)).toBe(true);
+    expect(finalOutbounds.every((outbound: { message?: string }) => (outbound.message?.length ?? 0) <= 420)).toBe(true);
+    expect(finalOutbounds.every((outbound: { connectOnly?: unknown }) => outbound.connectOnly == null)).toBe(true);
+    expect(combinedFinalMessage).toContain("Slot tersedia");
+    expect(combinedFinalMessage).toMatch(/Silakan pilih jam mulai|pilih jam/i);
+    expect(combinedFinalMessage).toContain("Lihat slot Badminton Court B");
 
     const session = await getActiveSession(phone);
     expect(session).not.toBeNull();
