@@ -3359,11 +3359,21 @@ export default function AdminBookings() {
     );
     setSelectedBooking(data);
     if (paymentAffectedByDateChange) {
+      const paymentId = Number(paymentAffectedByDateChange.id);
       setPaymentDateChangedIds((current) => {
         const next = new Set(current);
-        next.add(Number(paymentAffectedByDateChange.id));
+        next.add(paymentId);
         return next;
       });
+      // A payment-date correction must immediately flow through to the
+      // reconciliation projection. Keep the manual retry button as fallback
+      // when the candidate is locked or the automatic sync fails.
+      syncReconciliationMutation.mutate(paymentId);
+      toast({
+        title: "Tanggal berhasil diperbarui",
+        description: "Rekonsiliasi sedang disinkronkan otomatis dengan tanggal pembayaran terbaru.",
+      });
+      return;
     }
     toast({ title: "Tanggal berhasil diperbarui" });
   };
@@ -3396,6 +3406,12 @@ export default function AdminBookings() {
         if (!(paymentId in current)) return current;
         const next = { ...current };
         delete next[paymentId];
+        return next;
+      });
+      setPaymentDateChangedIds((current) => {
+        if (!current.has(paymentId)) return current;
+        const next = new Set(current);
+        next.delete(paymentId);
         return next;
       });
       await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
@@ -4368,10 +4384,24 @@ export default function AdminBookings() {
                     // The admin correction is written to the canonical/representative booking payment,
                     // so the group row must prefer that payment instead of picking the latest timestamp
                     // from a sibling session (which can preserve an old paidAt value).
+                    const bookingPaymentsNewestFirst = [
+                      b.payment,
+                      ...(Array.isArray(b.payments) ? b.payments : []),
+                    ]
+                      .filter(Boolean)
+                      .filter(
+                        (payment: any, index: number, rows: any[]) =>
+                          rows.findIndex((candidate: any) => candidate.id === payment.id) === index,
+                      )
+                      .sort((a: any, b: any) => Number(b.id ?? 0) - Number(a.id ?? 0));
                     const representativePayment =
                       b.membershipPayment ??
-                      b.payment ??
-                      (Array.isArray(b.payments) ? b.payments[0] : null);
+                      bookingPaymentsNewestFirst.find(
+                        (payment: any) =>
+                          payment.status === "pending" || payment.status === "confirmed",
+                      ) ??
+                      bookingPaymentsNewestFirst[0] ??
+                      null;
                     const groupPayment = representativePayment ?? groupPayments[0] ?? null;
                     const listPayment = isMultiSessionGroup
                       ? groupPayment
