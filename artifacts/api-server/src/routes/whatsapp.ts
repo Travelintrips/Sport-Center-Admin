@@ -2885,9 +2885,9 @@ async function presentBookingSession(
           ? `\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
           : "";
         reply =
-          `⏰ Jam berapa mau mulai? (jam operasional: ${facility.openTime}–${facility.closeTime})\n` +
+          `Jam berapa mau mulai?\n` +
           `Contoh: jam 8 pagi, jam 20.00, 19:00\n` +
-          `🟢 Slot tersedia tanggal ${current.bookingDate}:\n` +
+          `Slot tersedia tanggal ${current.bookingDate}:\n` +
           `${slots.join("  | ")}` +
           alternativeMenu;
       } else if (alternatives.length > 0) {
@@ -3690,9 +3690,9 @@ async function continueSession(
             ? `\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
             : "";
           reply =
-            `⏰ Jam berapa mau mulai? (jam operasional: ${fac.openTime}–${fac.closeTime})\n` +
+            `Jam berapa mau mulai?\n` +
             `Contoh: jam 8 pagi, jam 20.00, 19:00\n` +
-            `🟢 Slot tersedia tanggal ${durationDraft.bookingDate}:\n` +
+            `Slot tersedia tanggal ${durationDraft.bookingDate}:\n` +
             `${slots.join("  | ")}` +
             alternativeMenu;
         } else if (alternatives.length > 0) {
