@@ -187,7 +187,10 @@ async function getBookingWithPayment(id: number) {
     : [id];
   const allPayments = await db.select().from(paymentsTable)
     .where(inArray(paymentsTable.bookingId, groupBookingIds));
-  allPayments.sort((a, b) => a.id - b.id);
+  // A booking can retain historical payment rows. Always resolve the
+  // canonical display payment from the newest row first so an administrative
+  // payment-date correction is not hidden by an older confirmed payment.
+  const paymentsNewestFirst = [...allPayments].sort((a, b) => b.id - a.id);
   const [companyInvoiceItem] = await db.select({
     invoiceId: companyInvoiceItemsTable.invoiceId,
     totalAmount: companyInvoiceItemsTable.totalAmount,
@@ -225,8 +228,8 @@ async function getBookingWithPayment(id: number) {
       }
     : null;
   const payment =
-    allPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
-    allPayments[allPayments.length - 1] ??
+    paymentsNewestFirst.find((p) => p.status === "pending" || p.status === "confirmed") ??
+    paymentsNewestFirst[0] ??
     companyInvoicePayment;
   const allocations = booking.groupRef
     ? await db.select().from(paymentAllocationsTable)
@@ -577,7 +580,11 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
 
     const result = bookings.map((b) => {
       const facility = facilities.find((f) => f.id === b.facilityId);
-      const bPayments = paymentsByBookingId[b.id] ?? [];
+      // Keep the list projection consistent with the detail drawer: if a
+      // booking has more than one historical payment row, the newest active
+      // payment is canonical for "Tgl Bayar".
+      const bPayments = [...(paymentsByBookingId[b.id] ?? [])]
+        .sort((a, b) => b.id - a.id);
       const companyInvoiceId = b.companyInvoiceId ?? invoiceIdByBookingId.get(b.id) ?? null;
       const invoice = companyInvoiceId != null
         ? companyInvoiceById.get(companyInvoiceId)
