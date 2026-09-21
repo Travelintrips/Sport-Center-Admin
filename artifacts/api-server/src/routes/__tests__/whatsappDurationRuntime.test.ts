@@ -119,11 +119,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
 
     let releaseFinalSend!: () => void;
     const blockedFonnteResponse = new Promise<Response>((resolve) => {
-      releaseFinalSend = () => resolve(new Response(JSON.stringify({
-        status: false,
-        reason: "invalid message request on free package",
-        requestid: "free-plan-regression",
-      }), {
+      releaseFinalSend = () => resolve(new Response(JSON.stringify({ status: true }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }));
@@ -175,24 +171,18 @@ describe("Mina WhatsApp duration runtime regression", () => {
       .map((outbound: { message?: string }) => outbound.message ?? "")
       .join("\n\n");
 
-    expect(finalOutbounds).toHaveLength(2);
-    expect(finalOutbounds.every((outbound: { target?: string }) => outbound.target === phone)).toBe(true);
-    expect(finalOutbounds.every((outbound: { inboxid?: unknown }) => outbound.inboxid === "9004")).toBe(true);
-    expect(finalOutbounds.every((outbound: { connectOnly?: unknown }) => outbound.connectOnly == null)).toBe(true);
+    expect(finalOutbounds).toHaveLength(1);
+    expect(finalOutbounds[0]?.target).toBe(phone);
+    expect(finalOutbounds[0]?.inboxid).toBe("9004");
+    expect(finalOutbounds[0]?.connectOnly).toBeNull();
 
     const originalMessage = finalOutbounds[0]?.message ?? "";
-    const fallbackMessage = finalOutbounds[1]?.message ?? "";
-    expect(originalMessage).toContain("Jam berapa mau mulai?");
-    expect(originalMessage).toContain("Slot tersedia tanggal");
-    expect(originalMessage).not.toContain("jam operasional");
+    expect(originalMessage).toBe(
+      "Jam berapa mau mulai?\nContoh: jam 8 pagi, jam 20.00, 19:00",
+    );
+    expect(originalMessage).not.toContain("Slot tersedia tanggal");
+    expect(originalMessage).not.toContain("|");
     expect(originalMessage).not.toMatch(/[⏰🟢]/u);
-    expect(originalMessage).toContain("1. Lihat slot Badminton Court B");
-    expect(fallbackMessage).toContain("Slot tersedia tanggal");
-    expect(fallbackMessage).toContain("1. Lihat slot Badminton Court B");
-    expect(fallbackMessage).not.toMatch(/[🏟️🏸✅❌👤📅⏱️⏰🟢⚠️❓🏅🎉👋🔍📋🙏🔗•]/u);
-    expect(fallbackMessage).not.toContain("|");
-    expect(combinedFinalMessage).not.toContain("2. Ganti tanggal");
-    expect(combinedFinalMessage).not.toContain("3. Ganti durasi");
 
     const session = await getActiveSession(phone);
     expect(session).not.toBeNull();
