@@ -173,6 +173,20 @@ export default function WaProofUpload() {
   const b = info?.booking;
   const grossAmount = b ? (b.grandTotal ?? b.totalPrice) : 0;
   const hasWithholding = !!b && Number(b.pphAmount ?? 0) > 0 && b.netAmount != null;
+  const expectedPaymentAmount = Number(
+    hasWithholding ? (b?.netAmount ?? 0) : grossAmount,
+  );
+  const ocrAmountMatches =
+    ocrPreview?.amount != null &&
+    expectedPaymentAmount > 0 &&
+    Number(ocrPreview.amount) === expectedPaymentAmount;
+  const ocrMethodMatches =
+    ocrPreview?.paymentMethod !== "unknown" &&
+    ocrPreview?.paymentMethod === paymentMethod;
+  const ocrPreviewVerified =
+    Boolean(ocrPreview) &&
+    ocrAmountMatches &&
+    ocrMethodMatches;
 
   return (
     <div className="min-h-screen bg-orange-50 pb-8">
@@ -291,22 +305,28 @@ export default function WaProofUpload() {
                )}
                {ocrPreview && !scanningOcr && (
                  <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
-                   ocrPreview.paymentMethod === "unknown" || ocrPreview.amount == null
-                     ? "border-yellow-200 bg-yellow-50 text-yellow-800"
-                     : "border-green-200 bg-green-50 text-green-800"
+                   ocrPreviewVerified
+                     ? "border-green-200 bg-green-50 text-green-800"
+                     : "border-yellow-200 bg-yellow-50 text-yellow-800"
                  }`}>
                    <p className="font-bold">Hasil pengecekan awal</p>
                    <p className="mt-1">
                      Metode: <strong>{ocrPreview.paymentMethod === "unknown" ? "Belum terbaca" : ocrPreview.paymentMethod}</strong>
+                     {ocrPreview.paymentMethod !== "unknown" && !ocrMethodMatches && (
+                       <span> — tidak sesuai pilihan {paymentMethod}</span>
+                     )}
                    </p>
                    <p>
                      Nominal: <strong>{ocrPreview.amount == null ? "Belum terbaca" : `Rp ${Number(ocrPreview.amount).toLocaleString("id-ID")}`}</strong>
+                     {ocrPreview.amount != null && expectedPaymentAmount > 0 && !ocrAmountMatches && (
+                       <span> — tagihan Rp {expectedPaymentAmount.toLocaleString("id-ID")}</span>
+                     )}
                    </p>
                    {ocrPreview.date && <p>Tanggal terbaca: <strong>{ocrPreview.date}</strong></p>}
                    <p className="mt-1">
-                     {ocrPreview.paymentMethod === "unknown" || ocrPreview.amount == null
-                       ? "Bukti akan tetap dikirim untuk pemeriksaan manual admin."
-                       : "Server akan memeriksa ulang bukti saat dikirim."}
+                     {ocrPreviewVerified
+                       ? "Metode dan nominal sesuai tagihan. Server akan memeriksa ulang bukti saat dikirim."
+                       : "Hasil OCR belum dapat dipastikan sesuai. Bukti akan diperiksa ulang saat dikirim dan tetap menunggu verifikasi admin."}
                    </p>
                  </div>
                )}
