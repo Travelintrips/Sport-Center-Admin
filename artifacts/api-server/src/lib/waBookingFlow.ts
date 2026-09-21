@@ -72,11 +72,7 @@ export function formatAlternativeFacilityOptions(
   const label = alternativeFacilityNames.length > 0
     ? `Lihat slot ${alternativeFacilityNames.join(" atau ")}`
     : "Lihat fasilitas sejenis lainnya";
-  return [
-    `1. ${label}`,
-    "2. Ganti tanggal",
-    "3. Ganti durasi",
-  ].join("\n");
+  return `1. ${label}`;
 }
 
 export function getAlternativeBookingDraftPatch(
