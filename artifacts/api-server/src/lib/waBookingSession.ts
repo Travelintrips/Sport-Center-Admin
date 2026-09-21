@@ -1,5 +1,5 @@
 import { db, waBookingSessionsTable, usersTable } from "@workspace/db";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, desc } from "drizzle-orm";
 
 export type WaStep =
   | "wait_registration"
@@ -541,7 +541,7 @@ export async function getActiveSession(phone: string): Promise<WaBookingSessionR
         gt(waBookingSessionsTable.expiredAt, now)
       )
     )
-    .orderBy(waBookingSessionsTable.createdAt)
+    .orderBy(desc(waBookingSessionsTable.createdAt))
     .limit(1);
   return row ?? null;
 }
