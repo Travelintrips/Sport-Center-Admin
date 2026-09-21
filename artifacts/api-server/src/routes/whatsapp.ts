@@ -1749,6 +1749,17 @@ function splitFonnteTextMessage(message: string, maxLength = 420): string[] {
   return chunks;
 }
 
+function sanitizeFonnteFreePackageMessage(message: string): string {
+  return message
+    .replace(/[🏟️🏸✅❌👤📅⏱️⏰🟢⚠️❓🏅🎉👋🔍📋🙏🔗•]/gu, "")
+    .replace(/\*/g, "")
+    .replace(/\s*\|\s*/g, ", ")
+    .replace(/[–—]/g, "-")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<boolean> {
   if (!phone) return false;
   const fonnte = await getFonnteConfig();
@@ -1829,6 +1840,85 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       const providerRequestId = providerBody?.requestid ?? providerBody?.requestId;
 
       if (!response.ok || providerStatus === false) {
+        const reasonText = providerReason == null ? "" : String(providerReason);
+        const isFreePackageContentRejection =
+          response.ok &&
+          providerStatus === false &&
+          /invalid message request on free package/i.test(reasonText);
+
+        if (isFreePackageContentRejection) {
+          const fallbackMessage = sanitizeFonnteFreePackageMessage(chunk);
+          if (fallbackMessage && fallbackMessage !== chunk) {
+            const fallbackForm = new FormData();
+            fallbackForm.append("target", phone);
+            fallbackForm.append("message", fallbackMessage);
+            if (replyInboxId) fallbackForm.append("inboxid", replyInboxId);
+
+            const fallbackController = new AbortController();
+            const fallbackTimeout = setTimeout(() => fallbackController.abort(), 15_000);
+            try {
+              const fallbackResponse = await fetch("https://api.fonnte.com/send", {
+                method: "POST",
+                headers: { Authorization: token },
+                body: fallbackForm,
+                signal: fallbackController.signal,
+              });
+              clearTimeout(fallbackTimeout);
+
+              const fallbackText = await fallbackResponse.text().catch(() => "");
+              let fallbackBody: Record<string, unknown> | null = null;
+              try {
+                fallbackBody = fallbackText
+                  ? JSON.parse(fallbackText) as Record<string, unknown>
+                  : null;
+              } catch {
+                fallbackBody = null;
+              }
+
+              const fallbackStatus = fallbackBody?.status ?? fallbackBody?.Status;
+              const fallbackReason = fallbackBody?.reason ?? fallbackBody?.detail;
+              const fallbackRequestId = fallbackBody?.requestid ?? fallbackBody?.requestId;
+              const fallbackAccepted = fallbackResponse.ok && fallbackStatus !== false;
+
+              await logAudit({
+                action: fallbackAccepted
+                  ? "mina_reply_free_package_fallback_accepted"
+                  : "mina_reply_free_package_fallback_rejected",
+                entity: "wa_outbound",
+                after: {
+                  recipient: phone,
+                  channel: useCustomerToken ? "mina" : "admin",
+                  originalMessageLength: chunk.length,
+                  fallbackMessageLength: fallbackMessage.length,
+                  httpStatus: fallbackResponse.status,
+                  providerStatus: fallbackStatus,
+                  providerReason: fallbackReason == null ? null : String(fallbackReason),
+                  providerRequestId: fallbackRequestId == null ? null : String(fallbackRequestId),
+                  inboxIdPresent: Boolean(replyInboxId),
+                },
+              }).catch(() => {});
+
+              if (fallbackAccepted) {
+                trackSentMessage(fallbackMessage);
+                continue;
+              }
+            } catch (fallbackError) {
+              clearTimeout(fallbackTimeout);
+              await logAudit({
+                action: "mina_reply_free_package_fallback_error",
+                entity: "wa_outbound",
+                after: {
+                  recipient: phone,
+                  channel: useCustomerToken ? "mina" : "admin",
+                  error: fallbackError instanceof Error
+                    ? fallbackError.message
+                    : String(fallbackError),
+                },
+              }).catch(() => {});
+            }
+          }
+        }
+
         logger.error(
           {
             channel: useCustomerToken ? "mina" : "admin",
@@ -1857,6 +1947,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
             messageLength: chunk.length,
             chunkIndex: chunkIndex + 1,
             chunkCount: chunks.length,
+            inboxIdPresent: Boolean(replyInboxId),
           },
         }).catch(() => {});
         return false;
