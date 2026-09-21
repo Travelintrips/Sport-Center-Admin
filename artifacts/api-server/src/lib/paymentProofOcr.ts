@@ -29,31 +29,81 @@ function normalizeText(value: string): string {
     .trim();
 }
 
-function parseAmount(text: string): number | null {
-  const candidates: number[] = [];
+function parseMoneyToken(raw: string): number | null {
+  let token = raw
+    .replace(/[Oo]/g, "0")
+    .replace(/[IiLl]/g, "1")
+    .replace(/\s+/g, "")
+    .replace(/[^\d.,]/g, "");
+
+  if (!token) return null;
+
+  // Indonesian receipts commonly use dot thousands + comma decimals
+  // (Rp 200.000,00), while some apps use the inverse
+  // (Rp 200,000.00). A trailing 2-digit group is treated as cents;
+  // a trailing 3-digit group is preserved as a thousands group.
+  const lastDot = token.lastIndexOf(".");
+  const lastComma = token.lastIndexOf(",");
+  const lastSeparator = Math.max(lastDot, lastComma);
+  if (lastSeparator >= 0) {
+    const trailing = token.slice(lastSeparator + 1);
+    if (/^\d{2}$/.test(trailing)) {
+      token = token.slice(0, lastSeparator);
+    }
+  }
+
+  const digits = token.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const amount = Number(digits);
+  return Number.isFinite(amount) && amount >= 1_000 ? amount : null;
+}
+
+export function parsePaymentProofAmount(text: string): number | null {
+  const candidates: Array<{ amount: number; score: number }> = [];
   const lines = text.split(/\r?\n/);
 
   for (const line of lines) {
     const normalized = normalizeText(line);
-    const looksLikeAmount =
-      /\b(RP|IDR|TOTAL|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|PEMBAYARAN)\b/.test(
+    if (!normalized) continue;
+
+    // Reference/account identifiers often contain long digit sequences and
+    // must never be treated as payment amounts.
+    if (/\b(?:REF(?:ERENSI)?|REFERENCE|PAN|TERMINAL|REKENING|ACCOUNT)\b/.test(normalized)) {
+      continue;
+    }
+
+    const hasStrongAmountLabel =
+      /\b(?:TOTAL(?:\s+TRANSAKSI)?|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|TOTAL\s+TRANSACTION)\b/.test(
         normalized,
       );
-    if (!looksLikeAmount) continue;
 
-    const matches =
-      line.match(/(?:Rp|IDR)?\s*[\dOIl]{3,}(?:[.,]\d{2})?/gi) ?? [];
-    for (const match of matches) {
-      const digits = match
-        .replace(/[Oo]/g, "0")
-        .replace(/[IiLl]/g, "1")
-        .replace(/[^\d]/g, "");
-      const amount = Number(digits);
-      if (Number.isFinite(amount) && amount >= 1_000) candidates.push(amount);
+    // Prefer explicit currency values. Allow OCR-confused O/I/l inside digits
+    // and preserve thousands separators instead of accidentally reading
+    // "200.000" as "200.00" => 20.000.
+    const currencyMatches = [
+      ...line.matchAll(/(?:Rp|IDR)\.?\s*([\dOIl][\dOIl.,\s]{1,28})/gi),
+    ];
+    for (const match of currencyMatches) {
+      const amount = parseMoneyToken(match[1] ?? "");
+      if (amount != null) {
+        candidates.push({ amount, score: hasStrongAmountLabel ? 3 : 2 });
+      }
+    }
+
+    // Some OCR engines drop the "Rp" prefix. Only trust an unprefixed number
+    // when the same line explicitly labels it as the total/amount.
+    if (hasStrongAmountLabel && currencyMatches.length === 0) {
+      const labelled = line.match(
+        /(?:TOTAL(?:\s+TRANSAKSI)?|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|TOTAL\s+TRANSACTION)\s*[:\-]?\s*([\dOIl][\dOIl.,\s]{2,28})/i,
+      );
+      const amount = labelled ? parseMoneyToken(labelled[1] ?? "") : null;
+      if (amount != null) candidates.push({ amount, score: 3 });
     }
   }
 
-  return candidates.length ? Math.max(...candidates) : null;
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score || b.amount - a.amount);
+  return candidates[0]!.amount;
 }
 
 function parseDate(text: string): string | null {
@@ -218,7 +268,7 @@ export async function scanPaymentProof(
         ...classification,
         rawText,
         name: parseName(rawText),
-        amount: parseAmount(rawText),
+        amount: parsePaymentProofAmount(rawText),
         date: parseDate(rawText),
         engine: "tesseract",
         scannedAt,
