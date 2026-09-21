@@ -2764,10 +2764,15 @@ async function presentBookingSession(
         current.durationMinutes ?? 60,
       );
       if (slots.length > 0) {
-        reply += `\n\n🟢 *Slot tersedia di ${facility.name} tanggal ${current.bookingDate}:*\n${slots.join("  | ")}`;
-        reply += alternatives.length > 0
-          ? `\n\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
-          : `\n\nJika jamnya belum cocok, ketik *ganti tanggal* atau *ganti durasi*.`;
+        const alternativeMenu = alternatives.length > 0
+          ? `\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
+          : "";
+        reply =
+          `⏰ Jam berapa mau mulai? (jam operasional: ${facility.openTime}–${facility.closeTime})\n` +
+          `Contoh: jam 8 pagi, jam 20.00, 19:00\n` +
+          `🟢 Slot tersedia tanggal ${current.bookingDate}:\n` +
+          `${slots.join("  | ")}` +
+          alternativeMenu;
       } else if (alternatives.length > 0) {
         current = await updateSession(current.id, {
           startTime: null,
@@ -3564,10 +3569,15 @@ async function continueSession(
         );
 
         if (slots.length > 0) {
-          reply += `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${durationDraft.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`;
-          reply += alternatives.length > 0
-            ? `\n\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
-            : `\n\nJika jamnya belum cocok, ketik *ganti tanggal* atau *ganti durasi*.`;
+          const alternativeMenu = alternatives.length > 0
+            ? `\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
+            : "";
+          reply =
+            `⏰ Jam berapa mau mulai? (jam operasional: ${fac.openTime}–${fac.closeTime})\n` +
+            `Contoh: jam 8 pagi, jam 20.00, 19:00\n` +
+            `🟢 Slot tersedia tanggal ${durationDraft.bookingDate}:\n` +
+            `${slots.join("  | ")}` +
+            alternativeMenu;
         } else if (alternatives.length > 0) {
           deliveredStep = "choose_alternative_facility";
           reply = buildAlternativeFacilitySlotPrompt({
