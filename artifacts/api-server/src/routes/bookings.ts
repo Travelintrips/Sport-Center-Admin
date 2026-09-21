@@ -629,7 +629,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const payment =
         companyInvoicePayment ??
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
-        bPayments[bPayments.length - 1] ??
+        bPayments[0] ??
         null;
       const transactionPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
       const paymentMethodCode = String(payment?.paymentMethod ?? "").trim().toLowerCase();
