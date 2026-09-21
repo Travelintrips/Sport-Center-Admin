@@ -19,6 +19,7 @@ if (!rawPort) {
 }
 
 const port = Number(rawPort);
+const host = process.env["HOST"]?.trim() || "0.0.0.0";
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -1303,13 +1304,13 @@ try {
 // migrations and seed in the background. Previously migrations ran before
 // app.listen(), which meant a slow/paused Supabase DB would timeout and
 // the port would never open, causing the deploy to fail.
-app.listen(port, (err) => {
+app.listen(port, host, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
 
-  logger.info({ port }, "Server listening");
+  logger.info({ port, host }, "Server listening");
   if (process.env.NODE_ENV !== "production") {
     initBizportalTables().catch(() => {});
     ensureDefaultTemplates().catch(() => {});
