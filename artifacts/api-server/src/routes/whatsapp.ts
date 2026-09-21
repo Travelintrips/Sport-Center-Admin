@@ -2881,15 +2881,9 @@ async function presentBookingSession(
         current.durationMinutes ?? 60,
       );
       if (slots.length > 0) {
-        const alternativeMenu = alternatives.length > 0
-          ? `\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
-          : "";
         reply =
           `Jam berapa mau mulai?\n` +
-          `Contoh: jam 8 pagi, jam 20.00, 19:00\n` +
-          `Slot tersedia tanggal ${current.bookingDate}:\n` +
-          `${slots.join("  | ")}` +
-          alternativeMenu;
+          `Contoh: jam 8 pagi, jam 20.00, 19:00`;
       } else if (alternatives.length > 0) {
         current = await updateSession(current.id, {
           startTime: null,
@@ -3523,10 +3517,10 @@ async function continueSession(
             options: alternativeSlotOptions,
           })
           : fac && slots.length > 0
-            ? `⏰ Baik, tetap di *${fac.name}*. Jam berapa yang cocok untuk durasi *${minutesToHours(session.durationMinutes ?? 60)} jam* pada tanggal *${session.bookingDate}*?\n\n` +
-              `🟢 Slot yang bisa dipilih:\n${slots.join("  | ")}\n\nBalas dengan *11*, *11:00*, atau *jam 11*.`
-            : `⚠️ Tidak ada jam lain yang tersedia di *${fac?.name ?? "fasilitas ini"}* pada tanggal tersebut.\n\n` +
-              `Ketik *tanggal lain* atau *batal*.`;
+            ? `Coba salah satu jam berikut: ${slots.slice(0, 3).join(", ")}.\n` +
+              `Atau ketik jam lain yang kamu inginkan.`
+            : `Tidak ada jam lain yang tersedia di ${fac?.name ?? "fasilitas ini"} pada tanggal tersebut.\n` +
+              `Ketik tanggal lain atau batal.`;
         await appendMessage(updated.id, "bot", reply);
         await sendReply(reply);
         return;
@@ -3559,12 +3553,12 @@ async function continueSession(
               durationMinutes,
             );
             const slotsStr = availSlots.length > 0
-              ? `\n\n🟢 *Slot tersedia di ${fac.name}:*\n${availSlots.join("  | ")}`
-              : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
+              ? ` Coba: ${availSlots.slice(0, 3).join(", ")}.`
+              : ` Tidak ada slot tersedia di tanggal ini.`;
              const reason = reqMin < openMin
-               ? `Jam mulai *${requestedStartTime}* berada sebelum jam buka`
-             : `Booking ${durationMinutes / 60} jam dari *${requestedStartTime}* melewati jam tutup`;
-            const reply = `⏰ ${reason} *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
+               ? `Jam mulai ${requestedStartTime} berada sebelum jam buka`
+             : `Booking ${durationMinutes / 60} jam dari ${requestedStartTime} melewati jam tutup`;
+            const reply = `${reason} ${fac.openTime}-${fac.closeTime}.${slotsStr}`;
             await appendMessage(session.id, "bot", reply);
             await sendReply(reply);
             return;
@@ -3588,8 +3582,8 @@ async function continueSession(
               session.durationMinutes ?? 60,
             );
             const slotsStr = availSlots.length > 0
-             ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}\n\n⏰ *Jam berapa yang cocok?* Balas dengan *11*, *11:00*, atau *jam 11*.`
-              : `\n\n⚠️ Tidak ada slot lain yang tersedia. Pilih tanggal berbeda atau ketik *batal*.`;
+             ? ` Coba jam ${availSlots.slice(0, 3).join(", ")} atau ketik jam lain.`
+              : ` Tidak ada slot lain yang tersedia. Pilih tanggal berbeda atau ketik batal.`;
             const reply = alternativeFacilities.length > 0
               ? buildAlternativeFacilityChoiceReply({
                 facilityName: fac.name,
@@ -3686,15 +3680,9 @@ async function continueSession(
         );
 
         if (slots.length > 0) {
-          const alternativeMenu = alternatives.length > 0
-            ? `\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
-            : "";
           reply =
             `Jam berapa mau mulai?\n` +
-            `Contoh: jam 8 pagi, jam 20.00, 19:00\n` +
-            `Slot tersedia tanggal ${durationDraft.bookingDate}:\n` +
-            `${slots.join("  | ")}` +
-            alternativeMenu;
+            `Contoh: jam 8 pagi, jam 20.00, 19:00`;
         } else if (alternatives.length > 0) {
           deliveredStep = "choose_alternative_facility";
           reply = buildAlternativeFacilitySlotPrompt({
