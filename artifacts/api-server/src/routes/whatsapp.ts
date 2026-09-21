@@ -4373,9 +4373,13 @@ async function claimDistributedWebhook(
 }
 
 const handleFonnteWebhook = async (req: Request, res: Response) => {
-  // Respond immediately to avoid Fonnte timeout/retry
-  res.status(200).json({ status: "ok" });
-
+  // Keep the webhook request open until Mina has finished processing the
+  // inbound message. Replit Autoscale can suspend work after an HTTP response
+  // has already been sent; acknowledging first can therefore drop slower
+  // booking steps such as duration -> availability lookup.
+  //
+  // Fonnte retries are still protected by the existing in-memory and
+  // distributed dedup guards below.
   try {
     req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
 
@@ -4712,6 +4716,12 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       { error: err instanceof Error ? err.message : String(err) },
       "[wa/fonnte/webhook] error",
     );
+  } finally {
+    // ACK only after the processing path has finished so no business logic is
+    // left running after the request lifecycle is considered complete.
+    if (!res.headersSent) {
+      res.status(200).json({ status: "ok" });
+    }
   }
 };
 
