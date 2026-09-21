@@ -3,6 +3,7 @@ import {
   getNearestAvailableSlots,
   hasSlotConflict,
   isRecentMessageDuplicate,
+  switchBookingFacility,
 } from "./waBookingFlow";
 
 describe("WhatsApp Mina booking flow regressions", () => {
@@ -103,5 +104,25 @@ describe("WhatsApp Mina booking flow regressions", () => {
       bookings: [{ startTime: "19:00", endTime: "21:00", status: "waiting_admin_approval" }],
     };
     expect(hasSlotConflict(committed)).toBe(true);
+  });
+
+  it("switches badminton Court A to Court B without resetting the booking draft", () => {
+    const draft = {
+      facilityId: 101,
+      customerId: 7,
+      customerName: "Robby Rahman",
+      bookingDate: "2026-09-20",
+      startTime: "19:00",
+      durationMinutes: 120,
+      notes: "latihan rutin",
+    };
+
+    const switched = switchBookingFacility(draft, 102);
+
+    expect(switched).toEqual({
+      ...draft,
+      facilityId: 102,
+    });
+    expect(switched).not.toBe(draft);
   });
 });

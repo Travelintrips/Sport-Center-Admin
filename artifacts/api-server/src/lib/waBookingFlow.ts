@@ -16,6 +16,17 @@ export interface SlotWindow {
   endTime: string;
 }
 
+/**
+ * Switch the selected facility without resetting the rest of a booking draft.
+ * Availability is validated by the caller for the target facility.
+ */
+export function switchBookingFacility<T extends { facilityId: number | null }>(
+  draft: T,
+  facilityId: number,
+): T {
+  return { ...draft, facilityId };
+}
+
 export function isRecentMessageDuplicate(
   seen: Map<string, number>,
   key: string,

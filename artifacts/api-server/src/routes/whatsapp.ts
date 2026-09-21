@@ -80,6 +80,7 @@ import {
   getNearestAvailableSlots,
   hasSlotConflict,
   isRecentMessageDuplicate,
+  switchBookingFacility,
 } from "../lib/waBookingFlow";
 
 const router = Router();
@@ -2946,8 +2947,9 @@ async function continueSession(
         if (explicitAlternative || acceptsAlternative || (directTime && alternativeSlotOptions.length === 1)) {
           const selected = explicitAlternative ?? alternativeSlotOptions[0];
           if (selected) {
+            const switchedDraft = switchBookingFacility(session, selected.facility.id);
             const updated = await updateSession(session.id, {
-              facilityId: selected.facility.id,
+              facilityId: switchedDraft.facilityId,
               startTime: null,
               currentStep: "ask_time",
             });
@@ -3107,8 +3109,9 @@ async function continueSession(
         return;
       }
 
+      const switchedDraft = switchBookingFacility(session, selected.id);
       const updated = await updateSession(session.id, {
-        facilityId: selected.id,
+        facilityId: switchedDraft.facilityId,
         currentStep: getNextStep({ ...session, facilityId: selected.id }),
       });
       const reply = `✅ Baik, saya pindahkan ke *${selected.name}* untuk slot yang sama.\n\n`;
