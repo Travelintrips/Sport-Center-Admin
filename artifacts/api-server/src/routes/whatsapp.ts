@@ -4845,6 +4845,23 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       return;
     }
 
+    // A bare confirmation without an active booking session should never fall
+    // through to the general AI responder. This can happen in DEV when
+    // transaction/session data is deliberately reset between booking steps.
+    if (isYes(lower)) {
+      await logAudit({
+        action: "mina_orphan_confirmation",
+        entity: "wa_session",
+        after: { phone, message: msg, reason: "no_active_booking_session" },
+      }).catch(() => {});
+      await sendWAMsg(
+        phone,
+        "Sesi booking sudah tidak aktif. Ketik booking untuk mulai lagi.",
+        true,
+      );
+      return;
+    }
+
     // Mina's first greeting starts a fresh persisted conversation. A greeting
     // received while a session is active is handled above as a restart.
     if (isMinaGreeting(msg)) {
