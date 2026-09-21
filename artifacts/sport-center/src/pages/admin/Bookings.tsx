@@ -4440,9 +4440,15 @@ export default function AdminBookings() {
                             return sum + rowTax.netAmount;
                          }, 0)
                        : bookingDisplayTotal;
-                      const groupSummaryTotal = isPaidCompanyInvoice
-                        ? companyInvoiceDisplayTotal
-                        : groupDisplayTotal;
+                      // Group booking total must represent the cash amount that
+                      // should hit the bank after withholding (DPP + PPN - PPh).
+                      // companyInvoiceTotal is the gross corporate invoice and must
+                      // not override the grouped net payable shown for reconciliation.
+                      const groupSummaryTotal = isMultiSessionGroup
+                        ? groupDisplayTotal
+                        : isPaidCompanyInvoice
+                          ? companyInvoiceDisplayTotal
+                          : bookingDisplayTotal;
                       const isGroupTotalRow =
                         isMultiSessionGroup && groupRows[0]?.id === b.id;
 
@@ -4641,7 +4647,7 @@ export default function AdminBookings() {
                                      total group: {formatCurrency(groupSummaryTotal)}
                                    </span>
                                  )}
-                                 {bookingTax.pphAmount > 0 && (
+                                 {bookingTax.pphAmount > 0 && !isMultiSessionGroup && (
                                    <span className="text-[10px] text-orange-600 dark:text-orange-400">
                                      net setelah PPh: {formatCurrency(bookingTax.netAmount)}
                                    </span>
