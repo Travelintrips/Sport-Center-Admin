@@ -1718,20 +1718,34 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
+    // Fonnte's documented JavaScript contract uses multipart/form-data.
+    // Do not force JSON here: some provider paths accept short JSON payloads
+    // but reject richer messages even while returning HTTP 200/status=false.
+    const form = new FormData();
+    form.append("target", phone);
+    form.append("message", message);
+    // Keep the request queued when the WhatsApp device is temporarily
+    // disconnected instead of silently dropping the customer's next step.
+    form.append("connectOnly", "false");
+
     const response = await fetch("https://api.fonnte.com/send", {
       method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: phone, message }),
+      headers: { Authorization: token },
+      body: form,
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    let providerStatus: unknown = undefined;
+
+    const providerText = await response.text().catch(() => "");
+    let providerBody: Record<string, unknown> | null = null;
     try {
-      const body = await response.json() as { status?: unknown };
-      providerStatus = body.status;
+      providerBody = providerText ? JSON.parse(providerText) as Record<string, unknown> : null;
     } catch {
-      // Fonnte may return a non-JSON body; the HTTP status is still useful.
+      providerBody = null;
     }
+    const providerStatus = providerBody?.status ?? providerBody?.Status;
+    const providerReason = providerBody?.reason ?? providerBody?.detail;
+    const providerRequestId = providerBody?.requestid ?? providerBody?.requestId;
 
     if (!response.ok || providerStatus === false) {
       logger.error(
@@ -1740,6 +1754,9 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           recipient: phone,
           httpStatus: response.status,
           providerStatus,
+          providerReason,
+          providerRequestId,
+          messageLength: message.length,
         },
         "[wa] Fonnte outbound rejected",
       );
@@ -1751,6 +1768,9 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           channel: useCustomerToken ? "mina" : "admin",
           httpStatus: response.status,
           providerStatus,
+          providerReason: providerReason == null ? null : String(providerReason),
+          providerRequestId: providerRequestId == null ? null : String(providerRequestId),
+          messageLength: message.length,
         },
       }).catch(() => {});
       return;
@@ -1761,6 +1781,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
         channel: useCustomerToken ? "mina" : "admin",
         recipient: phone,
         httpStatus: response.status,
+        providerRequestId,
       },
       "[wa] Fonnte outbound accepted",
     );
