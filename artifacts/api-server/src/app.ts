@@ -9,6 +9,7 @@ import { logger } from "./lib/logger";
 import { isStartupReady } from "./lib/startupReadiness";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "node:url";
 
 const app: Express = express();
 
@@ -96,7 +97,15 @@ if (process.env.NODE_ENV === "production") {
   //
   // cloudbuild.yaml copies the frontend to gae-deploy/artifacts/sport-center/dist/public
   // and GAE starts the process with the deployment directory as cwd.
-  const frontendDist = path.resolve(process.cwd(), "artifacts/sport-center/dist/public");
+  const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
+  const bundledFrontendDist = path.join(runtimeDir, "public");
+  const workspaceFrontendDist = path.resolve(
+    process.cwd(),
+    "artifacts/sport-center/dist/public",
+  );
+  const frontendDist = fs.existsSync(bundledFrontendDist)
+    ? bundledFrontendDist
+    : workspaceFrontendDist;
   logger.info({ frontendDist, exists: fs.existsSync(frontendDist) }, "[app] frontend dist path");
 
   if (fs.existsSync(frontendDist)) {
