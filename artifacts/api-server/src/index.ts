@@ -10,14 +10,7 @@ import { validateEnv } from "./lib/envValidation";
 import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
 import { markStartupReady } from "./lib/startupReadiness";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
+const rawPort = process.env["PORT"]?.trim() || "3000";
 const port = Number(rawPort);
 const host = process.env["HOST"]?.trim() || "0.0.0.0";
 
