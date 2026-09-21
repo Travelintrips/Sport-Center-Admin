@@ -110,6 +110,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
           message,
           name: "Mina regression",
           device: "081234567890",
+          inboxid: `900${index}`,
           id: `mina-duration-regression-${index}`,
         });
       expect(response.status).toBe(200);
@@ -133,6 +134,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         message: "2 jam",
         name: "Mina regression",
         device: "081234567890",
+        inboxid: "9004",
         id: "mina-duration-regression-4",
       })
       .then((response: any) => {
@@ -154,12 +156,14 @@ describe("Mina WhatsApp duration runtime regression", () => {
           target: String(body.get("target") ?? ""),
           message: String(body.get("message") ?? ""),
           connectOnly: body.get("connectOnly"),
+          inboxid: body.get("inboxid"),
         };
       }
       return JSON.parse(String(body ?? "{}")) as {
         target?: string;
         message?: string;
         connectOnly?: unknown;
+        inboxid?: unknown;
       };
     });
     const finalOutbounds = sentMessages.slice(setupMessages.length);
@@ -171,6 +175,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
     expect(finalOutbounds[0]?.target).toBe(phone);
     expect((finalOutbounds[0]?.message?.length ?? 0)).toBeLessThanOrEqual(420);
     expect(finalOutbounds[0]?.connectOnly).toBeNull();
+    expect(finalOutbounds[0]?.inboxid).toBe("9004");
     expect(combinedFinalMessage).toContain("Slot tersedia tanggal");
     expect(combinedFinalMessage).toContain("1. Lihat slot Badminton Court B");
     expect(combinedFinalMessage).not.toContain("2. Ganti tanggal");
