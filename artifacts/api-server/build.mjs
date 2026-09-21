@@ -30,7 +30,7 @@ async function buildAll() {
     // must be bundled because Hostinger deploys the output directory without workspace node_modules.
     // Examples of unbundleable packages:
     // - uses native modules and loads them dynamically (e.g. sharp)
-    // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
+    // - use path traversal to read sibling runtime assets. @google-cloud/storage is bundled for Hostinger.
     external: [
       "*.node",
       "sharp",
@@ -65,7 +65,6 @@ async function buildAll() {
       "@aws-sdk/*",
       "@azure/*",
       "@opentelemetry/*",
-      "@google-cloud/*",
       "@google/*",
       "firebase-admin",
       "@parcel/watcher",
