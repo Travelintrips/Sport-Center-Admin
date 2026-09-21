@@ -99,10 +99,10 @@ describe("Mina WhatsApp duration runtime regression", () => {
     }
   });
 
-  it("routes Court A → lanjut di sini → Tri → besok → 2 jam to outbound availability", async () => {
-    const messages = ["Court A", "lanjut di sini", "Tri", "besok (tanggal 22)", "2 jam"];
+  it("routes Court A → lanjut di sini → Tri → besok → 2 jam to outbound availability before webhook ACK", async () => {
+    const setupMessages = ["Court A", "lanjut di sini", "Tri", "besok (tanggal 22)"];
 
-    for (const [index, message] of messages.entries()) {
+    for (const [index, message] of setupMessages.entries()) {
       const response = await request
         .post("/api/wa/fonnte/webhook")
         .send({
@@ -115,6 +115,37 @@ describe("Mina WhatsApp duration runtime regression", () => {
       expect(response.status).toBe(200);
       await waitFor(() => fetchMock.mock.calls.length >= index + 1);
     }
+
+    let releaseFinalSend!: () => void;
+    const blockedFonnteResponse = new Promise<Response>((resolve) => {
+      releaseFinalSend = () => resolve(new Response(JSON.stringify({ status: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    });
+    fetchMock.mockImplementationOnce(() => blockedFonnteResponse);
+
+    let webhookSettled = false;
+    const finalWebhook = request
+      .post("/api/wa/fonnte/webhook")
+      .send({
+        sender: phone,
+        message: "2 jam",
+        name: "Mina regression",
+        device: "081234567890",
+        id: "mina-duration-regression-4",
+      })
+      .then((response: any) => {
+        webhookSettled = true;
+        return response;
+      });
+
+    await waitFor(() => fetchMock.mock.calls.length >= setupMessages.length + 1);
+    expect(webhookSettled).toBe(false);
+
+    releaseFinalSend();
+    const response = await finalWebhook;
+    expect(response.status).toBe(200);
 
     const sentMessages = fetchMock.mock.calls.map(([, init]: [unknown, RequestInit?]) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { target?: string; message?: string };
