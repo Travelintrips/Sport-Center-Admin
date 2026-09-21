@@ -1679,6 +1679,60 @@ router.post("/wa/review/:token", async (req, res) => {
 
 // ─── Helpers for Fonnte webhook ───────────────────────────────────────────────
 
+function splitFonnteTextMessage(message: string, maxLength = 420): string[] {
+  const text = message.trim();
+  if (!text || text.length <= maxLength) return text ? [text] : [];
+
+  const paragraphs = text.split(/\n\n+/);
+  const chunks: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    const value = current.trim();
+    if (value) chunks.push(value);
+    current = "";
+  };
+
+  for (const paragraph of paragraphs) {
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      continue;
+    }
+
+    pushCurrent();
+
+    if (paragraph.length <= maxLength) {
+      current = paragraph;
+      continue;
+    }
+
+    // Long slot lists or menu blocks are split on line boundaries first.
+    const lines = paragraph.split("\n");
+    for (const line of lines) {
+      const lineCandidate = current ? `${current}\n${line}` : line;
+      if (lineCandidate.length <= maxLength) {
+        current = lineCandidate;
+        continue;
+      }
+
+      pushCurrent();
+
+      // Last-resort hard split keeps the provider request below the free-tier
+      // rejection threshold without dropping any customer-visible content.
+      let remaining = line;
+      while (remaining.length > maxLength) {
+        chunks.push(remaining.slice(0, maxLength));
+        remaining = remaining.slice(maxLength);
+      }
+      current = remaining;
+    }
+  }
+
+  pushCurrent();
+  return chunks;
+}
+
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<boolean> {
   if (!phone) return false;
   const fonnte = await getFonnteConfig();
@@ -1713,99 +1767,114 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
     recipient: phone,
     customerTokenConfigured: useCustomerToken ? Boolean(fonnte.customerToken) : false,
   })) return true;
-  // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
-  trackSentMessage(message);
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-    // Fonnte's documented JavaScript contract uses multipart/form-data.
-    // Do not force JSON here: some provider paths accept short JSON payloads
-    // but reject richer messages even while returning HTTP 200/status=false.
-    const form = new FormData();
-    form.append("target", phone);
-    form.append("message", message);
-    // Keep the request queued when the WhatsApp device is temporarily
-    // disconnected instead of silently dropping the customer's next step.
-    form.append("connectOnly", "false");
 
-    const response = await fetch("https://api.fonnte.com/send", {
-      method: "POST",
-      headers: { Authorization: token },
-      body: form,
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+  const chunks = splitFonnteTextMessage(message);
+  if (chunks.length === 0) return false;
 
-    const providerText = await response.text().catch(() => "");
-    let providerBody: Record<string, unknown> | null = null;
+  for (const [chunkIndex, chunk] of chunks.entries()) {
+    // Track every actual outbound chunk so Fonnte echoes cannot re-enter Mina.
+    trackSentMessage(chunk);
+
     try {
-      providerBody = providerText ? JSON.parse(providerText) as Record<string, unknown> : null;
-    } catch {
-      providerBody = null;
-    }
-    const providerStatus = providerBody?.status ?? providerBody?.Status;
-    const providerReason = providerBody?.reason ?? providerBody?.detail;
-    const providerRequestId = providerBody?.requestid ?? providerBody?.requestId;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+      const form = new FormData();
+      form.append("target", phone);
+      form.append("message", chunk);
 
-    if (!response.ok || providerStatus === false) {
-      logger.error(
+      // Keep the free-package request minimal. Optional send parameters can
+      // cause Fonnte to answer HTTP 200 with status=false/"invalid message
+      // request on free package".
+      const response = await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: { Authorization: token },
+        body: form,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      const providerText = await response.text().catch(() => "");
+      let providerBody: Record<string, unknown> | null = null;
+      try {
+        providerBody = providerText ? JSON.parse(providerText) as Record<string, unknown> : null;
+      } catch {
+        providerBody = null;
+      }
+      const providerStatus = providerBody?.status ?? providerBody?.Status;
+      const providerReason = providerBody?.reason ?? providerBody?.detail;
+      const providerRequestId = providerBody?.requestid ?? providerBody?.requestId;
+
+      if (!response.ok || providerStatus === false) {
+        logger.error(
+          {
+            channel: useCustomerToken ? "mina" : "admin",
+            recipient: phone,
+            httpStatus: response.status,
+            providerStatus,
+            providerReason,
+            providerRequestId,
+            messageLength: chunk.length,
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+          "[wa] Fonnte outbound rejected",
+        );
+        await logAudit({
+          action: "mina_reply_provider_rejected",
+          entity: "wa_outbound",
+          after: {
+            recipient: phone,
+            channel: useCustomerToken ? "mina" : "admin",
+            httpStatus: response.status,
+            providerStatus,
+            providerReason: providerReason == null ? null : String(providerReason),
+            providerRequestId: providerRequestId == null ? null : String(providerRequestId),
+            messageLength: chunk.length,
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+        }).catch(() => {});
+        return false;
+      }
+
+      logger.info(
         {
           channel: useCustomerToken ? "mina" : "admin",
           recipient: phone,
           httpStatus: response.status,
-          providerStatus,
-          providerReason,
           providerRequestId,
-          messageLength: message.length,
+          chunkIndex: chunkIndex + 1,
+          chunkCount: chunks.length,
         },
-        "[wa] Fonnte outbound rejected",
+        "[wa] Fonnte outbound accepted",
+      );
+    } catch (err) {
+      logger.error(
+        {
+          channel: useCustomerToken ? "mina" : "admin",
+          recipient: phone,
+          error: err instanceof Error ? err.message : String(err),
+          chunkIndex: chunkIndex + 1,
+          chunkCount: chunks.length,
+        },
+        "[wa] Fonnte outbound request failed",
       );
       await logAudit({
-        action: "mina_reply_provider_rejected",
+        action: "mina_reply_provider_error",
         entity: "wa_outbound",
         after: {
           recipient: phone,
           channel: useCustomerToken ? "mina" : "admin",
-          httpStatus: response.status,
-          providerStatus,
-          providerReason: providerReason == null ? null : String(providerReason),
-          providerRequestId: providerRequestId == null ? null : String(providerRequestId),
-          messageLength: message.length,
+          error: err instanceof Error ? err.message : String(err),
+          chunkIndex: chunkIndex + 1,
+          chunkCount: chunks.length,
         },
       }).catch(() => {});
       return false;
     }
-
-    logger.info(
-      {
-        channel: useCustomerToken ? "mina" : "admin",
-        recipient: phone,
-        httpStatus: response.status,
-        providerRequestId,
-      },
-      "[wa] Fonnte outbound accepted",
-    );
-    return true;
-  } catch (err) {
-    logger.error(
-      {
-        channel: useCustomerToken ? "mina" : "admin",
-        recipient: phone,
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "[wa] Fonnte outbound request failed",
-    );
-    await logAudit({
-      action: "mina_reply_provider_error",
-      entity: "wa_outbound",
-      after: {
-        recipient: phone,
-        channel: useCustomerToken ? "mina" : "admin",
-        error: err instanceof Error ? err.message : String(err),
-      },
-    }).catch(() => {});
-    return false;
   }
+
+  return true;
 }
 
 async function getAdminPhones(): Promise<string[]> {
