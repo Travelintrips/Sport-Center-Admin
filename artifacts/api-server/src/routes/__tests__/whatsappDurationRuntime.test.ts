@@ -167,12 +167,11 @@ describe("Mina WhatsApp duration runtime regression", () => {
       .map((outbound: { message?: string }) => outbound.message ?? "")
       .join("\n\n");
 
-    expect(finalOutbounds.length).toBeGreaterThanOrEqual(2);
-    expect(finalOutbounds.every((outbound: { target?: string }) => outbound.target === phone)).toBe(true);
-    expect(finalOutbounds.every((outbound: { message?: string }) => (outbound.message?.length ?? 0) <= 420)).toBe(true);
-    expect(finalOutbounds.every((outbound: { connectOnly?: unknown }) => outbound.connectOnly == null)).toBe(true);
-    expect(combinedFinalMessage).toContain("Slot tersedia");
-    expect(combinedFinalMessage).toMatch(/Silakan pilih jam mulai|pilih jam/i);
+    expect(finalOutbounds).toHaveLength(1);
+    expect(finalOutbounds[0]?.target).toBe(phone);
+    expect((finalOutbounds[0]?.message?.length ?? 0)).toBeLessThanOrEqual(420);
+    expect(finalOutbounds[0]?.connectOnly).toBeNull();
+    expect(combinedFinalMessage).toContain("Slot tersedia tanggal");
     expect(combinedFinalMessage).toContain("1. Lihat slot Badminton Court B");
     expect(combinedFinalMessage).not.toContain("2. Ganti tanggal");
     expect(combinedFinalMessage).not.toContain("3. Ganti durasi");
