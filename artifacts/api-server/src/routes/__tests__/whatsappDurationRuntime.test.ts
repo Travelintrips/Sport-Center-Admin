@@ -148,13 +148,25 @@ describe("Mina WhatsApp duration runtime regression", () => {
     expect(response.status).toBe(200);
 
     const sentMessages = fetchMock.mock.calls.map(([, init]: [unknown, RequestInit?]) => {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { target?: string; message?: string };
-      return body;
+      const body = init?.body;
+      if (body instanceof FormData) {
+        return {
+          target: String(body.get("target") ?? ""),
+          message: String(body.get("message") ?? ""),
+          connectOnly: String(body.get("connectOnly") ?? ""),
+        };
+      }
+      return JSON.parse(String(body ?? "{}")) as {
+        target?: string;
+        message?: string;
+        connectOnly?: string;
+      };
     });
     const lastOutbound = sentMessages.at(-1);
     expect(lastOutbound?.target).toBe(phone);
     expect(lastOutbound?.message).toContain("Slot tersedia");
     expect(lastOutbound?.message).toMatch(/Silakan pilih jam mulai|pilih jam/i);
+    expect(lastOutbound?.connectOnly).toBe("false");
 
     const session = await getActiveSession(phone);
     expect(session).not.toBeNull();
