@@ -173,7 +173,9 @@ describe("Mina WhatsApp duration runtime regression", () => {
     expect(finalOutbounds.every((outbound: { connectOnly?: unknown }) => outbound.connectOnly == null)).toBe(true);
     expect(combinedFinalMessage).toContain("Slot tersedia");
     expect(combinedFinalMessage).toMatch(/Silakan pilih jam mulai|pilih jam/i);
-    expect(combinedFinalMessage).toContain("Lihat slot Badminton Court B");
+    expect(combinedFinalMessage).toContain("1. Lihat slot Badminton Court B");
+    expect(combinedFinalMessage).not.toContain("2. Ganti tanggal");
+    expect(combinedFinalMessage).not.toContain("3. Ganti durasi");
 
     const session = await getActiveSession(phone);
     expect(session).not.toBeNull();
