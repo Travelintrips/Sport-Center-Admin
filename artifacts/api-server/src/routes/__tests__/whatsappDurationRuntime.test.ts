@@ -119,7 +119,11 @@ describe("Mina WhatsApp duration runtime regression", () => {
 
     let releaseFinalSend!: () => void;
     const blockedFonnteResponse = new Promise<Response>((resolve) => {
-      releaseFinalSend = () => resolve(new Response(JSON.stringify({ status: true }), {
+      releaseFinalSend = () => resolve(new Response(JSON.stringify({
+        status: false,
+        reason: "invalid message request on free package",
+        requestid: "free-plan-regression",
+      }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }));
@@ -171,13 +175,19 @@ describe("Mina WhatsApp duration runtime regression", () => {
       .map((outbound: { message?: string }) => outbound.message ?? "")
       .join("\n\n");
 
-    expect(finalOutbounds).toHaveLength(1);
-    expect(finalOutbounds[0]?.target).toBe(phone);
-    expect((finalOutbounds[0]?.message?.length ?? 0)).toBeLessThanOrEqual(420);
-    expect(finalOutbounds[0]?.connectOnly).toBeNull();
-    expect(finalOutbounds[0]?.inboxid).toBe("9004");
-    expect(combinedFinalMessage).toContain("Slot tersedia tanggal");
-    expect(combinedFinalMessage).toContain("1. Lihat slot Badminton Court B");
+    expect(finalOutbounds).toHaveLength(2);
+    expect(finalOutbounds.every((outbound: { target?: string }) => outbound.target === phone)).toBe(true);
+    expect(finalOutbounds.every((outbound: { inboxid?: unknown }) => outbound.inboxid === "9004")).toBe(true);
+    expect(finalOutbounds.every((outbound: { connectOnly?: unknown }) => outbound.connectOnly == null)).toBe(true);
+
+    const originalMessage = finalOutbounds[0]?.message ?? "";
+    const fallbackMessage = finalOutbounds[1]?.message ?? "";
+    expect(originalMessage).toContain("Slot tersedia tanggal");
+    expect(originalMessage).toContain("1. Lihat slot Badminton Court B");
+    expect(fallbackMessage).toContain("Slot tersedia tanggal");
+    expect(fallbackMessage).toContain("1. Lihat slot Badminton Court B");
+    expect(fallbackMessage).not.toMatch(/[🏟️🏸✅❌👤📅⏱️⏰🟢⚠️❓🏅🎉👋🔍📋🙏🔗•]/u);
+    expect(fallbackMessage).not.toContain("|");
     expect(combinedFinalMessage).not.toContain("2. Ganti tanggal");
     expect(combinedFinalMessage).not.toContain("3. Ganti durasi");
 
