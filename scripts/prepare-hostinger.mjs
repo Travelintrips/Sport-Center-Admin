@@ -34,8 +34,9 @@ await writeFile(
   path.join(outputDir, "index.js"),
   [
     '"use strict";',
+    'console.log("[hostinger] dist launcher starting");',
     'import("./index.mjs").catch((error) => {',
-    '  console.error(error);',
+    '  console.error("[hostinger] dist launcher failed", error);',
     '  process.exit(1);',
     '});',
     "",
