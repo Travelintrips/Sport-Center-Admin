@@ -26,8 +26,8 @@ async function buildAll() {
     // reliable in the artifact deployment bundle.
     loader: { ".sql": "text" },
     logLevel: "info",
-    // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
-    // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
+    // Keep only native/binary or path-sensitive packages external. Pure-JS runtime dependencies
+    // must be bundled because Hostinger deploys the output directory without workspace node_modules.
     // Examples of unbundleable packages:
     // - uses native modules and loads them dynamically (e.g. sharp)
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
@@ -43,7 +43,6 @@ async function buildAll() {
       "re2",
       "farmhash",
       "xxhash-addon",
-      "ws",
       "bufferutil",
       "utf-8-validate",
       "ssh2",
@@ -51,15 +50,12 @@ async function buildAll() {
       "dtrace-provider",
       "isolated-vm",
       "lightningcss",
-      "pg",
       "pg-native",
       "oracledb",
       "mongodb-client-encryption",
-      "nodemailer",
       "handlebars",
       "knex",
       "typeorm",
-      "protobufjs",
       "onnxruntime-node",
       "@tensorflow/*",
       "@prisma/client",
@@ -101,9 +97,6 @@ async function buildAll() {
       "wrangler",
       "zeromq",
       "zeromq-prebuilt",
-      "xlsx",
-      "googleapis",
-      "openai",
       // tesseract.js creates a Node worker by resolving sibling files at
       // runtime. Bundling moves its worker-script path beside dist/ and makes
       // every image proof upload crash the API with MODULE_NOT_FOUND.
