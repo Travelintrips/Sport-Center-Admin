@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import sharp from "sharp";
 
 export type OcrPaymentMethod = "QRIS" | "Transfer Bank" | "unknown";
 
@@ -173,6 +172,7 @@ export function classifyPaymentMethod(text: string): {
 }
 
 async function preprocessImage(buffer: Buffer): Promise<Buffer> {
+  const sharp = (await import("sharp")).default;
   return sharp(buffer)
     .rotate()
     .resize({ width: 1800, withoutEnlargement: false })
