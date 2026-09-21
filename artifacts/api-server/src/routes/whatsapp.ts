@@ -3880,17 +3880,32 @@ function buildAlternativeFacilityChoiceReply(params: {
       ``,
       `🟢 Jika tetap di *${params.facilityName}*, slot lain yang tersedia untuk durasi yang sama:`,
       params.sameFacilitySlots.join("  | "),
+      `Kamu juga boleh langsung ketik salah satu jam di atas.`,
     ].join("\n")
     : `\n\n⚠️ Tidak ada jam lain yang tersedia di *${params.facilityName}* untuk tanggal tersebut.`;
+
+  const alternativeNames = params.alternatives.map((candidate) => candidate.name);
+  const alternativeAction = alternativeNames.length === 1
+    ? [
+      `✅ Slot *${params.startTime}–${params.endTime}* tersedia di *${alternativeNames[0]}*.`,
+      ``,
+      `1. Gunakan *${alternativeNames[0]}* untuk jam yang sama`,
+      `2. Ganti tanggal`,
+      `3. Ganti durasi`,
+    ].join("\n")
+    : [
+      `✅ Slot *${params.startTime}–${params.endTime}* tersedia di beberapa fasilitas sejenis:`,
+      ...alternativeNames.map((name) => `• *${name}*`),
+      ``,
+      `Ketik nama fasilitas yang ingin dipakai.`,
+      `Atau ketik *ganti tanggal* / *ganti durasi*.`,
+    ].join("\n");
 
   return [
     `❌ Slot *${params.startTime}–${params.endTime}* di *${params.facilityName}* pada *${params.bookingDate}* sudah penuh.`,
     ``,
-    `✅ Slot yang sama masih tersedia di:`,
-    formatAlternativeFacilityOptions(params.alternatives.map((candidate) => candidate.name)),
+    alternativeAction,
     sameFacilitySlots,
-    ``,
-    `Balas nomor pilihan kamu. Pilihan 1 akan langsung mengecek fasilitas lain dengan tanggal dan durasi yang sama.`,
   ].join("\n");
 }
 
