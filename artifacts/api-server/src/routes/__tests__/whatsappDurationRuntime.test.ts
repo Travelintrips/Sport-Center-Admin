@@ -182,7 +182,10 @@ describe("Mina WhatsApp duration runtime regression", () => {
 
     const originalMessage = finalOutbounds[0]?.message ?? "";
     const fallbackMessage = finalOutbounds[1]?.message ?? "";
+    expect(originalMessage).toContain("Jam berapa mau mulai?");
     expect(originalMessage).toContain("Slot tersedia tanggal");
+    expect(originalMessage).not.toContain("jam operasional");
+    expect(originalMessage).not.toMatch(/[⏰🟢]/u);
     expect(originalMessage).toContain("1. Lihat slot Badminton Court B");
     expect(fallbackMessage).toContain("Slot tersedia tanggal");
     expect(fallbackMessage).toContain("1. Lihat slot Badminton Court B");
