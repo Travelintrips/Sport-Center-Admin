@@ -1,5 +1,3 @@
-import sharp from "sharp";
-
 const MAX_IMAGE_DIMENSION = 2400;
 
 export type CompressedImage = {
@@ -52,6 +50,18 @@ export async function compressImage(
 ): Promise<CompressedImage> {
   const format = imageFormatFromContentType(contentType, objectPath);
   if (!format) {
+    return {
+      buffer,
+      contentType,
+      extension: objectPath.split(".").pop()?.toLowerCase() ?? "bin",
+      wasCompressed: false,
+    };
+  }
+
+  let sharp: typeof import("sharp").default;
+  try {
+    sharp = (await import("sharp")).default;
+  } catch {
     return {
       buffer,
       contentType,
