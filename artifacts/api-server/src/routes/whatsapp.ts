@@ -2024,7 +2024,7 @@ function hasDisplayedAlternativeFacilityMenu(session: WaBookingSessionRow): bool
   const lastBotMessage = [...(session.rawMessages ?? [])]
     .reverse()
     .find((message) => message.role === "bot")?.text ?? "";
-  return /2\.\s+Ganti tanggal\s+3\.\s+Ganti durasi/i.test(lastBotMessage);
+  return /1\.\s+Lihat\s+(?:slot|fasilitas)/i.test(lastBotMessage);
 }
 
 function isYes(msg: string): boolean {
@@ -2766,7 +2766,7 @@ async function presentBookingSession(
       if (slots.length > 0) {
         reply += `\n\n🟢 *Slot tersedia di ${facility.name} tanggal ${current.bookingDate}:*\n${slots.join("  | ")}`;
         reply += alternatives.length > 0
-          ? `\n\nJika belum cocok, pilih:\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
+          ? `\n\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
           : `\n\nJika jamnya belum cocok, ketik *ganti tanggal* atau *ganti durasi*.`;
       } else if (alternatives.length > 0) {
         current = await updateSession(current.id, {
@@ -3058,13 +3058,15 @@ async function continueSession(
         );
         const directTime = parseSlotStartTime(msg);
         const numericChoice = lower.match(/^\d+$/)?.[0];
-        const isAlternativeMenuChoice = numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
+        const isAlternativeMenuChoice = numericChoice === "1";
         const requestedDirectTime = directTime && !isAlternativeMenuChoice ? directTime : null;
-        const alternativeChoice = parseAlternativeBookingChoice(
-          msg,
-          alternativeSlotOptions.map(({ facility }) => facility.name),
-          { allowNumericMenu: true },
-        );
+        const alternativeChoice = isAlternativeMenuChoice
+          ? "facility"
+          : parseAlternativeBookingChoice(
+              msg,
+              alternativeSlotOptions.map(({ facility }) => facility.name),
+              { allowNumericMenu: false },
+            );
         const explicitAlternative = alternativeSlotOptions.find(({ facility }) => {
           const candidateName = facility.name.toLowerCase();
           return lower.includes(candidateName) || /(?:court|lapangan)\s*b\b/i.test(lower);
@@ -3174,18 +3176,20 @@ async function continueSession(
         session.startTime,
         minutesToHours(session.durationMinutes),
       );
-      const alternativeChoice = parseAlternativeBookingChoice(
-        msg,
-        alternatives.map((candidate) => candidate.name),
-        { allowNumericMenu: true },
-      );
-
-      // After Mina offers Court B/current-court/date choices, accept a direct
-      // replacement time as well (including a bare displayed hour such as
-      // "11"). Only the actual menu numbers keep their menu meaning.
-      const directTime = parseSlotStartTime(msg);
       const numericChoice = lower.match(/^\d+$/)?.[0];
-      const isAlternativeMenuChoice = numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
+      const isAlternativeMenuChoice = numericChoice === "1";
+      const alternativeChoice = isAlternativeMenuChoice
+        ? "facility"
+        : parseAlternativeBookingChoice(
+            msg,
+            alternatives.map((candidate) => candidate.name),
+            { allowNumericMenu: false },
+          );
+
+      // After Mina offers Court B, accept a direct replacement time as well
+      // (including a bare displayed hour such as "11"). Only option 1 keeps
+      // menu meaning because date/duration are no longer shown as menu items.
+      const directTime = parseSlotStartTime(msg);
       if (directTime && !isAlternativeMenuChoice) {
         const timeStep = await updateSession(session.id, {
           startTime: null,
@@ -3320,14 +3324,12 @@ async function continueSession(
     case "ask_time": {
       const parsed = parseIntent(msg);
       const alternativeMenuDisplayed = hasDisplayedAlternativeFacilityMenu(session);
-      const alternativeChoice = parseAlternativeBookingChoice(
-        msg,
-        [],
-        { allowNumericMenu: alternativeMenuDisplayed },
-      );
       const numericChoice = lower.match(/^\d+$/)?.[0];
       const isAlternativeMenuChoice =
-        alternativeMenuDisplayed && numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
+        alternativeMenuDisplayed && numericChoice === "1";
+      const alternativeChoice = isAlternativeMenuChoice
+        ? "facility"
+        : parseAlternativeBookingChoice(msg, [], { allowNumericMenu: false });
       const requestedStartTime = isAlternativeMenuChoice ? null : parseSlotStartTime(msg);
 
       // Natural replies such as "tidak cocok", "ada lapangan lain?", or
@@ -3564,7 +3566,7 @@ async function continueSession(
         if (slots.length > 0) {
           reply += `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${durationDraft.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`;
           reply += alternatives.length > 0
-            ? `\n\n❓ Jika slot *${fac.name}* belum cocok, pilih:\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
+            ? `\n\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
             : `\n\nJika jamnya belum cocok, ketik *ganti tanggal* atau *ganti durasi*.`;
         } else if (alternatives.length > 0) {
           deliveredStep = "choose_alternative_facility";
