@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   classifyPaymentMethod,
+  parsePaymentProofAmount,
   paymentMethodMatchesOcr,
   type PaymentProofOcrScan,
 } from "./paymentProofOcr";
@@ -40,3 +41,45 @@ describe("payment proof OCR method classification", () => {
     expect(paymentMethodMatchesOcr("QRIS", scan)).toBe(false);
   });
 });
+
+describe("payment proof OCR amount parsing", () => {
+  it("reads Mandiri QRIS total Rp 200.000 as 200000, not 20000", () => {
+    const rawText = [
+      "QR Bayar",
+      "Pembayaran Berhasil!",
+      "Penerima Travelin.",
+      "Detail Transaksi",
+      "Total Transaksi Rp 200.000",
+      "No. Referensi QRIS 609102309748",
+      "Merchant PAN 9360084906137241838",
+    ].join("\n");
+
+    expect(parsePaymentProofAmount(rawText)).toBe(200000);
+  });
+
+  it("reads BCA-style Rp200.000,00 as 200000", () => {
+    const rawText = [
+      "Pembayaran QRIS Berhasil",
+      "Rp200.000,00",
+      "Pengakuisisi BCA",
+      "Merchant PAN 936000801776324881",
+    ].join("\n");
+
+    expect(parsePaymentProofAmount(rawText)).toBe(200000);
+  });
+
+  it("supports international grouped format Rp 200,000.00", () => {
+    expect(parsePaymentProofAmount("Total Transaksi Rp 200,000.00")).toBe(200000);
+  });
+
+  it("does not use reference or PAN identifiers as the amount", () => {
+    const rawText = [
+      "No. Referensi QRIS 609102309748",
+      "Merchant PAN 9360084906137241838",
+      "Total Transaksi Rp 200.000",
+    ].join("\n");
+
+    expect(parsePaymentProofAmount(rawText)).toBe(200000);
+  });
+});
+
