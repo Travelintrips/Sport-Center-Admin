@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { db, auditLogsTable, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
@@ -87,6 +88,21 @@ import {
 } from "../lib/waBookingFlow";
 
 const router = Router();
+
+type FonnteReplyContext = {
+  inboxId?: string;
+};
+
+const fonnteReplyContext = new AsyncLocalStorage<FonnteReplyContext>();
+
+function resolveFonnteInboxId(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const payload = body as Record<string, unknown>;
+  const raw = payload.inboxid ?? payload.inboxId ?? payload.inbox_id;
+  if (raw === null || raw === undefined || raw === "") return undefined;
+  const value = String(raw).trim();
+  return /^\d+$/.test(value) ? value : undefined;
+}
 
 // Base URL for WA links is always resolved fresh via getBaseUrl():
 // dev environments always use the Replit dev domain (never a prod domain
@@ -1781,6 +1797,14 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       const form = new FormData();
       form.append("target", phone);
       form.append("message", chunk);
+      const replyInboxId = useCustomerToken
+        ? fonnteReplyContext.getStore()?.inboxId
+        : undefined;
+      if (replyInboxId) {
+        // Fonnte uses inboxid to classify an API send as a reply to the
+        // incoming webhook message instead of a new push message.
+        form.append("inboxid", replyInboxId);
+      }
 
       // Keep the free-package request minimal. Optional send parameters can
       // cause Fonnte to answer HTTP 200 with status=false/"invalid message
@@ -1816,6 +1840,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
             messageLength: chunk.length,
             chunkIndex: chunkIndex + 1,
             chunkCount: chunks.length,
+            inboxIdPresent: Boolean(replyInboxId),
           },
           "[wa] Fonnte outbound rejected",
         );
@@ -1845,6 +1870,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           providerRequestId,
           chunkIndex: chunkIndex + 1,
           chunkCount: chunks.length,
+          inboxIdPresent: Boolean(replyInboxId),
         },
         "[wa] Fonnte outbound accepted",
       );
@@ -4570,6 +4596,7 @@ async function claimDistributedWebhook(
           phone,
           message: msg,
           messageId,
+          inboxIdPresent: Boolean(fonnteReplyContext.getStore()?.inboxId),
         },
       });
     }
@@ -4605,6 +4632,9 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
     if (!sender) return;
+
+    const inboundInboxId = resolveFonnteInboxId(req.body);
+    fonnteReplyContext.enterWith({ inboxId: inboundInboxId });
 
     const phone = cleanPhone(String(sender));
     const msg = String(message).trim();
