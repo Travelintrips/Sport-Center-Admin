@@ -3,6 +3,9 @@ import {
   getNearestAvailableSlots,
   hasSlotConflict,
   isRecentMessageDuplicate,
+  formatAlternativeFacilityOptions,
+  getAlternativeBookingDraftPatch,
+  parseAlternativeBookingChoice,
   switchBookingFacility,
 } from "./waBookingFlow";
 
@@ -124,5 +127,46 @@ describe("WhatsApp Mina booking flow regressions", () => {
       facilityId: 102,
     });
     expect(switched).not.toBe(draft);
+  });
+
+  it("keeps the WhatsApp alternative menu fixed and parses natural replies", () => {
+    expect(formatAlternativeFacilityOptions(["Badminton Court B"])).toBe(
+      "1. Lihat slot Badminton Court B\n2. Ganti tanggal\n3. Ganti durasi",
+    );
+    expect(parseAlternativeBookingChoice("1", ["Badminton Court B"])).toBe("facility");
+    expect(parseAlternativeBookingChoice("tidak cocok", ["Badminton Court B"])).toBe("facility");
+    expect(parseAlternativeBookingChoice("lapangan lain", ["Badminton Court B"])).toBe("facility");
+    expect(parseAlternativeBookingChoice("Court B", ["Badminton Court B"])).toBe("facility");
+    expect(parseAlternativeBookingChoice("ganti tanggal", ["Badminton Court B"])).toBe("date");
+    expect(parseAlternativeBookingChoice("3", ["Badminton Court B"])).toBe("duration");
+  });
+
+  it("preserves the draft when choosing a new date or duration", () => {
+    const draft = {
+      facilityId: 101,
+      customerId: 7,
+      customerName: "Robby Rahman",
+      bookingDate: "2026-09-20",
+      startTime: "19:00",
+      durationMinutes: 120,
+      notes: "latihan rutin",
+    };
+
+    expect({
+      ...draft,
+      ...getAlternativeBookingDraftPatch("date"),
+    }).toEqual({
+      ...draft,
+      bookingDate: null,
+      startTime: null,
+    });
+    expect({
+      ...draft,
+      ...getAlternativeBookingDraftPatch("duration"),
+    }).toEqual({
+      ...draft,
+      durationMinutes: null,
+      startTime: null,
+    });
   });
 });

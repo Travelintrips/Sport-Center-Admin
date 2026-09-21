@@ -27,6 +27,63 @@ export function switchBookingFacility<T extends { facilityId: number | null }>(
   return { ...draft, facilityId };
 }
 
+export type AlternativeBookingChoice = "facility" | "date" | "duration" | null;
+
+export type AlternativeBookingDraftPatch = {
+  bookingDate?: null;
+  durationMinutes?: null;
+  startTime?: null;
+};
+
+/**
+ * Parse the explicit alternative menu and the natural-language replies Mina
+ * commonly receives after showing a full slot.
+ */
+export function parseAlternativeBookingChoice(
+  message: string,
+  alternativeFacilityNames: string[] = [],
+): AlternativeBookingChoice {
+  const lower = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (lower === "1") return "facility";
+  if (lower === "2") return "date";
+  if (lower === "3") return "duration";
+
+  if (/(?:ganti|ubah|pindah|pilih).*(?:tanggal|hari)|tanggal\s+lain|hari\s+lain/.test(lower)) {
+    return "date";
+  }
+  if (/(?:ganti|ubah|pilih).*(?:durasi|lama)|durasi\s+lain|waktu\s+sewa/.test(lower)) {
+    return "duration";
+  }
+
+  const mentionsAlternativeFacility =
+    alternativeFacilityNames.some((name) => lower.includes(name.toLowerCase())) ||
+    /court\s*[a-z]\b|lapangan\s+(?:lain|[a-z]\b)|fasilitas\s+(?:lain|sejenis)/.test(lower) ||
+    /ada\s+(?:court|lapangan|fasilitas)\s+lain|yang\s+lain/.test(lower) ||
+    /^(?:tidak|nggak|ngga|gak|ga|belum)\s+(?:cocok|pas|mau|setuju)/.test(lower);
+  return mentionsAlternativeFacility ? "facility" : null;
+}
+
+export function formatAlternativeFacilityOptions(
+  alternativeFacilityNames: string[],
+): string {
+  const label = alternativeFacilityNames.length > 0
+    ? `Lihat slot ${alternativeFacilityNames.join(" atau ")}`
+    : "Lihat fasilitas sejenis lainnya";
+  return [
+    `1. ${label}`,
+    "2. Ganti tanggal",
+    "3. Ganti durasi",
+  ].join("\n");
+}
+
+export function getAlternativeBookingDraftPatch(
+  choice: AlternativeBookingChoice,
+): AlternativeBookingDraftPatch {
+  if (choice === "date") return { bookingDate: null, startTime: null };
+  if (choice === "duration") return { durationMinutes: null, startTime: null };
+  return {};
+}
+
 export function isRecentMessageDuplicate(
   seen: Map<string, number>,
   key: string,

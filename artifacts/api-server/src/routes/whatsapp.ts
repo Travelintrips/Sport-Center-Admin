@@ -81,6 +81,9 @@ import {
   hasSlotConflict,
   isRecentMessageDuplicate,
   switchBookingFacility,
+  formatAlternativeFacilityOptions,
+  getAlternativeBookingDraftPatch,
+  parseAlternativeBookingChoice,
 } from "../lib/waBookingFlow";
 
 const router = Router();
@@ -2655,8 +2658,14 @@ async function presentBookingSession(
         facility.closeTime,
         current.durationMinutes ?? 60,
       );
+      const alternatives = await getAlternativeFacilitySlotOptions(
+        current.facilityId!,
+        current.bookingDate,
+        current.durationMinutes ?? 60,
+      );
       reply += slots.length
-        ? `\n\n🟢 *Slot tersedia di ${facility.name} tanggal ${current.bookingDate}:*\n${slots.join("  | ")}`
+        ? `\n\n🟢 *Slot tersedia di ${facility.name} tanggal ${current.bookingDate}:*\n${slots.join("  | ")}\n\n` +
+          `Jika belum cocok, pilih:\n${formatAlternativeFacilityOptions(alternatives.map(({ facility: candidate }) => candidate.name))}`
         : `\n\n⚠️ Semua slot tanggal *${current.bookingDate}* sudah penuh. Coba tanggal lain.`;
     }
     await appendMessage(current.id, "bot", reply);
@@ -2932,6 +2941,13 @@ async function continueSession(
           session.durationMinutes,
         );
         const directTime = parseSlotStartTime(msg);
+        const numericChoice = lower.match(/^\d+$/)?.[0];
+        const isAlternativeMenuChoice = numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
+        const requestedDirectTime = directTime && !isAlternativeMenuChoice ? directTime : null;
+        const alternativeChoice = parseAlternativeBookingChoice(
+          msg,
+          alternativeSlotOptions.map(({ facility }) => facility.name),
+        );
         const explicitAlternative = alternativeSlotOptions.find(({ facility }) => {
           const candidateName = facility.name.toLowerCase();
           return lower.includes(candidateName) || /(?:court|lapangan)\s*b\b/i.test(lower);
@@ -2944,7 +2960,12 @@ async function continueSession(
         const rejectsAlternative =
           /^(?:tidak|nggak|ngga|gak|ga)(?:\s+(?:cocok|mau|setuju|pas))?$/i.test(lower);
 
-        if (explicitAlternative || acceptsAlternative || (directTime && alternativeSlotOptions.length === 1)) {
+        if (
+          (alternativeChoice === "facility" && alternativeSlotOptions.length > 0) ||
+          explicitAlternative ||
+          acceptsAlternative ||
+          (requestedDirectTime && alternativeSlotOptions.length === 1)
+        ) {
           const selected = explicitAlternative ?? alternativeSlotOptions[0];
           if (selected) {
             const switchedDraft = switchBookingFacility(session, selected.facility.id);
@@ -2953,7 +2974,7 @@ async function continueSession(
               startTime: null,
               currentStep: "ask_time",
             });
-            if (directTime) {
+            if (requestedDirectTime) {
               await continueSession(updated, phone, msg, useCustomerToken, false);
               return;
             }
@@ -2968,10 +2989,9 @@ async function continueSession(
           }
         }
 
-        if (rejectsAlternative) {
+        if (alternativeChoice === "date" || rejectsAlternative) {
           const updated = await updateSession(session.id, {
-            bookingDate: null,
-            startTime: null,
+            ...getAlternativeBookingDraftPatch("date"),
             currentStep: "ask_date",
           });
           const reply =
@@ -2997,6 +3017,18 @@ async function continueSession(
             session.durationMinutes,
           )
           : [];
+        if (alternativeChoice === "duration") {
+          const updated = await updateSession(session.id, {
+            ...getAlternativeBookingDraftPatch(alternativeChoice),
+            currentStep: "ask_duration",
+          });
+          const reply =
+            `⏱️ Baik, kita ganti durasi untuk *${currentFacility?.name ?? "fasilitas ini"}*.\n\n` +
+            `Berapa lama durasi booking yang baru?\nContoh: *1 jam*, *2 jam*, *3 jam*.`;
+          await appendMessage(updated.id, "bot", reply);
+          await sendReply(reply);
+          return;
+        }
         const updated = await updateSession(session.id, {
           currentStep: "ask_time",
           startTime: null,
@@ -3025,18 +3057,17 @@ async function continueSession(
         session.startTime,
         minutesToHours(session.durationMinutes),
       );
-      const keepCurrentFacilityChoice = alternatives.length + 1;
-      const chooseAnotherDateChoice = alternatives.length + 2;
+      const alternativeChoice = parseAlternativeBookingChoice(
+        msg,
+        alternatives.map((candidate) => candidate.name),
+      );
 
       // After Mina offers Court B/current-court/date choices, accept a direct
       // replacement time as well (including a bare displayed hour such as
       // "11"). Only the actual menu numbers keep their menu meaning.
       const directTime = parseSlotStartTime(msg);
       const numericChoice = lower.match(/^\d+$/)?.[0];
-      const isAlternativeMenuChoice =
-        numericChoice !== undefined &&
-        Number(numericChoice) >= 1 &&
-        Number(numericChoice) <= chooseAnotherDateChoice;
+      const isAlternativeMenuChoice = numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
       if (directTime && !isAlternativeMenuChoice) {
         const timeStep = await updateSession(session.id, {
           startTime: null,
@@ -3047,11 +3078,11 @@ async function continueSession(
       }
 
       const wantsAnotherTime =
-        lower === String(keepCurrentFacilityChoice) ||
         /^(tetap|pilih|ganti).*(jam|waktu)|jam lain|pilih jam lain/i.test(lower);
       const wantsAnotherDate =
-        lower === String(chooseAnotherDateChoice) ||
+        alternativeChoice === "date" ||
         /tanggal lain|ganti tanggal|pilih tanggal lain/i.test(lower);
+      const wantsAnotherDuration = alternativeChoice === "duration";
 
       if (wantsAnotherTime) {
         const updated = await updateSession(session.id, {
@@ -3066,8 +3097,7 @@ async function continueSession(
 
       if (wantsAnotherDate) {
         const updated = await updateSession(session.id, {
-          bookingDate: null,
-          startTime: null,
+          ...getAlternativeBookingDraftPatch("date"),
           currentStep: "ask_date",
         });
         const reply = `📅 Baik, silakan pilih tanggal lain untuk *${minutesToHours(session.durationMinutes)} jam* di fasilitas yang sama.`;
@@ -3076,11 +3106,31 @@ async function continueSession(
         return;
       }
 
-      const selectedIndex = lower.match(/^(\d+)$/)?.[1];
-      const selected = selectedIndex
-        ? Number(selectedIndex) <= alternatives.length
-          ? alternatives[Number(selectedIndex) - 1]
-          : null
+      if (wantsAnotherDuration) {
+        const updated = await updateSession(session.id, {
+          ...getAlternativeBookingDraftPatch("duration"),
+          currentStep: "ask_duration",
+        });
+        const currentFacility = (await db
+          .select({ name: facilitiesTable.name })
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, session.facilityId))
+          .limit(1))[0];
+        const reply =
+          `⏱️ Baik, kita ganti durasi untuk *${currentFacility?.name ?? "fasilitas ini"}*.\n\n` +
+          `Berapa lama durasi booking yang baru?\nContoh: *1 jam*, *2 jam*, *3 jam*.`;
+        await appendMessage(updated.id, "bot", reply);
+        await sendReply(reply);
+        return;
+      }
+
+      const selected = alternativeChoice === "facility"
+        ? alternatives.find((candidate) => {
+          const requestedName = lower.replace(/^(pilih|mau|ambil)\s+/, "").trim();
+          return candidate.name.toLowerCase() === requestedName ||
+            candidate.name.toLowerCase().includes(requestedName) ||
+            requestedName.includes(candidate.name.toLowerCase());
+        }) ?? alternatives[0]
         : alternatives.find((candidate) => {
           const candidateName = candidate.name.toLowerCase();
           const requestedName = lower.replace(/^(pilih|mau|ambil)\s+/, "").trim();
@@ -3151,7 +3201,9 @@ async function continueSession(
 
     case "ask_time": {
       const parsed = parseIntent(msg);
-      const requestedStartTime = parseSlotStartTime(msg);
+      const numericChoice = lower.match(/^\d+$/)?.[0];
+      const isAlternativeMenuChoice = numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
+      const requestedStartTime = isAlternativeMenuChoice ? null : parseSlotStartTime(msg);
 
       // A customer may reject the suggested availability instead of sending
       // another time immediately. Treat that as a scheduling choice, not as
@@ -3161,12 +3213,12 @@ async function continueSession(
       const wantsAnotherTime =
         /(?:jam|waktu).*(?:lain|berbeda)|(?:ganti|pilih|mau|cari).*(?:jam|waktu)/i.test(lower) ||
         /^(?:tidak|nggak|ngga|gak|ga)\b/i.test(lower);
+      const wantsAlternativeFacility = parseAlternativeBookingChoice(msg) === "facility";
 
-      if (!requestedStartTime && (wantsAnotherDate || wantsAnotherTime)) {
+      if (!requestedStartTime && (wantsAnotherDate || wantsAnotherTime || wantsAlternativeFacility)) {
         if (wantsAnotherDate) {
           const updated = await updateSession(session.id, {
-            bookingDate: null,
-            startTime: null,
+            ...getAlternativeBookingDraftPatch("date"),
             currentStep: "ask_date",
           });
           const reply = `📅 Baik, kita cari tanggal lain untuk *${session.facilityId ? "fasilitas yang sama" : "booking ini"}*.\n\n` +
@@ -3348,7 +3400,13 @@ async function continueSession(
            ? `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${updated.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`
            : `\n\n⚠️ Tidak ada slot yang tersedia untuk durasi tersebut pada tanggal ini.\n\n📅 *Silakan pilih tanggal lain* atau ketik *batal*.`;
          if (slots.length) {
-           reply += `\n\n❓ Apakah slot jam di *${fac.name}* sudah cocok, atau mau saya cek *Badminton Court B*?`;
+           const alternatives = await getAlternativeFacilitySlotOptions(
+             fac.id,
+             updated.bookingDate,
+             updated.durationMinutes ?? 60,
+           );
+           reply += `\n\n❓ Jika slot *${fac.name}* belum cocok, pilih:\n` +
+             `${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`;
          }
       }
       await appendMessage(session.id, "bot", reply);
@@ -3695,6 +3753,8 @@ function buildAlternativeFacilitySlotPrompt(params: {
     `❓ Apakah salah satu jam di lapangan lain cocok?`,
     `Balas *ya* atau ketik *Court B* untuk memilihnya, lalu pilih jam.`,
     `Jika tetap ingin *${params.currentFacilityName}*, ketik *tetap Court A*.`,
+    ``,
+    formatAlternativeFacilityOptions(params.options.map(({ facility }) => facility.name)),
   ].join("\n");
 }
 
@@ -3751,11 +3811,6 @@ function buildAlternativeFacilityChoiceReply(params: {
   alternatives: Array<typeof facilitiesTable.$inferSelect>;
   sameFacilitySlots?: string[];
 }): string {
-  const switchOptions = params.alternatives
-    .map((candidate, index) => `${index + 1}. Ya, pindah ke *${candidate.name}*`)
-    .join("\n");
-  const keepCurrentFacilityChoice = params.alternatives.length + 1;
-  const chooseAnotherDateChoice = params.alternatives.length + 2;
   const sameFacilitySlots = params.sameFacilitySlots?.length
     ? [
       ``,
@@ -3768,12 +3823,10 @@ function buildAlternativeFacilityChoiceReply(params: {
     `❌ Slot *${params.startTime}–${params.endTime}* di *${params.facilityName}* pada *${params.bookingDate}* sudah penuh.`,
     ``,
     `✅ Slot yang sama masih tersedia di:`,
-    switchOptions,
-    `${keepCurrentFacilityChoice}. Tetap di *${params.facilityName}*, pilih jam lain`,
-    `${chooseAnotherDateChoice}. Pilih tanggal lain`,
+    formatAlternativeFacilityOptions(params.alternatives.map((candidate) => candidate.name)),
     sameFacilitySlots,
     ``,
-    `Balas nomor pilihan kamu. Jika memilih jam lain, ketik *${keepCurrentFacilityChoice}* dulu lalu pilih jamnya.`,
+    `Balas nomor pilihan kamu. Pilihan 1 akan langsung mengecek fasilitas lain dengan tanggal dan durasi yang sama.`,
   ].join("\n");
 }
 
