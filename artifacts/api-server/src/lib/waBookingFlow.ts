@@ -42,11 +42,14 @@ export type AlternativeBookingDraftPatch = {
 export function parseAlternativeBookingChoice(
   message: string,
   alternativeFacilityNames: string[] = [],
+  options: { allowNumericMenu?: boolean } = {},
 ): AlternativeBookingChoice {
   const lower = message.toLowerCase().replace(/\s+/g, " ").trim();
-  if (lower === "1") return "facility";
-  if (lower === "2") return "date";
-  if (lower === "3") return "duration";
+  if (options.allowNumericMenu) {
+    if (lower === "1") return "facility";
+    if (lower === "2") return "date";
+    if (lower === "3") return "duration";
+  }
 
   if (/(?:ganti|ubah|pindah|pilih).*(?:tanggal|hari)|tanggal\s+lain|hari\s+lain/.test(lower)) {
     return "date";

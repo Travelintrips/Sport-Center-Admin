@@ -133,12 +133,14 @@ describe("WhatsApp Mina booking flow regressions", () => {
     expect(formatAlternativeFacilityOptions(["Badminton Court B"])).toBe(
       "1. Lihat slot Badminton Court B\n2. Ganti tanggal\n3. Ganti durasi",
     );
-    expect(parseAlternativeBookingChoice("1", ["Badminton Court B"])).toBe("facility");
+    expect(parseAlternativeBookingChoice("1", ["Badminton Court B"], { allowNumericMenu: true })).toBe("facility");
     expect(parseAlternativeBookingChoice("tidak cocok", ["Badminton Court B"])).toBe("facility");
     expect(parseAlternativeBookingChoice("lapangan lain", ["Badminton Court B"])).toBe("facility");
     expect(parseAlternativeBookingChoice("Court B", ["Badminton Court B"])).toBe("facility");
     expect(parseAlternativeBookingChoice("ganti tanggal", ["Badminton Court B"])).toBe("date");
-    expect(parseAlternativeBookingChoice("3", ["Badminton Court B"])).toBe("duration");
+    expect(parseAlternativeBookingChoice("3", ["Badminton Court B"], { allowNumericMenu: true })).toBe("duration");
+    expect(parseAlternativeBookingChoice("2 jam", ["Badminton Court B"], { allowNumericMenu: true })).toBeNull();
+    expect(parseAlternativeBookingChoice("2", ["Badminton Court B"])).toBeNull();
   });
 
   it("preserves the draft when choosing a new date or duration", () => {

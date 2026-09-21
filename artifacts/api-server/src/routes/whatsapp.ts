@@ -144,7 +144,8 @@ function isDuplicateWebhook(body: Record<string, unknown>): boolean {
     if (_processedMsgIds.has(key)) return true;
     _processedMsgIds.add(key);
     // Bersihkan setelah 10 menit agar tidak memory leak
-    setTimeout(() => _processedMsgIds.delete(key), 10 * 60 * 1000);
+    const cleanupTimer = setTimeout(() => _processedMsgIds.delete(key), 10 * 60 * 1000);
+    cleanupTimer.unref?.();
   }
   return false;
 }
@@ -1927,6 +1928,13 @@ function parseSlotStartTime(msg: string): string | null {
   return `${String(Number(bareHour[1])).padStart(2, "0")}:00`;
 }
 
+function hasDisplayedAlternativeFacilityMenu(session: WaBookingSessionRow): boolean {
+  const lastBotMessage = [...(session.rawMessages ?? [])]
+    .reverse()
+    .find((message) => message.role === "bot")?.text ?? "";
+  return /2\.\s+Ganti tanggal\s+3\.\s+Ganti durasi/i.test(lastBotMessage);
+}
+
 function isYes(msg: string): boolean {
   return /^ya$/i.test(msg.trim());
 }
@@ -2947,6 +2955,7 @@ async function continueSession(
         const alternativeChoice = parseAlternativeBookingChoice(
           msg,
           alternativeSlotOptions.map(({ facility }) => facility.name),
+          { allowNumericMenu: true },
         );
         const explicitAlternative = alternativeSlotOptions.find(({ facility }) => {
           const candidateName = facility.name.toLowerCase();
@@ -3060,6 +3069,7 @@ async function continueSession(
       const alternativeChoice = parseAlternativeBookingChoice(
         msg,
         alternatives.map((candidate) => candidate.name),
+        { allowNumericMenu: true },
       );
 
       // After Mina offers Court B/current-court/date choices, accept a direct
@@ -3201,8 +3211,10 @@ async function continueSession(
 
     case "ask_time": {
       const parsed = parseIntent(msg);
+      const alternativeMenuDisplayed = hasDisplayedAlternativeFacilityMenu(session);
       const numericChoice = lower.match(/^\d+$/)?.[0];
-      const isAlternativeMenuChoice = numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
+      const isAlternativeMenuChoice =
+        alternativeMenuDisplayed && numericChoice !== undefined && ["1", "2", "3"].includes(numericChoice);
       const requestedStartTime = isAlternativeMenuChoice ? null : parseSlotStartTime(msg);
 
       // A customer may reject the suggested availability instead of sending
@@ -3213,7 +3225,9 @@ async function continueSession(
       const wantsAnotherTime =
         /(?:jam|waktu).*(?:lain|berbeda)|(?:ganti|pilih|mau|cari).*(?:jam|waktu)/i.test(lower) ||
         /^(?:tidak|nggak|ngga|gak|ga)\b/i.test(lower);
-      const wantsAlternativeFacility = parseAlternativeBookingChoice(msg) === "facility";
+      const wantsAlternativeFacility =
+        alternativeMenuDisplayed &&
+        parseAlternativeBookingChoice(msg, [], { allowNumericMenu: true }) === "facility";
 
       if (!requestedStartTime && (wantsAnotherDate || wantsAnotherTime || wantsAlternativeFacility)) {
         if (wantsAnotherDate) {
@@ -4294,7 +4308,8 @@ function isDuplicateByContent(phone: string, msg: string): boolean {
   if (isRecentMessageDuplicate(_recentMsgHashes, hash, now)) {
     return true; // same msg from same phone within 8 detik → duplicate
   }
-  setTimeout(() => _recentMsgHashes.delete(hash), 30 * 1000);
+  const cleanupTimer = setTimeout(() => _recentMsgHashes.delete(hash), 30 * 1000);
+  cleanupTimer.unref?.();
   return false;
 }
 
@@ -4462,6 +4477,11 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       // can leave an out-of-hours/full-slot request without the right prompt.
       const parsedMessage = parseIntent(msg);
       try {
+        if (session.currentStep === "ask_duration") {
+          await continueSession(session, phone, msg, true);
+          return;
+        }
+
         if (session.currentStep === "ask_time" && parsedMessage.startTime) {
           await continueSession(session, phone, msg, true);
           return;
