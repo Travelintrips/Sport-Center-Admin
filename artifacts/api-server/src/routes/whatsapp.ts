@@ -1679,8 +1679,8 @@ router.post("/wa/review/:token", async (req, res) => {
 
 // ─── Helpers for Fonnte webhook ───────────────────────────────────────────────
 
-async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<void> {
-  if (!phone) return;
+async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<boolean> {
+  if (!phone) return false;
   const fonnte = await getFonnteConfig();
   if (useCustomerToken && !fonnte.customerDevice) {
     logger.warn("[wa] Device Mina/customer belum dikonfigurasi; pesan customer tidak dikirim");
@@ -1689,7 +1689,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       entity: "wa_outbound",
       after: { recipient: phone, channel: "mina", deviceSource: fonnte.customerDeviceSource },
     }).catch(() => {});
-    return;
+    return false;
   }
   const token = selectFonnteToken(fonnte, useCustomerToken);
   if (!token) {
@@ -1706,13 +1706,13 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
         customerTokenConfigured: Boolean(fonnte.customerToken),
       },
     }).catch(() => {});
-    return;
+    return false;
   }
   if (!allowWhatsAppProviderSend({
     channel: useCustomerToken ? "mina" : "admin",
     recipient: phone,
     customerTokenConfigured: useCustomerToken ? Boolean(fonnte.customerToken) : false,
-  })) return;
+  })) return true;
   // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
   try {
@@ -1773,7 +1773,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           messageLength: message.length,
         },
       }).catch(() => {});
-      return;
+      return false;
     }
 
     logger.info(
@@ -1785,6 +1785,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       },
       "[wa] Fonnte outbound accepted",
     );
+    return true;
   } catch (err) {
     logger.error(
       {
@@ -1803,6 +1804,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
         error: err instanceof Error ? err.message : String(err),
       },
     }).catch(() => {});
+    return false;
   }
 }
 
@@ -3448,42 +3450,59 @@ async function continueSession(
         await sendReply(reply);
         return;
       }
-      const updated = await updateSession(session.id, {
+
+      // Persist the entered duration, but do not advance the conversation step
+      // until Fonnte has accepted Mina's next prompt. This prevents the session
+      // from becoming ask_time while the customer never received the slot list.
+      const nextStep = getNextStep({ ...session, durationMinutes });
+      const durationDraft = await updateSession(session.id, {
         durationMinutes,
-        currentStep: getNextStep({ ...session, durationMinutes }),
+        currentStep: "ask_duration",
       });
-      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_duration", durationMinutes } });
-      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
-      let reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
-      let replySession = updated;
-      if (fac && updated.bookingDate && fac.bookingMode !== "walk_in" && updated.currentStep === "ask_time") {
+      await logAudit({
+        action: "booking_session_updated",
+        entity: "wa_booking_session",
+        entityId: session.id,
+        after: { step: "ask_duration", durationMinutes, pendingNextStep: nextStep },
+      });
+
+      const fac = session.facilityId
+        ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
+        : null;
+      const responseSession = { ...durationDraft, currentStep: nextStep } as WaBookingSessionRow;
+      let deliveredStep: WaStep = nextStep;
+      let reply = await buildStepQuestion(
+        nextStep,
+        responseSession,
+        fac?.name ?? "",
+        Number(fac?.pricePerHour ?? 0),
+      );
+
+      if (fac && durationDraft.bookingDate && fac.bookingMode !== "walk_in" && nextStep === "ask_time") {
         const slots = await getAvailableSlotsForDay(
           fac.id,
-          updated.bookingDate,
+          durationDraft.bookingDate,
           fac.openTime,
           fac.closeTime,
-          updated.durationMinutes ?? 60,
+          durationDraft.durationMinutes ?? 60,
         );
         const alternatives = await getAlternativeFacilitySlotOptions(
           fac.id,
-          updated.bookingDate,
-          updated.durationMinutes ?? 60,
+          durationDraft.bookingDate,
+          durationDraft.durationMinutes ?? 60,
         );
 
         if (slots.length > 0) {
-          reply += `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${updated.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`;
+          reply += `\n\n🟢 *Slot tersedia di ${fac.name} tanggal ${durationDraft.bookingDate}:*\n${slots.join("  | ")}\n\n⏰ *Silakan pilih jam mulai:* balas dengan *11*, *11:00*, atau *jam 11*.`;
           reply += alternatives.length > 0
             ? `\n\n❓ Jika slot *${fac.name}* belum cocok, pilih:\n${formatAlternativeFacilityOptions(alternatives.map(({ facility }) => facility.name))}`
             : `\n\nJika jamnya belum cocok, ketik *ganti tanggal* atau *ganti durasi*.`;
         } else if (alternatives.length > 0) {
-          replySession = await updateSession(updated.id, {
-            startTime: null,
-            currentStep: "choose_alternative_facility",
-          });
+          deliveredStep = "choose_alternative_facility";
           reply = buildAlternativeFacilitySlotPrompt({
             currentFacilityName: fac.name,
-            bookingDate: updated.bookingDate,
-            durationMinutes: updated.durationMinutes ?? 60,
+            bookingDate: durationDraft.bookingDate,
+            durationMinutes: durationDraft.durationMinutes ?? 60,
             options: alternatives,
             reason: "full",
           });
@@ -3491,8 +3510,27 @@ async function continueSession(
           reply += `\n\n⚠️ Tidak ada slot yang sesuai durasi di *${fac.name}* maupun fasilitas sejenis pada tanggal ini.\n\nKetik *ganti tanggal* atau *ganti durasi*.`;
         }
       }
-      await appendMessage(replySession.id, "bot", reply);
-      await sendReply(reply);
+
+      await appendMessage(durationDraft.id, "bot", reply);
+      const delivered = await sendReply(reply);
+      if (delivered) {
+        await updateSession(session.id, { currentStep: deliveredStep });
+      } else {
+        await updateSession(session.id, {
+          durationMinutes: session.durationMinutes,
+          currentStep: "ask_duration",
+        });
+        await logAudit({
+          action: "mina_booking_step_delivery_failed",
+          entity: "wa_booking_session",
+          entityId: session.id,
+          after: {
+            attemptedStep: deliveredStep,
+            restoredStep: "ask_duration",
+            message: msg,
+          },
+        }).catch(() => {});
+      }
       break;
     }
 
