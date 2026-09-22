@@ -11,7 +11,8 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "migrate:dev": "pnpm --filter @workspace/scripts run migrate:dev",
-    "migrate:prod": "pnpm --filter @workspace/scripts run migrate:prod"
+    "migrate:prod": "pnpm --filter @workspace/scripts run migrate:prod",
+    "test": "pnpm --filter @workspace/api-server test"
   },
   "private": true,
   "pnpm": {

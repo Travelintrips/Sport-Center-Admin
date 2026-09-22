@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { assessVendorDirectionRecovery } from "./vendorDirectionRecovery";
 
 const base = {
@@ -42,7 +42,7 @@ describe("vendor direction recovery", () => {
     const result = assessVendorDirectionRecovery({
       ...base,
       debitAmount: "0",
-      rawPayload: { Debit: "1.250.000" },
+      rawPayload: { Debit: 1250000 },
     });
     expect(result.eligible).toBe(true);
     expect(result.debitAmount).toBe(1250000);

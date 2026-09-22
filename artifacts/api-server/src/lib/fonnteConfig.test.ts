@@ -81,7 +81,7 @@ describe("Fonnte Mina device and token separation", () => {
       validateMinaFonnteWebhookDevice({ device: "081399999999" }, deviceA),
     ).resolves.toMatchObject({
       accepted: false,
-      providedDevice: "628139999999",
+      providedDevice: "6281399999999",
       configuredDevice: deviceA,
     });
 

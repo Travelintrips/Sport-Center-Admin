@@ -262,6 +262,12 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
   if (sql.includes("SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST'")) {
     return { rows: [{ id: 1316 }], rowCount: 1 };
   }
+  if (
+    sql.includes("FROM public.chart_of_accounts c") &&
+    sql.includes("PPh%Potong%")
+  ) {
+    return { rows: [{ id: 1317 }], rowCount: 1 };
+  }
 
   if (sql.startsWith("SELECT id, code, name FROM public.chart_of_accounts")) {
     return { rows: [{ id: 49098, code: "1-1020-CST", name: "Bank Mandiri CST" }], rowCount: 1 };

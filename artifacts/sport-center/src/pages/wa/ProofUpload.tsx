@@ -200,11 +200,11 @@ export default function WaProofUpload() {
     );
   const methodMismatch =
     Boolean(ocrPreview) &&
-    ocrPreview.paymentMethod !== "unknown" &&
+    ocrPreview?.paymentMethod !== "unknown" &&
     !ocrMethodMatches;
   const amountMismatch =
     Boolean(ocrPreview) &&
-    ocrPreview.amount != null &&
+    ocrPreview?.amount != null &&
     expectedPaymentAmount > 0 &&
     !ocrAmountMatches;
   const dateMismatch =
