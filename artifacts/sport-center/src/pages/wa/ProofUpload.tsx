@@ -36,6 +36,7 @@ interface ActionInfo {
     transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
     qris: { imageUrl: string } | null;
   };
+  supportWhatsapp?: string | null;
 }
 
 export default function WaProofUpload() {
@@ -53,6 +54,7 @@ export default function WaProofUpload() {
   const [ocrPreview, setOcrPreview] = useState<OcrPreview | null>(null);
   const [scanningOcr, setScanningOcr] = useState(false);
   const [ocrError, setOcrError] = useState("");
+  const [replacementAttempts, setReplacementAttempts] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -73,6 +75,7 @@ export default function WaProofUpload() {
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+    if (file) setReplacementAttempts((count) => count + 1);
     setFile(f);
     setOcrPreview(null);
     setOcrError("");
@@ -195,11 +198,34 @@ export default function WaProofUpload() {
       ocrPreview.date >= bookingCreatedDate &&
       ocrPreview.date <= todayWib,
     );
+  const methodMismatch =
+    Boolean(ocrPreview) &&
+    ocrPreview.paymentMethod !== "unknown" &&
+    !ocrMethodMatches;
+  const amountMismatch =
+    Boolean(ocrPreview) &&
+    ocrPreview.amount != null &&
+    expectedPaymentAmount > 0 &&
+    !ocrAmountMatches;
+  const dateMismatch =
+    Boolean(ocrPreview?.date) &&
+    Boolean(bookingCreatedDate) &&
+    !ocrDateMatches;
+  const hasConfidentMismatch = methodMismatch || amountMismatch || dateMismatch;
+  const escalationRequired = hasConfidentMismatch && replacementAttempts >= 3;
   const ocrPreviewVerified =
     Boolean(ocrPreview) &&
     ocrAmountMatches &&
     ocrMethodMatches &&
     ocrDateMatches;
+  const remainingReplacements = Math.max(0, 3 - replacementAttempts);
+  const supportWhatsapp = String(info?.supportWhatsapp ?? "").replace(/\D/g, "");
+  const supportMessage = encodeURIComponent(
+    `Halo Admin Sport Center, saya perlu bantuan verifikasi bukti pembayaran untuk ${b?.orderNumber ?? "booking saya"}. OCR masih tidak cocok setelah 3 kali ganti foto.`,
+  );
+  const supportUrl = supportWhatsapp
+    ? `https://wa.me/${supportWhatsapp}?text=${supportMessage}`
+    : null;
 
   return (
     <div className="min-h-screen bg-orange-50 pb-8">
@@ -344,17 +370,48 @@ export default function WaProofUpload() {
                    <p className="mt-1">
                      {ocrPreviewVerified
                        ? "Metode, nominal, dan tanggal transaksi sesuai. Server akan memeriksa ulang bukti saat dikirim."
-                       : "Hasil OCR belum dapat dipastikan sesuai. Metode, nominal, dan tanggal transaksi akan diperiksa ulang saat dikirim dan tetap menunggu verifikasi admin."}
+                       : escalationRequired
+                         ? "Bukti masih tidak cocok setelah 3 kali ganti foto. Silakan hubungi admin untuk pemeriksaan manual."
+                         : hasConfidentMismatch
+                           ? `Bukti belum cocok. Silakan Ganti Foto${remainingReplacements > 0 ? ` (tersisa ${remainingReplacements} kali)` : ""}.`
+                           : "Sebagian data OCR belum terbaca. Bukti tetap dapat dikirim dan akan menunggu verifikasi admin."}
                    </p>
                  </div>
                )}
             </CardContent>
           </Card>
 
+          {escalationRequired && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+              <div className="flex items-start gap-2 text-sm text-red-700">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-bold">Perlu bantuan admin</p>
+                  <p className="mt-1">
+                    Bukti pembayaran masih tidak cocok setelah 3 kali ganti foto. Jangan kirim bukti ini lagi.
+                  </p>
+                </div>
+              </div>
+              {supportUrl ? (
+                <a
+                  href={supportUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-full rounded-lg bg-green-600 hover:bg-green-700 text-white text-center font-bold py-3 px-4">
+                  Hubungi Admin via WhatsApp
+                </a>
+              ) : (
+                <p className="text-xs text-red-700">
+                  Nomor admin belum tersedia di sistem. Silakan hubungi petugas Sport Center.
+                </p>
+              )}
+            </div>
+          )}
+
           <Button
             type="submit"
-             disabled={!file || uploading || scanningOcr}
-            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
+            disabled={!file || uploading || scanningOcr || hasConfidentMismatch}
+            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed">
             {uploading ? (
               <span className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
