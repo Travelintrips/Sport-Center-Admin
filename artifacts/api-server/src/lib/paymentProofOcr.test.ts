@@ -2,6 +2,8 @@ import { describe, expect, it } from "@jest/globals";
 import {
   classifyPaymentMethod,
   parsePaymentProofAmount,
+  parsePaymentProofDate,
+  paymentProofDateMatchesBooking,
   paymentMethodMatchesOcr,
   type PaymentProofOcrScan,
 } from "./paymentProofOcr";
@@ -83,3 +85,43 @@ describe("payment proof OCR amount parsing", () => {
   });
 });
 
+
+
+describe("payment proof OCR date validation", () => {
+  it("reads textual Mandiri receipt dates", () => {
+    expect(parsePaymentProofDate("Pembayaran Berhasil!\n10 Sep 2026 · 18:49:26 WIB")).toBe("2026-09-10");
+    expect(parsePaymentProofDate("22 September 2026 09:14 WIB")).toBe("2026-09-22");
+    expect(parsePaymentProofDate("05 Okt 2026")).toBe("2026-10-05");
+  });
+
+  it("rejects a proof dated before the booking was created", () => {
+    expect(
+      paymentProofDateMatchesBooking(
+        "2026-09-10",
+        "2026-09-22T08:52:20.379Z",
+        new Date("2026-09-22T09:00:00.000Z"),
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts proof dates on or after the booking creation date and not in the future", () => {
+    expect(
+      paymentProofDateMatchesBooking(
+        "2026-09-22",
+        "2026-09-22T08:52:20.379Z",
+        new Date("2026-09-22T09:00:00.000Z"),
+      ),
+    ).toBe(true);
+    expect(
+      paymentProofDateMatchesBooking(
+        "2026-09-23",
+        "2026-09-22T08:52:20.379Z",
+        new Date("2026-09-22T09:00:00.000Z"),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns null when OCR cannot read a date", () => {
+    expect(paymentProofDateMatchesBooking(null, "2026-09-22T08:52:20.379Z")).toBeNull();
+  });
+});
