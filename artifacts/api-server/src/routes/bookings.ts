@@ -390,9 +390,12 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const companyInvoices = companyInvoiceIds.length > 0
       ? await db.select({
           id: companyInvoicesTable.id,
+          invoiceNumber: companyInvoicesTable.invoiceNumber,
           status: companyInvoicesTable.status,
           grandTotal: companyInvoicesTable.grandTotal,
           totalAmount: companyInvoicesTable.totalAmount,
+          pphAmount: companyInvoicesTable.pphAmount,
+          netAmount: companyInvoicesTable.netAmount,
           paymentMethod: companyInvoicesTable.paymentMethod,
           paymentProofUrl: companyInvoicesTable.paymentProofUrl,
           paidAt: companyInvoicesTable.paidAt,
@@ -698,7 +701,11 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       return {
         ...b,
         companyInvoiceId: companyInvoiceId ?? b.companyInvoiceId,
+        companyInvoiceNumber: invoice?.invoiceNumber ?? null,
         companyInvoiceTotal: companyInvoiceTotal && companyInvoiceTotal > 0 ? companyInvoiceTotal : null,
+        companyInvoicePphAmount: invoice?.pphAmount == null ? null : Number(invoice.pphAmount),
+        companyInvoiceNetAmount: invoice?.netAmount == null ? null : Number(invoice.netAmount),
+        companyInvoicePaymentMethod: invoice?.paymentMethod ?? null,
         paidAt: b.paidAt ?? invoice?.paidAt ?? null,
         companyName: b.companyCustomerId ? (companyNameById[b.companyCustomerId] ?? "") : null,
         totalPrice: Number(b.totalPrice),
