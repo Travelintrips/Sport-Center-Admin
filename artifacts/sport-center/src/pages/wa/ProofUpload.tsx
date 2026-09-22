@@ -317,9 +317,10 @@ export default function WaProofUpload() {
                     type="button"
                     variant="outline"
                     className="w-full"
+                    disabled={escalationRequired}
                     onClick={() => fileRef.current?.click()}>
                     <ImageIcon className="w-4 h-4 mr-2" />
-                    Ganti Foto
+                    {escalationRequired ? "Batas Ganti Foto Tercapai" : "Ganti Foto"}
                   </Button>
                 </div>
               ) : (
