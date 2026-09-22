@@ -73,6 +73,7 @@ import {
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
 import {
   paymentMethodMatchesOcr,
+  paymentProofDateMatchesBooking,
   scanPaymentProof,
   storedPaymentProofOcr,
 } from "../lib/paymentProofOcr";
@@ -990,6 +991,13 @@ router.post("/wa/action/:token", async (req, res) => {
           });
           return;
         }
+        if (paymentProofDateMatchesBooking(ocrScan?.date, booking.createdAt) === false) {
+          res.status(422).json({
+            error: `Tanggal transaksi pada bukti (${ocrScan?.date}) tidak valid untuk booking ini.`,
+            code: "PAYMENT_DATE_PROOF_MISMATCH",
+          });
+          return;
+        }
         payment = await ensurePaymentBankAccount(payment, booking);
 
         await consumeWaToken(req.params.token);
@@ -1288,10 +1296,15 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       proofOcr?.engine === "tesseract" &&
       proofOcr.amount != null &&
       Number(proofOcr.amount) !== payableTotal;
+    const dateMatch =
+      proofOcr?.engine === "tesseract"
+        ? paymentProofDateMatchesBooking(proofOcr.date, booking.createdAt)
+        : null;
+    const dateMismatch = dateMatch === false;
 
     // A confident contradiction is rejected before creating/replacing a
     // payment. Unknown/unreadable OCR is allowed through to manual review.
-    if (methodMismatch || amountMismatch) {
+    if (methodMismatch || amountMismatch || dateMismatch) {
       const reasons = [
         methodMismatch
           ? `metode pembayaran tidak sesuai (terbaca ${proofOcr?.paymentMethod})`
@@ -1299,16 +1312,22 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         amountMismatch
           ? `nominal pada bukti Rp ${Number(proofOcr?.amount).toLocaleString("id-ID")} tidak sama dengan tagihan Rp ${payableTotal.toLocaleString("id-ID")}`
           : null,
+        dateMismatch
+          ? `tanggal transaksi ${proofOcr?.date} lebih lama dari tanggal booking dibuat atau berada di masa depan`
+          : null,
       ].filter(Boolean);
       res.status(422).json({
         error: `Bukti pembayaran belum dapat diterima: ${reasons.join(" dan ")}. Silakan upload bukti yang benar.`,
         code: methodMismatch
           ? "PAYMENT_METHOD_PROOF_MISMATCH"
-          : "PAYMENT_AMOUNT_PROOF_MISMATCH",
+          : amountMismatch
+            ? "PAYMENT_AMOUNT_PROOF_MISMATCH"
+            : "PAYMENT_DATE_PROOF_MISMATCH",
         ocrScan: {
           paymentMethod: proofOcr?.paymentMethod,
           confidence: proofOcr?.confidence,
           amount: proofOcr?.amount,
+          date: proofOcr?.date,
           signals: proofOcr?.signals,
         },
       });
@@ -1347,6 +1366,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
           amountMatch,
+          dateMatch,
         } : null,
         status: "pending",
         updatedAt: new Date(),
@@ -1369,6 +1389,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
           amountMatch,
+          dateMatch,
         } : null,
         status: "pending",
       };
@@ -1399,6 +1420,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
           amountMatch,
+          dateMatch,
         } : null,
         status: "pending",
       }).returning();
@@ -1452,9 +1474,9 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const reviewToken = await createWaToken(bookingId, "review_payment", 7);
 
     const fullProofUrl = proofUrl;
-    const ocrNote = methodMatch && amountMatch
-      ? "OCR mendeteksi metode dan nominal sesuai. Tetap wajib diverifikasi admin."
-      : "OCR belum dapat memastikan seluruh detail. Bukti menunggu pemeriksaan admin.";
+    const ocrNote = methodMatch && amountMatch && dateMatch === true
+      ? "OCR mendeteksi metode, nominal, dan tanggal transaksi sesuai. Tetap wajib diverifikasi admin."
+      : "OCR belum dapat memastikan seluruh detail termasuk tanggal transaksi. Bukti menunggu pemeriksaan admin.";
     notifyWaProofUploaded({
       customerName: booking.customerName, customerPhone: booking.customerPhone,
       orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -1480,7 +1502,14 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       action: "wa_proof_uploaded",
       entity: "booking",
       entityId: bookingId,
-      after: { proofUrl, status: nextStatus, ocrMatched: methodMatch && amountMatch, methodMatch, amountMatch },
+      after: {
+        proofUrl,
+        status: nextStatus,
+        ocrMatched: methodMatch && amountMatch && dateMatch === true,
+        methodMatch,
+        amountMatch,
+        dateMatch,
+      },
     });
 
     syncStatusToBizportal(booking.orderNumber, nextStatus, proofUrl, null, booking).catch(() => {});
@@ -1489,7 +1518,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       success: true,
       orderNumber: booking.orderNumber,
       status: nextStatus,
-      ocrPassed: methodMatch && amountMatch,
+      ocrPassed: methodMatch && amountMatch && dateMatch === true,
       message: "Bukti pembayaran diterima dan menunggu verifikasi admin.",
     });
   } catch (err) {
