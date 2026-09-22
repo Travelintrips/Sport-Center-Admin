@@ -18,6 +18,7 @@ jobs:
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_TEST }}
       GCP_SECRET_ID: sport-center-test
       SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
 
     steps:
       - name: Checkout
