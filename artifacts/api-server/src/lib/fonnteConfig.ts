@@ -1,6 +1,7 @@
 import { db, settingsTable } from "@workspace/db";
 
 export const CUSTOMER_DEVICE_ENV = "FONNTE_CUSTOMER_DEVICE";
+export const CUSTOMER_INBOUND_DEVICES_ENV = "FONNTE_CUSTOMER_INBOUND_DEVICES";
 
 export type FonnteConfig = {
   adminToken: string;
@@ -30,6 +31,17 @@ export function resolveFonnteValueSource(settingsValue: unknown, environmentValu
   if (String(settingsValue ?? "").trim()) return "settings";
   if (String(environmentValue ?? "").trim()) return "environment";
   return "missing";
+}
+
+export function normalizeFonnteDeviceList(value: unknown): string[] {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw
+      .split(/[,;|\n]+/)
+      .map((item) => normalizeFonnteDevice(item))
+      .filter(Boolean),
+  )];
 }
 
 export function normalizeFonnteDevice(value: unknown): string {
@@ -103,8 +115,12 @@ export async function validateMinaFonnteWebhookDevice(
   }
 
   const providedDevice = normalizeFonnteDevice(body.device);
+  const allowedDevices = new Set([
+    ...(normalizedConfiguredDevice ? [normalizedConfiguredDevice] : []),
+    ...normalizeFonnteDeviceList(process.env[CUSTOMER_INBOUND_DEVICES_ENV]),
+  ]);
   return {
-    accepted: Boolean(normalizedConfiguredDevice && providedDevice === normalizedConfiguredDevice),
+    accepted: Boolean(providedDevice && allowedDevices.has(providedDevice)),
     providedDevice: providedDevice || null,
     configuredDevice: normalizedConfiguredDevice,
     source: resolved.source,
