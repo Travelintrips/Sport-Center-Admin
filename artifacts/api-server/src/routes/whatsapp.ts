@@ -940,11 +940,15 @@ router.get("/wa/action/:token", async (req, res) => {
       };
     }
 
+    const adminPhones = tokenRow.action === "upload_proof" ? await getAdminPhones() : [];
+    const supportWhatsapp = adminPhones[0] ?? null;
+
     res.json({
       action: tokenRow.action,
       booking,
       expiresAt: tokenRow.expiresAt,
       paymentOptions,
+      supportWhatsapp,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
