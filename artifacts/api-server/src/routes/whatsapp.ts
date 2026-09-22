@@ -4848,7 +4848,7 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // A bare confirmation without an active booking session should never fall
     // through to the general AI responder. This can happen in DEV when
     // transaction/session data is deliberately reset between booking steps.
-    if (isYes(lower)) {
+    if (isYes(msg)) {
       await logAudit({
         action: "mina_orphan_confirmation",
         entity: "wa_session",
