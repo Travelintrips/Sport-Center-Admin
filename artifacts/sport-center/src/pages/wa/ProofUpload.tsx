@@ -30,6 +30,7 @@ interface ActionInfo {
     pphAmount?: number | null;
     netAmount?: number | null;
     status: string;
+    createdAt?: string | null;
   };
   paymentOptions?: {
     transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
@@ -183,10 +184,22 @@ export default function WaProofUpload() {
   const ocrMethodMatches =
     ocrPreview?.paymentMethod !== "unknown" &&
     ocrPreview?.paymentMethod === paymentMethod;
+  const bookingCreatedDate = b?.createdAt
+    ? new Date(b.createdAt).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
+    : null;
+  const todayWib = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+  const ocrDateMatches =
+    Boolean(
+      ocrPreview?.date &&
+      bookingCreatedDate &&
+      ocrPreview.date >= bookingCreatedDate &&
+      ocrPreview.date <= todayWib,
+    );
   const ocrPreviewVerified =
     Boolean(ocrPreview) &&
     ocrAmountMatches &&
-    ocrMethodMatches;
+    ocrMethodMatches &&
+    ocrDateMatches;
 
   return (
     <div className="min-h-screen bg-orange-50 pb-8">
@@ -322,11 +335,16 @@ export default function WaProofUpload() {
                        <span> — tagihan Rp {expectedPaymentAmount.toLocaleString("id-ID")}</span>
                      )}
                    </p>
-                   {ocrPreview.date && <p>Tanggal terbaca: <strong>{ocrPreview.date}</strong></p>}
+                   <p>
+                     Tanggal transaksi: <strong>{ocrPreview.date ?? "Belum terbaca"}</strong>
+                     {ocrPreview.date && !ocrDateMatches && bookingCreatedDate && (
+                       <span> — tidak valid untuk booking yang dibuat {bookingCreatedDate}</span>
+                     )}
+                   </p>
                    <p className="mt-1">
                      {ocrPreviewVerified
-                       ? "Metode dan nominal sesuai tagihan. Server akan memeriksa ulang bukti saat dikirim."
-                       : "Hasil OCR belum dapat dipastikan sesuai. Bukti akan diperiksa ulang saat dikirim dan tetap menunggu verifikasi admin."}
+                       ? "Metode, nominal, dan tanggal transaksi sesuai. Server akan memeriksa ulang bukti saat dikirim."
+                       : "Hasil OCR belum dapat dipastikan sesuai. Metode, nominal, dan tanggal transaksi akan diperiksa ulang saat dikirim dan tetap menunggu verifikasi admin."}
                    </p>
                  </div>
                )}
