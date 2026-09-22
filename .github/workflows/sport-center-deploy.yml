@@ -1,0 +1,21 @@
+name: Sport Center Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy Sport Center
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deployment started
+        run: |
+          echo "Sport Center deployment workflow started"
+          echo "Hostinger deployment handled separately"
