@@ -1,5 +1,6 @@
 import {
   normalizeFonnteDevice,
+  normalizeFonnteDeviceList,
   resolveMinaFonnteDeviceValue,
   resolveFonnteToken,
   selectFonnteToken,
@@ -57,6 +58,35 @@ describe("Fonnte Mina device and token separation", () => {
       accepted: true,
       configuredDevice: deviceB,
     });
+  });
+
+  it("accepts only explicitly allowlisted secondary inbound devices", async () => {
+    const previous = process.env.FONNTE_CUSTOMER_INBOUND_DEVICES;
+    process.env.FONNTE_CUSTOMER_INBOUND_DEVICES = "0812 1610 4734, 0823-2130-1338";
+
+    expect(normalizeFonnteDeviceList(process.env.FONNTE_CUSTOMER_INBOUND_DEVICES)).toEqual([
+      "6281216104734",
+      "6282321301338",
+    ]);
+
+    await expect(
+      validateMinaFonnteWebhookDevice({ device: "081216104734" }, deviceA),
+    ).resolves.toMatchObject({
+      accepted: true,
+      providedDevice: "6281216104734",
+      configuredDevice: deviceA,
+    });
+
+    await expect(
+      validateMinaFonnteWebhookDevice({ device: "081399999999" }, deviceA),
+    ).resolves.toMatchObject({
+      accepted: false,
+      providedDevice: "628139999999",
+      configuredDevice: deviceA,
+    });
+
+    if (previous === undefined) delete process.env.FONNTE_CUSTOMER_INBOUND_DEVICES;
+    else process.env.FONNTE_CUSTOMER_INBOUND_DEVICES = previous;
   });
 
   it("fails closed when the configured device is empty or invalid", async () => {
