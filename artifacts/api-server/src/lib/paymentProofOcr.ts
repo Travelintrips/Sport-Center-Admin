@@ -106,17 +106,75 @@ export function parsePaymentProofAmount(text: string): number | null {
   return candidates[0]!.amount;
 }
 
-function parseDate(text: string): string | null {
-  const match =
+const MONTHS: Record<string, number> = {
+  jan: 1, januari: 1, january: 1,
+  feb: 2, februari: 2, february: 2,
+  mar: 3, maret: 3, march: 3,
+  apr: 4, april: 4,
+  mei: 5, may: 5,
+  jun: 6, juni: 6, june: 6,
+  jul: 7, juli: 7, july: 7,
+  agu: 8, agt: 8, agustus: 8, aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  okt: 10, oktober: 10, oct: 10, october: 10,
+  nov: 11, november: 11,
+  des: 12, desember: 12, dec: 12, december: 12,
+};
+
+function isoDate(year: number, month: number, day: number): string | null {
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+export function parsePaymentProofDate(text: string): string | null {
+  const numeric =
     text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/) ??
     text.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})\b/);
-  if (!match) return null;
+  if (numeric) {
+    const [, a, b, c] = numeric;
+    const year = Number(a.length === 4 ? a : c);
+    const month = Number(b);
+    const day = Number(a.length === 4 ? c : a);
+    const parsed = isoDate(year, month, day);
+    if (parsed) return parsed;
+  }
 
-  const [, a, b, c] = match;
-  const year = a.length === 4 ? a : c;
-  const month = a.length === 4 ? b : b;
-  const day = a.length === 4 ? c : a;
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const textual = text.match(
+    /\b(\d{1,2})\s+(Jan(?:uari|uary)?|Feb(?:ruari|ruary)?|Mar(?:et|ch)?|Apr(?:il)?|Mei|May|Jun(?:i|e)?|Jul(?:i|y)?|Agu(?:stus)?|Agt|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Okt(?:ober)?|Oct(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Dec(?:ember)?)\s+(20\d{2})\b/i,
+  );
+  if (!textual) return null;
+  const day = Number(textual[1]);
+  const month = MONTHS[textual[2].toLowerCase()];
+  const year = Number(textual[3]);
+  return month ? isoDate(year, month, day) : null;
+}
+
+function toWibDate(value: Date | string): string | null {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}
+
+export function paymentProofDateMatchesBooking(
+  proofDate: string | null | undefined,
+  bookingCreatedAt: Date | string | null | undefined,
+  now: Date = new Date(),
+): boolean | null {
+  if (!proofDate || !bookingCreatedAt) return null;
+  const createdDate = toWibDate(bookingCreatedAt);
+  const today = toWibDate(now);
+  if (!createdDate || !today) return null;
+  return proofDate >= createdDate && proofDate <= today;
 }
 
 function parseName(text: string): string | null {
@@ -269,7 +327,7 @@ export async function scanPaymentProof(
         rawText,
         name: parseName(rawText),
         amount: parsePaymentProofAmount(rawText),
-        date: parseDate(rawText),
+        date: parsePaymentProofDate(rawText),
         engine: "tesseract",
         scannedAt,
       };
