@@ -4363,8 +4363,19 @@ export default function AdminBookings() {
               <tbody>
                 <AnimatePresence mode="popLayout">
                    {displayRows.map((b: any, i: number) => {
-                    const groupRows = b.groupRef ? (bookingsByGroupRef[b.groupRef] ?? []) : [];
-                    const isMultiSessionGroup = Boolean(b.groupRef && groupRows.length > 1);
+                    const displayGroupKey = bookingDisplayGroupKey(b);
+                    const groupRows = displayGroupKey
+                      ? (bookingsByDisplayGroupKey[displayGroupKey] ?? [])
+                      : [];
+                    const isMultiSessionGroup = groupRows.length > 1;
+                    const isCompanyInvoiceAggregate = Boolean(
+                      isMultiSessionGroup &&
+                      b.payerType === "company" &&
+                      b.companyInvoiceId != null &&
+                      groupRows.every(
+                        (row: any) => Number(row.companyInvoiceId) === Number(b.companyInvoiceId),
+                      ),
+                    );
                     const groupPendingRows = groupRows.filter(
                       (row: any) => row.status === "waiting_confirmation" || row.status === "paid",
                     );
@@ -4391,7 +4402,12 @@ export default function AdminBookings() {
                      const groupPaymentMethods = [
                        ...new Set(
                          groupTaxRows
-                           .map((row: any) => row.membershipPayment?.paymentMethod ?? row.payment?.paymentMethod)
+                           .map(
+                             (row: any) =>
+                               row.companyInvoicePaymentMethod ??
+                               row.membershipPayment?.paymentMethod ??
+                               row.payment?.paymentMethod,
+                           )
                            .filter(Boolean),
                        ),
                      ];
@@ -4447,26 +4463,30 @@ export default function AdminBookings() {
                         b.payments.some((payment: any) => payment.isSettledOutsideBankReconciliation)),
                     );
                      const bookingTax = getBookingInvoiceTax(b);
-                      // The main Total column shows the amount payable after
-                      // withholding: DPP + PPN - PPh.
-                      const bookingDisplayTotal = bookingTax.netAmount;
                       const isPaidCompanyInvoice =
                         b.payerType === "company" &&
                         b.billingStatus === "paid" &&
                         Number(b.companyInvoiceTotal ?? 0) > 0;
+                      const companyInvoiceNetTotal = Number(
+                        b.companyInvoiceNetAmount ?? b.companyInvoiceTotal ?? 0,
+                      );
+                      // For one corporate invoice, show the single cash amount
+                      // expected in bank reconciliation across all facilities.
+                      const bookingDisplayTotal =
+                        isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
+                          ? companyInvoiceNetTotal
+                          : bookingTax.netAmount;
                       const companyInvoiceDisplayTotal = isPaidCompanyInvoice
-                        ? Number(b.companyInvoiceTotal)
+                        ? companyInvoiceNetTotal
                         : 0;
                      const groupDisplayTotal = isMultiSessionGroup
-                        ? groupRows.reduce((sum: number, row: any) => {
-                           const rowTax = getBookingInvoiceTax(row);
-                            return sum + rowTax.netAmount;
-                         }, 0)
+                        ? isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
+                          ? companyInvoiceNetTotal
+                          : groupRows.reduce((sum: number, row: any) => {
+                              const rowTax = getBookingInvoiceTax(row);
+                              return sum + rowTax.netAmount;
+                            }, 0)
                        : bookingDisplayTotal;
-                      // Group booking total must represent the cash amount that
-                      // should hit the bank after withholding (DPP + PPN - PPh).
-                      // companyInvoiceTotal is the gross corporate invoice and must
-                      // not override the grouped net payable shown for reconciliation.
                       const groupSummaryTotal = isMultiSessionGroup
                         ? groupDisplayTotal
                         : isPaidCompanyInvoice
@@ -4501,7 +4521,11 @@ export default function AdminBookings() {
                                   : "text-slate-600 dark:text-slate-400"
                               }`}
                             >
-                               {isMultiSessionGroup ? b.groupRef : b.orderNumber}
+                               {isCompanyInvoiceAggregate
+                                 ? (b.companyInvoiceNumber ?? `INV-${b.companyInvoiceId}`)
+                                 : isMultiSessionGroup
+                                   ? b.groupRef
+                                   : b.orderNumber}
                             </span>
                             {(isBankReconciled || isSettledOutsideBankReconciliation) && (
                               <div className="flex flex-wrap gap-1">
@@ -4647,34 +4671,29 @@ export default function AdminBookings() {
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                              {formatCurrency(bookingDisplayTotal)}
                           </span>
-                          {b.groupRef && (
+                          {isMultiSessionGroup && (
                             <div className="flex flex-col gap-0.5 mt-0.5">
-                              {/* Badge Group Booking + jumlah booking */}
                               <div className="flex items-center gap-1 flex-wrap">
                                 <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-600 text-white dark:bg-violet-500">
-                                  Group Booking
+                                  {isCompanyInvoiceAggregate ? "Tagihan Perusahaan" : "Group Booking"}
                                 </span>
-                                {bookingCountByGroupRef[b.groupRef] && (
-                                  <span className="text-[10px] text-violet-500 dark:text-violet-400 font-semibold">
-                                    {bookingCountByGroupRef[b.groupRef]} Booking
-                                  </span>
-                                )}
+                                <span className="text-[10px] text-violet-500 dark:text-violet-400 font-semibold">
+                                  {groupRows.length} Booking
+                                </span>
                               </div>
-                               {/* Ref grup + ringkasan total group. */}
                               <div className="flex items-center gap-1 flex-wrap">
                                 <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700">
-                                  <Link2 size={9} /> {b.groupRef}
+                                  <Link2 size={9} />{" "}
+                                  {isCompanyInvoiceAggregate
+                                    ? (b.companyInvoiceNumber ?? `INV-${b.companyInvoiceId}`)
+                                    : b.groupRef}
                                 </span>
-                                 {isGroupTotalRow && (
-                                   <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-400">
-                                     total group: {formatCurrency(groupSummaryTotal)}
-                                   </span>
-                                 )}
-                                 {bookingTax.pphAmount > 0 && !isMultiSessionGroup && (
-                                   <span className="text-[10px] text-orange-600 dark:text-orange-400">
-                                     net setelah PPh: {formatCurrency(bookingTax.netAmount)}
-                                   </span>
-                                 )}
+                                {isGroupTotalRow && (
+                                  <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+                                    {isCompanyInvoiceAggregate ? "total invoice" : "total group"}:{" "}
+                                    {formatCurrency(groupSummaryTotal)}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           )}
