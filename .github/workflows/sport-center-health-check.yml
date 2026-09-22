@@ -1,0 +1,27 @@
+name: Sport Center Health Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  health-check:
+    name: Check Sport Center Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check website
+        run: |
+          URL="https://sc.travelintrips.co.id"
+
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" $URL)
+
+          echo "HTTP Status: $STATUS"
+
+          if [ "$STATUS" != "200" ]; then
+            echo "Sport Center is not healthy"
+            exit 1
+          fi
+
+          echo "Sport Center is healthy"
