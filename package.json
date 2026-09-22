@@ -5,7 +5,7 @@
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*|npm/*) ;; *) echo \"Use pnpm, or npm only as the Hostinger bootstrap package manager\" >&2; exit 1 ;; esac'",
     "build": "sh -c 'case \"$npm_config_user_agent\" in npm/*) npx --yes pnpm@10.33.0 install --frozen-lockfile && npx --yes pnpm@10.33.0 run build:workspace ;; *) pnpm run build:workspace ;; esac'",
-    "build:workspace": "pnpm run typecheck && pnpm -r --if-present run build && node ./scripts/prepare-hostinger.mjs",
+    "build:workspace": "pnpm run typecheck && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/sport-center run build && node ./scripts/prepare-hostinger.mjs",
     "hostinger:build": "npm run build",
     "start": "node --max-http-header-size=65536 --enable-source-maps ./index.js",
     "typecheck:libs": "tsc --build",
