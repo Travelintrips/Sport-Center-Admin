@@ -150,6 +150,25 @@ function findField(section: JsonObject, field: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Hostinger production keeps a long-lived node-postgres Pool. In this
+ * environment the Supabase shared transaction-pooler endpoint on port 6543
+ * has been observed refusing outbound connections, while the same Supavisor
+ * host exposes session mode on port 5432. Keep the secret as source-of-truth
+ * and normalize only the transport port at runtime; credentials, host,
+ * project reference, database name and query parameters remain unchanged.
+ */
+function normalizeDatabaseUrlForRuntime(
+  value: string,
+  env: "dev" | "prod",
+): string {
+  if (env !== "prod") return value;
+  return value.replace(
+    /(\.pooler\.supabase\.com):6543(?=\/|\?|$)/i,
+    "$1:5432",
+  );
+}
+
 function parseBootstrap(raw: string): BootstrapConfig {
   const parsed = JSON.parse(raw) as JsonObject;
   const projectId =
@@ -286,7 +305,10 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
   for (const [field, envKey] of mappings) {
     const value = findField(section, field);
     if (value) {
-      process.env[envKey] = value;
+      process.env[envKey] =
+        field === "database_url"
+          ? normalizeDatabaseUrlForRuntime(value, env)
+          : value;
       loaded.push(envKey);
     }
   }
