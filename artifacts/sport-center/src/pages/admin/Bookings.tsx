@@ -3061,6 +3061,25 @@ export default function AdminBookings() {
     return m;
   }, [bookings]);
 
+  // Corporate monthly invoices can contain several recurring groups across
+  // different facilities. They represent one payment obligation in the list,
+  // so collapse those rows by companyInvoiceId rather than by groupRef.
+  const bookingDisplayGroupKey = (booking: any): string | null => {
+    if (booking?.payerType === "company" && booking?.companyInvoiceId != null) {
+      return `company-invoice:${booking.companyInvoiceId}`;
+    }
+    return booking?.groupRef ? `group:${booking.groupRef}` : null;
+  };
+
+  const bookingsByDisplayGroupKey = useMemo(() => {
+    const m: Record<string, any[]> = {};
+    for (const b of bookings as any[]) {
+      const key = bookingDisplayGroupKey(b);
+      if (key) (m[key] ??= []).push(b);
+    }
+    return m;
+  }, [bookings]);
+
   const dissolveGroup = async (groupRef: string) => {
     setDissolvingRef(groupRef);
     try {
@@ -3538,19 +3557,21 @@ export default function AdminBookings() {
       : sorted;
   }, [bookings, statusFilter, settlementFilter, search, dateFrom, dateTo]);
 
-  // Recurring sessions remain separate in `filtered` for stats, selection, and
-  // audit actions, but the main table shows one representative row per group.
+  // Source sessions remain separate for audit/detail, but the main table shows
+  // one representative per payment obligation. A company invoice is one
+  // obligation even when it contains several groupRefs/facilities.
   const displayRows = useMemo(() => {
     const seenGroups = new Set<string>();
     return filtered.filter((booking: any) => {
-      if (!booking.groupRef || (bookingsByGroupRef[booking.groupRef] ?? []).length <= 1) {
+      const key = bookingDisplayGroupKey(booking);
+      if (!key || (bookingsByDisplayGroupKey[key] ?? []).length <= 1) {
         return true;
       }
-      if (seenGroups.has(booking.groupRef)) return false;
-      seenGroups.add(booking.groupRef);
+      if (seenGroups.has(key)) return false;
+      seenGroups.add(key);
       return true;
     });
-  }, [filtered, bookingsByGroupRef]);
+  }, [filtered, bookingsByDisplayGroupKey]);
 
   // Satu groupRef hanya boleh memiliki satu entry aksi verifikasi pada
   // tampilan saat ini. Memilih row dengan bukti pembayaran membuat aksi tetap
@@ -3763,7 +3784,7 @@ export default function AdminBookings() {
   );
 
   const toggleRowSelection = (booking: any, groupRows: any[]) => {
-    const ids = booking.groupRef && groupRows.length > 1
+    const ids = groupRows.length > 1
       ? groupRows.map((row: any) => row.id)
       : [booking.id];
     setSelectedIds((prev) => {
@@ -4301,10 +4322,11 @@ export default function AdminBookings() {
                        checked={
                          displayRows.length > 0 &&
                          displayRows.every((row: any) => {
-                           const groupRows = row.groupRef
-                             ? (bookingsByGroupRef[row.groupRef] ?? [])
+                           const displayKey = bookingDisplayGroupKey(row);
+                           const groupRows = displayKey
+                             ? (bookingsByDisplayGroupKey[displayKey] ?? [])
                              : [];
-                           const ids = row.groupRef && groupRows.length > 1
+                           const ids = groupRows.length > 1
                              ? groupRows.map((groupRow: any) => groupRow.id)
                              : [row.id];
                            return ids.every((id: number) => selectedIds.has(id));
@@ -4317,10 +4339,11 @@ export default function AdminBookings() {
                          }
                          const ids = new Set<number>();
                          displayRows.forEach((row: any) => {
-                           const groupRows = row.groupRef
-                             ? (bookingsByGroupRef[row.groupRef] ?? [])
+                           const displayKey = bookingDisplayGroupKey(row);
+                           const groupRows = displayKey
+                             ? (bookingsByDisplayGroupKey[displayKey] ?? [])
                              : [];
-                           const rows = row.groupRef && groupRows.length > 1 ? groupRows : [row];
+                           const rows = groupRows.length > 1 ? groupRows : [row];
                            rows.forEach((groupRow: any) => ids.add(groupRow.id));
                          });
                          setSelectedIds(ids);
