@@ -16,6 +16,7 @@ import {
 } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import type { InvoiceSession, InvoiceData } from "./invoiceTemplate";
+import { calculateBookingWithholdingTax, calculateInclusiveInvoiceTax } from "./tax";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ function calcDpp(grandTotal: number, ppnRate: number) {
   const dpp = Math.round(grandTotal / (1 + rate));
   const dppNilaiLain = Math.round((dpp * 11) / 12);
   const ppnAmount = Math.round(dppNilaiLain * 0.12);
-  return { dpp, dppNilaiLain, ppnAmount, grandTotal: dpp + ppnAmount };
+  return { dpp, dppNilaiLain, ppnAmount, grandTotal };
 }
 
 function snapshotTax(booking: {
@@ -74,9 +75,18 @@ function snapshotTax(booking: {
   ppnRate?: string | number | null;
 }) {
   const hasSnapshot = booking.dpp != null || booking.ppnAmount != null || booking.grandTotal != null;
+  const totalPrice = Math.max(0, Math.round(Number(booking.totalPrice ?? 0)));
   const grandTotal = Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0));
   if (!hasSnapshot) return null;
   const ppnAmount = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
+  const isAdditiveLegacySnapshot =
+    totalPrice > 0 &&
+    ppnAmount > 0 &&
+    grandTotal > totalPrice &&
+    Math.abs(grandTotal - totalPrice - ppnAmount) <= 1;
+  if (isAdditiveLegacySnapshot) {
+    return calculateInclusiveInvoiceTax(totalPrice);
+  }
   const dpp = Math.max(0, Math.round(Number(booking.dpp ?? grandTotal - ppnAmount)));
   return {
     dpp,
@@ -108,6 +118,15 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
   const ppnRate = booking.ppnRate == null ? await resolvePpnRate(booking.ppnRate) : Number(booking.ppnRate);
   const baseGrandTotal = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice ?? 0);
   const tax = snapshotTax(booking) ?? calcDpp(baseGrandTotal, ppnRate);
+  const withholding = calculateBookingWithholdingTax({
+    companyCustomerId: booking.companyCustomerId,
+    grandTotal: tax.grandTotal,
+    totalPrice: booking.totalPrice,
+    dpp: tax.dpp,
+    ppnAmount: tax.ppnAmount,
+    pphRate: booking.pphRate,
+    pphAmount: booking.pphAmount,
+  });
   const invoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
 
   return {
@@ -134,9 +153,9 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     ppnTreatment: booking.ppnTreatment,
     ppnCollectedByCustomer: booking.ppnCollectedByCustomer === true || booking.ppnTreatment === "collected_by_customer",
     grandTotal: tax.grandTotal,
-    pphRate: booking.pphRate == null ? 0 : Number(booking.pphRate),
-    pphAmount: booking.pphAmount == null ? 0 : Number(booking.pphAmount),
-    netAmount: booking.netAmount == null ? tax.grandTotal : Number(booking.netAmount),
+    pphRate: withholding.rate,
+    pphAmount: withholding.amount,
+    netAmount: withholding.netAmount,
 
     promoCode: booking.promoCode ?? null,
     discountAmount: Number(booking.discountAmount ?? 0),
@@ -200,20 +219,45 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
   const { invoiceDoc, generalDoc } = await loadDocSettings();
 
   const ppnRate = firstBooking.ppnRate == null ? await resolvePpnRate(firstBooking.ppnRate) : Number(firstBooking.ppnRate);
-  const groupTax = groupBookings.reduce(
-    (sum, b) => {
-      const tax = snapshotTax(b) ?? calcDpp(Number(b.totalPrice ?? 0), Number(b.ppnRate ?? ppnRate));
-      sum.dpp += tax.dpp;
-      sum.ppnAmount += tax.ppnAmount;
-      sum.grandTotal += tax.grandTotal;
-      return sum;
-    },
-    { dpp: 0, ppnAmount: 0, grandTotal: 0 },
+  // Harga setiap sesi sudah termasuk PPN. Jumlahkan bruto sesi dahulu,
+  // kemudian ekstrak DPP/PPN sekali dari total grup agar pembulatan tidak
+  // menghasilkan total yang berbeda dari invoice resmi.
+  const groupGrossTotal = groupBookings.reduce(
+    (sum, b) => sum + Math.max(0, Math.round(Number(b.totalPrice ?? b.grandTotal ?? 0))),
+    0,
   );
+  const hasPpn =
+    ppnRate > 0 ||
+    groupBookings.some((b) => Number(b.ppnAmount ?? 0) > 0);
+  const groupTax = hasPpn
+    ? calculateInclusiveInvoiceTax(groupGrossTotal)
+    : {
+        dpp: groupGrossTotal,
+        dppNilaiLain: 0,
+        ppnAmount: 0,
+        grandTotal: groupGrossTotal,
+      };
   const dpp = groupTax.dpp;
-  const dppNilaiLain = groupTax.ppnAmount > 0 ? Math.round((dpp * 11) / 12) : 0;
+  const dppNilaiLain = groupTax.dppNilaiLain;
   const ppnAmount = groupTax.ppnAmount;
   const grandTotal = groupTax.grandTotal;
+  const pphSource =
+    groupBookings.find(
+      (b) =>
+        b.companyCustomerId != null &&
+        (Number(b.pphRate ?? 0) > 0 || Number(b.pphAmount ?? 0) > 0),
+    ) ?? firstBooking;
+  const storedPphAmount = groupBookings.reduce(
+    (sum, b) => sum + Math.max(0, Math.round(Number(b.pphAmount ?? 0))),
+    0,
+  );
+  const withholding = calculateBookingWithholdingTax({
+    companyCustomerId: pphSource.companyCustomerId,
+    grandTotal,
+    dpp,
+    pphRate: pphSource.pphRate,
+    pphAmount: storedPphAmount,
+  });
 
   // Nama fasilitas per booking (bisa berbeda jika multi-fasilitas)
   const facilityNames: Record<number, string> = {};
@@ -230,7 +274,7 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
 
   const sessions: InvoiceSession[] = groupBookings.map((b) => {
     const discountAmt = Number(b.discountAmount ?? 0);
-    const grandTotalVal = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+    const grandTotalVal = b.totalPrice != null ? Number(b.totalPrice) : Number(b.grandTotal);
     const basePriceVal =
       b.basePrice != null
         ? Number(b.basePrice)
@@ -281,9 +325,9 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
     ppnTreatment: firstBooking.ppnTreatment,
     ppnCollectedByCustomer: groupBookings.every((b) => b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer"),
     grandTotal,
-    pphRate: firstBooking.pphRate == null ? 0 : Number(firstBooking.pphRate),
-    pphAmount: groupBookings.reduce((sum, b) => sum + Number(b.pphAmount ?? 0), 0),
-    netAmount: groupBookings.reduce((sum, b) => sum + Number(b.netAmount ?? b.grandTotal ?? b.totalPrice), 0),
+    pphRate: withholding.rate,
+    pphAmount: withholding.amount,
+    netAmount: withholding.netAmount,
 
     promoCode: firstBooking.promoCode ?? null,
     discountAmount: totalDiscount,

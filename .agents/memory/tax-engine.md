@@ -11,7 +11,7 @@ Harga lapangan adalah **inklusif PPN** (tax-inclusive). Grand Total = harga yang
 - `totalPrice` di DB = harga inklusif (= grandTotal). `ppnAmount` = PPN yang diekstrak. `grandTotal` = harga inklusif.
 - Frontend DPP display = `grandTotal - ppnAmount` (bukan `totalPrice` karena keduanya sama sekarang).
 - `recordTaxTransaction(...)` inserts to tax_transactions table (non-blocking, fire-and-forget).
-- Company invoices: PPN is summed from `booking.ppnAmount` (already stored), NOT recalculated.
+- Company/group invoices: sum the inclusive `totalPrice` values first, then extract DPP/PPN once from the aggregate; do not sum per-session rounded tax snapshots.
 - Admin/customer booking detail and company invoices use `pphAmount = precise inclusive DPP × rate` and `netAmount = (DPP + PPN) − PPh` regardless of who collects the PPN; display-rounded DPP must not be used for the final PPh rounding.
 - PPh eligibility is limited to company bookings whose company setting enables withholding; personal bookings must ignore any stale PPh snapshot and use the normal gross total.
 - Company invoice corrections may apply the withholding snapshot back to each linked booking: keep `totalPrice`, DPP, PPN, and `grandTotal` unchanged; update only `pphRate`, `pphAmount`, and `netAmount`.
@@ -33,4 +33,4 @@ Harga lapangan adalah **inklusif PPN** (tax-inclusive). Grand Total = harga yang
 Pengguna ingin harga yang tertera (mis. 50rb) sudah termasuk PPN, bukan ditambah PPN di atas harga. Consistent dengan praktik umum usaha ritel Indonesia.
 
 **How to apply:**
-Jika tax rate perlu diubah, update baris di `tax_settings` DB saja. Kalkulasi inklusif: dpp = harga / (1 + rate/100).
+Jika tax rate perlu diubah, update baris di `tax_settings` DB saja. Kalkulasi inklusif: dpp = harga / (1 + rate/100). Untuk beberapa sesi, agregasikan harga inklusif sebelum pembulatan pajak agar net invoice dan daftar booking identik.

@@ -91,7 +91,18 @@ type BookingStatus =
   | "expired"
   | "refunded";
 
-function getBookingInvoiceTax(booking: any) {
+type InvoiceTaxSummary = {
+  grandTotal: number;
+  dpp: number;
+  dppNilaiLain: number;
+  ppnAmount: number;
+  pphRate: number;
+  pphAmount: number;
+  cashGross: number;
+  netAmount: number;
+};
+
+function getBookingInvoiceTax(booking: any): InvoiceTaxSummary {
   const totalPrice = Math.max(0, Math.round(Number(booking.totalPrice ?? booking.grandTotal ?? 0)));
   const storedPpn = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
   const legacyAdditiveSnapshot = isAdditiveLegacyTaxSnapshot(booking);
@@ -132,6 +143,59 @@ function getBookingInvoiceTax(booking: any) {
     dpp,
     dppNilaiLain,
     ppnAmount,
+    pphRate: withholding.rate,
+    pphAmount: withholding.amount,
+    cashGross: withholding.cashGross,
+    netAmount: withholding.netAmount,
+  };
+}
+
+function getGroupInvoiceTax(bookings: any[]): InvoiceTaxSummary | null {
+  const rows = bookings.filter(Boolean);
+  if (rows.length === 0) return null;
+
+  const rowTaxes = rows.map((row) => getBookingInvoiceTax(row));
+  const grossAmount = rowTaxes.reduce((sum, tax) => sum + tax.grandTotal, 0);
+  const hasPpn = rows.some(
+    (row, index) =>
+      rowTaxes[index].ppnAmount > 0 ||
+      row.ppnTreatment === "inclusive" ||
+      isAdditiveLegacyTaxSnapshot(row),
+  );
+  const tax: Pick<InvoiceTaxSummary, "grandTotal" | "dpp" | "dppNilaiLain" | "ppnAmount"> = hasPpn
+    ? calculateInclusiveInvoiceTax(grossAmount)
+    : {
+        grandTotal: grossAmount,
+        dpp: grossAmount,
+        dppNilaiLain: 0,
+        ppnAmount: 0,
+      };
+  const withholdingSource =
+    rows.find(
+      (row) =>
+        row.companyCustomerId != null &&
+        (Number(row.pphRate ?? 0) > 0 || Number(row.pphAmount ?? 0) > 0),
+    ) ?? rows[0];
+  const storedPphAmount = rows.reduce(
+    (sum, row) => sum + Math.max(0, Math.round(Number(row.pphAmount ?? 0))),
+    0,
+  );
+  const withholding = calculateBookingWithholdingTax({
+    grossAmount: tax.grandTotal,
+    dpp: tax.dpp,
+    companyCustomerId: withholdingSource?.companyCustomerId,
+    pphRate: withholdingSource?.pphRate,
+    pphAmount: storedPphAmount,
+    ppnCollectedByCustomer: rows.every(
+      (row) =>
+        row.ppnCollectedByCustomer === true ||
+        row.ppnTreatment === "collected_by_customer",
+    ),
+    ppnTreatment: withholdingSource?.ppnTreatment,
+  });
+
+  return {
+    ...tax,
     pphRate: withholding.rate,
     pphAmount: withholding.amount,
     cashGross: withholding.cashGross,
@@ -359,11 +423,7 @@ function BookingGroupSessionsDialog({
     const bKey = `${b.bookingDate ?? ""} ${b.startTime ?? ""}`;
     return aKey.localeCompare(bKey);
   });
-  const total = sortedSessions.reduce(
-    (sum, session) =>
-      sum + getBookingInvoiceTax(session).netAmount,
-    0,
-  );
+  const total = getGroupInvoiceTax(sortedSessions)?.netAmount ?? 0;
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -1318,29 +1378,7 @@ function BookingDetailDrawer({
   const StatusIcon = cfg.icon;
   const bookingTax = getBookingInvoiceTax(booking);
   const isMultiSessionGroup = Boolean(booking.groupRef && groupBookings.length > 1);
-  const groupTax = isMultiSessionGroup
-    ? groupBookings.reduce(
-        (totals: {
-          grandTotal: number;
-          dpp: number;
-          dppNilaiLain: number;
-          ppnAmount: number;
-          pphAmount: number;
-          netAmount: number;
-        }, row: any) => {
-          const rowTax = getBookingInvoiceTax(row);
-          return {
-            grandTotal: totals.grandTotal + rowTax.grandTotal,
-            dpp: totals.dpp + rowTax.dpp,
-            dppNilaiLain: totals.dppNilaiLain + rowTax.dppNilaiLain,
-            ppnAmount: totals.ppnAmount + rowTax.ppnAmount,
-            pphAmount: totals.pphAmount + rowTax.pphAmount,
-            netAmount: totals.netAmount + rowTax.netAmount,
-          };
-        },
-        { grandTotal: 0, dpp: 0, dppNilaiLain: 0, ppnAmount: 0, pphAmount: 0, netAmount: 0 },
-      )
-    : null;
+  const groupTax = isMultiSessionGroup ? getGroupInvoiceTax(groupBookings) : null;
 
   const handleAction = (action: string) => {
     if (confirmAction === action) {
@@ -1659,7 +1697,10 @@ function BookingDetailDrawer({
                   </div>
                 </div>
               )}
-              {bookingTax.ppnAmount > 0 || bookingTax.pphAmount > 0 ? (
+              {bookingTax.ppnAmount > 0 ||
+              bookingTax.pphAmount > 0 ||
+              (groupTax?.ppnAmount ?? 0) > 0 ||
+              (groupTax?.pphAmount ?? 0) > 0 ? (
                 <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1 space-y-1.5">
                   {groupTax && (
                     <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 dark:border-violet-800 dark:bg-violet-900/20">
@@ -4484,13 +4525,10 @@ export default function AdminBookings() {
                       const companyInvoiceDisplayTotal = isPaidCompanyInvoice
                         ? companyInvoiceNetTotal
                         : 0;
-                     const groupDisplayTotal = isMultiSessionGroup
+                       const groupDisplayTotal = isMultiSessionGroup
                         ? isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
                           ? companyInvoiceNetTotal
-                          : groupRows.reduce((sum: number, row: any) => {
-                              const rowTax = getBookingInvoiceTax(row);
-                              return sum + rowTax.netAmount;
-                            }, 0)
+                           : (getGroupInvoiceTax(groupRows)?.netAmount ?? 0)
                        : bookingDisplayTotal;
                       const groupSummaryTotal = isMultiSessionGroup
                         ? groupDisplayTotal

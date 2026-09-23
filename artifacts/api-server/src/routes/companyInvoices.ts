@@ -186,50 +186,26 @@ function summarizeBookingTax(rows: Array<{
   ppnCollectedByCustomer?: boolean | null;
 }>) {
   const hasSnapshot = rows.some((b) => b.dpp != null || b.ppnAmount != null || b.grandTotal != null);
-  const totalAmount = rows.reduce((sum, b) => sum + Number(b.totalPrice ?? 0), 0);
-  if (!hasSnapshot) {
-    const tax = calcTaxBreakdown(totalAmount);
-    return { totalAmount, ...tax, ppnRate: 11, ppnTreatment: "normal", ppnCollectedByCustomer: false };
-  }
-
-  const dpp = rows.reduce((sum, b) => {
-    const totalPrice = Math.max(0, Math.round(Number(b.totalPrice ?? 0)));
-    const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
-    const storedPpn = Math.max(0, Math.round(Number(b.ppnAmount ?? 0)));
-    const looksLikeAdditiveLegacySnapshot =
-      storedPpn > 0 &&
-      totalPrice > 0 &&
-      grand > totalPrice &&
-      Math.abs(grand - totalPrice - storedPpn) <= 1;
-    if (looksLikeAdditiveLegacySnapshot) {
-      return sum + calcTaxBreakdown(totalPrice).dpp;
-    }
-    return sum + Math.max(0, Number(b.dpp ?? grand - storedPpn));
-  }, 0);
-  const ppnAmount = rows.reduce((sum, b) => {
-    const totalPrice = Math.max(0, Math.round(Number(b.totalPrice ?? 0)));
-    const storedPpn = Math.max(0, Math.round(Number(b.ppnAmount ?? 0)));
-    const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
-    const looksLikeAdditiveLegacySnapshot =
-      storedPpn > 0 &&
-      totalPrice > 0 &&
-      grand > totalPrice &&
-      Math.abs(grand - totalPrice - storedPpn) <= 1;
-    return sum + (looksLikeAdditiveLegacySnapshot
-      ? calcTaxBreakdown(totalPrice).ppnAmount
-      : storedPpn);
-  }, 0);
-  const grandTotal = rows.reduce((sum, b) => {
-    const totalPrice = Math.max(0, Math.round(Number(b.totalPrice ?? 0)));
-    const storedPpn = Math.max(0, Math.round(Number(b.ppnAmount ?? 0)));
-    const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
-    const looksLikeAdditiveLegacySnapshot =
-      storedPpn > 0 &&
-      totalPrice > 0 &&
-      grand > totalPrice &&
-      Math.abs(grand - totalPrice - storedPpn) <= 1;
-    return sum + (looksLikeAdditiveLegacySnapshot ? totalPrice : grand);
-  }, 0);
+  const totalAmount = rows.reduce(
+    (sum, b) => sum + Math.max(0, Math.round(Number(b.totalPrice ?? b.grandTotal ?? 0))),
+    0,
+  );
+  const hasPpn =
+    !hasSnapshot ||
+    rows.some(
+      (b) =>
+        Number(b.ppnAmount ?? 0) > 0 ||
+        Number(b.ppnRate ?? 0) > 0 ||
+        b.ppnTreatment === "inclusive",
+    );
+  const tax = hasPpn
+    ? calcTaxBreakdown(totalAmount)
+    : {
+        dpp: totalAmount,
+        dppNilaiLain: 0,
+        ppnAmount: 0,
+        grandTotal: totalAmount,
+      };
   const rates = [...new Set(rows.map((b) => Number(b.ppnRate ?? 0)).filter((rate) => rate > 0))];
   const collected = rows.length > 0 && rows.every((b) =>
     b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer",
@@ -237,12 +213,9 @@ function summarizeBookingTax(rows: Array<{
   const treatments = [...new Set(rows.map((b) => b.ppnTreatment).filter(Boolean))];
   return {
     totalAmount,
-    dpp: Math.round(dpp),
-    dppNilaiLain: ppnAmount > 0 ? Math.round(dpp * 11 / 12) : 0,
-    ppnAmount: Math.round(ppnAmount),
-    grandTotal: Math.round(grandTotal),
-    ppnRate: rates.length === 1 ? rates[0] : 0,
-    ppnTreatment: treatments.length === 1 ? treatments[0] : "mixed",
+    ...tax,
+    ppnRate: rates.length === 1 ? rates[0] : hasPpn ? 11 : 0,
+    ppnTreatment: treatments.length === 1 ? treatments[0] : hasPpn ? "inclusive" : "none",
     ppnCollectedByCustomer: collected,
   };
 }
@@ -259,39 +232,32 @@ function summarizeWithholdingTax(
     ppnTreatment?: string | null;
     ppnCollectedByCustomer?: boolean | null;
   }>,
+  tax = summarizeBookingTax(rows),
 ) {
   // Recalculate from the tax base instead of trusting historical pphAmount or
   // netAmount snapshots. Some booking rows store PPN additively (grandTotal =
   // totalPrice + ppnAmount), while the company invoice presents that same
   // price as PPN-inclusive. Normalize those legacy snapshots before applying
   // withholding so Net never becomes larger than the invoice total.
-  const calculations = rows.map((row) => {
-    const totalPrice = Math.max(0, Math.round(Number(row.totalPrice ?? 0)));
-    const storedGrandTotal = Math.max(0, Math.round(Number(row.grandTotal ?? totalPrice)));
-    const ppnAmount = Math.max(0, Math.round(Number(row.ppnAmount ?? 0)));
-    const looksLikeAdditiveLegacySnapshot =
-      ppnAmount > 0 &&
-      totalPrice > 0 &&
-      storedGrandTotal > totalPrice &&
-      Math.abs(storedGrandTotal - totalPrice - ppnAmount) <= 1;
-    const grandTotal = looksLikeAdditiveLegacySnapshot ? totalPrice : storedGrandTotal;
-    const dpp = looksLikeAdditiveLegacySnapshot
-      ? calcTaxBreakdown(totalPrice).dpp
-      : Math.max(0, Math.round(Number(row.dpp ?? grandTotal - ppnAmount)));
-    const storedPph = Math.max(0, Number(row.pphAmount ?? 0));
-    const configuredRate = Math.max(0, Number(row.pphRate ?? 0));
-    const enabled = configuredRate > 0 || storedPph > 0;
-    const rate = configuredRate > 0 ? configuredRate : (enabled ? 10 : 0);
-    const withholding = calculateWithholdingTax(grandTotal, dpp, enabled, rate);
-    return { rate: withholding.rate, amount: withholding.amount, netAmount: withholding.netAmount };
-  });
-  const pphAmount = calculations.reduce((sum, row) => sum + row.amount, 0);
-  const rates = [...new Set(calculations.map((row) => row.rate).filter((rate) => rate > 0))];
-  const netAmount = calculations.reduce((sum, calculation) => sum + calculation.netAmount, 0);
+  const configuredRates = [...new Set(
+    rows.map((row) => Math.max(0, Number(row.pphRate ?? 0))).filter((rate) => rate > 0),
+  )];
+  const storedPphAmount = rows.reduce(
+    (sum, row) => sum + Math.max(0, Math.round(Number(row.pphAmount ?? 0))),
+    0,
+  );
+  const enabled = configuredRates.length > 0 || storedPphAmount > 0;
+  const rate = configuredRates.length === 1 ? configuredRates[0] : enabled ? 10 : 0;
+  const withholding = calculateWithholdingTax(
+    tax.grandTotal,
+    tax.dpp,
+    enabled,
+    rate,
+  );
   return {
-    pphRate: pphAmount > 0 && rates.length === 1 ? rates[0] : 0,
-    pphAmount: Math.round(pphAmount),
-    netAmount: Math.round(netAmount),
+    pphRate: withholding.amount > 0 ? withholding.rate : 0,
+    pphAmount: withholding.amount,
+    netAmount: withholding.netAmount,
   };
 }
 
@@ -565,8 +531,8 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
 
     const tax = summarizeBookingTax(bookingList);
     const { totalAmount: subtotal, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
-    const { pphRate, pphAmount } = summarizeWithholdingTax(bookingList);
-    const { netAmount } = summarizeWithholdingTax(bookingList);
+    const withholding = summarizeWithholdingTax(bookingList, tax);
+    const { pphRate, pphAmount, netAmount } = withholding;
 
     // Check if invoice already exists for this company + period
     const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
@@ -679,7 +645,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         pphRate: newPphRate,
         pphAmount: newPphAmount,
         netAmount: newNetAmount,
-      } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems));
+      } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems), newTax);
 
       const [updated] = await db.update(companyInvoicesTable)
         .set({
@@ -728,7 +694,7 @@ async function handleGenerateInvoice(req: any, res: any) {
     // historical values from the current tax settings.
     const tax = summarizeBookingTax(unbilledBookings);
     const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
-    const { pphRate, pphAmount, netAmount } = summarizeWithholdingTax(unbilledBookings);
+    const { pphRate, pphAmount, netAmount } = summarizeWithholdingTax(unbilledBookings, tax);
 
     const [inv] = await db.insert(companyInvoicesTable).values({
       invoiceNumber: "TEMP",
