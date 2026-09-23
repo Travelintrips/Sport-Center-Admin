@@ -190,10 +190,10 @@ export function calculateTaxFromTreatment(
  * Resolve PPN treatment from the customer snapshot source before calculating
  * the amount. The global tax setting remains the source for the active rate.
  *
- * Personal checked  = inclusive PPN.
- * Personal unchecked = no PPN.
- * Company unchecked  = normal PPN received by Sport Center.
- * Company checked    = PPN shown on the invoice but collected by customer.
+ * Harga fasilitas sudah termasuk PPN ketika customer mengaktifkan PPN.
+ * Personal/company checked = inclusive PPN.
+ * Personal/company unchecked = no PPN breakdown, tetapi harga jual tetap
+ * tidak ditambah PPN lagi.
  */
 export async function resolveCustomerTax(
   subtotal: number,
@@ -214,9 +214,7 @@ export async function resolveCustomerTax(
 
   const accountType = customer?.accountType === "company" ? "company" : "personal";
   const enabled = customer?.ppnEnabled ?? true;
-  const treatment: PpnTreatment = accountType === "company"
-    ? (enabled ? "collected_by_customer" : "normal")
-    : (enabled ? "inclusive" : "none");
+  const treatment: PpnTreatment = enabled ? "inclusive" : "none";
 
   return calculateTaxForTreatment(subtotal, treatment, options.bookingDate);
 }
