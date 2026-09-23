@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle, CheckCircle, Clock, MapPin, Phone } from "lucide-react";
+import { AlertCircle, Building2, CheckCircle, Clock, MapPin, Phone, QrCode } from "lucide-react";
 
 interface Facility {
   id: number;
@@ -36,6 +36,12 @@ interface AvailabilitySlot {
   time: string;
   available: boolean;
   reason: string | null;
+}
+
+interface PaymentSettings {
+  bankName?: string | null;
+  bankAccount?: string | null;
+  qrisImageUrl?: string | null;
 }
 
 function timeToMinutes(t: string): number {
@@ -67,6 +73,7 @@ export default function WaBookingForm() {
   const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilitySlot[] | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -75,6 +82,7 @@ export default function WaBookingForm() {
     startTime: startTimeFromWA,
     durationHours: durationFromWA,
     notes: "",
+    paymentMethod: "" as "" | "qris" | "transfer",
   });
 
   useEffect(() => {
@@ -87,6 +95,17 @@ export default function WaBookingForm() {
       .catch(() => setError("Gagal memuat data fasilitas"))
       .finally(() => setLoading(false));
   }, [params.facilityId]);
+
+  // Manual payment options are read from the public production settings.
+  // This flow does not use the Paylabs/sandbox configuration.
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: PaymentSettings | null) => {
+        if (data) setPaymentSettings(data);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!facility || !form.bookingDate) {
@@ -156,6 +175,23 @@ export default function WaBookingForm() {
     ? facility.pricePerHour * Number(form.durationHours)
     : 0;
 
+  const paymentOptions: Array<{
+    id: "qris" | "transfer";
+    label: string;
+    detail: string;
+  }> = [
+    ...(paymentSettings?.qrisImageUrl
+      ? [{ id: "qris" as const, label: "QRIS", detail: "Scan & bayar" }]
+      : []),
+    ...(paymentSettings?.bankName && paymentSettings?.bankAccount
+      ? [{
+          id: "transfer" as const,
+          label: "Transfer Bank",
+          detail: paymentSettings.bankName,
+        }]
+      : []),
+  ];
+
   const endTime = form.startTime
     ? addHoursToTime(form.startTime, Number(form.durationHours))
     : "";
@@ -163,6 +199,10 @@ export default function WaBookingForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (paymentOptions.length > 0 && !form.paymentMethod) {
+      setError("Pilih metode pembayaran: QRIS atau Transfer Bank.");
+      return;
+    }
     setSubmitting(true);
     try {
       const resp = await fetch("/api/wa/booking", {
@@ -176,6 +216,7 @@ export default function WaBookingForm() {
           startTime: form.startTime,
           durationHours: Number(form.durationHours),
           notes: form.notes,
+          paymentMethod: form.paymentMethod || undefined,
         }),
       });
       const data = await resp.json();
@@ -429,6 +470,41 @@ export default function WaBookingForm() {
           {form.startTime && (
             <Card className="border-orange-200 bg-orange-50">
               <CardContent className="pt-4 pb-3 space-y-1.5">
+                {paymentOptions.length > 0 && (
+                  <div className="space-y-2.5 pb-3">
+                    <div className="text-sm font-bold text-gray-700">Pilih Metode Pembayaran</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {paymentOptions.map((method) => {
+                        const selected = form.paymentMethod === method.id;
+                        return (
+                          <button
+                            key={method.id}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => setForm((current) => ({ ...current, paymentMethod: method.id }))}
+                            className={`flex min-h-16 items-center gap-2 rounded-lg border-2 px-2.5 py-2 text-left transition-colors ${
+                              selected
+                                ? "border-orange-500 bg-orange-500 text-white"
+                                : "border-orange-200 bg-white text-gray-700 hover:border-orange-400"
+                            }`}
+                          >
+                            {method.id === "qris" ? (
+                              <QrCode className={`h-6 w-6 shrink-0 ${selected ? "text-white" : "text-orange-600"}`} />
+                            ) : (
+                              <Building2 className={`h-6 w-6 shrink-0 ${selected ? "text-white" : "text-blue-600"}`} />
+                            )}
+                            <span className="min-w-0">
+                              <span className="block text-xs font-bold">{method.label}</span>
+                              <span className={`block truncate text-[10px] ${selected ? "text-white/80" : "text-gray-500"}`}>
+                                {method.detail}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between items-center border-t border-orange-200 pt-1.5">
                   <span className="text-gray-700 font-bold">Grand Total</span>
                   <span className="text-orange-600 font-black text-xl">
