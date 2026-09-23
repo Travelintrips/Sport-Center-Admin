@@ -105,25 +105,25 @@ type InvoiceTaxSummary = {
 function getBookingInvoiceTax(booking: any): InvoiceTaxSummary {
   const totalPrice = Math.max(0, Math.round(Number(booking.totalPrice ?? booking.grandTotal ?? 0)));
   const storedPpn = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
+  const storedGrandTotal = Math.max(0, Math.round(Number(booking.grandTotal ?? totalPrice)));
   const legacyAdditiveSnapshot = isAdditiveLegacyTaxSnapshot(booking);
-  const hasInclusiveSnapshot = booking.ppnTreatment === "inclusive" || legacyAdditiveSnapshot;
+  const hasPpnSnapshot =
+    storedPpn > 0 ||
+    Number(booking.ppnRate ?? 0) > 0 ||
+    booking.ppnTreatment === "inclusive" ||
+    legacyAdditiveSnapshot;
   const inclusiveTax = calculateInclusiveInvoiceTax(totalPrice);
-  const grandTotal = hasInclusiveSnapshot
-    ? inclusiveTax.grandTotal
-    : Math.max(0, Math.round(Number(booking.grandTotal ?? totalPrice)));
-  const dpp = hasInclusiveSnapshot
+  // totalPrice is the facility price entered by the business and is already
+  // PPN-inclusive. Never use an additive/legacy grandTotal when both fields
+  // exist, otherwise a group can be inflated above its actual facility price.
+  const grandTotal = booking.totalPrice != null ? totalPrice : storedGrandTotal;
+  const dpp = hasPpnSnapshot
     ? inclusiveTax.dpp
-    : Math.max(0, Math.round(Number(booking.dpp ?? grandTotal - storedPpn)));
-  const dppNilaiLain = storedPpn > 0 || hasInclusiveSnapshot
-    ? (hasInclusiveSnapshot ? inclusiveTax.dppNilaiLain : Math.round(dpp * 11 / 12))
+    : grandTotal;
+  const dppNilaiLain = hasPpnSnapshot
+    ? inclusiveTax.dppNilaiLain
     : 0;
-  const ppnAmount = hasInclusiveSnapshot
-    ? inclusiveTax.ppnAmount
-    : storedPpn > 0
-      ? storedPpn
-      : dppNilaiLain > 0
-        ? Math.round(dppNilaiLain * 0.12)
-        : 0;
+  const ppnAmount = hasPpnSnapshot ? inclusiveTax.ppnAmount : 0;
   const ppnCollectedByCustomer =
     booking.ppnCollectedByCustomer === true ||
     booking.ppnTreatment === "collected_by_customer";
@@ -600,17 +600,20 @@ async function printInvoice(booking: any, settings?: any) {
   if (!isGroup) sessions = [booking];
 
   // Hitung total dari semua sesi
-  const grandTotalAll = sessions.reduce((sum: number, s: any) =>
-    sum + (s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice))), 0);
-  const totalPpnAll = sessions.reduce((sum: number, s: any) =>
-    sum + (s.ppnAmount != null ? Math.round(Number(s.ppnAmount)) : 0), 0);
-  const hasPpn = totalPpnAll > 0;
-  const dppAll = hasPpn ? (grandTotalAll - totalPpnAll) : grandTotalAll;
-  const dppNilaiLainAll = hasPpn ? Math.round(dppAll * 11 / 12) : 0;
+  const sessionTaxes = sessions.map((s: any) => getBookingInvoiceTax(s));
+  const grossTotalAll = sessionTaxes.reduce((sum, tax) => sum + tax.grandTotal, 0);
+  const hasPpn = sessionTaxes.some((tax) => tax.ppnAmount > 0);
+  const printTax = hasPpn
+    ? calculateInclusiveInvoiceTax(grossTotalAll)
+    : { grandTotal: grossTotalAll, dpp: grossTotalAll, dppNilaiLain: 0, ppnAmount: 0 };
+  const grandTotalAll = printTax.grandTotal;
+  const totalPpnAll = printTax.ppnAmount;
+  const dppAll = printTax.dpp;
+  const dppNilaiLainAll = printTax.dppNilaiLain;
 
   // Baris sesi
   const sessionRows = sessions.map((s: any, i: number) => {
-    const sTotal = s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice));
+    const sTotal = getBookingInvoiceTax(s).grandTotal;
     return `<tr>
       <td>${isGroup ? `Sesi ${i + 1} – ${s.facilityName ?? booking.facilityName}` : s.facilityName ?? booking.facilityName}</td>
       <td>${formatDate(s.bookingDate)}</td>
@@ -790,18 +793,21 @@ async function printKwitansi(booking: any, settings?: any) {
   }
 
   // Hitung total gabungan dari semua sesi
-  const grandTotalAll = sessions.reduce((sum: number, s: any) => {
-    return sum + (s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice)));
-  }, 0);
-  const totalPpnAll = sessions.reduce((sum: number, s: any) => sum + (s.ppnAmount != null ? Math.round(Number(s.ppnAmount)) : 0), 0);
-  const hasPpnK = totalPpnAll > 0;
-  const dppAll = hasPpnK ? (grandTotalAll - totalPpnAll) : grandTotalAll;
-  const dppNilaiLainAll = hasPpnK ? Math.round(dppAll * 11 / 12) : 0;
+  const sessionTaxes = sessions.map((s: any) => getBookingInvoiceTax(s));
+  const grossTotalAll = sessionTaxes.reduce((sum, tax) => sum + tax.grandTotal, 0);
+  const hasPpnK = sessionTaxes.some((tax) => tax.ppnAmount > 0);
+  const printTax = hasPpnK
+    ? calculateInclusiveInvoiceTax(grossTotalAll)
+    : { grandTotal: grossTotalAll, dpp: grossTotalAll, dppNilaiLain: 0, ppnAmount: 0 };
+  const grandTotalAll = printTax.grandTotal;
+  const totalPpnAll = printTax.ppnAmount;
+  const dppAll = printTax.dpp;
+  const dppNilaiLainAll = printTax.dppNilaiLain;
   const terbilangText = terbilang(grandTotalAll) + " Rupiah";
 
   // Baris tabel sesi
   const sessionRows = sessions.map((s: any, i: number) => {
-    const sTotal = s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice));
+    const sTotal = getBookingInvoiceTax(s).grandTotal;
     return `<tr>
       <td>${isGroup ? `Sesi ${i + 1}` : s.facilityName ?? booking.facilityName}</td>
       <td>${formatDate(s.bookingDate)}</td>

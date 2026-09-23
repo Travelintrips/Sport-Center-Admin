@@ -73,25 +73,34 @@ function snapshotTax(booking: {
   ppnAmount?: string | number | null;
   grandTotal?: string | number | null;
   ppnRate?: string | number | null;
+  ppnTreatment?: string | null;
 }) {
   const hasSnapshot = booking.dpp != null || booking.ppnAmount != null || booking.grandTotal != null;
   const totalPrice = Math.max(0, Math.round(Number(booking.totalPrice ?? 0)));
-  const grandTotal = Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0));
+  const storedGrandTotal = Math.max(0, Math.round(Number(booking.grandTotal ?? totalPrice)));
   if (!hasSnapshot) return null;
   const ppnAmount = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
   const isAdditiveLegacySnapshot =
     totalPrice > 0 &&
     ppnAmount > 0 &&
-    grandTotal > totalPrice &&
-    Math.abs(grandTotal - totalPrice - ppnAmount) <= 1;
-  if (isAdditiveLegacySnapshot) {
-    return calculateInclusiveInvoiceTax(totalPrice);
+    storedGrandTotal > totalPrice &&
+    Math.abs(storedGrandTotal - totalPrice - ppnAmount) <= 1;
+  const hasPpnSnapshot =
+    ppnAmount > 0 ||
+    Number(booking.ppnRate ?? 0) > 0 ||
+    booking.ppnTreatment === "inclusive" ||
+    isAdditiveLegacySnapshot;
+  // totalPrice is the persisted facility price and already includes PPN.
+  // Prefer it over any legacy additive grandTotal snapshot.
+  const grandTotal = totalPrice > 0 ? totalPrice : storedGrandTotal;
+  if (hasPpnSnapshot) {
+    return calculateInclusiveInvoiceTax(grandTotal);
   }
-  const dpp = Math.max(0, Math.round(Number(booking.dpp ?? grandTotal - ppnAmount)));
+  const dpp = grandTotal;
   return {
     dpp,
-    dppNilaiLain: ppnAmount > 0 ? Math.round((dpp * 11) / 12) : 0,
-    ppnAmount,
+    dppNilaiLain: 0,
+    ppnAmount: 0,
     grandTotal,
   };
 }
@@ -116,7 +125,9 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
   const { invoiceDoc, generalDoc } = await loadDocSettings();
 
   const ppnRate = booking.ppnRate == null ? await resolvePpnRate(booking.ppnRate) : Number(booking.ppnRate);
-  const baseGrandTotal = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice ?? 0);
+  const baseGrandTotal = booking.totalPrice != null
+    ? Number(booking.totalPrice)
+    : Number(booking.grandTotal ?? 0);
   const tax = snapshotTax(booking) ?? calcDpp(baseGrandTotal, ppnRate);
   const withholding = calculateBookingWithholdingTax({
     companyCustomerId: booking.companyCustomerId,
