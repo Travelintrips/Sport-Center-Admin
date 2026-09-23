@@ -2619,8 +2619,14 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       return;
     }
 
-    const bookingDate =
+    const paymentDateOnly =
+      req.body?.paymentDateOnly === true ||
+      String(req.body?.paymentDateOnly ?? "").toLowerCase() === "true";
+    const requestedBookingDate =
       req.body?.bookingDate === undefined ? undefined : String(req.body.bookingDate);
+    // A payment-only correction must not accidentally trigger slot-conflict
+    // validation when an older client also sends the unchanged booking date.
+    const bookingDate = paymentDateOnly ? undefined : requestedBookingDate;
     const paymentDate =
       req.body?.paymentDate === undefined || req.body?.paymentDate === null || req.body?.paymentDate === ""
         ? undefined

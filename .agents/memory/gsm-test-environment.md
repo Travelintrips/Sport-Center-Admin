@@ -3,11 +3,11 @@ name: GSM-loaded test environment
 description: Why managed API startup and shell-launched tests see different development configuration.
 ---
 
-Managed API workflows bootstrap development Supabase configuration from the shared Google Secret Manager payload before importing the application. Standalone shell test commands do not run that bootstrap and can fail while importing the database package if the dev database URL is absent.
+Managed API workflows bootstrap development Supabase configuration from the shared Google Secret Manager payload before importing the application. The bootstrap can itself succeed while the workflow still fails if the payload has no development database pair; standalone shell test commands also fail without the same bootstrap.
 
 **Why:** The application intentionally loads secrets at runtime to keep environment separation and fail closed; exporting unrelated production values into test commands would risk testing against the wrong database.
 
-**How to apply:** Keep pure unit tests independent of database-importing modules. Use the managed workflow or an approved development-only secret bootstrap for integration tests, and never work around this by pointing tests at production.
+**How to apply:** Verify that the bootstrap loaded the development database pair before restarting the API workflow. Keep pure unit tests independent of database-importing modules, and never work around a missing dev URL by pointing tests at production.
 
 Shell Jest can also fail before collecting tests when the ESM setup file with top-level await is loaded through the default Jest configuration. Pure validation suites can be isolated with setupFiles disabled, but DB-backed suites still require a correctly bootstrapped test runner.
 

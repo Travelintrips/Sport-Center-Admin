@@ -3363,6 +3363,11 @@ export default function AdminBookings() {
         ...(paymentDate !== undefined ? { paymentDate } : {}),
         ...(startTime !== undefined ? { startTime } : {}),
         ...(endTime !== undefined ? { endTime } : {}),
+        paymentDateOnly:
+          paymentDate !== undefined &&
+          bookingDate === undefined &&
+          startTime === undefined &&
+          endTime === undefined,
       }),
     });
     const data = await response.json().catch(() => ({}));
