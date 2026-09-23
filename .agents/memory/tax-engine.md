@@ -12,6 +12,7 @@ Harga lapangan adalah **inklusif PPN** (tax-inclusive). Grand Total = harga yang
 - Frontend DPP display = `grandTotal - ppnAmount` (bukan `totalPrice` karena keduanya sama sekarang).
 - `recordTaxTransaction(...)` inserts to tax_transactions table (non-blocking, fire-and-forget).
 - Company/group invoices: sum the inclusive `totalPrice` values first, then extract DPP/PPN once from the aggregate; do not sum per-session rounded tax snapshots.
+- Collapsed admin rows for recurring/company groups must display the group/invoice obligation, never the first session's net amount.
 - Admin/customer booking detail and company invoices use `pphAmount = precise inclusive DPP × rate` and `netAmount = (DPP + PPN) − PPh` regardless of who collects the PPN; display-rounded DPP must not be used for the final PPh rounding.
 - PPh eligibility is limited to company bookings whose company setting enables withholding; personal bookings must ignore any stale PPh snapshot and use the normal gross total.
 - Company invoice corrections may apply the withholding snapshot back to each linked booking: keep `totalPrice`, DPP, PPN, and `grandTotal` unchanged; update only `pphRate`, `pphAmount`, and `netAmount`.

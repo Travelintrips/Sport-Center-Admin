@@ -4518,18 +4518,23 @@ export default function AdminBookings() {
                       );
                       // For one corporate invoice, show the single cash amount
                       // expected in bank reconciliation across all facilities.
-                      const bookingDisplayTotal =
+                      const sessionDisplayTotal =
                         isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
                           ? companyInvoiceNetTotal
                           : bookingTax.netAmount;
                       const companyInvoiceDisplayTotal = isPaidCompanyInvoice
                         ? companyInvoiceNetTotal
                         : 0;
-                       const groupDisplayTotal = isMultiSessionGroup
+                      const groupDisplayTotal = isMultiSessionGroup
                         ? isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
                           ? companyInvoiceNetTotal
                            : (getGroupInvoiceTax(groupRows)?.netAmount ?? 0)
-                       : bookingDisplayTotal;
+                        : sessionDisplayTotal;
+                      // A collapsed group row represents all sessions. Never
+                      // show the first session's net as the main total.
+                      const bookingDisplayTotal = isMultiSessionGroup
+                        ? groupDisplayTotal
+                        : sessionDisplayTotal;
                       const groupSummaryTotal = isMultiSessionGroup
                         ? groupDisplayTotal
                         : isPaidCompanyInvoice
