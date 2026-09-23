@@ -63,7 +63,7 @@ import {
   logAiIntentDetected,
   detectIntent,
 } from "../services/aiSportCenterService";
-import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
+import { trackSentMessage, isBotEcho, isMinaGreetingEcho } from "../lib/waSentTracker";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import {
   getFonnteConfig,
@@ -4641,7 +4641,7 @@ function isBotGeneratedMessage(msg: string): boolean {
 
 function isDuplicateByContent(phone: string, msg: string): boolean {
   // Layer 1: timing-based cache (semua pesan outgoing yang sudah di-track)
-  if (isBotEcho(msg)) return true;
+  if (isBotEcho(msg) || isMinaGreetingEcho(msg)) return true;
 
   // Layer 2: pattern-based — pesan yang jelas dari bot, blokir tanpa cache
   if (isBotGeneratedMessage(msg)) return true;

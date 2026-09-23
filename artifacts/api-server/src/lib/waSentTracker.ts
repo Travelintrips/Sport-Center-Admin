@@ -11,3 +11,12 @@ export function isBotEcho(msg: string): boolean {
   const ts = _sentMsgTexts.get(key);
   return !!ts && Date.now() - ts < 60 * 1000;
 }
+
+/**
+ * Fonnte may append a provider footer when it echoes an outbound message
+ * into the inbound webhook. Mina's initial greeting must never be treated as
+ * customer input for the active booking session.
+ */
+export function isMinaGreetingEcho(msg: string): boolean {
+  return /^Halo! Aku Mina asisten Sport Center\b/i.test(msg.trimStart());
+}

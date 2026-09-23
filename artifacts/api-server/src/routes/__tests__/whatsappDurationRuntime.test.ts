@@ -195,6 +195,22 @@ describe("Mina WhatsApp duration runtime regression", () => {
     });
     expect(session?.bookingDate).toBeTruthy();
     expect(session?.bookingDate).not.toBe(todayWIB());
+
+    // Fonnte may send Mina's own greeting back as an inbound webhook. It must
+    // not be routed through the active ask_time session as customer input.
+    const outboundBeforeEcho = fetchMock.mock.calls.length;
+    const echoResponse = await request
+      .post("/api/wa/fonnte/webhook")
+      .send({
+        sender: phone,
+        message: "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?\n\n> Sent via fonnte.com",
+        name: "Mina",
+        device: "081234567890",
+        inboxid: "9005",
+        id: "mina-greeting-echo-regression",
+      });
+    expect(echoResponse.status).toBe(200);
+    expect(fetchMock.mock.calls.length).toBe(outboundBeforeEcho);
   }, 30_000);
 });
 
