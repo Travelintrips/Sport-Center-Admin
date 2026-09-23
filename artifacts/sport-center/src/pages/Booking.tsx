@@ -9,7 +9,6 @@ import {
   useCreateRecurringBooking,
   useGetMe,
   getGetMeQueryKey,
-  useGetSettings,
   useListVendors,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -34,7 +33,7 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
-  Plane, ShieldCheck, User, Building2, CreditCard, Banknote, QrCode, PartyPopper, Tag, Plus, Trash2
+  Plane, ShieldCheck, User, Building2, CreditCard, Banknote, PartyPopper, Tag, Plus, Trash2
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -80,7 +79,6 @@ export default function Booking() {
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
   });
-  const { data: paymentSettings } = useGetSettings();
 
   // Keep legacy Gym links correct even when they do not include
   // mode=walk_in. Older facility rows may still be stored as time_slot.
@@ -249,22 +247,6 @@ export default function Booking() {
   // --- DP (Down Payment) ---
   const [paymentType, setPaymentType] = useState<"full" | "dp">("full");
   const [dpAmount, setDpAmount] = useState("");
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"qris" | "transfer" | null>(null);
-
-  // Manual payment methods come from the public production payment settings,
-  // not from Paylabs or its sandbox/production gateway configuration.
-  const paymentMethods: Array<{ id: "qris" | "transfer"; label: string; detail: string }> = [
-    ...(paymentSettings?.qrisImageUrl
-      ? [{ id: "qris" as const, label: "QRIS", detail: t("Scan & bayar", "Scan & pay") }]
-      : []),
-    ...(paymentSettings?.bankName && paymentSettings?.bankAccount
-      ? [{
-          id: "transfer" as const,
-          label: t("Transfer Bank", "Bank Transfer"),
-          detail: paymentSettings.bankName,
-        }]
-      : []),
-  ];
 
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
@@ -273,7 +255,6 @@ export default function Booking() {
     skipped: string[];
     firstOrder?: string;
     groupRef?: string;
-    paymentMethod?: string;
   } | null>(null);
 
   // ---- Single booking ----
@@ -296,10 +277,7 @@ export default function Booking() {
           }
         }
         toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
-        const paymentQuery = selectedPaymentMethod
-          ? `?paymentMethod=${encodeURIComponent(selectedPaymentMethod)}`
-          : "";
-        setLocation(`/booking/${data.orderNumber}${paymentQuery}`);
+        setLocation(`/booking/${data.orderNumber}`);
       },
       onError: (error: any) => {
         toast({ title: t("Booking Gagal", "Booking Failed"), description: error?.message || t("Gagal membuat booking", "Failed to create booking"), variant: "destructive" });
@@ -321,7 +299,6 @@ export default function Booking() {
           skipped: data.skipped,
           firstOrder: data.created[0]?.orderNumber,
           groupRef: (data as any).groupRef ?? undefined,
-          paymentMethod: selectedPaymentMethod ?? undefined,
         });
       },
       onError: (error: any) => {
@@ -443,17 +420,6 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
-    if (!isCompanyMode && paymentMethods.length > 0 && !selectedPaymentMethod) {
-      toast({
-        title: t("Pilih metode pembayaran", "Choose a payment method"),
-        description: t(
-          "Pilih QRIS atau Transfer Bank sebelum melanjutkan.",
-          "Choose QRIS or Bank Transfer before continuing.",
-        ),
-        variant: "destructive",
-      });
-      return;
-    }
     if (isCustomPriceFacility && (!customPrice || Number(customPrice) <= 0)) {
       toast({
         title: t("Harga Konsumsi wajib diisi", "Consumption price is required"),
@@ -804,15 +770,7 @@ export default function Booking() {
         )}
         <div className="flex gap-3">
           {recurringResult.firstOrder && (
-            <Button
-              className="flex-1"
-              onClick={() => {
-                const paymentQuery = recurringResult.paymentMethod
-                  ? `?paymentMethod=${encodeURIComponent(recurringResult.paymentMethod)}`
-                  : "";
-                setLocation(`/booking/${recurringResult.firstOrder}${paymentQuery}`);
-              }}
-            >
+            <Button className="flex-1" onClick={() => setLocation(`/booking/${recurringResult.firstOrder}`)}>
               {t("Lihat Detail Pembayaran", "View Payment Details")}
             </Button>
           )}
@@ -1906,45 +1864,6 @@ export default function Booking() {
                      : Math.max(0, singlePriceBeforeDiscount - disc);
                   return (
                     <>
-                      {!isCompanyMode && paymentMethods.length > 0 && (
-                        <div className="space-y-2.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-semibold">
-                              {t("Pilih Metode Pembayaran", "Choose Payment Method")}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            {paymentMethods.map((method) => {
-                              const isSelected = selectedPaymentMethod === method.id;
-                              return (
-                                <button
-                                  key={method.id}
-                                  type="button"
-                                  onClick={() => setSelectedPaymentMethod(method.id)}
-                                  aria-pressed={isSelected}
-                                  className={`flex min-h-16 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                                    isSelected
-                                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                                      : "border-border bg-background hover:border-primary/50 hover:bg-primary/5"
-                                  }`}
-                                >
-                                  {method.id === "qris" ? (
-                                    <QrCode className={isSelected ? "h-7 w-7 shrink-0" : "h-7 w-7 shrink-0 text-orange-600"} />
-                                  ) : (
-                                    <Building2 className={isSelected ? "h-7 w-7 shrink-0" : "h-7 w-7 shrink-0 text-blue-600"} />
-                                  )}
-                                  <span className="min-w-0">
-                                    <span className="block text-xs font-semibold leading-tight">{method.label}</span>
-                                    <span className={`mt-0.5 block truncate text-[10px] ${isSelected ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                                      {method.detail}
-                                    </span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
                         <span>{isAP && isMultiguna ? t("Perkiraan Total Setelah Verifikasi", "Estimated Total After Verification") : t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
