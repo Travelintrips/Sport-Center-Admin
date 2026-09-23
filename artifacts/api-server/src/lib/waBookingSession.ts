@@ -510,10 +510,10 @@ export function getNextStep(data: {
   notes?: string | null;
 }): WaStep {
   if (!data.facilityId) return "ask_facility";
+  if (!data.customerName) return "ask_name";
   if (!data.bookingDate) return "ask_date";
   if (!data.durationMinutes) return "ask_duration";
   if (!data.startTime) return "ask_time";
-  if (!data.customerName) return "ask_name";
   // Notes are intentionally optional. Mina only stores them when the customer
   // mentions a note; it must never create an extra question in the flow.
   return "confirm";

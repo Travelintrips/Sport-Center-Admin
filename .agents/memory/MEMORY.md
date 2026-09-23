@@ -110,6 +110,7 @@
 - [Settings comment block](settings-comment-block.md) — disabled duplicate JSX must not contain an unescaped `*/` that closes its outer block comment early.
 - [WA time validation routing](wa-time-validation-routing.md) — active ask_time messages with a parsed time must bypass generic merge and run facility availability validation first.
 - [WA slot selection inputs](wa-slot-selection-inputs.md) — displayed booking slots must explicitly ask for a choice and accept bare hours without confusing them with alternative-menu numbers.
+- [WA name-before-date invariant](wa-name-before-date.md) — collect booking name before date; reject retried menu commands when the session is already at ask_name.
 
 
 

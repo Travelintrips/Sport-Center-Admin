@@ -38,7 +38,17 @@ describe("Mina natural-language booking session", () => {
       startTime: parsed.startTime,
       durationMinutes: parsed.durationMinutes,
       customerName: null,
-    })).toBe("ask_duration");
+    })).toBe("ask_name");
+  });
+
+  it("always asks for the booking name before a date when the name is missing", () => {
+    expect(getNextStep({
+      facilityId: 12,
+      bookingDate: "2026-09-24",
+      startTime: null,
+      durationMinutes: null,
+      customerName: null,
+    })).toBe("ask_name");
   });
 
   it("uses an existing customer or WhatsApp profile name before asking again", () => {

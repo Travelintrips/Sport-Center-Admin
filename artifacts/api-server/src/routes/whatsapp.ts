@@ -3773,6 +3773,22 @@ async function continueSession(
       // relationship prefix is required.
       const rawName = msg.trim();
 
+      // Fonnte can retry an inbound message after the previous handler has
+      // already advanced the session. Do not treat the previous menu answer
+      // ("lanjut di sini") or another flow command as the customer's name.
+      if (
+        isContinueHere(rawName) ||
+        isMakeForm(rawName) ||
+        isMinaGreeting(rawName) ||
+        isBookingRequest(rawName) ||
+        isYes(rawName)
+      ) {
+        const hint = `👤 *Pesan/Booking atas nama siapa?*\n\nContoh: *Andi*`;
+        await appendMessage(session.id, "bot", hint);
+        await sendReply(hint);
+        return;
+      }
+
       if (rawName.length < 2 || rawName.length > 150) {
         const hint = `👤 Nama booking belum valid. Contoh: *Andi*`;
         await appendMessage(session.id, "bot", hint);
