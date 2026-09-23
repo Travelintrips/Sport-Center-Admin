@@ -237,9 +237,13 @@ function RecurringPaymentFields({ selection }: { selection: RecurringPaymentSele
 export default function BookingDetail() {
   const [, params] = useRoute("/booking/:orderNumber");
   const orderNumber = params?.orderNumber || "";
-  const preferredPaylabsMethod =
+  const preferredPaymentMethod =
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("paymentMethod")
+      : null;
+  const initialManualPaymentMethod =
+    preferredPaymentMethod === "qris" || preferredPaymentMethod === "transfer"
+      ? preferredPaymentMethod
       : null;
   const { toast } = useToast();
   const { t } = useLang();
@@ -256,7 +260,7 @@ export default function BookingDetail() {
   const existingReview = existingReviews?.find((r) => r.bookingId === booking?.id);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(
-    preferredPaylabsMethod ? "paylabs" : null,
+    initialManualPaymentMethod,
   );
   const [dpMode, setDpMode] = useState(false);
   const [dpInputAmount, setDpInputAmount] = useState("");
@@ -1336,7 +1340,6 @@ export default function BookingDetail() {
                     groupId={paymentSelection.groupId}
                     memberId={paymentSelection.memberId}
                     paylabsConfig={paylabsConfig!}
-                    initialMethod={preferredPaylabsMethod}
                     onBack={() => setPaymentMethod(null)}
                     onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
                     base={BASE}
@@ -1626,7 +1629,7 @@ const VA_BANKS = ["bri","bni","bca","mandiri","permata","cimb","bsi","btn","muam
 const EWALLETS = ["ovo","dana","shopeepay","linkaja","gopay"];
 
 function PaylabsPaymentSection({
-  bookingId, amount, recurringSeriesId, groupId, memberId, onBack, onSuccess, base, initialMethod,
+  bookingId, amount, recurringSeriesId, groupId, memberId, onBack, onSuccess, base,
 }: {
   bookingId: number;
   orderNumber: string;
@@ -1635,7 +1638,6 @@ function PaylabsPaymentSection({
   groupId: string | null;
   memberId: string | null;
   paylabsConfig: PaylabsPublicConfig;   // kept in props signature for caller; component fetches fresh copy
-  initialMethod?: string | null;
   onBack: () => void;
   onSuccess: () => void;
   base: string;
@@ -1645,7 +1647,6 @@ function PaylabsPaymentSection({
 
   const [subMethod, setSubMethod] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [autoSelected, setAutoSelected] = useState(false);
   const [payment, setPayment] = useState<{
     merchantTradeNo: string; qrCodeUrl: string; qrContent: string;
     vaNumber: string; payUrl: string; paymentMethod: string;
@@ -1713,22 +1714,6 @@ function PaylabsPaymentSection({
       setLoading(false);
     }
   }
-
-  // A method selected on the checkout summary is carried into this page.
-  // Auto-select only in production; sandbox never receives this shortcut.
-  useEffect(() => {
-    if (autoSelected || loading || payment || !freshConfig || !initialMethod) return;
-    if (freshConfig.sandboxMode || !freshConfig.configured) return;
-    const methodId = initialMethod.trim().toLowerCase();
-    const isActive = (freshConfig.paymentMethodsConfig ?? []).some(
-      (method) => method.active && method.id.trim().toLowerCase() === methodId,
-    );
-    if (!isActive) return;
-    setAutoSelected(true);
-    void handleSelectMethod(methodId);
-    // This effect intentionally runs once for the checkout-selected method.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSelected, freshConfig, initialMethod, loading, payment]);
 
   // ── Poll for payment status ───────────────────────────────────────────────
   useEffect(() => {
