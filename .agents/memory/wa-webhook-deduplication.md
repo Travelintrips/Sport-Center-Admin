@@ -8,3 +8,5 @@ Inbound Mina webhooks must use a shared database-backed deduplication claim in a
 **Why:** Fonnte can retry deliveries without a stable ID, and separate API instances do not share in-memory Maps, so local-only deduplication can send the same reply twice.
 
 **How to apply:** Serialize claims with a PostgreSQL advisory transaction lock, keep the claim window short enough to allow intentional repeated messages later, and ignore duplicate deliveries before AI/session processing.
+
+Fonnte can also echo outbound Mina replies with a standalone `Sent via fonnte.com` footer and quoted-message header. Detect that footer before deduplication/session handling; leading-text bot patterns are not sufficient.
