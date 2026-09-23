@@ -41,6 +41,7 @@ interface AvailabilitySlot {
 interface PaymentSettings {
   bankName?: string | null;
   bankAccount?: string | null;
+  bankAccountName?: string | null;
   qrisImageUrl?: string | null;
 }
 
@@ -503,6 +504,38 @@ export default function WaBookingForm() {
                         );
                       })}
                     </div>
+                    {form.paymentMethod === "qris" && paymentSettings?.qrisImageUrl && (
+                      <div className="rounded-lg border border-orange-200 bg-white p-3 text-center">
+                        <p className="mb-2 text-xs font-semibold text-gray-600">
+                          Scan gambar QRIS untuk melakukan pembayaran
+                        </p>
+                        <img
+                          src={paymentSettings.qrisImageUrl}
+                          alt="QRIS pembayaran"
+                          className="mx-auto max-h-64 w-auto max-w-full rounded-md object-contain"
+                        />
+                      </div>
+                    )}
+                    {form.paymentMethod === "transfer" &&
+                      paymentSettings?.bankName &&
+                      paymentSettings?.bankAccount && (
+                        <div className="rounded-lg border border-orange-200 bg-white p-3 text-sm text-gray-700">
+                          <div className="flex items-start justify-between gap-4">
+                            <span className="text-gray-500">Nama Bank</span>
+                            <span className="text-right font-bold">{paymentSettings.bankName}</span>
+                          </div>
+                          <div className="mt-2 flex items-start justify-between gap-4">
+                            <span className="text-gray-500">Nomor Tujuan</span>
+                            <span className="text-right font-bold">{paymentSettings.bankAccount}</span>
+                          </div>
+                          <div className="mt-2 flex items-start justify-between gap-4">
+                            <span className="text-gray-500">Nama Akun</span>
+                            <span className="text-right font-bold">
+                              {paymentSettings.bankAccountName || "-"}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                   </div>
                 )}
                 <div className="flex justify-between items-center border-t border-orange-200 pt-1.5">
