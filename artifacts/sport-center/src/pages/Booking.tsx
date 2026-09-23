@@ -53,6 +53,39 @@ function formatDate(dateStr: string, lang: string = "id") {
 
 type RepeatType = "weekly" | "monthly";
 
+const PAYLABS_CHILD_METHOD_IDS = new Set([
+  "qris",
+  "bri",
+  "bca",
+  "bni",
+  "mandiri",
+  "permata",
+  "cimb",
+  "btn",
+  "danamon",
+  "ovo",
+  "dana",
+  "shopeepay",
+  "linkaja",
+  "gopay",
+  "maybank",
+  "bsi",
+  "muamalat",
+  "sinarmas",
+  "ina",
+]);
+
+interface PaylabsPublicConfig {
+  sandboxMode: boolean;
+  configured: boolean;
+  paymentMethodsConfig: Array<{
+    id: string;
+    name: string;
+    active: boolean;
+    iconUrl?: string;
+  }> | null;
+}
+
 const OPERATIONAL_BOOKING_ROLES = new Set([
   "admin",
   "super_admin",
@@ -247,6 +280,26 @@ export default function Booking() {
   // --- DP (Down Payment) ---
   const [paymentType, setPaymentType] = useState<"full" | "dp">("full");
   const [dpAmount, setDpAmount] = useState("");
+  const [paylabsConfig, setPaylabsConfig] = useState<PaylabsPublicConfig | null>(null);
+  const [selectedPaylabsMethod, setSelectedPaylabsMethod] = useState<string | null>(null);
+
+  // Only read the public payment-method list from the runtime environment.
+  // Sandbox methods must never appear in the customer booking checkout.
+  useEffect(() => {
+    fetch("/api/paylabs/config")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((config: PaylabsPublicConfig | null) => {
+        if (config) setPaylabsConfig(config);
+      })
+      .catch(() => {});
+  }, []);
+
+  const productionPaymentMethods =
+    paylabsConfig?.sandboxMode === false && paylabsConfig.configured
+      ? (paylabsConfig.paymentMethodsConfig ?? []).filter((method) =>
+          method.active && PAYLABS_CHILD_METHOD_IDS.has(method.id.trim().toLowerCase()),
+        )
+      : [];
 
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
@@ -255,6 +308,7 @@ export default function Booking() {
     skipped: string[];
     firstOrder?: string;
     groupRef?: string;
+    paymentMethod?: string;
   } | null>(null);
 
   // ---- Single booking ----
@@ -277,7 +331,10 @@ export default function Booking() {
           }
         }
         toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
-        setLocation(`/booking/${data.orderNumber}`);
+        const paymentQuery = selectedPaylabsMethod
+          ? `?paymentMethod=${encodeURIComponent(selectedPaylabsMethod)}`
+          : "";
+        setLocation(`/booking/${data.orderNumber}${paymentQuery}`);
       },
       onError: (error: any) => {
         toast({ title: t("Booking Gagal", "Booking Failed"), description: error?.message || t("Gagal membuat booking", "Failed to create booking"), variant: "destructive" });
@@ -299,6 +356,7 @@ export default function Booking() {
           skipped: data.skipped,
           firstOrder: data.created[0]?.orderNumber,
           groupRef: (data as any).groupRef ?? undefined,
+          paymentMethod: selectedPaylabsMethod ?? undefined,
         });
       },
       onError: (error: any) => {
@@ -420,6 +478,17 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
+    if (!isCompanyMode && productionPaymentMethods.length > 0 && !selectedPaylabsMethod) {
+      toast({
+        title: t("Pilih metode pembayaran", "Choose a payment method"),
+        description: t(
+          "Pilih salah satu metode pembayaran produksi sebelum melanjutkan.",
+          "Choose one of the production payment methods before continuing.",
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
     if (isCustomPriceFacility && (!customPrice || Number(customPrice) <= 0)) {
       toast({
         title: t("Harga Konsumsi wajib diisi", "Consumption price is required"),
@@ -770,7 +839,15 @@ export default function Booking() {
         )}
         <div className="flex gap-3">
           {recurringResult.firstOrder && (
-            <Button className="flex-1" onClick={() => setLocation(`/booking/${recurringResult.firstOrder}`)}>
+            <Button
+              className="flex-1"
+              onClick={() => {
+                const paymentQuery = recurringResult.paymentMethod
+                  ? `?paymentMethod=${encodeURIComponent(recurringResult.paymentMethod)}`
+                  : "";
+                setLocation(`/booking/${recurringResult.firstOrder}${paymentQuery}`);
+              }}
+            >
               {t("Lihat Detail Pembayaran", "View Payment Details")}
             </Button>
           )}
@@ -1864,6 +1941,54 @@ export default function Booking() {
                      : Math.max(0, singlePriceBeforeDiscount - disc);
                   return (
                     <>
+                      {!isCompanyMode && productionPaymentMethods.length > 0 && (
+                        <div className="space-y-2.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold">
+                              {t("Pilih Pembayaran", "Choose Payment")}
+                            </span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                              {t("Produksi", "Production")}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {productionPaymentMethods.map((method) => {
+                              const methodId = method.id.trim().toLowerCase();
+                              const isSelected = selectedPaylabsMethod === methodId;
+                              return (
+                                <button
+                                  key={methodId}
+                                  type="button"
+                                  onClick={() => setSelectedPaylabsMethod(methodId)}
+                                  aria-pressed={isSelected}
+                                  className={`flex min-h-16 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                    isSelected
+                                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                                      : "border-border bg-background hover:border-primary/50 hover:bg-primary/5"
+                                  }`}
+                                >
+                                  {method.iconUrl ? (
+                                    <img
+                                      src={method.iconUrl}
+                                      alt=""
+                                      className="h-7 w-7 shrink-0 rounded object-contain"
+                                    />
+                                  ) : (
+                                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-[9px] font-black ${
+                                      isSelected ? "bg-white/20" : "bg-primary/10 text-primary"
+                                    }`}>
+                                      {methodId.toUpperCase().slice(0, 4)}
+                                    </span>
+                                  )}
+                                  <span className="min-w-0 text-xs font-semibold leading-tight">
+                                    {method.name}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
                         <span>{isAP && isMultiguna ? t("Perkiraan Total Setelah Verifikasi", "Estimated Total After Verification") : t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
