@@ -37,9 +37,17 @@ router.get(["/availability", "/bookings/availability"], async (req, res) => {
   try {
     const facilityId = parseInt(req.query.facilityId as string);
     const date = req.query.date as string;
+    const rawDurationHours = req.query.durationHours;
+    const durationHours = rawDurationHours == null || rawDurationHours === ""
+      ? 1
+      : Number(rawDurationHours);
 
     if (!facilityId || !date) {
       res.status(400).json({ error: "facilityId and date required" });
+      return;
+    }
+    if (!Number.isInteger(durationHours) || durationHours < 1 || durationHours > 24) {
+      res.status(400).json({ error: "durationHours must be an integer between 1 and 24" });
       return;
     }
 
@@ -88,14 +96,15 @@ router.get(["/availability", "/bookings/availability"], async (req, res) => {
 
     const openMinutes = timeToMinutes(facility.openTime);
     const closeMinutes = closeTimeToMinutes(getEffectiveCloseTime(facility));
+    const durationMinutes = durationHours * 60;
     const slots: { time: string; available: boolean; reason: string | null }[] = [];
 
     const isToday = date === getTodayWIB();
     const nowMinutes = isToday ? getCurrentMinutesWIB() : -1;
 
-    for (let t = openMinutes; t < closeMinutes; t += 60) {
+    for (let t = openMinutes; t + durationMinutes <= closeMinutes; t += 60) {
       const timeStr = minutesToTime(t);
-      const slotEnd = t + 60;
+      const slotEnd = t + durationMinutes;
 
       // Hide/disable slots that have already passed today (dilewati untuk admin/operator)
       if (!isAdminOverride && isToday && t <= nowMinutes) {

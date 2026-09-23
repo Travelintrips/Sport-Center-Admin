@@ -32,6 +32,12 @@ interface BookingResult {
   uploadProofUrl: string;
 }
 
+interface AvailabilitySlot {
+  time: string;
+  available: boolean;
+  reason: string | null;
+}
+
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + (m || 0);
@@ -42,19 +48,6 @@ function addHoursToTime(time: string, hours: number): string {
   const h = Math.floor(total / 60) % 24;
   const m = total % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
-}
-
-function generateTimeSlots(openTime: string, closeTime: string, durationHours: number): string[] {
-  const slots: string[] = [];
-  const closeMin = timeToMinutes(closeTime);
-  let current = timeToMinutes(openTime);
-  while (current + durationHours * 60 <= closeMin) {
-    const h = Math.floor(current / 60);
-    const m = current % 60;
-    slots.push(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
-    current += 60;
-  }
-  return slots;
 }
 
 export default function WaBookingForm() {
@@ -71,6 +64,9 @@ export default function WaBookingForm() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<BookingResult | null>(null);
   const [error, setError] = useState("");
+  const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilitySlot[] | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
 
   const [form, setForm] = useState({
     customerName: "",
@@ -92,6 +88,60 @@ export default function WaBookingForm() {
       .finally(() => setLoading(false));
   }, [params.facilityId]);
 
+  useEffect(() => {
+    if (!facility || !form.bookingDate) {
+      setAvailabilitySlots(null);
+      setAvailabilityLoading(false);
+      setAvailabilityError("");
+      return;
+    }
+
+    const controller = new AbortController();
+    setAvailabilitySlots(null);
+    setAvailabilityLoading(true);
+    setAvailabilityError("");
+
+    const query = new URLSearchParams({
+      facilityId: String(facility.id),
+      date: form.bookingDate,
+      durationHours: form.durationHours,
+    });
+
+    fetch(`/api/availability?${query.toString()}`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !Array.isArray(data)) {
+          throw new Error("availability_request_failed");
+        }
+        return data as AvailabilitySlot[];
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setAvailabilitySlots(data);
+        setForm((current) => {
+          if (!current.startTime) return current;
+          const selectedSlot = data.find(
+            (slot) => slot.time === current.startTime && slot.available,
+          );
+          return selectedSlot ? current : { ...current, startTime: "" };
+        });
+      })
+      .catch((requestError: unknown) => {
+        if (controller.signal.aborted) return;
+        setAvailabilitySlots([]);
+        setAvailabilityError(
+          requestError instanceof Error && requestError.message === "availability_request_failed"
+            ? "Gagal memeriksa ketersediaan jam. Coba lagi."
+            : "Gagal memeriksa ketersediaan jam. Coba pilih tanggal lagi.",
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAvailabilityLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [facility, form.bookingDate, form.durationHours]);
+
   const today = new Date().toISOString().split("T")[0];
   const maxDuration = facility?.maxDuration ?? 8;
   const minDuration = facility?.minDuration ?? 1;
@@ -100,9 +150,7 @@ export default function WaBookingForm() {
     (_, i) => String(i + minDuration)
   );
 
-  const timeSlots = facility
-    ? generateTimeSlots(facility.openTime, facility.closeTime, Number(form.durationHours))
-    : [];
+  const timeSlots = availabilitySlots?.filter((slot) => slot.available).map((slot) => slot.time) ?? [];
 
   const totalPrice = facility
     ? facility.pricePerHour * Number(form.durationHours)
@@ -289,22 +337,14 @@ export default function WaBookingForm() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1">
-                <Label htmlFor="date" className="text-sm font-semibold">Tanggal *</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  min={today}
-                  value={form.bookingDate}
-                  onChange={(e) => setForm((f) => ({ ...f, bookingDate: e.target.value, startTime: "" }))}
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
                 <Label className="text-sm font-semibold">Durasi *</Label>
                 <Select
                   value={form.durationHours}
-                  onValueChange={(v) => setForm((f) => ({ ...f, durationHours: v, startTime: "" }))}>
+                  onValueChange={(v) => {
+                    setAvailabilitySlots(null);
+                    setAvailabilityError("");
+                    setForm((f) => ({ ...f, durationHours: v, startTime: "" }));
+                  }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -317,12 +357,40 @@ export default function WaBookingForm() {
               </div>
 
               <div className="space-y-1">
+                <Label htmlFor="date" className="text-sm font-semibold">Tanggal *</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  min={today}
+                  value={form.bookingDate}
+                  onChange={(e) => {
+                    setAvailabilitySlots(null);
+                    setAvailabilityError("");
+                    setForm((f) => ({ ...f, bookingDate: e.target.value, startTime: "" }));
+                  }}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
                 <Label className="text-sm font-semibold">Jam Mulai *</Label>
                 <Select
                   value={form.startTime}
                   onValueChange={(v) => setForm((f) => ({ ...f, startTime: v }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih jam mulai" />
+                  <SelectTrigger disabled={availabilityLoading || !form.bookingDate || availabilitySlots === null || timeSlots.length === 0}>
+                    <SelectValue
+                      placeholder={
+                        availabilityLoading
+                          ? "Memeriksa ketersediaan..."
+                          : !form.bookingDate
+                            ? "Pilih tanggal terlebih dahulu"
+                            : availabilitySlots === null
+                              ? "Memeriksa ketersediaan..."
+                              : timeSlots.length === 0
+                                ? "Tidak ada jam tersedia"
+                                : "Pilih jam mulai"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {timeSlots.map((t) => (
@@ -330,6 +398,15 @@ export default function WaBookingForm() {
                     ))}
                   </SelectContent>
                 </Select>
+                {availabilityLoading && (
+                  <p className="text-xs text-gray-500">Sedang memeriksa ketersediaan untuk tanggal dan durasi ini...</p>
+                )}
+                {!availabilityLoading && availabilityError && (
+                  <p className="text-xs text-red-600">{availabilityError}</p>
+                )}
+                {!availabilityLoading && !availabilityError && availabilitySlots && timeSlots.length === 0 && (
+                  <p className="text-xs text-red-600">Tidak ada jam yang tersedia untuk tanggal dan durasi tersebut.</p>
+                )}
                 {form.startTime && endTime && (
                   <p className="text-xs text-gray-500">Selesai jam: <strong>{endTime}</strong></p>
                 )}
@@ -367,7 +444,16 @@ export default function WaBookingForm() {
 
           <Button
             type="submit"
-            disabled={submitting || !form.customerName || !form.customerPhone || !form.bookingDate || !form.startTime}
+            disabled={
+              submitting ||
+              availabilityLoading ||
+              !availabilitySlots ||
+              !timeSlots.includes(form.startTime) ||
+              !form.customerName ||
+              !form.customerPhone ||
+              !form.bookingDate ||
+              !form.startTime
+            }
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
             {submitting ? (
               <span className="flex items-center gap-2">

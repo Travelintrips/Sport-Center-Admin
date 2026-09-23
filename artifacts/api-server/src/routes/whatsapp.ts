@@ -210,15 +210,29 @@ async function generateCustomerCode(): Promise<string> {
 }
 
 async function checkConflict(facilityId: number, bookingDate: string, startTime: string, endTime: string): Promise<boolean> {
-  const existing = await db.select().from(bookingsTable)
-    .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, bookingDate)));
+  const [existing, blocked] = await Promise.all([
+    db.select().from(bookingsTable)
+      .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, bookingDate))),
+    db.select({
+      startTime: blockedSchedulesTable.startTime,
+      endTime: blockedSchedulesTable.endTime,
+    }).from(blockedSchedulesTable)
+      .where(and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, bookingDate))),
+  ]);
   const active = existing.filter((b) => !INACTIVE_STATUSES.includes(b.status));
   const sMin = timeToMinutes(startTime);
   const eMin = timeToMinutes(endTime);
-  return active.some((b) => {
+  const bookingConflict = active.some((b) => {
     const bS = timeToMinutes(b.startTime);
     const bE = timeToMinutes(b.endTime);
     return sMin < bE && eMin > bS;
+  });
+  if (bookingConflict) return true;
+
+  return blocked.some((schedule) => {
+    const blockStart = timeToMinutes(schedule.startTime);
+    const blockEnd = timeToMinutes(schedule.endTime);
+    return sMin < blockEnd && eMin > blockStart;
   });
 }
 
