@@ -27,16 +27,16 @@ export function calculateBookingWithholdingTax(input: BookingWithholdingTaxInput
   const storedAmount = Math.max(0, Math.round(Number(input.pphAmount ?? 0) || 0));
   const isCompanyBooking = input.companyCustomerId != null;
   const enabled = isCompanyBooking && (configuredRate > 0 || storedAmount > 0);
-  const rate = configuredRate > 0
-    ? configuredRate
-    : (storedAmount > 0 && dpp > 0 ? Math.round((storedAmount / dpp) * 100) : 0);
+  // A legacy booking can contain a stale pphAmount snapshot without a
+  // reliable pphRate. The API uses the business default of 10% in that case;
+  // deriving a rate from a group-summed snapshot can double-count PPh across
+  // recurring sessions and produce an incorrect group net.
+  const rate = configuredRate > 0 ? configuredRate : (storedAmount > 0 ? 10 : 0);
   const preciseInclusiveDpp = grossAmount / 1.11;
   const isRoundedInclusiveDpp =
     dpp > 0 && Math.abs(dpp - preciseInclusiveDpp) <= 2;
   const withholdingBase = isRoundedInclusiveDpp ? preciseInclusiveDpp : dpp;
-  const amount = configuredRate > 0
-    ? Math.round(withholdingBase * configuredRate / 100)
-    : storedAmount;
+  const amount = enabled ? Math.round(withholdingBase * rate / 100) : 0;
   // PPh is withheld from DPP, but the customer still settles DPP + PPN.
   // PPN collection ownership must not remove PPN from the net invoice amount.
   const cashGross = grossAmount;

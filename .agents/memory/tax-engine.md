@@ -16,6 +16,7 @@ Harga lapangan adalah **inklusif PPN** (tax-inclusive). Grand Total = harga yang
 - Admin/customer booking detail and company invoices use `pphAmount = precise inclusive DPP × rate` and `netAmount = (DPP + PPN) − PPh` regardless of who collects the PPN; display-rounded DPP must not be used for the final PPh rounding.
 - PPh eligibility is limited to company bookings whose company setting enables withholding; personal bookings must ignore any stale PPh snapshot and use the normal gross total.
 - Company invoice corrections may apply the withholding snapshot back to each linked booking: keep `totalPrice`, DPP, PPN, and `grandTotal` unchanged; update only `pphRate`, `pphAmount`, and `netAmount`.
+- A legacy company booking with a PPh snapshot but no reliable `pphRate` must use the 10% business default on the aggregate DPP; never infer a rate from group-summed `pphAmount`.
 
 ## DB tables
 - `sport_center.tax_settings` — seeded with `PPN_OUT_11` at 11%.
