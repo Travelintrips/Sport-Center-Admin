@@ -3,6 +3,11 @@ import { db, bookingsTable, facilitiesTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
+import {
+  recordTaxTransaction,
+  resolveCustomerTax,
+  resolveWithholdingTax,
+} from "../lib/tax";
 
 const router = Router();
 
@@ -16,7 +21,14 @@ router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
     }
 
     const [customer] = await db
-      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone })
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        phone: usersTable.phone,
+        accountType: usersTable.accountType,
+        requirePerBookingApproval: usersTable.requirePerBookingApproval,
+      })
       .from(usersTable)
       .where(eq(usersTable.id, Number(customerId)))
       .limit(1);
@@ -46,6 +58,18 @@ router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
 
     const durationHours = Number(duration);
     const totalPrice = Number(facility.pricePerHour) * durationHours;
+    const isCompany = customer.accountType === "company";
+    const companyCustomerId = isCompany ? customer.id : null;
+    const taxCalc = await resolveCustomerTax(totalPrice, {
+      customerId: customer.id,
+      companyCustomerId,
+      bookingDate,
+    });
+    const pphCalc = await resolveWithholdingTax(
+      companyCustomerId,
+      taxCalc.grandTotal,
+      taxCalc.dpp,
+    );
     const orderNumber = await generateBookingOrderNumber();
 
     const endDt = new Date(dt.getTime() + durationHours * 60 * 60 * 1000);
@@ -67,12 +91,34 @@ router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
         endTime: endTimeFormatted,
         durationHours,
         totalPrice: String(totalPrice),
+        basePrice: String(totalPrice),
         discountAmount: "0",
         apDiscountAmount: "0",
-        status: "pending_payment",
+        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+        dpp: String(taxCalc.dpp),
+        ppnAmount: String(taxCalc.taxAmount),
+        grandTotal: String(taxCalc.grandTotal),
+        ppnTreatment: taxCalc.ppnTreatment,
+        ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
+        pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+        pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+        netAmount: String(pphCalc.netAmount),
+        payerType: isCompany ? "company" : "personal",
+        companyCustomerId,
+        paymentRequiredNow: !isCompany,
+        billingStatus: isCompany ? "unbilled" : null,
+        bookedForName: isCompany ? (req.body.bookedForName?.trim() || customer.name) : null,
+        bookedForPhone: isCompany ? (req.body.bookedForPhone?.trim() || customer.phone || null) : null,
+        status: isCompany
+          ? (customer.requirePerBookingApproval ? "waiting_confirmation" : "confirmed")
+          : "pending_payment",
         notes: req.body.notes ?? null,
       })
       .returning();
+
+    if (taxCalc.taxCode) {
+      recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
+    }
 
     req.log.info({ bookingId: booking.id, orderNumber }, "Admin walk-in booking created");
     res.status(201).json({ success: true, booking: { ...booking, totalPrice } });
