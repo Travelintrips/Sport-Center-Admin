@@ -4674,14 +4674,24 @@ function isBotGeneratedMessage(msg: string): boolean {
   return BOT_MESSAGE_PATTERNS.some((p) => p.test(msg.trimStart()));
 }
 
-function isDuplicateByContent(phone: string, msg: string): boolean {
+type WebhookDedupSession = Pick<WaBookingSessionRow, "id" | "currentStep"> | null;
+
+function getWebhookDedupScope(session: WebhookDedupSession): string {
+  return session ? `session:${session.id}:${session.currentStep}` : "no-session";
+}
+
+function isDuplicateByContent(
+  phone: string,
+  msg: string,
+  session: WebhookDedupSession,
+): boolean {
   // Layer 1: timing-based cache (semua pesan outgoing yang sudah di-track)
   if (isBotEcho(msg) || isMinaGreetingEcho(msg) || isFonnteProviderEcho(msg)) return true;
 
   // Layer 2: pattern-based — pesan yang jelas dari bot, blokir tanpa cache
   if (isBotGeneratedMessage(msg)) return true;
 
-  const hash = `${phone}:${normalizeInboundMessage(msg).substring(0, 160)}`;
+  const hash = `${phone}:${getWebhookDedupScope(session)}:${normalizeInboundMessage(msg).substring(0, 160)}`;
   const now = Date.now();
   if (isRecentMessageDuplicate(_recentMsgHashes, hash, now)) {
     return true; // same msg from same phone within 8 detik → duplicate
@@ -4709,9 +4719,11 @@ async function claimDistributedWebhook(
   phone: string,
   msg: string,
   messageId: string | null,
+  session: WebhookDedupSession,
 ): Promise<boolean> {
+  const scope = getWebhookDedupScope(session);
   const keys = [
-    `content:${phone}:${normalizeInboundMessage(msg)}`,
+    `content:${phone}:${scope}:${normalizeInboundMessage(msg)}`,
     ...(messageId ? [`id:${messageId}`] : []),
   ];
 
@@ -4787,13 +4799,21 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     const msg = String(message).trim();
     if (!msg || !phone) return;
 
+    // Read the active step before deduplication. The same customer text can be
+    // a legitimate answer to two different prompts (for example, "jam 12
+    // siang" is first rejected at ask_duration, then answered at ask_time).
+    // Dedup must still suppress a retry in the same step, but not suppress the
+    // same text after the booking session has advanced.
+    const activeSession = await getActiveSession(phone);
+
     // Dedup berdasarkan konten (cegah Fonnte retry tanpa message_id)
-    if (isDuplicateByContent(phone, msg)) return;
+    if (isDuplicateByContent(phone, msg, activeSession)) return;
     const inboundMessageId = req.body.id ?? req.body.message_id ?? req.body.msg_id ?? req.body.msgId;
     const claimed = await claimDistributedWebhook(
       phone,
       msg,
       inboundMessageId ? String(inboundMessageId) : null,
+      activeSession,
     );
     if (!claimed) {
       req.log?.info?.({ phone, message: msg }, "[wa-webhook] duplicate inbound message ignored");
@@ -4839,7 +4859,7 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     }
 
     // 3. Active session — continue conversation (always takes priority)
-    const session = await getActiveSession(phone);
+    const session = activeSession;
     if (session) {
       // A greeting after a pause means the customer is starting over, not
       // answering the previous booking field. Close the stale flow and create
