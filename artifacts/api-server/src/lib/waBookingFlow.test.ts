@@ -7,9 +7,59 @@ import {
   getAlternativeBookingDraftPatch,
   parseAlternativeBookingChoice,
   switchBookingFacility,
+  isMinaGreeting,
+  isBookingRequest,
 } from "./waBookingFlow";
 
 describe("WhatsApp Mina booking flow regressions", () => {
+  it("recognizes the requested greeting messages", () => {
+    for (const message of [
+      "halo",
+      "hallo",
+      "halo mina",
+      "hallo mina",
+      "hi",
+      "hi mina",
+      "hai",
+      "hai mina",
+      "halo kak",
+      "hallo kak",
+      "halo ka",
+      "hallo ka",
+      "Selamat pagi",
+      "selamat pagi",
+      "Selamat siang",
+      "selamat siang",
+      "Selamat sore",
+      "selamat sore",
+      "Selamat malam",
+      "selamat malam",
+    ]) {
+      expect(isMinaGreeting(message)).toBe(true);
+    }
+    expect(isMinaGreeting("halo,")).toBe(true);
+    expect(isMinaGreeting("pagi")).toBe(false);
+  });
+
+  it("recognizes the requested booking commands", () => {
+    for (const message of [
+      "Booking",
+      "booking",
+      "mau pesan",
+      "mau booking",
+      "mau boking",
+      "mau pesan ka",
+      "mau pesan kak",
+      "mau booking ka",
+      "mau booking kak",
+      "mau boking ka",
+      "mau boking kak",
+    ]) {
+      expect(isBookingRequest(message)).toBe(true);
+    }
+    expect(isBookingRequest("mau booking badminton")).toBe(false);
+  });
+
   it("offers the one-message booking parser the complete required input", async () => {
     const { parseIntent, getNextStep } = await import("./waBookingSession");
     const parsed = parseIntent(

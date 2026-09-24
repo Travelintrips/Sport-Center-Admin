@@ -91,6 +91,8 @@ import {
   formatAlternativeFacilityOptions,
   getAlternativeBookingDraftPatch,
   parseAlternativeBookingChoice,
+  isMinaGreeting,
+  isBookingRequest,
 } from "../lib/waBookingFlow";
 
 const router = Router();
@@ -2211,14 +2213,6 @@ function isExplicitCancel(msg: string): boolean {
   return /^(batal|cancel|hapus|batalkan|stop|keluar|quit|abort)$/i.test(msg.trim());
 }
 
-function isMinaGreeting(msg: string): boolean {
-  return /^(halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?$/i.test(msg.replace(/\s+/g, " ").trim());
-}
-
-function isBookingRequest(msg: string): boolean {
-  return /^(?:mau|mao)\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?$/i.test(msg.replace(/\s+/g, " ").trim());
-}
-
 function isContinueHere(msg: string): boolean {
   // Accept both natural WhatsApp spellings: "lanjut di sini" and
   // "lanjut disini". Keep the match strict so unrelated messages do not
@@ -3005,7 +2999,9 @@ async function startGreetingSession(
   useCustomerToken = false,
 ): Promise<void> {
   const customer = await getRegisteredCustomer(phone);
-  const greeting = "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?";
+  const greeting =
+    "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
+    "Mau booking fasilitas, cukup ketik Booking.";
   const greetingSession = await createSession({
     phone,
     customerId: customer?.id ?? null,
@@ -4954,6 +4950,13 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // received while a session is active is handled above as a restart.
     if (isMinaGreeting(msg)) {
       await startGreetingSession(phone, msg, String(name), true);
+      return;
+    }
+
+    // Recognized booking commands always enter the structured facility flow;
+    // do not leave this decision to AI intent classification.
+    if (isBookingRequest(msg)) {
+      await startBookingSession(phone, msg, String(name), true);
       return;
     }
 

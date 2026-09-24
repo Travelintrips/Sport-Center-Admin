@@ -99,8 +99,53 @@ describe("Mina WhatsApp duration runtime regression", () => {
     }
   });
 
+  it("greets a salutation and opens the facility list when the customer replies Booking", async () => {
+    const outboundStart = fetchMock.mock.calls.length;
+
+    const greetingResponse = await request
+      .post("/api/wa/fonnte/webhook")
+      .send({
+        sender: phone,
+        message: "Selamat pagi",
+        name: "Mina regression",
+        device: "081234567890",
+        inboxid: "8998",
+        id: "mina-greeting-booking-regression-1",
+      });
+    expect(greetingResponse.status).toBe(200);
+    const greetingBody = fetchMock.mock.calls[outboundStart]?.[1]?.body as FormData;
+    expect(String(greetingBody?.get("message"))).toBe(
+      "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
+      "Mau booking fasilitas, cukup ketik Booking.",
+    );
+
+    const bookingResponse = await request
+      .post("/api/wa/fonnte/webhook")
+      .send({
+        sender: phone,
+        message: "Booking",
+        name: "Mina regression",
+        device: "081234567890",
+        inboxid: "8999",
+        id: "mina-greeting-booking-regression-2",
+      });
+    expect(bookingResponse.status).toBe(200);
+    const facilityListBody = fetchMock.mock.calls[outboundStart + 1]?.[1]?.body as FormData;
+    const facilityListMessage = String(facilityListBody?.get("message") ?? "");
+    expect(facilityListMessage).toContain("Fasilitas tersedia:");
+    expect(facilityListMessage).toContain("Sebutkan nama fasilitas");
+    expect(facilityListMessage).not.toContain("Fasilitas tidak ditemukan");
+
+    const session = await getActiveSession(phone);
+    expect(session).toMatchObject({
+      facilityId: null,
+      currentStep: "ask_facility",
+    });
+  }, 30_000);
+
   it("routes Court A → lanjut di sini → Tri → besok → 2 jam to outbound availability before webhook ACK", async () => {
     const setupMessages = ["Court A", "lanjut di sini", "Tri", "besok (tanggal 22)"];
+    const setupOutboundStart = fetchMock.mock.calls.length;
 
     for (const [index, message] of setupMessages.entries()) {
       const response = await request
@@ -114,7 +159,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
           id: `mina-duration-regression-${index}`,
         });
       expect(response.status).toBe(200);
-      await waitFor(() => fetchMock.mock.calls.length >= index + 1);
+      await waitFor(() => fetchMock.mock.calls.length >= setupOutboundStart + index + 1);
     }
 
     let releaseFinalSend!: () => void;
@@ -142,7 +187,9 @@ describe("Mina WhatsApp duration runtime regression", () => {
         return response;
       });
 
-    await waitFor(() => fetchMock.mock.calls.length >= setupMessages.length + 1);
+    await waitFor(() =>
+      fetchMock.mock.calls.length >= setupOutboundStart + setupMessages.length + 1,
+    );
     expect(webhookSettled).toBe(false);
 
     releaseFinalSend();
@@ -166,7 +213,9 @@ describe("Mina WhatsApp duration runtime regression", () => {
         inboxid?: unknown;
       };
     });
-    const finalOutbounds = sentMessages.slice(setupMessages.length);
+    const finalOutbounds = sentMessages.slice(
+      setupOutboundStart + setupMessages.length,
+    );
     const combinedFinalMessage = finalOutbounds
       .map((outbound: { message?: string }) => outbound.message ?? "")
       .join("\n\n");

@@ -5,6 +5,27 @@ export const INACTIVE_BOOKING_STATUSES = [
   "refunded",
 ] as const;
 
+function normalizeTriggerMessage(message: string): string {
+  return message
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.,!?]+$/, "")
+    .toLowerCase();
+}
+
+/** Recognize the greetings that should start or restart Mina's greeting flow. */
+export function isMinaGreeting(message: string): boolean {
+  const normalized = normalizeTriggerMessage(message);
+  return /^(?:halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?$/.test(normalized) ||
+    /^selamat\s+(?:pagi|siang|sore|malam)$/.test(normalized);
+}
+
+/** Recognize the explicit booking commands that show the facility menu. */
+export function isBookingRequest(message: string): boolean {
+  const normalized = normalizeTriggerMessage(message);
+  return /^(?:booking|mau\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?)$/.test(normalized);
+}
+
 export interface SlotBooking {
   startTime: string;
   endTime: string;
