@@ -916,11 +916,7 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
       return;
     }
 
-    const isSettled =
-      invoice.status === "paid" ||
-      invoice.status === "partial_paid" ||
-      invoice.invoiceStatus === "paid" ||
-      invoice.invoiceStatus === "partial_paid";
+    const isSettled = invoice.status === "paid" || invoice.status === "partial_paid";
     if (isSettled && !confirmPaidInvoice) {
       res.status(409).json({
         code: "PAID_INVOICE_CONFIRMATION_REQUIRED",
