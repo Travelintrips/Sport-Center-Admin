@@ -110,6 +110,27 @@ export function parsePaymentProofAmount(text: string): number | null {
         if (fuzzyAmount != null) candidates.push({ amount: fuzzyAmount, score: 3 });
       }
     }
+
+    // QRIS success screens often put the amount on its own large line. On
+    // colored screenshots Tesseract can read the digits perfectly while
+    // dropping the small "Rp" prefix. Accept a grouped money token on a
+    // non-reference line as a low-priority fallback. Long ungrouped PAN/RRN/
+    // reference numbers are intentionally excluded by this pattern.
+    if (currencyMatches.length === 0) {
+      const groupedAmounts = [
+        ...line.matchAll(
+          /(?<![\dOIl])([\dOIl]{1,3}(?:[.,\s][\dOIl]{3})+(?:[.,][\dOIl]{2})?)(?![\dOIl])/gi,
+        ),
+      ]
+        .map((match) => parseMoneyToken(match[1] ?? ""))
+        .filter(
+          (value): value is number =>
+            value != null && value >= 1_000 && value <= 1_000_000_000,
+        );
+      for (const amount of groupedAmounts) {
+        candidates.push({ amount, score: hasStrongAmountLabel ? 3 : 1 });
+      }
+    }
   }
 
   if (candidates.length === 0) return null;
@@ -503,10 +524,12 @@ export async function scanPaymentProof(
     });
     try {
       const scans: Array<PaymentProofOcrScan & { quality: number }> = [];
-      for (const variant of ["color", "normalized"] as const) {
-        const image = await preprocessImage(buffer, variant);
+
+      const recognize = async (image: Buffer) => {
         const result = await worker.recognize(image);
         const rawText = String(result.data.text ?? "").trim();
+        if (!rawText) return null;
+
         const classification = classifyPaymentMethod(rawText);
         const scan = {
           ...classification,
@@ -518,7 +541,8 @@ export async function scanPaymentProof(
           engine: "tesseract" as const,
           scannedAt,
         };
-        scans.push({
+
+        return {
           ...scan,
           quality:
             (scan.paymentMethod !== "unknown" ? 4 : 0) +
@@ -526,7 +550,42 @@ export async function scanPaymentProof(
             (scan.date != null ? 2 : 0) +
             (scan.recipient != null ? 2 : 0) +
             scan.confidence,
-        });
+        };
+      };
+
+      // First scan the original upload. This avoids image preprocessing from
+      // accidentally degrading crisp bank/QRIS screenshots such as the BCA
+      // success screen where the amount is already highly legible.
+      try {
+        const originalScan = await recognize(buffer);
+        if (originalScan) scans.push(originalScan);
+      } catch {
+        // Continue with preprocessed fallbacks below.
+      }
+
+      const original = scans[0];
+      const needsFallback =
+        !original ||
+        original.amount == null ||
+        original.date == null ||
+        original.recipient == null ||
+        original.paymentMethod === "unknown";
+
+      if (needsFallback) {
+        for (const variant of ["color", "normalized"] as const) {
+          try {
+            const image = await preprocessImage(buffer, variant);
+            const scan = await recognize(image);
+            if (scan) scans.push(scan);
+          } catch {
+            // One bad preprocessing/recognition variant must not make the
+            // whole proof unreadable if another variant succeeds.
+          }
+        }
+      }
+
+      if (scans.length === 0) {
+        throw new Error("OCR did not produce readable text");
       }
 
       scans.sort((a, b) => b.quality - a.quality);

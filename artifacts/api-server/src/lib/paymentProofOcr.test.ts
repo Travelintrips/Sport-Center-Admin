@@ -78,6 +78,27 @@ describe("payment proof OCR amount parsing", () => {
     expect(parsePaymentProofAmount("Total Transaksi Rp 200,000.00")).toBe(200000);
   });
 
+  it("reads a standalone grouped amount when OCR drops the Rp prefix", () => {
+    const rawText = [
+      "Pembayaran QRIS Berhasil",
+      "200.000,00",
+      "27/06/2026 - 18:21:43 WIB",
+      "Pembayaran ke TRAVELIN BANDARA",
+      "SOETTA",
+      "Pengakuisisi BANK MANDIRI",
+      "Merchant PAN 9360000801776324881",
+      "Customer PAN 9360001410085280088",
+      "RRN 117929478",
+      "Ref 182163000728",
+    ].join("\n");
+
+    expect(parsePaymentProofAmount(rawText)).toBe(200000);
+  });
+
+  it("reads the amount when OCR mangles the Rp prefix but keeps the grouped digits", () => {
+    expect(parsePaymentProofAmount("R p 200.000,00")).toBe(200000);
+  });
+
   it("does not use reference or PAN identifiers as the amount", () => {
     const rawText = [
       "No. Referensi QRIS 609102309748",
