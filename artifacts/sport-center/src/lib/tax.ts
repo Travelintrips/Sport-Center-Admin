@@ -32,11 +32,8 @@ export function calculateBookingWithholdingTax(input: BookingWithholdingTaxInput
   // deriving a rate from a group-summed snapshot can double-count PPh across
   // recurring sessions and produce an incorrect group net.
   const rate = configuredRate > 0 ? configuredRate : (storedAmount > 0 ? 10 : 0);
-  const preciseInclusiveDpp = grossAmount / 1.11;
-  const isRoundedInclusiveDpp =
-    dpp > 0 && Math.abs(dpp - preciseInclusiveDpp) <= 2;
-  const withholdingBase = isRoundedInclusiveDpp ? preciseInclusiveDpp : dpp;
-  const amount = enabled ? Math.round(withholdingBase * rate / 100) : 0;
+  // Canonical business rule: PPh = rounded DPP × rate.
+  const amount = enabled ? Math.round(dpp * rate / 100) : 0;
   // PPh is withheld from DPP, but the customer still settles DPP + PPN.
   // PPN collection ownership must not remove PPN from the net invoice amount.
   const cashGross = grossAmount;
