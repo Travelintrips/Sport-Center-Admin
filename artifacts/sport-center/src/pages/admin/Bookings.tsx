@@ -155,15 +155,32 @@ function getGroupInvoiceTax(bookings: any[]): InvoiceTaxSummary | null {
   if (rows.length === 0) return null;
 
   const rowTaxes = rows.map((row) => getBookingInvoiceTax(row));
-  const grossAmount = rowTaxes.reduce((sum, tax) => sum + tax.grandTotal, 0);
-  const hasPpn = rows.some(
-    (row, index) =>
-      rowTaxes[index].ppnAmount > 0 ||
-      row.ppnTreatment === "inclusive" ||
-      isAdditiveLegacyTaxSnapshot(row),
-  );
+  const groupSnapshot = rows.find((row) => row.groupTotalPayment != null);
+  const grossAmount = groupSnapshot
+    ? Math.max(0, Math.round(Number(groupSnapshot.groupTotalPayment) || 0))
+    : rowTaxes.reduce((sum, tax) => sum + tax.grandTotal, 0);
+  const groupDppSnapshot = groupSnapshot?.groupDpp;
+  const hasPpn = groupSnapshot
+    ? Number(groupSnapshot.groupPpnAmount ?? 0) > 0 ||
+      groupSnapshot.ppnTreatment === "inclusive"
+    : rows.some(
+        (row, index) =>
+          rowTaxes[index].ppnAmount > 0 ||
+          row.ppnTreatment === "inclusive" ||
+          isAdditiveLegacyTaxSnapshot(row),
+      );
   const tax: Pick<InvoiceTaxSummary, "grandTotal" | "dpp" | "dppNilaiLain" | "ppnAmount"> = hasPpn
-    ? calculateInclusiveInvoiceTax(grossAmount)
+    ? groupDppSnapshot != null
+      ? {
+          grandTotal: grossAmount,
+          dpp: Math.max(0, Math.round(Number(groupDppSnapshot))),
+          dppNilaiLain: Math.round(Number(groupDppSnapshot) * 11 / 12),
+          ppnAmount: Math.max(
+            0,
+            grossAmount - Math.max(0, Math.round(Number(groupDppSnapshot))),
+          ),
+        }
+      : calculateInclusiveInvoiceTax(grossAmount)
     : {
         grandTotal: grossAmount,
         dpp: grossAmount,
@@ -183,9 +200,9 @@ function getGroupInvoiceTax(bookings: any[]): InvoiceTaxSummary | null {
   const withholding = calculateBookingWithholdingTax({
     grossAmount: tax.grandTotal,
     dpp: tax.dpp,
-    companyCustomerId: withholdingSource?.companyCustomerId,
-    pphRate: withholdingSource?.pphRate,
-    pphAmount: storedPphAmount,
+    companyCustomerId: groupSnapshot?.companyCustomerId ?? withholdingSource?.companyCustomerId,
+    pphRate: groupSnapshot?.groupPphRate ?? withholdingSource?.pphRate,
+    pphAmount: groupSnapshot?.groupPphAmount ?? storedPphAmount,
     ppnCollectedByCustomer: rows.every(
       (row) =>
         row.ppnCollectedByCustomer === true ||
@@ -4531,10 +4548,11 @@ export default function AdminBookings() {
                       const companyInvoiceDisplayTotal = isPaidCompanyInvoice
                         ? companyInvoiceNetTotal
                         : 0;
-                      const groupDisplayTotal = isMultiSessionGroup
+                     const groupTaxSummary = isMultiSessionGroup ? getGroupInvoiceTax(groupRows) : null;
+                     const groupDisplayTotal = isMultiSessionGroup
                         ? isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
                           ? companyInvoiceNetTotal
-                           : (getGroupInvoiceTax(groupRows)?.netAmount ?? 0)
+                          : (groupTaxSummary?.netAmount ?? 0)
                         : sessionDisplayTotal;
                       // A collapsed group row represents all sessions. Never
                       // show the first session's net as the main total.
@@ -4725,6 +4743,11 @@ export default function AdminBookings() {
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                              {formatCurrency(bookingDisplayTotal)}
                           </span>
+                          {isGroupTotalRow && groupTaxSummary && (
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              Bruto: {formatCurrency(groupTaxSummary.grandTotal)}
+                            </div>
+                          )}
                           {isMultiSessionGroup && (
                             <div className="flex flex-col gap-0.5 mt-0.5">
                               <div className="flex items-center gap-1 flex-wrap">

@@ -462,6 +462,60 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const charges = normalizeAdditionalCharges(row.additionalCharges);
       if (charges.length > 0) groupAdditionalCharges.set(row.groupRef, charges);
     }
+    const groupTaxByRef = new Map<string, {
+      groupTotalPayment: number;
+      groupDpp: number;
+      groupPpnAmount: number;
+      groupPphRate: number;
+      groupPphAmount: number;
+      groupNetTotalPayment: number;
+    }>();
+    if (groupRefs.length > 0) {
+      const groups = await db
+        .select()
+        .from(bookingGroupsTable)
+        .where(inArray(bookingGroupsTable.groupRef, groupRefs))
+        .catch((err) => {
+          req.log.warn({ err }, "Booking group tax lookup skipped for booking list");
+          return [];
+        });
+      for (const group of groups) {
+        const groupBookings = bookings.filter((booking) => booking.groupRef === group.groupRef);
+        const companyBooking = groupBookings.find((booking) => booking.companyCustomerId != null);
+        const groupGross = Math.max(0, Math.round(Number(group.totalPayment) || 0));
+        const storedGroupPpn = Math.max(0, Number(group.ppnAmount ?? 0));
+        const groupHasPpn =
+          storedGroupPpn > 0 ||
+          group.ppnTreatment === "inclusive" ||
+          groupBookings.some(
+            (booking) =>
+              Number(booking.ppnAmount ?? 0) > 0 ||
+              booking.ppnTreatment === "inclusive",
+          );
+        const groupDpp = Math.max(
+          0,
+          Math.round(
+            Number(group.dpp ?? (groupHasPpn ? groupGross / 1.11 : groupGross)),
+          ),
+        );
+        const storedGroupPph = Math.max(0, Number(group.pphAmount ?? 0));
+        const groupPphRate = Math.max(0, Number(group.pphRate ?? 0) || (storedGroupPph > 0 ? 10 : 0));
+        const groupWithholding = calculateWithholdingTax(
+          groupGross,
+          groupDpp,
+          companyBooking != null && (groupPphRate > 0 || storedGroupPph > 0),
+          groupPphRate || 10,
+        );
+        groupTaxByRef.set(group.groupRef, {
+          groupTotalPayment: groupGross,
+          groupDpp,
+          groupPpnAmount: groupHasPpn ? Math.max(0, groupGross - groupDpp) : 0,
+          groupPphRate: groupWithholding.rate,
+          groupPphAmount: groupWithholding.amount,
+          groupNetTotalPayment: groupWithholding.netAmount,
+        });
+      }
+    }
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
     const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
     let reconciledPaymentIds = new Set<number>();
@@ -723,6 +777,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       const bookingWithholding = calculateBookingWithholdingTax(b);
+      const groupTax = b.groupRef ? groupTaxByRef.get(b.groupRef) : undefined;
       const companyInvoiceTotal =
         invoice?.status === "paid"
           ? Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)
@@ -750,6 +805,12 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         pphRate: bookingWithholding.enabled ? bookingWithholding.rate : null,
         pphAmount: bookingWithholding.enabled ? bookingWithholding.amount : null,
         netAmount: bookingWithholding.netAmount,
+        groupTotalPayment: groupTax?.groupTotalPayment ?? null,
+        groupDpp: groupTax?.groupDpp ?? null,
+        groupPpnAmount: groupTax?.groupPpnAmount ?? null,
+        groupPphRate: groupTax?.groupPphRate ?? null,
+        groupPphAmount: groupTax?.groupPphAmount ?? null,
+        groupNetTotalPayment: groupTax?.groupNetTotalPayment ?? null,
         additionalCharges: normalizeAdditionalCharges(b.additionalCharges),
         groupAdditionalCharges: b.groupRef
           ? (groupAdditionalCharges.get(b.groupRef) ?? [])
