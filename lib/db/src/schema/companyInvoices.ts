@@ -56,7 +56,9 @@ export const companyInvoiceItemsTable = scSchema.table("company_invoice_items", 
   totalAmount: numeric("total_amount", { precision: 14, scale: 2 }),
   orderNumber: text("order_number"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => ({
+  uniqueInvoiceBooking: uniqueIndex("company_invoice_items_invoice_booking_unique").on(t.invoiceId, t.bookingId),
+}));
 
 export const insertCompanyInvoiceSchema = createInsertSchema(companyInvoicesTable).omit({ id: true, createdAt: true });
 export const insertCompanyInvoiceItemSchema = createInsertSchema(companyInvoiceItemsTable).omit({ id: true, createdAt: true });
