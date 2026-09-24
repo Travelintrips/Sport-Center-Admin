@@ -508,11 +508,23 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           ),
         );
         const storedGroupPph = Math.max(0, Number(group.pphAmount ?? 0));
-        const groupPphRate = Math.max(0, Number(group.pphRate ?? 0) || (storedGroupPph > 0 ? 10 : 0));
+        const bookingPphRate = Math.max(
+          0,
+          ...groupBookings.map((booking) => Number(booking.pphRate ?? 0) || 0),
+        );
+        const bookingHasPph = groupBookings.some(
+          (booking) => Number(booking.pphAmount ?? 0) > 0 || Number(booking.pphRate ?? 0) > 0,
+        );
+        const groupPphRate = Math.max(
+          0,
+          Number(group.pphRate ?? 0) ||
+            bookingPphRate ||
+            (storedGroupPph > 0 || bookingHasPph ? 10 : 0),
+        );
         const groupWithholding = calculateWithholdingTax(
           groupGross,
           groupDpp,
-          companyBooking != null && (groupPphRate > 0 || storedGroupPph > 0),
+          companyBooking != null && (groupPphRate > 0 || storedGroupPph > 0 || bookingHasPph),
           groupPphRate || 10,
         );
         groupTaxByRef.set(group.groupRef, {
@@ -1309,6 +1321,10 @@ router.post("/bookings", async (req, res) => {
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
 
+    if (incomingGroupRef) {
+      await syncBookingGroupTotal(incomingGroupRef);
+    }
+
     // Release slot advisory lock setelah INSERT berhasil
     if (slotLockKey) {
       await db.execute(sql`SELECT pg_advisory_unlock(${slotLockKey.fId}, ${slotLockKey.dInt})`).catch(() => {});
@@ -2066,6 +2082,8 @@ router.post("/bookings/recurring", async (req, res) => {
 
         // Update created array dengan groupRef
         for (const b of created) b.groupRef = groupRef;
+
+        await syncBookingGroupTotal(groupRef);
       }
     }
 
