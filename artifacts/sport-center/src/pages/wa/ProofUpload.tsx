@@ -136,7 +136,7 @@ export default function WaProofUpload() {
     e.preventDefault();
     if (!file) return;
     if (!ocrPreviewVerified) {
-      setError("Bukti belum lolos pemeriksaan metode, tanggal, penerima, dan nominal.");
+      setError("Bukti belum lolos pemeriksaan nominal.");
       return;
     }
     setUploading(true);
@@ -224,8 +224,6 @@ export default function WaProofUpload() {
       (hasWithholding ? (b?.netAmount ?? 0) : grossAmount),
   );
   const ocrAmountMatches = ocrValidation?.amountMatch === true;
-  const ocrMethodMatches = ocrValidation?.methodMatch === true;
-  const ocrRecipientMatches = ocrValidation?.recipientMatch === true;
   const configuredRecipients = paymentMethod === "QRIS"
     ? info?.paymentOptions?.qris?.recipientNames ?? []
     : info?.paymentOptions?.transferBank?.bankAccountName
@@ -235,18 +233,10 @@ export default function WaProofUpload() {
     ocrValidation?.expectedRecipients.join(" / ") ||
     configuredRecipients.join(" / ") ||
     "Belum dikonfigurasi";
-  const bookingCreatedDate = b?.createdAt
-    ? new Date(b.createdAt).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
-    : null;
-  const ocrDateMatches = ocrValidation?.dateMatch === true;
-  const methodMismatch = Boolean(ocrPreview) && !ocrMethodMatches;
   const amountMismatch = Boolean(ocrPreview) && !ocrAmountMatches;
-  const dateMismatch = Boolean(ocrPreview) && !ocrDateMatches;
-  const recipientMismatch = Boolean(ocrPreview) && !ocrRecipientMatches;
-  const hasConfidentMismatch =
-    methodMismatch || amountMismatch || dateMismatch || recipientMismatch;
+  const hasConfidentMismatch = amountMismatch;
   const escalationRequired = hasConfidentMismatch && replacementAttempts >= 3;
-  const ocrPreviewVerified = ocrValidation?.complete === true;
+  const ocrPreviewVerified = ocrAmountMatches;
   const remainingReplacements = Math.max(0, 3 - replacementAttempts);
   const supportWhatsapp = String(info?.supportWhatsapp ?? "").replace(/\D/g, "");
   const supportMessage = encodeURIComponent(
@@ -427,27 +417,13 @@ export default function WaProofUpload() {
                      : "border-yellow-200 bg-yellow-50 text-yellow-800"
                  }`}>
                    <p className="font-bold">Hasil pengecekan awal</p>
+                    <p className="mt-1">Mode uji coba: hanya nominal yang diperiksa.</p>
                    <div className="mt-2 space-y-1.5">
                      {[
-                       {
-                         label: "Metode",
-                         value: `${ocrPreview.paymentMethod === "unknown" ? "Belum terbaca" : ocrPreview.paymentMethod} · dipilih ${paymentMethod}`,
-                         passed: ocrMethodMatches,
-                       },
                        {
                          label: "Nominal",
                          value: `${ocrPreview.amount == null ? "Belum terbaca" : `Rp ${Number(ocrPreview.amount).toLocaleString("id-ID")}`} · tagihan Rp ${expectedPaymentAmount.toLocaleString("id-ID")}`,
                          passed: ocrAmountMatches,
-                       },
-                       {
-                         label: "Tanggal transaksi",
-                         value: `${ocrPreview.date ?? "Belum terbaca"} · harus dari ${bookingCreatedDate ?? "tanggal booking"} sampai hari ini`,
-                         passed: ocrDateMatches,
-                       },
-                       {
-                         label: "Penerima",
-                         value: `${ocrPreview.recipient ?? "Belum terbaca"} · tujuan ${expectedRecipientLabel}`,
-                         passed: ocrRecipientMatches,
                        },
                      ].map((check) => (
                        <p key={check.label} className="flex items-start gap-1.5">
@@ -460,12 +436,12 @@ export default function WaProofUpload() {
                    </div>
                    <p className="mt-1">
                      {ocrPreviewVerified
-                       ? "Keempat detail cocok. Server akan memeriksa ulang bukti saat dikirim."
+                        ? "Nominal cocok. Server akan memeriksa ulang nominal saat bukti dikirim."
                        : escalationRequired
-                         ? "Bukti masih tidak cocok setelah 3 kali ganti foto. Silakan hubungi admin untuk pemeriksaan manual."
+                          ? "Nominal masih tidak cocok setelah 3 kali ganti foto. Silakan hubungi admin untuk pemeriksaan manual."
                          : hasConfidentMismatch
-                           ? `Bukti belum cocok atau ada detail yang belum terbaca. Ganti foto${remainingReplacements > 0 ? ` (tersisa ${remainingReplacements} kali)` : ""}. Bukti hanya dapat dikirim setelah semua pemeriksaan lolos.`
-                           : "Pengecekan bukti belum selesai. Silakan coba foto yang lebih jelas."}
+                            ? `Nominal bukti belum cocok atau belum terbaca. Ganti foto${remainingReplacements > 0 ? ` (tersisa ${remainingReplacements} kali)` : ""}. Bukti hanya dapat dikirim jika nominal cocok.`
+                            : "Pengecekan nominal belum selesai. Silakan coba foto yang lebih jelas."}
                    </p>
                  </div>
                )}

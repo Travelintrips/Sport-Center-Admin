@@ -1367,25 +1367,10 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const resolvedPaymentMethod = selectedPaymentMethod;
     const resolvedProvider = resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
 
-    if (!proofValidation.complete) {
+    // Temporary WA proof-upload test: only a matching amount is required.
+    // Keep the other OCR results for audit/review, but do not block submission on them.
+    if (!proofValidation.amountMatch) {
       const reasons = [
-        !proofValidation.methodMatch
-          ? proofOcr.paymentMethod === "unknown"
-            ? "metode pembayaran tidak terbaca"
-            : `metode pembayaran terbaca ${proofOcr.paymentMethod}, bukan ${selectedPaymentMethod}`
-          : null,
-        !proofValidation.dateMatch
-          ? proofOcr.date
-            ? `tanggal transaksi ${proofOcr.date} tidak valid untuk booking ini`
-            : "tanggal transaksi tidak terbaca"
-          : null,
-        !proofValidation.recipientMatch
-          ? validationContext.expectedRecipients.length === 0
-            ? "tujuan pembayaran belum dikonfigurasi"
-            : proofOcr.recipient
-              ? `penerima "${proofOcr.recipient}" tidak sesuai dengan tujuan pembayaran`
-              : "nama penerima tidak terbaca"
-          : null,
         !proofValidation.amountMatch
           ? proofOcr.amount == null
             ? "nominal transaksi tidak terbaca"
@@ -1393,7 +1378,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           : null,
       ].filter(Boolean);
       res.status(422).json({
-        error: `Bukti belum dapat diterima: ${reasons.join("; ")}. Upload bukti yang benar dan pastikan seluruh detail terlihat.`,
+        error: `Bukti belum dapat diterima: ${reasons.join("; ")}. Pastikan nominal pada bukti sama dengan tagihan.`,
         code: "PAYMENT_PROOF_VALIDATION_FAILED",
         ocrScan: {
           paymentMethod: proofOcr.paymentMethod,
