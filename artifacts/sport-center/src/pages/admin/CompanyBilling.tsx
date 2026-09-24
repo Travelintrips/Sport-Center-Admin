@@ -263,8 +263,8 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
   </tbody><tfoot>
     <tr class="total-row">
       <td colspan="7" style="padding:8px 7px;font-size:12px;border-top:2px solid #ea580c;">Total</td>
-      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Number(i.subtotal ?? 0) / 1.11), 0))}</td>
-      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;color:#6b7280;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round(Number(i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
+      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(dpp)}</td>
+      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;color:#6b7280;">${formatCurrency(ppn)}</td>
        <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Number(i.totalAmount ?? i.subtotal ?? 0), 0))}</td>
     </tr>
   </tfoot></table>
@@ -345,6 +345,21 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
 function printLampiranPemakaian(invoice: any, ds: DocTemplateSettings) {
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
+  const aggregateGross = Math.max(
+    0,
+    Math.round(Number(invoice.grandTotal ?? invoice.totalAmount ?? items.reduce(
+      (sum: number, item: any) => sum + Number(item.totalAmount ?? item.subtotal ?? 0),
+      0,
+    ))),
+  );
+  const aggregateDpp = Math.max(
+    0,
+    Math.round(Number(invoice.dpp ?? (aggregateGross > 0 ? aggregateGross / 1.11 : 0))),
+  );
+  const aggregatePpn = Math.max(
+    0,
+    Math.round(Number(invoice.ppnAmount ?? (aggregateGross - aggregateDpp))),
+  );
   const rows = items.map((item: any, i: number) => `
     <tr style="${i % 2 === 1 ? "background:#f9fafb;" : ""}">
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;">${i + 1}</td>
@@ -404,8 +419,8 @@ function printLampiranPemakaian(invoice: any, ds: DocTemplateSettings) {
     <tr class="total-row">
       <td colspan="5" style="padding:8px;text-align:right;font-size:12px;">Total:</td>
       <td style="padding:8px;text-align:center;font-size:12px;font-weight:700;">${totalDurasi.toFixed(1)} jam</td>
-      <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Number(i.subtotal ?? 0) / 1.11), 0))}</td>
-      <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round(Number(i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
+      <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;">${formatCurrency(aggregateDpp)}</td>
+      <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${formatCurrency(aggregatePpn)}</td>
        <td style="padding:8px;text-align:right;font-size:13px;font-weight:900;color:#ea580c;">${formatCurrency(items.reduce((s, i) => s + Number(i.totalAmount ?? i.subtotal ?? 0), 0))}</td>
     </tr>
   </tfoot></table>
