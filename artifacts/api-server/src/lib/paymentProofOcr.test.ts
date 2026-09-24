@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 import {
   classifyPaymentMethod,
   parsePaymentProofAmount,
+  parsePaymentProofVisionAmount,
   parsePaymentProofDate,
   parsePaymentProofRecipient,
   paymentProofDateMatchesBooking,
@@ -115,6 +116,16 @@ describe("payment proof OCR amount parsing", () => {
 });
 
 
+
+describe("payment proof vision amount response parsing", () => {
+  it("accepts only a bounded integer rupiah amount", () => {
+    expect(parsePaymentProofVisionAmount('{"amount":200000}')).toBe(200000);
+    expect(parsePaymentProofVisionAmount('```json\n{"amount":30000}\n```')).toBe(30000);
+    expect(parsePaymentProofVisionAmount('{"amount":null}')).toBeNull();
+    expect(parsePaymentProofVisionAmount('{"amount":1179294781234}')).toBeNull();
+    expect(parsePaymentProofVisionAmount("not json")).toBeNull();
+  });
+});
 
 describe("payment proof OCR date validation", () => {
   it("reads textual Mandiri receipt dates", () => {

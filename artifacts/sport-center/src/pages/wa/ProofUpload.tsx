@@ -18,7 +18,7 @@ interface OcrPreview {
   recipient: string | null;
   amount: number | null;
   date: string | null;
-  engine: "tesseract" | "unsupported" | "failed";
+  engine: "tesseract" | "openai_vision" | "unsupported" | "failed";
   validation: {
     methodMatch: boolean;
     amountMatch: boolean;

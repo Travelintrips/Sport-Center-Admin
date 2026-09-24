@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import OpenAI from "openai";
 
 export type OcrPaymentMethod = "QRIS" | "Transfer Bank" | "unknown";
 
@@ -13,7 +14,7 @@ export interface PaymentProofOcrScan {
   recipient: string | null;
   amount: number | null;
   date: string | null;
-  engine: "tesseract" | "unsupported" | "failed";
+  engine: "tesseract" | "openai_vision" | "unsupported" | "failed";
   scannedAt: string;
 }
 
@@ -481,6 +482,121 @@ export function classifyPaymentMethod(text: string): {
   };
 }
 
+function detectImageMime(buffer: Buffer, fallback: string): string {
+  if (buffer.length >= 12) {
+    if (
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47
+    ) return "image/png";
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      return "image/jpeg";
+    }
+    if (
+      buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+      buffer.subarray(8, 12).toString("ascii") === "WEBP"
+    ) return "image/webp";
+  }
+  return fallback.startsWith("image/") ? fallback : "image/jpeg";
+}
+
+export function parsePaymentProofVisionAmount(raw: string): number | null {
+  const cleaned = String(raw ?? "")
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as { amount?: unknown };
+    const value = Number(parsed?.amount);
+    return Number.isInteger(value) && value >= 1_000 && value <= 1_000_000_000
+      ? value
+      : null;
+  } catch {
+    const match = cleaned.match(/"amount"\s*:\s*(null|\d{3,12})/i);
+    if (!match || /^null$/i.test(match[1] ?? "")) return null;
+    const value = Number(match[1]);
+    return Number.isInteger(value) && value >= 1_000 && value <= 1_000_000_000
+      ? value
+      : null;
+  }
+}
+
+async function readPaymentProofAmountWithVision(
+  buffer: Buffer,
+  mimetype: string,
+): Promise<number | null> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  try {
+    let imageBuffer = buffer;
+    let imageMime = detectImageMime(buffer, mimetype);
+
+    // Keep the fallback request compact and normalize odd extensions/content
+    // when Sharp is available. If Sharp is unavailable, the original bytes
+    // are still sent with a mime type detected from their magic header.
+    try {
+      const sharp = (await import("sharp")).default;
+      imageBuffer = await sharp(buffer)
+        .rotate()
+        .resize({ width: 1800, withoutEnlargement: true })
+        .jpeg({ quality: 88 })
+        .toBuffer();
+      imageMime = "image/jpeg";
+    } catch {
+      // The primary Tesseract path already logs Sharp/runtime problems.
+    }
+
+    const baseURL = process.env.OPENAI_BASE_URL || undefined;
+    const client = new OpenAI({
+      apiKey,
+      ...(baseURL ? { baseURL } : {}),
+      timeout: 15_000,
+      maxRetries: 1,
+    });
+    const completion = await client.chat.completions.create({
+      model: process.env.PAYMENT_PROOF_VISION_MODEL || "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 60,
+      messages: [
+        {
+          role: "system",
+          content:
+            'Read a payment receipt image and extract ONLY the total amount actually paid. Ignore account numbers, PAN, RRN, reference numbers, dates, balances, merchant IDs, and terminal IDs. Return exactly JSON: {"amount": integer_rupiah_or_null}. Examples: Rp30.000 => 30000, Rp200.000,00 => 200000. If the paid total is not clearly visible, return {"amount":null}.',
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Extract the transaction amount paid from this proof.",
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${imageMime};base64,${imageBuffer.toString("base64")}`,
+                detail: "high",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const content = completion.choices[0]?.message?.content ?? "";
+    const amount = parsePaymentProofVisionAmount(content);
+    if (amount != null) {
+      console.info("[payment-proof-ocr] vision fallback extracted amount", { amount });
+    }
+    return amount;
+  } catch (error) {
+    console.error("[payment-proof-ocr] vision fallback failed", error);
+    return null;
+  }
+}
+
 function resolveLocalTesseractLangPath(): string | null {
   const configured = process.env.TESSERACT_LANG_PATH?.trim();
   const candidates = [
@@ -628,16 +744,24 @@ export async function scanPaymentProof(
       const amount = scans.find((scan) => scan.amount != null)?.amount ?? null;
       const date = scans.find((scan) => scan.date != null)?.date ?? null;
 
+      const visionAmount =
+        amount == null
+          ? await readPaymentProofAmountWithVision(buffer, mimetype)
+          : null;
+
       return {
         paymentMethod: methodScan.paymentMethod,
         confidence: methodScan.confidence,
-        signals: methodScan.signals,
+        signals:
+          visionAmount != null
+            ? [...methodScan.signals, "amount extracted by vision fallback"]
+            : methodScan.signals,
         rawText: scans.map((scan) => scan.rawText).filter(Boolean).join("\n\n"),
         name,
         recipient,
-        amount,
+        amount: amount ?? visionAmount,
         date,
-        engine: best.engine,
+        engine: amount == null && visionAmount != null ? "openai_vision" : best.engine,
         scannedAt,
       };
     } finally {
@@ -645,16 +769,17 @@ export async function scanPaymentProof(
     }
   } catch (error) {
     console.error("[payment-proof-ocr] scan failed", error);
+    const visionAmount = await readPaymentProofAmountWithVision(buffer, mimetype);
     return {
       paymentMethod: "unknown",
       confidence: 0,
-      signals: [],
+      signals: visionAmount != null ? ["amount extracted by vision fallback"] : [],
       rawText: "",
       name: null,
       recipient: null,
-      amount: null,
+      amount: visionAmount,
       date: null,
-      engine: "failed",
+      engine: visionAmount != null ? "openai_vision" : "failed",
       scannedAt,
     };
   }
@@ -755,10 +880,12 @@ export function validatePaymentProofScan(params: {
 }): PaymentProofValidation {
   const scan = params.scan;
   const readable = scan?.engine === "tesseract";
+  const amountReadable =
+    scan?.engine === "tesseract" || scan?.engine === "openai_vision";
   const methodMatch =
     readable && paymentMethodMatchesOcr(params.selectedMethod, scan) === true;
   const amountMatch =
-    readable &&
+    amountReadable &&
     scan?.amount != null &&
     Number(scan.amount) === Number(params.expectedAmount);
   const dateMatch =
@@ -811,9 +938,11 @@ export function storedPaymentProofOcr(
     engine:
       data.engine === "tesseract"
         ? "tesseract"
-        : data.engine === "failed"
-          ? "failed"
-          : "unsupported",
+        : data.engine === "openai_vision"
+          ? "openai_vision"
+          : data.engine === "failed"
+            ? "failed"
+            : "unsupported",
     scannedAt: String(data.scannedAt ?? ""),
   };
 }
