@@ -71,15 +71,9 @@ export function calculateWithholdingTax(
   const normalizedRate = enabled ? Math.max(0, Math.min(100, Number(rate) || 0)) : 0;
   const roundedDpp = Math.max(0, Math.round(Number(dpp) || 0));
   const roundedGross = Math.max(0, Math.round(Number(grossAmount) || 0));
-  // For PPN-inclusive prices, DPP is stored/displayed as a rounded integer.
-  // PPh must use the exact inclusive base before rounding; otherwise a
-  // Rp6,000,000 invoice uses Rp5,405,405 × 10% = Rp540,540 instead of
-  // round((Rp6,000,000 / 1.11) × 10%) = Rp540,541.
-  const preciseInclusiveDpp = roundedGross / 1.11;
-  const isRoundedInclusiveDpp =
-    roundedDpp > 0 && Math.abs(roundedDpp - preciseInclusiveDpp) <= 2;
-  const withholdingBase = isRoundedInclusiveDpp ? preciseInclusiveDpp : roundedDpp;
-  const amount = normalizedRate > 0 ? Math.round(withholdingBase * normalizedRate / 100) : 0;
+  // Canonical business rule: PPh is calculated from the rounded DPP
+  // shown on the booking/invoice. This guarantees DPP × rate = PPh exactly.
+  const amount = normalizedRate > 0 ? Math.round(roundedDpp * normalizedRate / 100) : 0;
   return {
     enabled: normalizedRate > 0,
     rate: normalizedRate,
