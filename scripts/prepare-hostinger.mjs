@@ -30,6 +30,13 @@ await mkdir(outputDir, { recursive: true });
 await cp(apiDist, outputDir, { recursive: true });
 await cp(webDist, path.join(outputDir, "public"), { recursive: true });
 
+// Tesseract.js otherwise downloads English language data at runtime. Hostinger
+// may not allow/reliably reach that CDN, so ship the traineddata with the app.
+await cp(
+  path.join(repoRoot, "eng.traineddata"),
+  path.join(outputDir, "eng.traineddata"),
+);
+
 await writeFile(
   path.join(outputDir, "index.js"),
   [

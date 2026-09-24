@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 export type OcrPaymentMethod = "QRIS" | "Transfer Bank" | "unknown";
 
@@ -479,6 +481,22 @@ export function classifyPaymentMethod(text: string): {
   };
 }
 
+function resolveLocalTesseractLangPath(): string | null {
+  const configured = process.env.TESSERACT_LANG_PATH?.trim();
+  const candidates = [
+    configured ? path.resolve(configured) : null,
+    process.cwd(),
+    path.resolve(process.cwd(), "dist"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "eng.traineddata"))) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 async function preprocessImage(
   buffer: Buffer,
   variant: "color" | "normalized",
@@ -516,12 +534,27 @@ export async function scanPaymentProof(
 
   try {
     const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng", 1, {
-      // App Engine's application filesystem is read-only. Keep downloaded
-      // language data in its writable temporary filesystem instead.
-      cachePath: "/tmp/tesseract-cache",
-      logger: () => {},
-    });
+    const localLangPath = resolveLocalTesseractLangPath();
+    const worker = localLangPath
+      ? await createWorker("eng", 1, {
+          // Production must not depend on downloading tessdata from a CDN.
+          // The build copies eng.traineddata beside the runtime bundle.
+          langPath: localLangPath,
+          gzip: false,
+          cacheMethod: "none",
+          logger: () => {},
+          errorHandler: (error) => {
+            console.error("[payment-proof-ocr] tesseract worker error", error);
+          },
+        })
+      : await createWorker("eng", 1, {
+          // Development fallback when the repository language file is absent.
+          cachePath: "/tmp/tesseract-cache",
+          logger: () => {},
+          errorHandler: (error) => {
+            console.error("[payment-proof-ocr] tesseract worker error", error);
+          },
+        });
     try {
       const scans: Array<PaymentProofOcrScan & { quality: number }> = [];
 
@@ -553,34 +586,33 @@ export async function scanPaymentProof(
         };
       };
 
-      // First scan the original upload. This avoids image preprocessing from
-      // accidentally degrading crisp bank/QRIS screenshots such as the BCA
-      // success screen where the amount is already highly legible.
-      try {
-        const originalScan = await recognize(buffer);
-        if (originalScan) scans.push(originalScan);
-      } catch {
-        // Continue with preprocessed fallbacks below.
+      // Normalize the upload to a real JPEG before OCR. Screenshots shared by
+      // WhatsApp/browser can have a .jpg filename while the actual bytes are
+      // WebP. Tesseract is much more reliable after Sharp has decoded the
+      // source format and emitted a canonical JPEG.
+      for (const variant of ["color", "normalized"] as const) {
+        try {
+          const image = await preprocessImage(buffer, variant);
+          const scan = await recognize(image);
+          if (scan) scans.push(scan);
+
+          // The current customer flow only blocks on nominal. Avoid a second
+          // OCR pass when the first normalized image already found it.
+          if (scan?.amount != null && variant === "color") break;
+        } catch (error) {
+          console.error(`[payment-proof-ocr] ${variant} OCR pass failed`, error);
+        }
       }
 
-      const original = scans[0];
-      const needsFallback =
-        !original ||
-        original.amount == null ||
-        original.date == null ||
-        original.recipient == null ||
-        original.paymentMethod === "unknown";
-
-      if (needsFallback) {
-        for (const variant of ["color", "normalized"] as const) {
-          try {
-            const image = await preprocessImage(buffer, variant);
-            const scan = await recognize(image);
-            if (scan) scans.push(scan);
-          } catch {
-            // One bad preprocessing/recognition variant must not make the
-            // whole proof unreadable if another variant succeeds.
-          }
+      // Last resort for already-supported PNG/JPEG uploads when Sharp is not
+      // available in a runtime. Do this after preprocessing so an unsupported
+      // WebP input cannot poison the worker before the canonical JPEG pass.
+      if (scans.length === 0 || scans.every((scan) => scan.amount == null)) {
+        try {
+          const originalScan = await recognize(buffer);
+          if (originalScan) scans.push(originalScan);
+        } catch (error) {
+          console.error("[payment-proof-ocr] original OCR pass failed", error);
         }
       }
 
@@ -611,7 +643,8 @@ export async function scanPaymentProof(
     } finally {
       await worker.terminate();
     }
-  } catch {
+  } catch (error) {
+    console.error("[payment-proof-ocr] scan failed", error);
     return {
       paymentMethod: "unknown",
       confidence: 0,

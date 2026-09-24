@@ -93,12 +93,16 @@ steps:
           # Copy compiled API server bundle
           cp -r artifacts/api-server/dist/. gae-deploy/dist/
 
+          # Bundle OCR language data so production never depends on a CDN.
+          cp eng.traineddata gae-deploy/eng.traineddata
+
           # Copy prerendered frontend static files
           mkdir -p gae-deploy/artifacts/sport-center/dist
           cp -r artifacts/sport-center/dist/public gae-deploy/artifacts/sport-center/dist/
 
           echo "=== API bundle files ==="
           ls -lh gae-deploy/dist/
+          ls -lh gae-deploy/eng.traineddata
 
           echo "=== Frontend routes (prerendered) ==="
           find gae-deploy/artifacts/sport-center/dist/public -name "index.html" | sort
