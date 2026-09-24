@@ -2,15 +2,32 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, CheckCircle, Upload, Image as ImageIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { AlertCircle, CheckCircle, Upload, Image as ImageIcon, ZoomIn } from "lucide-react";
 
 interface OcrPreview {
   paymentMethod: "QRIS" | "Transfer Bank" | "unknown";
   confidence: number;
   signals: string[];
+  recipient: string | null;
   amount: number | null;
   date: string | null;
   engine: "tesseract" | "unsupported" | "failed";
+  validation: {
+    methodMatch: boolean;
+    amountMatch: boolean;
+    dateMatch: boolean;
+    recipientMatch: boolean;
+    complete: boolean;
+    expectedAmount: number;
+    expectedRecipients: string[];
+  };
 }
 
 interface ActionInfo {
@@ -34,7 +51,7 @@ interface ActionInfo {
   };
   paymentOptions?: {
     transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
-    qris: { imageUrl: string } | null;
+    qris: { imageUrl: string; recipientNames: string[] } | null;
   };
   supportWhatsapp?: string | null;
 }
@@ -55,7 +72,9 @@ export default function WaProofUpload() {
   const [scanningOcr, setScanningOcr] = useState(false);
   const [ocrError, setOcrError] = useState("");
   const [replacementAttempts, setReplacementAttempts] = useState(0);
+  const [showQrDialog, setShowQrDialog] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const ocrRequestIdRef = useRef(0);
 
   useEffect(() => {
     fetch(`/api/wa/action/${params.token}`)
@@ -72,36 +91,54 @@ export default function WaProofUpload() {
       .finally(() => setLoading(false));
   }, [params.token]);
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (file) setReplacementAttempts((count) => count + 1);
-    setFile(f);
+  async function runOcrScan(f: File, method: "QRIS" | "Transfer Bank") {
+    const requestId = ++ocrRequestIdRef.current;
     setOcrPreview(null);
     setOcrError("");
+    setError("");
     setScanningOcr(true);
-    const url = URL.createObjectURL(f);
-    setPreview(url);
-
     try {
       const fd = new FormData();
       fd.append("proof", f);
+      fd.append("paymentMethod", method);
+      fd.append("token", params.token);
       const resp = await fetch("/api/wa/proof/scan", { method: "POST", body: fd });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error ?? "Pengecekan bukti gagal");
-      setOcrPreview(data.ocrScan);
+      if (requestId === ocrRequestIdRef.current) setOcrPreview(data.ocrScan);
     } catch {
-      // The final submit still performs a server-side scan. A preview outage
-      // must not prevent a customer from submitting an otherwise valid proof.
-      setOcrError("Pengecekan awal belum tersedia. Bukti akan diperiksa saat dikirim.");
+      if (requestId === ocrRequestIdRef.current) {
+        setOcrError("Pengecekan bukti belum berhasil. Coba pilih foto yang lebih jelas.");
+      }
     } finally {
-      setScanningOcr(false);
+      if (requestId === ocrRequestIdRef.current) setScanningOcr(false);
     }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      setError("Pilih foto atau tangkapan layar bukti pembayaran dalam format gambar.");
+      e.target.value = "";
+      return;
+    }
+    if (file) setReplacementAttempts((count) => count + 1);
+    setError("");
+    setFile(f);
+    setOcrPreview(null);
+    setOcrError("");
+    setPreview(URL.createObjectURL(f));
+    await runOcrScan(f, paymentMethod);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+    if (!ocrPreviewVerified) {
+      setError("Bukti belum lolos pemeriksaan metode, tanggal, penerima, dan nominal.");
+      return;
+    }
     setUploading(true);
     setError("");
     try {
@@ -113,7 +150,11 @@ export default function WaProofUpload() {
         body: fd,
       });
       const data = await resp.json();
-      if (!resp.ok) { setError(data.error ?? "Upload gagal"); return; }
+      if (!resp.ok) {
+        if (data.ocrScan) setOcrPreview(data.ocrScan);
+        setError(data.error ?? "Upload gagal");
+        return;
+      }
       setOrderNumber(data.orderNumber);
       setConfirmed(data.status === "confirmed");
       setSuccess(true);
@@ -177,47 +218,35 @@ export default function WaProofUpload() {
   const b = info?.booking;
   const grossAmount = b ? (b.grandTotal ?? b.totalPrice) : 0;
   const hasWithholding = !!b && Number(b.pphAmount ?? 0) > 0 && b.netAmount != null;
+  const ocrValidation = ocrPreview?.validation;
   const expectedPaymentAmount = Number(
-    hasWithholding ? (b?.netAmount ?? 0) : grossAmount,
+    ocrValidation?.expectedAmount ??
+      (hasWithholding ? (b?.netAmount ?? 0) : grossAmount),
   );
-  const ocrAmountMatches =
-    ocrPreview?.amount != null &&
-    expectedPaymentAmount > 0 &&
-    Number(ocrPreview.amount) === expectedPaymentAmount;
-  const ocrMethodMatches =
-    ocrPreview?.paymentMethod !== "unknown" &&
-    ocrPreview?.paymentMethod === paymentMethod;
+  const ocrAmountMatches = ocrValidation?.amountMatch === true;
+  const ocrMethodMatches = ocrValidation?.methodMatch === true;
+  const ocrRecipientMatches = ocrValidation?.recipientMatch === true;
+  const configuredRecipients = paymentMethod === "QRIS"
+    ? info?.paymentOptions?.qris?.recipientNames ?? []
+    : info?.paymentOptions?.transferBank?.bankAccountName
+      ? [info.paymentOptions.transferBank.bankAccountName]
+      : [];
+  const expectedRecipientLabel =
+    ocrValidation?.expectedRecipients.join(" / ") ||
+    configuredRecipients.join(" / ") ||
+    "Belum dikonfigurasi";
   const bookingCreatedDate = b?.createdAt
     ? new Date(b.createdAt).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
     : null;
-  const todayWib = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-  const ocrDateMatches =
-    Boolean(
-      ocrPreview?.date &&
-      bookingCreatedDate &&
-      ocrPreview.date >= bookingCreatedDate &&
-      ocrPreview.date <= todayWib,
-    );
-  const methodMismatch =
-    Boolean(ocrPreview) &&
-    ocrPreview?.paymentMethod !== "unknown" &&
-    !ocrMethodMatches;
-  const amountMismatch =
-    Boolean(ocrPreview) &&
-    ocrPreview?.amount != null &&
-    expectedPaymentAmount > 0 &&
-    !ocrAmountMatches;
-  const dateMismatch =
-    Boolean(ocrPreview?.date) &&
-    Boolean(bookingCreatedDate) &&
-    !ocrDateMatches;
-  const hasConfidentMismatch = methodMismatch || amountMismatch || dateMismatch;
+  const ocrDateMatches = ocrValidation?.dateMatch === true;
+  const methodMismatch = Boolean(ocrPreview) && !ocrMethodMatches;
+  const amountMismatch = Boolean(ocrPreview) && !ocrAmountMatches;
+  const dateMismatch = Boolean(ocrPreview) && !ocrDateMatches;
+  const recipientMismatch = Boolean(ocrPreview) && !ocrRecipientMatches;
+  const hasConfidentMismatch =
+    methodMismatch || amountMismatch || dateMismatch || recipientMismatch;
   const escalationRequired = hasConfidentMismatch && replacementAttempts >= 3;
-  const ocrPreviewVerified =
-    Boolean(ocrPreview) &&
-    ocrAmountMatches &&
-    ocrMethodMatches &&
-    ocrDateMatches;
+  const ocrPreviewVerified = ocrValidation?.complete === true;
   const remainingReplacements = Math.max(0, 3 - replacementAttempts);
   const supportWhatsapp = String(info?.supportWhatsapp ?? "").replace(/\D/g, "");
   const supportMessage = encodeURIComponent(
@@ -274,18 +303,27 @@ export default function WaProofUpload() {
                 {info?.paymentOptions?.transferBank && (
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod("Transfer Bank")}
+                    onClick={() => {
+                      setPaymentMethod("Transfer Bank");
+                      if (file) void runOcrScan(file, "Transfer Bank");
+                    }}
                     className={`rounded-lg border p-3 text-left text-sm ${paymentMethod === "Transfer Bank" ? "border-orange-500 bg-orange-50" : "border-gray-200"}`}>
                     <div className="font-bold">Transfer Bank</div>
                     <div className="text-xs text-gray-500 mt-1">
                       {info.paymentOptions.transferBank.bankName} · {info.paymentOptions.transferBank.bankAccount}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      a.n. {info.paymentOptions.transferBank.bankAccountName || "Nama pemilik rekening"}
                     </div>
                   </button>
                 )}
                 {info?.paymentOptions?.qris && (
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod("QRIS")}
+                    onClick={() => {
+                      setPaymentMethod("QRIS");
+                      if (file) void runOcrScan(file, "QRIS");
+                    }}
                     className={`rounded-lg border p-3 text-left text-sm ${paymentMethod === "QRIS" ? "border-orange-500 bg-orange-50" : "border-gray-200"}`}>
                     <div className="font-bold">QRIS</div>
                     <img src={info.paymentOptions.qris.imageUrl} alt="QRIS Sport Center" className="mt-2 h-24 w-24 object-contain" />
@@ -295,24 +333,63 @@ export default function WaProofUpload() {
               <input
                 ref={fileRef}
                 type="file"
-                 accept="image/*,.pdf,application/pdf"
+                accept="image/*"
                 className="hidden"
                 onChange={handleFileChange}
               />
+              {paymentMethod === "QRIS" && info?.paymentOptions?.qris && (
+                <div className="mb-4 rounded-lg border border-orange-200 bg-white p-3 text-center">
+                  <p className="mb-2 text-xs font-semibold text-gray-600">
+                    Pindai kode QRIS ini untuk membayar
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowQrDialog(true)}
+                    aria-label="Perbesar kode QRIS"
+                    className="group mx-auto block rounded-lg p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                  >
+                    <img
+                      src={info.paymentOptions.qris.imageUrl}
+                      alt="Kode QRIS Sport Center"
+                      className="mx-auto h-48 w-48 rounded-md object-contain sm:h-56 sm:w-56"
+                    />
+                    <span className="mt-1 flex items-center justify-center gap-1 text-xs font-semibold text-orange-700">
+                      <ZoomIn className="h-4 w-4" />
+                      Ketuk untuk memperbesar
+                    </span>
+                  </button>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Penerima QRIS: <strong>{expectedRecipientLabel}</strong>
+                  </p>
+                </div>
+              )}
+              <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>
+                <DialogContent className="max-h-[92vh] max-w-[min(92vw,560px)] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Kode QRIS Sport Center</DialogTitle>
+                    <DialogDescription>
+                      Perbesar kode ini agar mudah dipindai dari aplikasi pembayaran.
+                    </DialogDescription>
+                  </DialogHeader>
+                  {info?.paymentOptions?.qris && (
+                    <img
+                      src={info.paymentOptions.qris.imageUrl}
+                      alt="Kode QRIS Sport Center ukuran besar"
+                      className="mx-auto max-h-[70vh] w-full object-contain"
+                    />
+                  )}
+                  <p className="text-center text-sm text-gray-700">
+                    Penerima: <strong>{expectedRecipientLabel}</strong>
+                  </p>
+                </DialogContent>
+              </Dialog>
                {preview ? (
                 <div className="space-y-3">
-                   {file?.type === "application/pdf" ? (
-                     <div className="rounded-lg border bg-gray-50 px-4 py-8 text-center text-sm text-gray-700">
-                       <p className="font-semibold">File PDF siap diperiksa</p>
-                       <p className="mt-1 text-xs text-gray-500">{file.name}</p>
-                     </div>
-                   ) : (
-                     <img
-                       src={preview}
-                       alt="Preview bukti"
-                       className="w-full max-h-64 object-contain rounded-lg border bg-gray-50"
-                     />
-                   )}
+                  <img
+                    src={preview}
+                    alt="Preview bukti"
+                    className="w-full max-h-64 object-contain rounded-lg border bg-gray-50"
+                  />
                   <Button
                     type="button"
                     variant="outline"
@@ -330,7 +407,7 @@ export default function WaProofUpload() {
                   className="w-full border-2 border-dashed border-orange-300 rounded-xl p-8 text-center hover:border-orange-500 hover:bg-orange-50 transition-colors">
                   <Upload className="w-10 h-10 text-orange-400 mx-auto mb-2" />
                   <p className="font-semibold text-gray-700">Tap untuk pilih foto</p>
-                   <p className="text-xs text-gray-500 mt-1">JPG, PNG, atau PDF (maks 10MB)</p>
+                  <p className="text-xs text-gray-500 mt-1">Pilih foto atau tangkapan layar (maks 10MB)</p>
                 </button>
               )}
                {scanningOcr && (
@@ -350,32 +427,45 @@ export default function WaProofUpload() {
                      : "border-yellow-200 bg-yellow-50 text-yellow-800"
                  }`}>
                    <p className="font-bold">Hasil pengecekan awal</p>
-                   <p className="mt-1">
-                     Metode: <strong>{ocrPreview.paymentMethod === "unknown" ? "Belum terbaca" : ocrPreview.paymentMethod}</strong>
-                     {ocrPreview.paymentMethod !== "unknown" && !ocrMethodMatches && (
-                       <span> — tidak sesuai pilihan {paymentMethod}</span>
-                     )}
-                   </p>
-                   <p>
-                     Nominal: <strong>{ocrPreview.amount == null ? "Belum terbaca" : `Rp ${Number(ocrPreview.amount).toLocaleString("id-ID")}`}</strong>
-                     {ocrPreview.amount != null && expectedPaymentAmount > 0 && !ocrAmountMatches && (
-                       <span> — tagihan Rp {expectedPaymentAmount.toLocaleString("id-ID")}</span>
-                     )}
-                   </p>
-                   <p>
-                     Tanggal transaksi: <strong>{ocrPreview.date ?? "Belum terbaca"}</strong>
-                     {ocrPreview.date && !ocrDateMatches && bookingCreatedDate && (
-                       <span> — tidak valid untuk booking yang dibuat {bookingCreatedDate}</span>
-                     )}
-                   </p>
+                   <div className="mt-2 space-y-1.5">
+                     {[
+                       {
+                         label: "Metode",
+                         value: `${ocrPreview.paymentMethod === "unknown" ? "Belum terbaca" : ocrPreview.paymentMethod} · dipilih ${paymentMethod}`,
+                         passed: ocrMethodMatches,
+                       },
+                       {
+                         label: "Nominal",
+                         value: `${ocrPreview.amount == null ? "Belum terbaca" : `Rp ${Number(ocrPreview.amount).toLocaleString("id-ID")}`} · tagihan Rp ${expectedPaymentAmount.toLocaleString("id-ID")}`,
+                         passed: ocrAmountMatches,
+                       },
+                       {
+                         label: "Tanggal transaksi",
+                         value: `${ocrPreview.date ?? "Belum terbaca"} · harus dari ${bookingCreatedDate ?? "tanggal booking"} sampai hari ini`,
+                         passed: ocrDateMatches,
+                       },
+                       {
+                         label: "Penerima",
+                         value: `${ocrPreview.recipient ?? "Belum terbaca"} · tujuan ${expectedRecipientLabel}`,
+                         passed: ocrRecipientMatches,
+                       },
+                     ].map((check) => (
+                       <p key={check.label} className="flex items-start gap-1.5">
+                         {check.passed
+                           ? <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                           : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                         <span><strong>{check.label}:</strong> {check.value}</span>
+                       </p>
+                     ))}
+                   </div>
                    <p className="mt-1">
                      {ocrPreviewVerified
-                       ? "Metode, nominal, dan tanggal transaksi sesuai. Server akan memeriksa ulang bukti saat dikirim."
+                       ? "Keempat detail cocok. Server akan memeriksa ulang bukti saat dikirim."
                        : escalationRequired
                          ? "Bukti masih tidak cocok setelah 3 kali ganti foto. Silakan hubungi admin untuk pemeriksaan manual."
                          : hasConfidentMismatch
-                           ? `Bukti belum cocok. Silakan Ganti Foto${remainingReplacements > 0 ? ` (tersisa ${remainingReplacements} kali)` : ""}.`
-                           : "Sebagian data OCR belum terbaca. Bukti tetap dapat dikirim dan akan menunggu verifikasi admin."}
+                           ? `Bukti belum cocok atau ada detail yang belum terbaca. Ganti foto${remainingReplacements > 0 ? ` (tersisa ${remainingReplacements} kali)` : ""}. Bukti hanya dapat dikirim setelah semua pemeriksaan lolos.`
+                           : "Pengecekan bukti belum selesai. Silakan coba foto yang lebih jelas."}
                    </p>
                  </div>
                )}
@@ -411,7 +501,7 @@ export default function WaProofUpload() {
 
           <Button
             type="submit"
-            disabled={!file || uploading || scanningOcr || hasConfidentMismatch}
+            disabled={!file || uploading || scanningOcr || !ocrPreviewVerified}
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed">
             {uploading ? (
               <span className="flex items-center gap-2">

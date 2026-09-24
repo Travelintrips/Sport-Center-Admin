@@ -81,6 +81,7 @@ import {
   paymentProofDateMatchesBooking,
   scanPaymentProof,
   storedPaymentProofOcr,
+  validatePaymentProofScan,
 } from "../lib/paymentProofOcr";
 import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 import {
@@ -938,10 +939,11 @@ router.get("/wa/action/:token", async (req, res) => {
 
     let paymentOptions: {
       transferBank: { bankName: string; bankAccount: string; bankAccountName: string } | null;
-      qris: { imageUrl: string } | null;
+      qris: { imageUrl: string; recipientNames: string[] } | null;
     } | undefined;
     if (tokenRow.action === "upload_proof") {
       const [settings] = await db.select({
+        centerName: settingsTable.centerName,
         bankName: settingsTable.bankName,
         bankAccount: settingsTable.bankAccount,
         bankAccountName: settingsTable.bankAccountName,
@@ -955,7 +957,15 @@ router.get("/wa/action/:token", async (req, res) => {
               bankAccountName: settings.bankAccountName ?? "",
             }
           : null,
-        qris: settings?.qrisImageUrl ? { imageUrl: settings.qrisImageUrl } : null,
+        qris: settings?.qrisImageUrl
+          ? {
+              imageUrl: settings.qrisImageUrl,
+              recipientNames: [...new Set([
+                settings.centerName,
+                settings.bankAccountName,
+              ])].map((name) => String(name ?? "").trim()).filter(Boolean),
+            }
+          : null,
       };
     }
 
@@ -1203,21 +1213,90 @@ router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
 
 // POST /api/wa/proof/scan — preview OCR before the customer submits the proof.
 // The final submit endpoint always scans again and never trusts this preview.
+type WaProofPaymentMethod = "QRIS" | "Transfer Bank";
+
+function parseWaProofPaymentMethod(value: unknown): WaProofPaymentMethod | null {
+  const method = String(value ?? "").trim();
+  if (/^qris$/i.test(method)) return "QRIS";
+  if (/^(?:transfer bank|transfer|bank)$/i.test(method)) return "Transfer Bank";
+  return null;
+}
+
+async function getWaProofValidationContext(
+  booking: typeof bookingsTable.$inferSelect,
+  selectedMethod: WaProofPaymentMethod,
+) {
+  const [bookingGroup] = booking.groupRef
+    ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+        .limit(1)
+    : [];
+  const [settings] = await db.select({
+    centerName: settingsTable.centerName,
+    bankAccountName: settingsTable.bankAccountName,
+  }).from(settingsTable).limit(1);
+  const grossAmount = Number(booking.grandTotal ?? booking.totalPrice);
+  const expectedAmount = Number(
+    bookingGroup?.totalPayment ??
+      (booking.netAmount != null && Number(booking.pphAmount ?? 0) > 0
+        ? booking.netAmount
+        : grossAmount),
+  );
+  const expectedRecipients = [...new Set(
+    selectedMethod === "QRIS"
+      ? [settings?.centerName, settings?.bankAccountName]
+      : [settings?.bankAccountName],
+  )].map((name) => String(name ?? "").trim()).filter(Boolean);
+  return { expectedAmount, expectedRecipients };
+}
+
 router.post("/wa/proof/scan", uploadProof.single("proof"), async (req, res) => {
   try {
     if (!req.file) {
       res.status(400).json({ error: "Tidak ada file" });
       return;
     }
+    const token = String(req.body?.token ?? "").trim();
+    const selectedMethod = parseWaProofPaymentMethod(req.body?.paymentMethod);
+    if (!token || !selectedMethod) {
+      res.status(400).json({ error: "Link booking dan metode pembayaran wajib diisi." });
+      return;
+    }
+    const tokenRow = await getWaTokenRow(token);
+    if (!tokenRow || tokenRow.action !== "upload_proof") {
+      res.status(404).json({ error: "Link tidak valid" });
+      return;
+    }
+    if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
+      res.status(410).json({ error: "Link sudah kedaluwarsa" });
+      return;
+    }
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, tokenRow.bookingId)).limit(1);
+    if (!booking || !["pending_payment", "expired"].includes(booking.status)) {
+      res.status(409).json({ error: "Booking tidak lagi menunggu pembayaran." });
+      return;
+    }
+    const context = await getWaProofValidationContext(booking, selectedMethod);
     const scan = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    const validation = validatePaymentProofScan({
+      scan,
+      selectedMethod,
+      expectedAmount: context.expectedAmount,
+      expectedRecipients: context.expectedRecipients,
+      bookingCreatedAt: booking.createdAt,
+    });
     res.json({
       ocrScan: {
         paymentMethod: scan.paymentMethod,
         confidence: scan.confidence,
         signals: scan.signals,
+        recipient: scan.recipient,
         amount: scan.amount,
         date: scan.date,
         engine: scan.engine,
+        validation,
       },
     });
   } catch (err) {
@@ -1248,16 +1327,6 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       res.status(410).json({ error: "Link sudah kedaluwarsa" }); return;
     }
 
-    let proofUrl: string | undefined = req.body?.proofUrl;
-    let proofOcr = null;
-    if (req.file) {
-      proofOcr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
-    }
-    if (!req.file && !proofUrl) {
-      res.status(400).json({ error: "Tidak ada bukti yang diupload" });
-      return;
-    }
-
     const bookingId = tokenRow.bookingId;
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, bookingId)).limit(1);
@@ -1265,6 +1334,74 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     if (!["pending_payment", "expired"].includes(booking.status)) {
       res.status(409).json({
         error: "Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.",
+      });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: "Unggah foto bukti pembayaran agar semua detail dapat diperiksa." });
+      return;
+    }
+    const selectedPaymentMethod = parseWaProofPaymentMethod(req.body?.paymentMethod);
+    if (!selectedPaymentMethod) {
+      res.status(400).json({ error: "Pilih QRIS atau Transfer Bank terlebih dahulu." });
+      return;
+    }
+    let proofUrl: string | undefined = req.body?.proofUrl;
+    const validationContext = await getWaProofValidationContext(booking, selectedPaymentMethod);
+    const proofOcr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    const proofValidation = validatePaymentProofScan({
+      scan: proofOcr,
+      selectedMethod: selectedPaymentMethod,
+      expectedAmount: validationContext.expectedAmount,
+      expectedRecipients: validationContext.expectedRecipients,
+      bookingCreatedAt: booking.createdAt,
+    });
+    const payableTotal = validationContext.expectedAmount;
+    const ocrMethodMatch = proofValidation.methodMatch;
+    const amountMatch = proofValidation.amountMatch;
+    const dateMatch = proofValidation.dateMatch;
+    const recipientMatch = proofValidation.recipientMatch;
+    const resolvedPaymentMethod = selectedPaymentMethod;
+    const resolvedProvider = resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
+
+    if (!proofValidation.complete) {
+      const reasons = [
+        !proofValidation.methodMatch
+          ? proofOcr.paymentMethod === "unknown"
+            ? "metode pembayaran tidak terbaca"
+            : `metode pembayaran terbaca ${proofOcr.paymentMethod}, bukan ${selectedPaymentMethod}`
+          : null,
+        !proofValidation.dateMatch
+          ? proofOcr.date
+            ? `tanggal transaksi ${proofOcr.date} tidak valid untuk booking ini`
+            : "tanggal transaksi tidak terbaca"
+          : null,
+        !proofValidation.recipientMatch
+          ? validationContext.expectedRecipients.length === 0
+            ? "tujuan pembayaran belum dikonfigurasi"
+            : proofOcr.recipient
+              ? `penerima "${proofOcr.recipient}" tidak sesuai dengan tujuan pembayaran`
+              : "nama penerima tidak terbaca"
+          : null,
+        !proofValidation.amountMatch
+          ? proofOcr.amount == null
+            ? "nominal transaksi tidak terbaca"
+            : `nominal Rp ${Number(proofOcr.amount).toLocaleString("id-ID")} tidak sama dengan tagihan Rp ${payableTotal.toLocaleString("id-ID")}`
+          : null,
+      ].filter(Boolean);
+      res.status(422).json({
+        error: `Bukti belum dapat diterima: ${reasons.join("; ")}. Upload bukti yang benar dan pastikan seluruh detail terlihat.`,
+        code: "PAYMENT_PROOF_VALIDATION_FAILED",
+        ocrScan: {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          recipient: proofOcr.recipient,
+          amount: proofOcr.amount,
+          date: proofOcr.date,
+          engine: proofOcr.engine,
+          signals: proofOcr.signals,
+          validation: proofValidation,
+        },
       });
       return;
     }
@@ -1284,13 +1421,6 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           grandTotal: booking.grandTotal,
         }];
     const groupBookingIds = groupBookings.map((row) => row.id);
-    const [bookingGroup] = booking.groupRef
-      ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
-        .from(bookingGroupsTable)
-        .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
-        .limit(1)
-      : [];
-    const payableTotal = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
     const groupPayments = await db.select().from(paymentsTable)
       .where(inArray(paymentsTable.bookingId, groupBookingIds))
       .orderBy(desc(paymentsTable.createdAt));
@@ -1299,64 +1429,6 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const [existing] = groupPayments.filter((candidate) =>
       candidate.status === "pending" || candidate.status === "waiting_confirmation",
     );
-    const requestedPaymentMethod = String(req.body?.paymentMethod ?? "").trim();
-    const selectedPaymentMethod =
-      /qris/i.test(requestedPaymentMethod) ? "QRIS" :
-      /transfer|bank|va/i.test(requestedPaymentMethod) ? "Transfer Bank" :
-      null;
-    // Keep the legacy upload page working when it does not send a selection,
-    // while the new payment page always sends one and therefore fails closed.
-    const detectedQris = proofOcr?.paymentMethod === "QRIS";
-    const resolvedPaymentMethod = selectedPaymentMethod ?? (detectedQris ? "QRIS" : "Transfer Bank");
-    const resolvedProvider = resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
-    const ocrMethodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr);
-    const methodMismatch = ocrMethodMatch === false;
-    const amountMatch =
-      proofOcr?.engine === "tesseract" &&
-      proofOcr.amount != null &&
-      Number(proofOcr.amount) === payableTotal;
-    const amountMismatch =
-      proofOcr?.engine === "tesseract" &&
-      proofOcr.amount != null &&
-      Number(proofOcr.amount) !== payableTotal;
-    const dateMatch =
-      proofOcr?.engine === "tesseract"
-        ? paymentProofDateMatchesBooking(proofOcr.date, booking.createdAt)
-        : null;
-    const dateMismatch = dateMatch === false;
-
-    // A confident contradiction is rejected before creating/replacing a
-    // payment. Unknown/unreadable OCR is allowed through to manual review.
-    if (methodMismatch || amountMismatch || dateMismatch) {
-      const reasons = [
-        methodMismatch
-          ? `metode pembayaran tidak sesuai (terbaca ${proofOcr?.paymentMethod})`
-          : null,
-        amountMismatch
-          ? `nominal pada bukti Rp ${Number(proofOcr?.amount).toLocaleString("id-ID")} tidak sama dengan tagihan Rp ${payableTotal.toLocaleString("id-ID")}`
-          : null,
-        dateMismatch
-          ? `tanggal transaksi ${proofOcr?.date} lebih lama dari tanggal booking dibuat atau berada di masa depan`
-          : null,
-      ].filter(Boolean);
-      res.status(422).json({
-        error: `Bukti pembayaran belum dapat diterima: ${reasons.join(" dan ")}. Silakan upload bukti yang benar.`,
-        code: methodMismatch
-          ? "PAYMENT_METHOD_PROOF_MISMATCH"
-          : amountMismatch
-            ? "PAYMENT_AMOUNT_PROOF_MISMATCH"
-            : "PAYMENT_DATE_PROOF_MISMATCH",
-        ocrScan: {
-          paymentMethod: proofOcr?.paymentMethod,
-          confidence: proofOcr?.confidence,
-          amount: proofOcr?.amount,
-          date: proofOcr?.date,
-          signals: proofOcr?.signals,
-        },
-      });
-      return;
-    }
-
     if (req.file) {
       proofUrl = await uploadProofWithFallback(
         req.file.buffer,
@@ -1385,11 +1457,13 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           paymentMethod: proofOcr.paymentMethod,
           confidence: proofOcr.confidence,
           signals: proofOcr.signals,
+          recipient: proofOcr.recipient,
           engine: proofOcr.engine,
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
           amountMatch,
           dateMatch,
+          recipientMatch,
         } : null,
         status: "pending",
         updatedAt: new Date(),
@@ -1408,11 +1482,13 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           paymentMethod: proofOcr.paymentMethod,
           confidence: proofOcr.confidence,
           signals: proofOcr.signals,
+          recipient: proofOcr.recipient,
           engine: proofOcr.engine,
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
           amountMatch,
           dateMatch,
+          recipientMatch,
         } : null,
         status: "pending",
       };
@@ -1439,11 +1515,13 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           paymentMethod: proofOcr.paymentMethod,
           confidence: proofOcr.confidence,
           signals: proofOcr.signals,
+          recipient: proofOcr.recipient,
           engine: proofOcr.engine,
           scannedAt: proofOcr.scannedAt,
           methodMatch: ocrMethodMatch,
           amountMatch,
           dateMatch,
+          recipientMatch,
         } : null,
         status: "pending",
       }).returning();
@@ -1454,9 +1532,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     }
 
     const methodMatch = ocrMethodMatch === true;
-    // OCR is evidence for the admin, not an automatic payment confirmation.
-    // Every accepted proof waits in the same review state, including a proof
-    // whose OCR fields are unreadable.
+    // Passing OCR only allows the proof into the admin review queue; it does
+    // not automatically confirm the payment.
     const nextStatus = "waiting_confirmation" as const;
     await db.update(bookingsTable).set({
       status: nextStatus,
@@ -1497,9 +1574,9 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const reviewToken = await createWaToken(bookingId, "review_payment", 7);
 
     const fullProofUrl = proofUrl;
-    const ocrNote = methodMatch && amountMatch && dateMatch === true
-      ? "OCR mendeteksi metode, nominal, dan tanggal transaksi sesuai. Tetap wajib diverifikasi admin."
-      : "OCR belum dapat memastikan seluruh detail termasuk tanggal transaksi. Bukti menunggu pemeriksaan admin.";
+    const ocrNote = methodMatch && amountMatch && dateMatch && recipientMatch
+      ? "OCR mendeteksi metode, nominal, tanggal, dan penerima sesuai. Tetap wajib diverifikasi admin."
+      : "OCR belum dapat memastikan seluruh detail bukti pembayaran.";
     notifyWaProofUploaded({
       customerName: booking.customerName, customerPhone: booking.customerPhone,
       orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -1528,10 +1605,11 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       after: {
         proofUrl,
         status: nextStatus,
-        ocrMatched: methodMatch && amountMatch && dateMatch === true,
+        ocrMatched: methodMatch && amountMatch && dateMatch && recipientMatch,
         methodMatch,
         amountMatch,
         dateMatch,
+        recipientMatch,
       },
     });
 
@@ -1541,7 +1619,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       success: true,
       orderNumber: booking.orderNumber,
       status: nextStatus,
-      ocrPassed: methodMatch && amountMatch && dateMatch === true,
+      ocrPassed: methodMatch && amountMatch && dateMatch && recipientMatch,
       message: "Bukti pembayaran diterima dan menunggu verifikasi admin.",
     });
   } catch (err) {
