@@ -147,6 +147,9 @@ describe("payment proof recipient validation", () => {
       parsePaymentProofRecipient("Pembayaran ke\nTRAVELIN BANDARA SOETTA"),
     ).toBe("TRAVELIN BANDARA SOETTA");
     expect(
+      parsePaymentProofRecipient("Pembayaran ke TRAVELIN BANDARA\nSOETTA"),
+    ).toBe("TRAVELIN BANDARA SOETTA");
+    expect(
       parsePaymentProofRecipient("Pembayal\nTRAVELIN BANDARA SOETTA\nTotal Transaksi Rp 30.000"),
     ).toBe("TRAVELIN BANDARA SOETTA");
     expect(

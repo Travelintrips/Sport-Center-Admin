@@ -240,7 +240,19 @@ export function parsePaymentProofRecipient(text: string): string | null {
       line.match(destinationPattern)?.[0] ? line.replace(destinationPattern, "") :
       null;
     const sameLineRecipient = cleanRecipient(sameLineMatch ?? undefined);
-    if (sameLineRecipient) return sameLineRecipient;
+    if (sameLineRecipient) {
+      const nextLine = lines[index + 1];
+      const continuation = cleanRecipient(nextLine);
+      if (
+        continuation &&
+        line.match(destinationPattern)?.[0] &&
+        /^[A-Z][A-Z .&'—-]{2,}$/.test(nextLine ?? "") &&
+        !/^(?:JAKARTA|PUSAT|BANK|DETAIL|TRANSAKSI|TIPE|KATEGORI)\b/i.test(continuation)
+      ) {
+        return `${sameLineRecipient} ${continuation}`;
+      }
+      return sameLineRecipient;
+    }
 
     if (labelPattern.test(line) || destinationPattern.test(line)) {
       const nextLineRecipient = cleanRecipient(lines[index + 1]);
