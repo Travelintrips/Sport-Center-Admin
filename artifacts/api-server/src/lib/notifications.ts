@@ -922,10 +922,7 @@ export async function notifyWaBookingPaymentRequired(data: WaBookingPaymentRequi
     `💳 *Langkah selanjutnya:*\n` +
     `Buka halaman pembayaran untuk memilih metode pembayaran dan upload bukti:\n` +
     `${data.paymentUrl}\n\n` +
-    (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
-    `Status saat ini: *Menunggu pembayaran dan verifikasi admin* ⏳\n` +
-    `Booking menjadi final setelah bukti pembayaran diverifikasi.\n\n` +
-    `🔍 Cek status booking: ${data.statusUrl}`;
+     (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*` : "");
   await sendWAToCustomer(data.customerPhone, msg);
 }
 
