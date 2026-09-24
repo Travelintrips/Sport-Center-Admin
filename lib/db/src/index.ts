@@ -61,9 +61,25 @@ console.info(
 
 const useSsl = /supabase\.(co|com|in)/.test(connectionString);
 
+const configuredPoolMax = Number(process.env.DB_POOL_MAX);
+const poolMax =
+  Number.isFinite(configuredPoolMax) && configuredPoolMax > 0
+    ? Math.max(1, Math.min(5, Math.floor(configuredPoolMax)))
+    : isProd
+      ? 2
+      : 5;
+
 export const pool = new Pool({
   connectionString,
   ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+  // Semua aplikasi production berbagi project Supabase yang sama. Jangan biarkan
+  // satu Hostinger process memakai default pg-pool=10 dan menghabiskan limit
+  // Supavisor session pool saat rolling deploy.
+  max: poolMax,
+  idleTimeoutMillis: isProd ? 5_000 : 30_000,
+  connectionTimeoutMillis: 8_000,
+  query_timeout: 20_000,
+  application_name: "sport-center-admin",
 });
 
 export const db = drizzle(pool, { schema });
