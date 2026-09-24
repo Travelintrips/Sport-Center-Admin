@@ -658,7 +658,8 @@ async function handleGenerateInvoice(req: any, res: any) {
            ppnCollectedByCustomer: newTax.ppnCollectedByCustomer,
            pphRate: String(newPphRate),
            pphAmount: String(newPphAmount),
-            netAmount: String(newNetAmount),
+           netAmount: String(newNetAmount),
+           remainingAmount: String(Math.max(0, newNetAmount - Number(existingInvoice.paidAmount ?? 0))),
           ...(notes ? { notes } : {}),
         })
         .where(eq(companyInvoicesTable.id, existingInvoice.id))
@@ -709,7 +710,9 @@ async function handleGenerateInvoice(req: any, res: any) {
       ppnCollectedByCustomer,
       pphRate: String(pphRate),
       pphAmount: String(pphAmount),
-       netAmount: String(netAmount),
+      netAmount: String(netAmount),
+      paidAmount: "0",
+      remainingAmount: String(netAmount),
       status: "unpaid",
       notes: notes ?? null,
     }).returning();
@@ -1001,6 +1004,11 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
           pphRate: String(rate),
           pphAmount: String(aggregatePph),
           netAmount: String(aggregateNet),
+          remainingAmount: String(
+            invoice.status === "paid"
+              ? 0
+              : Math.max(0, aggregateNet - Number(invoice.paidAmount ?? 0)),
+          ),
         })
         .where(eq(companyInvoicesTable.id, id))
         .returning();
