@@ -57,6 +57,20 @@ export type AlternativeBookingDraftPatch = {
 };
 
 /**
+ * A customer may reject a full slot without naming a replacement hour yet.
+ * Keep this separate from facility/date/duration choices so Mina can keep the
+ * booking at the time-selection step and show all available courts.
+ */
+export function isAlternativeTimeRequest(message: string): boolean {
+  const lower = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /^(?:jam|waktu)\s+lain(?:nya)?$/.test(lower) ||
+    /^(?:ganti|pilih|cari|mau|tetap)\s+(?:di\s+)?(?:jam|waktu)\b/.test(lower) ||
+    /^(?:tidak|nggak|ngga|gak|ga)\b/.test(lower)
+  );
+}
+
+/**
  * Parse the explicit alternative menu and the natural-language replies Mina
  * commonly receives after showing a full slot.
  */

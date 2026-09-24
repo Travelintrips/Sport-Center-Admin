@@ -92,6 +92,7 @@ import {
   formatAlternativeFacilityOptions,
   getAlternativeBookingDraftPatch,
   parseAlternativeBookingChoice,
+  isAlternativeTimeRequest,
   isMinaGreeting,
   isBookingRequest,
 } from "../lib/waBookingFlow";
@@ -3378,6 +3379,22 @@ async function continueSession(
             session.durationMinutes,
           )
           : [];
+        if (isAlternativeTimeRequest(msg)) {
+          const updated = await updateSession(session.id, {
+            currentStep: "ask_time",
+            startTime: null,
+          });
+          const reply = buildAlternativeTimeSelectionReply({
+            currentFacilityName: currentFacility?.name ?? "Court A",
+            bookingDate: session.bookingDate,
+            durationMinutes: session.durationMinutes,
+            sameFacilitySlots: currentSlots,
+            alternativeOptions: alternativeSlotOptions,
+          });
+          await appendMessage(updated.id, "bot", reply);
+          await sendReply(reply);
+          return;
+        }
         if (alternativeChoice === "duration") {
           const updated = await updateSession(session.id, {
             ...getAlternativeBookingDraftPatch(alternativeChoice),
@@ -3441,8 +3458,7 @@ async function continueSession(
         return;
       }
 
-      const wantsAnotherTime =
-        /^(tetap|pilih|ganti).*(jam|waktu)|jam lain|pilih jam lain/i.test(lower);
+      const wantsAnotherTime = isAlternativeTimeRequest(msg);
       const wantsAnotherDate =
         alternativeChoice === "date" ||
         /tanggal lain|ganti tanggal|pilih tanggal lain/i.test(lower);
@@ -3581,9 +3597,7 @@ async function continueSession(
         alternativeChoice === "date" ||
         /(?:tanggal|hari).*(?:lain|berbeda|berikutnya)|(?:ganti|pilih|mau).*(?:tanggal|hari)/i.test(lower);
       const wantsAnotherDuration = alternativeChoice === "duration";
-      const wantsAnotherTime =
-        /(?:jam|waktu).*(?:lain|berbeda)|(?:ganti|pilih|mau|cari).*(?:jam|waktu)/i.test(lower) ||
-        /^(?:tidak|nggak|ngga|gak|ga)\b/i.test(lower);
+      const wantsAnotherTime = isAlternativeTimeRequest(msg);
       const wantsAlternativeFacility = alternativeChoice === "facility";
 
       if (!requestedStartTime && (wantsAnotherDate || wantsAnotherDuration || wantsAnotherTime || wantsAlternativeFacility)) {
@@ -3631,16 +3645,15 @@ async function continueSession(
           : [];
         const updated = await updateSession(session.id, {
           startTime: null,
-          currentStep: alternativeSlotOptions.length > 0
-            ? "choose_alternative_facility"
-            : "ask_time",
+          currentStep: "ask_time",
         });
         const reply = alternativeSlotOptions.length > 0
-          ? buildAlternativeFacilitySlotPrompt({
+          ? buildAlternativeTimeSelectionReply({
             currentFacilityName: fac?.name ?? "Court A",
             bookingDate: session.bookingDate!,
             durationMinutes: session.durationMinutes ?? 60,
-            options: alternativeSlotOptions,
+            sameFacilitySlots: slots,
+            alternativeOptions: alternativeSlotOptions,
           })
           : fac && slots.length > 0
             ? `Coba salah satu jam berikut: ${slots.slice(0, 3).join(", ")}.\n` +
@@ -4293,6 +4306,40 @@ function buildAlternativeFacilityChoiceReply(params: {
     ``,
     alternativeAction,
     sameFacilitySlots,
+  ].join("\n");
+}
+
+function buildAlternativeTimeSelectionReply(params: {
+  currentFacilityName: string;
+  bookingDate: string;
+  durationMinutes: number;
+  sameFacilitySlots: string[];
+  alternativeOptions: AlternativeFacilitySlotOption[];
+}): string {
+  const sections: string[] = [];
+  const facilityNames = [
+    params.currentFacilityName,
+    ...params.alternativeOptions.map(({ facility }) => facility.name),
+  ];
+  if (params.sameFacilitySlots.length > 0) {
+    sections.push(
+      `🏸 *${params.currentFacilityName}*\n${params.sameFacilitySlots.join("  | ")}`,
+    );
+  }
+  sections.push(
+    ...params.alternativeOptions.map(({ facility, slots }) =>
+      `🏸 *${facility.name}*\n${slots.join("  | ")}`,
+    ),
+  );
+  return [
+    `⏰ Baik, kita cari jam lain untuk durasi *${minutesToHours(params.durationMinutes)} jam* pada tanggal *${params.bookingDate}*.`,
+    ``,
+    sections.length > 0
+      ? `🟢 Slot yang masih tersedia:\n${sections.join("\n\n")}`
+      : `⚠️ Tidak ada jam lain yang tersedia pada tanggal tersebut.`,
+    ``,
+    `Ketik jam spesifik yang kamu inginkan, misalnya *17:00* atau *jam 5 sore*. Mina akan mengecek ${facilityNames.join(" dan ")} sebelum melanjutkan booking.`,
+    `Ketik *ganti tanggal* atau *batal* jika ingin keluar dari pilihan jam.`,
   ].join("\n");
 }
 

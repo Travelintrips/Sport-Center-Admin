@@ -6,6 +6,7 @@ import {
   formatAlternativeFacilityOptions,
   getAlternativeBookingDraftPatch,
   parseAlternativeBookingChoice,
+  isAlternativeTimeRequest,
   switchBookingFacility,
   isMinaGreeting,
   isBookingRequest,
@@ -194,6 +195,15 @@ describe("WhatsApp Mina booking flow regressions", () => {
     expect(parseAlternativeBookingChoice("3", ["Badminton Court B"], { allowNumericMenu: true })).toBe("duration");
     expect(parseAlternativeBookingChoice("2 jam", ["Badminton Court B"], { allowNumericMenu: true })).toBeNull();
     expect(parseAlternativeBookingChoice("2", ["Badminton Court B"])).toBeNull();
+  });
+
+  it("keeps the conversation active when a customer asks for another time", () => {
+    expect(isAlternativeTimeRequest("jam lain")).toBe(true);
+    expect(isAlternativeTimeRequest("jam lainnya")).toBe(true);
+    expect(isAlternativeTimeRequest("ganti jam")).toBe(true);
+    expect(isAlternativeTimeRequest("pilih waktu lain")).toBe(true);
+    expect(isAlternativeTimeRequest("jam 18")).toBe(false);
+    expect(isAlternativeTimeRequest("Court B")).toBe(false);
   });
 
   it("preserves the draft when choosing a new date or duration", () => {
