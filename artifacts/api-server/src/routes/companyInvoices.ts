@@ -916,7 +916,11 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
       return;
     }
 
-    const isSettled = invoice.status === "paid" || invoice.status === "partial_paid";
+    const isSettled =
+      invoice.status === "paid" ||
+      invoice.status === "partial_paid" ||
+      invoice.invoiceStatus === "paid" ||
+      invoice.invoiceStatus === "partial_paid";
     if (isSettled && !confirmPaidInvoice) {
       res.status(409).json({
         code: "PAID_INVOICE_CONFIRMATION_REQUIRED",
@@ -940,8 +944,8 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
 
     let updatedInvoice: typeof companyInvoicesTable.$inferSelect;
     let updatedBookings = 0;
-    let totalPph = 0;
-    let totalNet = 0;
+    let aggregatePph = 0;
+    let aggregateNet = 0;
 
     await db.transaction(async (tx) => {
       const bookings = await tx
@@ -957,6 +961,18 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
       if (missingBookingIds.length > 0) {
         throw new Error(`Booking invoice tidak ditemukan atau perusahaan tidak cocok: ${missingBookingIds.join(", ")}`);
       }
+
+      // Invoice-level PPh must be calculated once from the aggregate DPP.
+      // Summing independently rounded session PPh values can drift by Rp1+.
+      const aggregateTax = summarizeBookingTax(bookings);
+      const aggregateWithholding = calculateWithholdingTax(
+        aggregateTax.grandTotal,
+        aggregateTax.dpp,
+        rate > 0,
+        rate,
+      );
+      aggregatePph = aggregateWithholding.amount;
+      aggregateNet = aggregateWithholding.netAmount;
 
       for (const bookingId of bookingIds) {
         const booking = bookingById.get(bookingId)!;
@@ -981,16 +997,14 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
             .where(eq(companyInvoiceItemsTable.id, item.id));
         }
 
-        totalPph += withholding.amount;
-        totalNet += withholding.netAmount;
         updatedBookings += 1;
       }
 
       const [updated] = await tx.update(companyInvoicesTable)
         .set({
           pphRate: String(rate),
-          pphAmount: String(Math.round(totalPph)),
-          netAmount: String(Math.round(totalNet)),
+          pphAmount: String(aggregatePph),
+          netAmount: String(aggregateNet),
         })
         .where(eq(companyInvoicesTable.id, id))
         .returning();
@@ -1022,8 +1036,8 @@ router.post("/company-invoices/:id/apply-withholding", adminMiddleware, async (r
       after: {
         status: updatedInvoice!.status,
         pphRate: rate,
-        pphAmount: Math.round(totalPph),
-        netAmount: Math.round(totalNet),
+        pphAmount: aggregatePph,
+        netAmount: aggregateNet,
         updatedBookingCount: updatedBookings,
         reason: reason || null,
       },
