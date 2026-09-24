@@ -579,6 +579,33 @@ export default function BookingDetail() {
       ? paymentSelection.sessions.reduce((sum, session) => sum + Number(session.amount ?? 0), 0)
       : ((booking as any).groupInfo?.groupNetTotalPayment ?? bookingWithholding.netAmount),
   );
+  const groupInfo = (booking as any).groupInfo;
+  const groupGross = Number(groupInfo?.groupTotalPayment ?? 0);
+  const groupHasPpn =
+    Number(groupInfo?.groupPpnAmount ?? 0) > 0 ||
+    Number((booking as any).ppnAmount ?? 0) > 0 ||
+    groupInfo?.ppnTreatment === "inclusive";
+  const groupDpp = Math.max(
+    0,
+    Math.round(Number(groupInfo?.groupDpp ?? (
+      groupHasPpn
+        ? groupGross / 1.11
+        : groupGross
+    ))),
+  );
+  const groupPpn = Math.max(
+    0,
+    Math.round(Number(groupInfo?.groupPpnAmount ?? (groupGross - groupDpp))),
+  );
+  const groupPphRate = Math.max(0, Number(groupInfo?.groupPphRate ?? bookingWithholding.rate ?? 0));
+  const groupPph = Math.max(
+    0,
+    Math.round(Number(groupInfo?.groupPphAmount ?? (groupDpp * groupPphRate / 100))),
+  );
+  const groupNet = Math.max(
+    0,
+    Math.round(Number(groupInfo?.groupNetTotalPayment ?? (groupGross - groupPph))),
+  );
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
 
@@ -697,6 +724,18 @@ export default function BookingDetail() {
                   <div>{t("Jumlah sesi", "Total sessions")}</div>
                   <div>{(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")}</div>
                 </div>
+                {groupGross > 0 && groupPphRate > 0 && (
+                  <>
+                    <div className="flex justify-between items-center text-sm text-muted-foreground">
+                      <div>DPP</div>
+                      <div>Rp {groupDpp.toLocaleString("id-ID")}</div>
+                    </div>
+                    <div className="flex justify-between items-center text-sm text-muted-foreground">
+                      <div>PPN 11%</div>
+                      <div className="text-primary font-semibold">+Rp {groupPpn.toLocaleString("id-ID")}</div>
+                    </div>
+                  </>
+                )}
                 <div className="h-px bg-border" />
                 <div className="flex justify-between items-center text-xl font-black">
                   <div className="flex flex-col gap-0.5">
@@ -707,11 +746,16 @@ export default function BookingDetail() {
                   </div>
                   <div className="text-right">
                     <div className="text-green-600 dark:text-green-400">
-                      Rp {(booking as any).groupInfo.groupNetTotalPayment.toLocaleString("id-ID")}
+                      Rp {groupNet.toLocaleString("id-ID")}
                     </div>
                     <div className="text-xs font-normal text-muted-foreground">
-                      {t("Bruto", "Gross")} Rp {(booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")}
+                      {t("Bruto", "Gross")} Rp {groupGross.toLocaleString("id-ID")}
                     </div>
+                    {groupPphRate > 0 && (
+                      <div className="text-xs font-normal text-orange-700 dark:text-orange-300">
+                        PPh {groupPphRate}% −Rp {groupPph.toLocaleString("id-ID")}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

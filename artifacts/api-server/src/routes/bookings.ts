@@ -237,10 +237,16 @@ async function getBookingWithPayment(id: number) {
       .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
     : [];
 
+  const bookingWithholding = calculateBookingWithholdingTax(booking);
+
   // Jika booking bagian dari grup recurring, ambil info grup
   let groupInfo: {
     groupTotalPayment: number;
     groupNetTotalPayment: number;
+    groupDpp: number;
+    groupPpnAmount: number;
+    groupPphRate: number;
+    groupPphAmount: number;
     groupSessionCount: number;
     groupRef: string;
     additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
@@ -267,31 +273,51 @@ async function getBookingWithPayment(id: number) {
       const groupCharges = groupBookings
         .map((row) => normalizeAdditionalCharges(row.additionalCharges))
         .find((charges) => charges.length > 0) ?? [];
+      const groupGross = Math.max(0, Math.round(Number(group.totalPayment) || 0));
+      const storedGroupPpn = Math.max(0, Number(group.ppnAmount ?? 0));
+      const groupHasPpn =
+        storedGroupPpn > 0 ||
+        group.ppnTreatment === "inclusive" ||
+        groupBookings.some((row) => Number(row.ppnAmount ?? 0) > 0 || row.ppnTreatment === "inclusive");
+      const groupDpp = Math.max(
+        0,
+        Math.round(
+          Number(group.dpp ?? (
+            groupHasPpn ? groupGross / 1.11 : groupGross
+          )),
+        ),
+      );
+      const storedGroupPph = Math.max(0, Number(group.pphAmount ?? 0));
+      const groupPphRate = Math.max(
+        0,
+        Number(group.pphRate ?? 0) || bookingWithholding.rate || (storedGroupPph > 0 ? 10 : 0),
+      );
+      const groupPphEnabled =
+        booking.companyCustomerId != null &&
+        (groupPphRate > 0 || storedGroupPph > 0 || bookingWithholding.enabled);
+      const groupWithholding = calculateWithholdingTax(
+        groupGross,
+        groupDpp,
+        groupPphEnabled,
+        groupPphRate || 10,
+      );
       groupInfo = {
         groupRef: booking.groupRef,
-        groupTotalPayment: Number(group.totalPayment),
-        groupNetTotalPayment: group.netPayment != null
-          ? Number(group.netPayment)
-          : groupBookings.reduce((sum, row) => {
-            const grandTotal = Number(row.grandTotal ?? row.totalPrice ?? 0);
-            const dpp = Math.max(0, Number(row.dpp ?? grandTotal - Number(row.ppnAmount ?? 0)));
-            const storedPphAmount = Math.max(0, Number(row.pphAmount ?? 0));
-            const configuredPphRate = Math.max(0, Number(row.pphRate ?? 0));
-            const withholding = calculateWithholdingTax(
-              grandTotal,
-              dpp,
-              row.companyCustomerId != null && (configuredPphRate > 0 || storedPphAmount > 0),
-              configuredPphRate > 0 ? configuredPphRate : 10,
-            );
-            return sum + withholding.netAmount;
-          }, 0),
+        groupTotalPayment: groupGross,
+        // Always derive the group net from the aggregate gross. The stored
+        // net_payment can be a legacy per-session sum and must not override
+        // the invoice-level withholding calculation.
+        groupNetTotalPayment: groupWithholding.netAmount,
+        groupDpp,
+        groupPpnAmount: groupHasPpn ? Math.max(0, groupGross - groupDpp) : 0,
+        groupPphRate: groupWithholding.rate,
+        groupPphAmount: groupWithholding.amount,
         groupSessionCount: groupBookings.length,
         additionalCharges: groupCharges,
       };
     }
   }
 
-  const bookingWithholding = calculateBookingWithholdingTax(booking);
   const payableTotal = groupInfo?.groupNetTotalPayment ?? bookingWithholding.netAmount;
 
   // idCardNumber adalah PII — jangan ekspos di endpoint publik (customer invoice).
@@ -1127,8 +1153,9 @@ router.post("/bookings", async (req, res) => {
     // Upsert booking_groups jika ada groupRef dari cart — HARUS sebelum insert booking
     // karena kolom bookings.group_ref punya FK ke booking_groups.group_ref (baris induk harus ada dulu)
     if (incomingGroupRef) {
-      // Payable amount: pakai grandTotal bila ada PPN, fallback ke totalPrice
-      const payableAmount = pphCalc.netAmount;
+      // booking_groups.total_payment menyimpan bruto agregat. PPh hanya
+      // memengaruhi nominal net dibayar, bukan dasar total invoice grup.
+      const payableAmount = taxCalc.grandTotal;
 
       const [existingGroup] = await db.select().from(bookingGroupsTable)
         .where(eq(bookingGroupsTable.groupRef, incomingGroupRef)).limit(1);
