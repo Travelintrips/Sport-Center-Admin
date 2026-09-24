@@ -58,7 +58,8 @@ export function calculateInclusiveInvoiceTax(
   const grandTotal = Math.max(0, Math.round(Number(totalAmountInclusive) || 0));
   const dpp = Math.round(grandTotal / 1.11);
   const dppNilaiLain = Math.round(dpp * 11 / 12);
-  const ppnAmount = Math.round(dppNilaiLain * 0.12);
+  // Keep the displayed inclusive total exact: DPP + PPN = gross.
+  const ppnAmount = Math.max(0, grandTotal - dpp);
   return { dpp, dppNilaiLain, ppnAmount, grandTotal };
 }
 
