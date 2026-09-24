@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, CheckCircle, Upload, Image as ImageIcon, ZoomIn } from "lucide-react";
+import { AlertCircle, CheckCircle, Download, Upload, Image as ImageIcon, ZoomIn } from "lucide-react";
 
 interface OcrPreview {
   paymentMethod: "QRIS" | "Transfer Bank" | "unknown";
@@ -130,6 +130,39 @@ export default function WaProofUpload() {
     setOcrError("");
     setPreview(URL.createObjectURL(f));
     await runOcrScan(f, paymentMethod);
+  }
+
+  async function handleDownloadQris() {
+    const imageUrl = info?.paymentOptions?.qris?.imageUrl;
+    if (!imageUrl) return;
+
+    const fileName = `QRIS-${info?.booking?.orderNumber ?? "Sport-Center"}.png`;
+
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error("QRIS image download failed");
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      // Cross-origin storage may block fetch(). Fall back to the browser's
+      // native download/open behavior so the customer can still save the QRIS.
+      const link = document.createElement("a");
+      link.href = imageUrl;
+      link.download = fileName;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -348,6 +381,15 @@ export default function WaProofUpload() {
                       Ketuk untuk memperbesar
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadQris()}
+                    className="mx-auto mt-2 flex items-center justify-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                    aria-label="Download kode QRIS"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download QRIS
+                  </button>
                   <p className="mt-2 text-xs text-gray-600">
                     Penerima QRIS: <strong>{expectedRecipientLabel}</strong>
                   </p>
@@ -371,6 +413,15 @@ export default function WaProofUpload() {
                   <p className="text-center text-sm text-gray-700">
                     Penerima: <strong>{expectedRecipientLabel}</strong>
                   </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-orange-300 text-orange-700 hover:bg-orange-50"
+                    onClick={() => void handleDownloadQris()}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download QRIS
+                  </Button>
                 </DialogContent>
               </Dialog>
                {preview ? (
