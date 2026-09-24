@@ -50,7 +50,10 @@ export function calculateInclusiveInvoiceTax(
   const grandTotal = Math.max(0, Math.round(Number(totalAmountInclusive) || 0));
   const dpp = Math.round(grandTotal / 1.11);
   const dppNilaiLain = Math.round(dpp * 11 / 12);
-  const ppnAmount = Math.round(dppNilaiLain * 0.12);
+  // The inclusive invoice must reconcile exactly: DPP + PPN = gross.
+  // DPP Nilai Lain remains a presentation base, while the booked PPN amount
+  // absorbs any Rp1 rounding remainder from the 11/12 × 12% presentation.
+  const ppnAmount = Math.max(0, grandTotal - dpp);
   return { dpp, dppNilaiLain, ppnAmount, grandTotal };
 }
 
