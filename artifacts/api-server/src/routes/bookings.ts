@@ -273,20 +273,29 @@ async function getBookingWithPayment(id: number) {
       const groupCharges = groupBookings
         .map((row) => normalizeAdditionalCharges(row.additionalCharges))
         .find((charges) => charges.length > 0) ?? [];
-      const groupGross = Math.max(0, Math.round(Number(group.totalPayment) || 0));
+      // totalPrice is the canonical PPN-inclusive selling price. Do not trust
+      // legacy group.totalPayment / group.dpp snapshots here: older rows could
+      // store PPN additively (grandTotal = totalPrice + ppnAmount), which made
+      // a Rp2.000.000 group appear as Rp2.220.000.
+      const groupGross = Math.max(
+        0,
+        Math.round(
+          group.totalPaymentOverride != null
+            ? Number(group.totalPaymentOverride)
+            : groupBookings.reduce(
+                (sum, row) => sum + Number(row.totalPrice ?? row.grandTotal ?? 0),
+                0,
+              ),
+        ),
+      );
       const storedGroupPpn = Math.max(0, Number(group.ppnAmount ?? 0));
       const groupHasPpn =
         storedGroupPpn > 0 ||
         group.ppnTreatment === "inclusive" ||
         groupBookings.some((row) => Number(row.ppnAmount ?? 0) > 0 || row.ppnTreatment === "inclusive");
-      const groupDpp = Math.max(
-        0,
-        Math.round(
-          Number(group.dpp ?? (
-            groupHasPpn ? groupGross / 1.11 : groupGross
-          )),
-        ),
-      );
+      // Tax is calculated once from the aggregate group amount. This avoids
+      // both additive legacy tax and per-session rounding drift.
+      const groupDpp = groupHasPpn ? Math.round(groupGross / 1.11) : groupGross;
       const storedGroupPph = Math.max(0, Number(group.pphAmount ?? 0));
       const groupPphRate = Math.max(
         0,
