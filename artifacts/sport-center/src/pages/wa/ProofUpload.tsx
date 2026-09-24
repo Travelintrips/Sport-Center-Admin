@@ -484,6 +484,14 @@ export default function WaProofUpload() {
                        </p>
                      ))}
                    </div>
+                   <p className="mt-1 flex items-start gap-1.5">
+                     <span>
+                       <strong>Bukti Scan:</strong>{" "}
+                       {ocrPreview.amount == null
+                         ? "Belum terbaca"
+                         : `Rp ${Number(ocrPreview.amount).toLocaleString("id-ID")}`}
+                     </span>
+                   </p>
                    <p className="mt-1">
                      {ocrPreviewVerified
                         ? "Nominal cocok. Server akan memeriksa ulang nominal saat bukti dikirim."
