@@ -74,7 +74,7 @@ export function parsePaymentProofAmount(text: string): number | null {
     }
 
     const hasStrongAmountLabel =
-      /\b(?:TOTAL(?:\s+TRANSAKSI)?|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|TOTAL\s+TRANSACTION)\b/.test(
+      /\b(?:TOTAL(?:\s+TRANSAKSI)?|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|TOTAL\s+TRANSACTION|TRANSACTION\s+AMOUNT)\b/.test(
         normalized,
       );
 
@@ -95,10 +95,20 @@ export function parsePaymentProofAmount(text: string): number | null {
     // when the same line explicitly labels it as the total/amount.
     if (hasStrongAmountLabel && currencyMatches.length === 0) {
       const labelled = line.match(
-        /(?:TOTAL(?:\s+TRANSAKSI)?|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|TOTAL\s+TRANSACTION)\s*[:\-]?\s*([\dOIl][\dOIl.,\s]{2,28})/i,
+        /(?:TOTAL(?:\s+TRANSAKSI)?|JUMLAH|NOMINAL|AMOUNT|DIBAYAR|TOTAL\s+TRANSACTION|TRANSACTION\s+AMOUNT)\s*[:\-]?\s*([\dOIl][\dOIl.,\s]{2,28})/i,
       );
       const amount = labelled ? parseMoneyToken(labelled[1] ?? "") : null;
       if (amount != null) candidates.push({ amount, score: 3 });
+
+      // Blurry screenshots can insert OCR noise between "Total" and the
+      // digits (for example, "Total Trai ! ~) 30.000"). The line is still a
+      // strong amount candidate, so use the last grouped number on that line.
+      if (amount == null) {
+        const fuzzyAmount = [...line.matchAll(/([\dOIl][\dOIl.,]{2,})/gi)]
+          .map((match) => parseMoneyToken(match[1] ?? ""))
+          .find((value): value is number => value != null);
+        if (fuzzyAmount != null) candidates.push({ amount: fuzzyAmount, score: 3 });
+      }
     }
   }
 
@@ -198,27 +208,95 @@ function parseName(text: string): string | null {
 }
 
 export function parsePaymentProofRecipient(text: string): string | null {
-  const patterns = [
-    /^(?:NAMA\s+PENERIMA|PENERIMA|NAMA\s+MERCHANT|MERCHANT\s+NAME|BENEFICIARY(?:\s+NAME)?)\s*[:\-]?\s*(.+)$/i,
-    /^(?:REKENING\s+TUJUAN|TUJUAN(?:\s+(?:TRANSFER|PEMBAYARAN))?|KEPADA|MERCHANT|TO)\s*[:\-]?\s*(.+)$/i,
-  ];
   const lines = text.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-  for (const line of lines) {
-    for (const pattern of patterns) {
-      const recipient = line.match(pattern)?.[1]
-        ?.replace(/^[\s:—-]+|[\s.,;]+$/g, "")
-        .trim();
-      if (
-        recipient &&
-        recipient.length >= 3 &&
-        recipient.length <= 120 &&
-        /[A-Za-z]/.test(recipient) &&
-        !/^(?:detail transaksi|transaction detail|berhasil|sukses)$/i.test(recipient)
-      ) {
-        return recipient;
-      }
+  const labelPattern =
+    /^(?:NAMA\s+PENERIMA|PENERIMA|RECIPIENT|NAMA\s+MERCHANT|MERCHANT\s+NAME|BENEFICIARY(?:\s+NAME)?)\b/i;
+  const destinationPattern =
+    /^(?:REKENING\s+TUJUAN|TUJUAN(?:\s+(?:TRANSFER|PEMBAYARAN))?|KEPADA|PEMBAYARAN\s+KE|TO)\b/i;
+
+  const cleanRecipient = (value: string | undefined): string | null => {
+    const recipient = value
+      ?.replace(/^[\s:—-]+|[\s.,;]+$/g, "")
+      .trim();
+    if (
+      !recipient ||
+      recipient.length < 3 ||
+      recipient.length > 120 ||
+      !/[A-Za-z]/.test(recipient) ||
+      /^(?:DETAIL(?:\s+TRANSAKSI)?|TRANSACTION\s+DETAIL|BERHASIL|SUKSES)$/i.test(recipient) ||
+      /^(?:TOTAL|NOMINAL|AMOUNT|SUMBER\s+DANA|BANK|PENGAKUISISI|MERCHANT\s+PAN|TERMINAL)/i.test(recipient)
+    ) {
+      return null;
+    }
+    return recipient;
+  };
+
+  // Most mobile banking receipts put the value on the line after
+  // "Penerima", "Recipient", or "Pembayaran ke". Read both forms.
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const sameLineMatch =
+      line.match(labelPattern)?.[0] ? line.replace(labelPattern, "") :
+      line.match(destinationPattern)?.[0] ? line.replace(destinationPattern, "") :
+      null;
+    const sameLineRecipient = cleanRecipient(sameLineMatch ?? undefined);
+    if (sameLineRecipient) return sameLineRecipient;
+
+    if (labelPattern.test(line) || destinationPattern.test(line)) {
+      const nextLineRecipient = cleanRecipient(lines[index + 1]);
+      if (nextLineRecipient) return nextLineRecipient;
     }
   }
+
+  // Blurry photos frequently turn "Pembayaran ke" into a partial word such
+  // as "Pembayal". If that anchor is still recognizable, use the next
+  // merchant-looking line, but never treat a total/reference line as a name.
+  const fuzzyAnchorIndex = lines.findIndex((line) =>
+    /PEMBAY|RECIPIENT|PENERIM/i.test(line),
+  );
+  if (fuzzyAnchorIndex >= 0) {
+    for (const candidate of lines.slice(fuzzyAnchorIndex + 1, fuzzyAnchorIndex + 3)) {
+      const recipient = cleanRecipient(candidate);
+      if (recipient && !/^\d/.test(recipient)) return recipient;
+    }
+  }
+
+  // Some QRIS success screens omit the "Penerima" label entirely. Prefer the
+  // merchant-looking line immediately after the total, or the first all-caps
+  // merchant line on a receipt, while excluding common receipt headings.
+  const totalIndex = lines.findIndex((line) => /\bTOTAL\b/i.test(line));
+  const merchantHeadings =
+    /^(?:TOTAL|NOMINAL|AMOUNT|DETAIL|TRANSAKSI|PAYMENT|PEMBAYARAN|SUCCESSFUL|BERHASIL|VIEW|RECEIPT|JAKARTA|PUSAT|TIPE|KATEGORI|UANG|KELUAR|NO\.?\s*REF|REF|BANK|PENGAKUISISI|MERCHANT\s+PAN|TERMINAL|CUSTOMER|DARI)\b/i;
+  const merchantLines = totalIndex >= 0
+    ? lines.slice(totalIndex + 1, totalIndex + 5)
+    : lines;
+  for (const candidate of merchantLines) {
+    if (
+      /\d/.test(candidate) ||
+      merchantHeadings.test(candidate) ||
+      candidate.split(/\s+/).length < 2 ||
+      (candidate.match(/\b[A-Z][A-Z]{2,}\b/g) ?? []).length < 2
+    ) {
+      continue;
+    }
+    const recipient = cleanRecipient(candidate);
+    if (recipient) return recipient;
+  }
+
+  for (const candidate of lines) {
+    if (
+      !/^[^a-z]*[A-Z][A-Z .&'—-]{5,}$/.test(candidate) ||
+      /\d/.test(candidate) ||
+      merchantHeadings.test(candidate) ||
+      candidate.split(/\s+/).length < 2 ||
+      (candidate.match(/\b[A-Z][A-Z]{2,}\b/g) ?? []).length < 2
+    ) {
+      continue;
+    }
+    const recipient = cleanRecipient(candidate);
+    if (recipient) return recipient;
+  }
+
   return null;
 }
 
@@ -228,6 +306,29 @@ function normalizedRecipientWords(value: string): string[] {
     .trim()
     .split(/\s+/)
     .filter((word) => word.length > 1 && !/^(?:PT|CV|UD|TBK|PERSERO|LTD|INC)$/.test(word));
+}
+
+function recipientWordsSimilar(actual: string, expected: string): boolean {
+  if (actual === expected) return true;
+  if (actual.length < 4 || expected.length < 4) return false;
+
+  const distances = Array.from({ length: expected.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= actual.length; row += 1) {
+    let diagonal = distances[0]!;
+    distances[0] = row;
+    for (let column = 1; column <= expected.length; column += 1) {
+      const above = distances[column]!;
+      const cost = actual[row - 1] === expected[column - 1] ? 0 : 1;
+      distances[column] = Math.min(
+        distances[column]! + 1,
+        distances[column - 1]! + 1,
+        diagonal + cost,
+      );
+      diagonal = above;
+    }
+  }
+
+  return distances[expected.length]! <= 1;
 }
 
 export function paymentRecipientMatchesOcr(
@@ -245,9 +346,14 @@ export function paymentRecipientMatchesOcr(
     const expectedText = expectedWords.join(" ");
     if (actualText === expectedText) return true;
 
-    const actualSet = new Set(actualWords);
-    const matchingWords = expectedWords.filter((word) => actualSet.has(word)).length;
-    if (expectedWords.length === 1) return actualSet.has(expectedWords[0]!);
+    const matchingWords = expectedWords.filter((word) =>
+      actualWords.some((actualWord) => recipientWordsSimilar(actualWord, word)),
+    ).length;
+    if (expectedWords.length === 1) {
+      return actualWords.some((actualWord) =>
+        recipientWordsSimilar(actualWord, expectedWords[0]!),
+      );
+    }
     return (
       matchingWords >= Math.min(2, expectedWords.length) &&
       matchingWords / expectedWords.length >= 0.65
@@ -268,12 +374,14 @@ export function classifyPaymentMethod(text: string): {
     ["Quick Response Code", /QUICK\s+RESPONSE\s+CODE/],
     ["NMID", /\bNMID\b/],
     ["QR Code", /\bQR\s*CODE\b/],
+    ["QR Bayar", /\bQR\s+BAYAR\b/],
+    ["QR Payment", /\bQR\s+(?:PAYMENT|PEMBAYARAN)\b/],
 
     // Banking apps may omit the word QRIS on the success screen,
     // but Merchant PAN / MPAN is specific evidence of a QR merchant payment.
-    ["Merchant PAN", /\bMERCHANT\s+PAN\b|\bMPAN\b/],
+    ["Merchant PAN", /\b(?:[A-Z]{0,2})?ERCHANT\s+PAN\b|\bMPAN\b/],
 
-    ["QR Payment", /\bQR\s+(?:PAYMENT|PEMBAYARAN)\b/],
+    ["QR transaction", /\bTRANSAKSI\s+QRIS\b/],
   ] as const;
 
   for (const [label, pattern] of qrisSignals) {
@@ -338,15 +446,19 @@ export function classifyPaymentMethod(text: string): {
   };
 }
 
-async function preprocessImage(buffer: Buffer): Promise<Buffer> {
+async function preprocessImage(
+  buffer: Buffer,
+  variant: "color" | "normalized",
+): Promise<Buffer> {
   const sharp = (await import("sharp")).default;
-  return sharp(buffer)
+  const image = sharp(buffer)
     .rotate()
-    .resize({ width: 1800, withoutEnlargement: false })
-    .grayscale()
-    .normalize()
-    .jpeg({ quality: 88 })
-    .toBuffer();
+    .resize({ width: 2200, withoutEnlargement: false })
+    .sharpen({ sigma: 1.1 });
+
+  if (variant === "normalized") image.grayscale().normalize();
+
+  return image.jpeg({ quality: 90 }).toBuffer();
 }
 
 export async function scanPaymentProof(
@@ -378,18 +490,51 @@ export async function scanPaymentProof(
       logger: () => {},
     });
     try {
-      const image = await preprocessImage(buffer);
-      const result = await worker.recognize(image);
-      const rawText = String(result.data.text ?? "").trim();
-      const classification = classifyPaymentMethod(rawText);
+      const scans: Array<PaymentProofOcrScan & { quality: number }> = [];
+      for (const variant of ["color", "normalized"] as const) {
+        const image = await preprocessImage(buffer, variant);
+        const result = await worker.recognize(image);
+        const rawText = String(result.data.text ?? "").trim();
+        const classification = classifyPaymentMethod(rawText);
+        const scan = {
+          ...classification,
+          rawText,
+          name: parseName(rawText),
+          recipient: parsePaymentProofRecipient(rawText),
+          amount: parsePaymentProofAmount(rawText),
+          date: parsePaymentProofDate(rawText),
+          engine: "tesseract" as const,
+          scannedAt,
+        };
+        scans.push({
+          ...scan,
+          quality:
+            (scan.paymentMethod !== "unknown" ? 4 : 0) +
+            (scan.amount != null ? 2 : 0) +
+            (scan.date != null ? 2 : 0) +
+            (scan.recipient != null ? 2 : 0) +
+            scan.confidence,
+        });
+      }
+
+      scans.sort((a, b) => b.quality - a.quality);
+      const best = scans[0]!;
+      const methodScan = scans.find((scan) => scan.paymentMethod !== "unknown") ?? best;
+      const name = scans.find((scan) => scan.name != null)?.name ?? null;
+      const recipient = scans.find((scan) => scan.recipient != null)?.recipient ?? null;
+      const amount = scans.find((scan) => scan.amount != null)?.amount ?? null;
+      const date = scans.find((scan) => scan.date != null)?.date ?? null;
+
       return {
-        ...classification,
-        rawText,
-        name: parseName(rawText),
-        recipient: parsePaymentProofRecipient(rawText),
-        amount: parsePaymentProofAmount(rawText),
-        date: parsePaymentProofDate(rawText),
-        engine: "tesseract",
+        paymentMethod: methodScan.paymentMethod,
+        confidence: methodScan.confidence,
+        signals: methodScan.signals,
+        rawText: scans.map((scan) => scan.rawText).filter(Boolean).join("\n\n"),
+        name,
+        recipient,
+        amount,
+        date,
+        engine: best.engine,
         scannedAt,
       };
     } finally {
