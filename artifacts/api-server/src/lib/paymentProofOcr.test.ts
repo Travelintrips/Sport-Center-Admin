@@ -87,6 +87,10 @@ describe("payment proof OCR amount parsing", () => {
 
     expect(parsePaymentProofAmount(rawText)).toBe(200000);
   });
+
+  it("reads a total when OCR drops the currency prefix and part of the label", () => {
+    expect(parsePaymentProofAmount("Total Trai ! ~) 30.000")).toBe(30000);
+  });
 });
 
 
@@ -139,11 +143,26 @@ describe("payment proof recipient validation", () => {
     expect(parsePaymentProofRecipient("Merchant Name: Sport Center Soekarno-Hatta")).toBe(
       "Sport Center Soekarno-Hatta",
     );
+    expect(
+      parsePaymentProofRecipient("Pembayaran ke\nTRAVELIN BANDARA SOETTA"),
+    ).toBe("TRAVELIN BANDARA SOETTA");
+    expect(
+      parsePaymentProofRecipient("Pembayal\nTRAVELIN BANDARA SOETTA\nTotal Transaksi Rp 30.000"),
+    ).toBe("TRAVELIN BANDARA SOETTA");
+    expect(
+      parsePaymentProofRecipient("Total\nRp 30.000\nims, TRAVELIN BANDARA SOETTA\nJAKARTA PUSAT"),
+    ).toBe("ims, TRAVELIN BANDARA SOETTA");
+    expect(
+      parsePaymentProofRecipient("Payment Successful\nTRAVELIN BANDARA SO...\nJAKARTA PUSAT"),
+    ).toBe("TRAVELIN BANDARA SO");
   });
 
   it("matches normalized recipient names while rejecting a different recipient", () => {
     expect(
       paymentRecipientMatchesOcr("Cahaya Sejati Teknologi", ["PT. Cahaya Sejati Teknologi"]),
+    ).toBe(true);
+    expect(
+      paymentRecipientMatchesOcr("TRAVELIN ANDARA SOETTAS", ["TRAVELIN BANDARA SOETTA"]),
     ).toBe(true);
     expect(paymentRecipientMatchesOcr("Travelin", ["Sport Center Soekarno-Hatta"])).toBe(false);
   });
