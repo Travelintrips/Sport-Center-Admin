@@ -275,7 +275,7 @@ export function parsePaymentProofRecipient(text: string): string | null {
       /\d/.test(candidate) ||
       merchantHeadings.test(candidate) ||
       candidate.split(/\s+/).length < 2 ||
-      !/[A-Za-z]{3}/.test(candidate)
+      (candidate.match(/\b[A-Z][A-Z]{2,}\b/g) ?? []).length < 2
     ) {
       continue;
     }
@@ -288,7 +288,8 @@ export function parsePaymentProofRecipient(text: string): string | null {
       !/^[^a-z]*[A-Z][A-Z .&'—-]{5,}$/.test(candidate) ||
       /\d/.test(candidate) ||
       merchantHeadings.test(candidate) ||
-      candidate.split(/\s+/).length < 2
+      candidate.split(/\s+/).length < 2 ||
+      (candidate.match(/\b[A-Z][A-Z]{2,}\b/g) ?? []).length < 2
     ) {
       continue;
     }
@@ -307,6 +308,29 @@ function normalizedRecipientWords(value: string): string[] {
     .filter((word) => word.length > 1 && !/^(?:PT|CV|UD|TBK|PERSERO|LTD|INC)$/.test(word));
 }
 
+function recipientWordsSimilar(actual: string, expected: string): boolean {
+  if (actual === expected) return true;
+  if (actual.length < 4 || expected.length < 4) return false;
+
+  const distances = Array.from({ length: expected.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= actual.length; row += 1) {
+    let diagonal = distances[0]!;
+    distances[0] = row;
+    for (let column = 1; column <= expected.length; column += 1) {
+      const above = distances[column]!;
+      const cost = actual[row - 1] === expected[column - 1] ? 0 : 1;
+      distances[column] = Math.min(
+        distances[column]! + 1,
+        distances[column - 1]! + 1,
+        diagonal + cost,
+      );
+      diagonal = above;
+    }
+  }
+
+  return distances[expected.length]! <= 1;
+}
+
 export function paymentRecipientMatchesOcr(
   actualRecipient: string | null | undefined,
   expectedRecipients: string[],
@@ -322,9 +346,14 @@ export function paymentRecipientMatchesOcr(
     const expectedText = expectedWords.join(" ");
     if (actualText === expectedText) return true;
 
-    const actualSet = new Set(actualWords);
-    const matchingWords = expectedWords.filter((word) => actualSet.has(word)).length;
-    if (expectedWords.length === 1) return actualSet.has(expectedWords[0]!);
+    const matchingWords = expectedWords.filter((word) =>
+      actualWords.some((actualWord) => recipientWordsSimilar(actualWord, word)),
+    ).length;
+    if (expectedWords.length === 1) {
+      return actualWords.some((actualWord) =>
+        recipientWordsSimilar(actualWord, expectedWords[0]!),
+      );
+    }
     return (
       matchingWords >= Math.min(2, expectedWords.length) &&
       matchingWords / expectedWords.length >= 0.65
