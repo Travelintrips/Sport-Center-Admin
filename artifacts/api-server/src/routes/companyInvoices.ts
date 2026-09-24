@@ -432,7 +432,11 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
     orderNumber: b.orderNumber ?? null,
   }));
   if (items.length > 0) {
-    await db.insert(companyInvoiceItemsTable).values(items);
+    // The same invoice-generation request can be retried or race with another
+    // request. Keep one line per (invoice, booking) and make retries idempotent.
+    await db.insert(companyInvoiceItemsTable)
+      .values(items)
+      .onConflictDoNothing();
   }
 }
 
