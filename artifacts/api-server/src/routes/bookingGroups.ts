@@ -3,6 +3,7 @@ import { db, bookingsTable, bookingGroupsTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
 import type { BookingGroup } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
+import { syncBookingGroupTotal } from "../lib/groupTotals";
 
 const router = Router();
 
@@ -97,7 +98,10 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
     }
 
     // Calculate total if not provided
-    const computedTotal = total_payment ?? bookings.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
+    const computedTotal = total_payment ?? bookings.reduce(
+      (sum, b) => sum + Number(b.totalPrice ?? b.grandTotal ?? 0),
+      0,
+    );
     if (!Number.isFinite(Number(computedTotal)) || Number(computedTotal) < 0) {
       res.status(400).json({ error: "total_payment tidak valid" });
       return;
@@ -135,7 +139,16 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
       return { group, groupRef };
     });
 
-    res.json({ ...created.group, totalPayment: Number(created.group.totalPayment), bookingIds: normalizedIds });
+    await syncBookingGroupTotal(created.groupRef);
+    const [syncedGroup] = await db.select().from(bookingGroupsTable)
+      .where(eq(bookingGroupsTable.groupRef, created.groupRef))
+      .limit(1);
+
+    res.json({
+      ...(syncedGroup ?? created.group),
+      totalPayment: Number((syncedGroup ?? created.group).totalPayment),
+      bookingIds: normalizedIds,
+    });
   } catch (err) {
     req.log.error({ err }, "Merge bookings error");
     res.status(500).json({ error: "Internal server error" });
@@ -192,6 +205,11 @@ router.patch("/bookings/groups/:groupRef", adminMiddleware, async (req, res) => 
     if (notes !== undefined) setData.notes = notes ?? null;
 
     await db.update(bookingGroupsTable).set(setData).where(eq(bookingGroupsTable.groupRef, groupRef));
+
+    // Tax snapshots are derived values. Recalculate them after every group
+    // update so a total override, status edit, or legacy manual tax payload
+    // cannot leave DPP/PPN/PPh/net out of sync.
+    await syncBookingGroupTotal(groupRef);
 
     const rows = await db.select().from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, groupRef));
     const updated = rows[0];
