@@ -468,7 +468,6 @@ export default function WaProofUpload() {
                      : "border-yellow-200 bg-yellow-50 text-yellow-800"
                  }`}>
                    <p className="font-bold">Hasil pengecekan awal</p>
-                    <p className="mt-1">Mode uji coba: hanya nominal yang diperiksa.</p>
                    <div className="mt-2 space-y-1.5">
                      {[
                        {
