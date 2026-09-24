@@ -28,5 +28,5 @@ export function isMinaGreetingEcho(msg: string): boolean {
  * checking the first line or by the short-lived outbound cache alone.
  */
 export function isFonnteProviderEcho(msg: string): boolean {
-  return /(?:^|\n)\s*>?\s*sent\s+via\s+fonnte\.com\s*(?:\n|$)/im.test(msg);
+  return /(?:^|\n)\s*>?\s*[_*~]?\s*sent\s+via\s+fonnte\.com\s*[_*~]?\s*(?:\n|$)/im.test(msg);
 }

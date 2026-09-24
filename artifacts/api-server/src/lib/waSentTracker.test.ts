@@ -24,6 +24,18 @@ describe("Mina WhatsApp echo guard", () => {
     ).toBe(true);
   });
 
+  it("ignores Fonnte's Markdown-formatted footer from the real webhook payload", () => {
+    expect(
+      isFonnteProviderEcho(
+        "You • +62 819-9293-5158\n" +
+        "lanjut di sini\n\n" +
+        "👤 Pesan/Booking atas nama siapa?\n\n" +
+        "Contoh: Andi\n\n" +
+        "> _Sent via fonnte.com_",
+      ),
+    ).toBe(true);
+  });
+
   it("does not ignore a customer message that only mentions Fonnte", () => {
     expect(isFonnteProviderEcho("Saya kirim bukti via Fonnte")).toBe(false);
   });

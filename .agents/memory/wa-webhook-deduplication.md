@@ -10,3 +10,9 @@ Inbound Mina webhooks must use a shared database-backed deduplication claim in a
 **How to apply:** Serialize claims with a PostgreSQL advisory transaction lock, keep the claim window short enough to allow intentional repeated messages later, and ignore duplicate deliveries before AI/session processing.
 
 Fonnte can also echo outbound Mina replies with a standalone `Sent via fonnte.com` footer and quoted-message header. Detect that footer before deduplication/session handling; leading-text bot patterns are not sufficient.
+
+For an active booking, include the session ID and current step in the content fingerprint. The same customer text can be a valid answer to different prompts after the session advances.
+
+**Why:** A customer may send `jam 12 siang` while Mina is asking for duration, then send the identical text again after Mina asks for the start time. A phone-plus-content key would silently drop the second message.
+
+**How to apply:** Load the active session before the content claim and scope both process-local and shared claims by `sessionId:currentStep`; keep provider message-ID claims independent so same-message retries remain blocked.
