@@ -3,8 +3,11 @@ import {
   classifyPaymentMethod,
   parsePaymentProofAmount,
   parsePaymentProofDate,
+  parsePaymentProofRecipient,
   paymentProofDateMatchesBooking,
   paymentMethodMatchesOcr,
+  paymentRecipientMatchesOcr,
+  validatePaymentProofScan,
   type PaymentProofOcrScan,
 } from "./paymentProofOcr";
 
@@ -14,6 +17,7 @@ function scanFromText(rawText: string): PaymentProofOcrScan {
     ...classification,
     rawText,
     name: null,
+    recipient: parsePaymentProofRecipient(rawText),
     amount: null,
     date: null,
     engine: "tesseract",
@@ -123,5 +127,62 @@ describe("payment proof OCR date validation", () => {
 
   it("returns null when OCR cannot read a date", () => {
     expect(paymentProofDateMatchesBooking(null, "2026-09-22T08:52:20.379Z")).toBeNull();
+  });
+});
+
+describe("payment proof recipient validation", () => {
+  it("reads QRIS and bank-transfer recipient labels", () => {
+    expect(parsePaymentProofRecipient("Penerima Travelin.")).toBe("Travelin");
+    expect(parsePaymentProofRecipient("Nama Penerima: PT Cahaya Sejati Teknologi")).toBe(
+      "PT Cahaya Sejati Teknologi",
+    );
+    expect(parsePaymentProofRecipient("Merchant Name: Sport Center Soekarno-Hatta")).toBe(
+      "Sport Center Soekarno-Hatta",
+    );
+  });
+
+  it("matches normalized recipient names while rejecting a different recipient", () => {
+    expect(
+      paymentRecipientMatchesOcr("Cahaya Sejati Teknologi", ["PT. Cahaya Sejati Teknologi"]),
+    ).toBe(true);
+    expect(paymentRecipientMatchesOcr("Travelin", ["Sport Center Soekarno-Hatta"])).toBe(false);
+  });
+
+  it("requires all four OCR checks to pass", () => {
+    const scan = scanFromText([
+      "Pembayaran QRIS Berhasil",
+      "Penerima Travelin",
+      "Total Transaksi Rp 200.000",
+      "22 Sep 2026 09:14 WIB",
+    ].join("\n"));
+    scan.amount = parsePaymentProofAmount(scan.rawText);
+    scan.date = parsePaymentProofDate(scan.rawText);
+
+    const validation = validatePaymentProofScan({
+      scan,
+      selectedMethod: "QRIS",
+      expectedAmount: 200000,
+      expectedRecipients: ["Travelin", "Sport Center Soekarno-Hatta"],
+      bookingCreatedAt: "2026-09-22T08:00:00.000Z",
+      now: new Date("2026-09-22T12:00:00.000Z"),
+    });
+    expect(validation).toMatchObject({
+      methodMatch: true,
+      amountMatch: true,
+      dateMatch: true,
+      recipientMatch: true,
+      complete: true,
+    });
+
+    const incomplete = validatePaymentProofScan({
+      scan: { ...scan, recipient: null },
+      selectedMethod: "QRIS",
+      expectedAmount: 200000,
+      expectedRecipients: ["Travelin"],
+      bookingCreatedAt: "2026-09-22T08:00:00.000Z",
+      now: new Date("2026-09-22T12:00:00.000Z"),
+    });
+    expect(incomplete.recipientMatch).toBe(false);
+    expect(incomplete.complete).toBe(false);
   });
 });

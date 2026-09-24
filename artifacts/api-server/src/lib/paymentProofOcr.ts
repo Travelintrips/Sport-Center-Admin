@@ -8,6 +8,7 @@ export interface PaymentProofOcrScan {
   signals: string[];
   rawText: string;
   name: string | null;
+  recipient: string | null;
   amount: number | null;
   date: string | null;
   engine: "tesseract" | "unsupported" | "failed";
@@ -196,6 +197,64 @@ function parseName(text: string): string | null {
   return value.length >= 3 && value.length <= 120 ? value : null;
 }
 
+export function parsePaymentProofRecipient(text: string): string | null {
+  const patterns = [
+    /^(?:NAMA\s+PENERIMA|PENERIMA|NAMA\s+MERCHANT|MERCHANT\s+NAME|BENEFICIARY(?:\s+NAME)?)\s*[:\-]?\s*(.+)$/i,
+    /^(?:REKENING\s+TUJUAN|TUJUAN(?:\s+(?:TRANSFER|PEMBAYARAN))?|KEPADA|MERCHANT|TO)\s*[:\-]?\s*(.+)$/i,
+  ];
+  const lines = text.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  for (const line of lines) {
+    for (const pattern of patterns) {
+      const recipient = line.match(pattern)?.[1]
+        ?.replace(/^[\s:—-]+|[\s.,;]+$/g, "")
+        .trim();
+      if (
+        recipient &&
+        recipient.length >= 3 &&
+        recipient.length <= 120 &&
+        /[A-Za-z]/.test(recipient) &&
+        !/^(?:detail transaksi|transaction detail|berhasil|sukses)$/i.test(recipient)
+      ) {
+        return recipient;
+      }
+    }
+  }
+  return null;
+}
+
+function normalizedRecipientWords(value: string): string[] {
+  return normalizeText(value)
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 1 && !/^(?:PT|CV|UD|TBK|PERSERO|LTD|INC)$/.test(word));
+}
+
+export function paymentRecipientMatchesOcr(
+  actualRecipient: string | null | undefined,
+  expectedRecipients: string[],
+): boolean {
+  if (!actualRecipient?.trim()) return false;
+  const actualWords = normalizedRecipientWords(actualRecipient);
+  if (actualWords.length === 0) return false;
+
+  return expectedRecipients.some((expectedRecipient) => {
+    const expectedWords = normalizedRecipientWords(expectedRecipient);
+    if (expectedWords.length === 0) return false;
+    const actualText = actualWords.join(" ");
+    const expectedText = expectedWords.join(" ");
+    if (actualText === expectedText) return true;
+
+    const actualSet = new Set(actualWords);
+    const matchingWords = expectedWords.filter((word) => actualSet.has(word)).length;
+    if (expectedWords.length === 1) return actualSet.has(expectedWords[0]!);
+    return (
+      matchingWords >= Math.min(2, expectedWords.length) &&
+      matchingWords / expectedWords.length >= 0.65
+    );
+  });
+}
+
 export function classifyPaymentMethod(text: string): {
   paymentMethod: OcrPaymentMethod;
   confidence: number;
@@ -302,6 +361,7 @@ export async function scanPaymentProof(
       signals: [],
       rawText: "",
       name: null,
+      recipient: null,
       amount: null,
       date: null,
       engine: "unsupported",
@@ -326,6 +386,7 @@ export async function scanPaymentProof(
         ...classification,
         rawText,
         name: parseName(rawText),
+        recipient: parsePaymentProofRecipient(rawText),
         amount: parsePaymentProofAmount(rawText),
         date: parsePaymentProofDate(rawText),
         engine: "tesseract",
@@ -341,6 +402,7 @@ export async function scanPaymentProof(
       signals: [],
       rawText: "",
       name: null,
+      recipient: null,
       amount: null,
       date: null,
       engine: "failed",
@@ -424,6 +486,53 @@ export function paymentMethodMatchesOcr(
   return null;
 }
 
+export interface PaymentProofValidation {
+  methodMatch: boolean;
+  amountMatch: boolean;
+  dateMatch: boolean;
+  recipientMatch: boolean;
+  complete: boolean;
+  expectedAmount: number;
+  expectedRecipients: string[];
+}
+
+export function validatePaymentProofScan(params: {
+  scan: PaymentProofOcrScan | null | undefined;
+  selectedMethod: string;
+  expectedAmount: number;
+  expectedRecipients: string[];
+  bookingCreatedAt: Date | string | null | undefined;
+  now?: Date;
+}): PaymentProofValidation {
+  const scan = params.scan;
+  const readable = scan?.engine === "tesseract";
+  const methodMatch =
+    readable && paymentMethodMatchesOcr(params.selectedMethod, scan) === true;
+  const amountMatch =
+    readable &&
+    scan?.amount != null &&
+    Number(scan.amount) === Number(params.expectedAmount);
+  const dateMatch =
+    readable &&
+    paymentProofDateMatchesBooking(
+      scan?.date,
+      params.bookingCreatedAt,
+      params.now,
+    ) === true;
+  const recipientMatch =
+    readable &&
+    paymentRecipientMatchesOcr(scan?.recipient, params.expectedRecipients);
+  return {
+    methodMatch,
+    amountMatch,
+    dateMatch,
+    recipientMatch,
+    complete: methodMatch && amountMatch && dateMatch && recipientMatch,
+    expectedAmount: Number(params.expectedAmount),
+    expectedRecipients: params.expectedRecipients,
+  };
+}
+
 export function storedPaymentProofOcr(
   payment:
     | {
@@ -447,6 +556,7 @@ export function storedPaymentProofOcr(
     signals: Array.isArray(data.signals) ? data.signals.map(String) : [],
     rawText: payment.ocrRaw ?? "",
     name: payment.ocrName ?? null,
+    recipient: typeof data.recipient === "string" ? data.recipient : null,
     amount: payment.ocrAmount == null ? null : Number(payment.ocrAmount),
     date: payment.ocrDate ?? null,
     engine:
