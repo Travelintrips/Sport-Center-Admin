@@ -1381,6 +1381,10 @@ function BookingDetailDrawer({
   );
   const [startTime, setStartTime] = useState(String(booking.startTime ?? "").slice(0, 5));
   const [endTime, setEndTime] = useState(String(booking.endTime ?? "").slice(0, 5));
+  const [bookingDateDirty, setBookingDateDirty] = useState(false);
+  const [paymentDateDirty, setPaymentDateDirty] = useState(false);
+  const [startTimeDirty, setStartTimeDirty] = useState(false);
+  const [endTimeDirty, setEndTimeDirty] = useState(false);
   const [savingDates, setSavingDates] = useState(false);
   const displayedAdditionalCharges =
     Array.isArray(booking.groupAdditionalCharges) && booking.groupAdditionalCharges.length > 0
@@ -1396,6 +1400,36 @@ function BookingDetailDrawer({
   const originalPaymentDate = paymentDateValue?.slice(0, 10) ?? "";
   const originalStartTime = String(booking.startTime ?? "").slice(0, 5);
   const originalEndTime = String(booking.endTime ?? "").slice(0, 5);
+
+  // The selected booking can be refreshed in-place while this drawer remains
+  // mounted. Keep untouched form fields aligned with the newest canonical row
+  // so a payment-only edit never accidentally submits an older booking date.
+  useEffect(() => {
+    setBookingDate(originalBookingDate);
+    setPaymentDate(originalPaymentDate);
+    setStartTime(originalStartTime);
+    setEndTime(originalEndTime);
+    setBookingDateDirty(false);
+    setPaymentDateDirty(false);
+    setStartTimeDirty(false);
+    setEndTimeDirty(false);
+  }, [booking.id]);
+
+  useEffect(() => {
+    if (!bookingDateDirty) setBookingDate(originalBookingDate);
+    if (!paymentDateDirty) setPaymentDate(originalPaymentDate);
+    if (!startTimeDirty) setStartTime(originalStartTime);
+    if (!endTimeDirty) setEndTime(originalEndTime);
+  }, [
+    originalBookingDate,
+    originalPaymentDate,
+    originalStartTime,
+    originalEndTime,
+    bookingDateDirty,
+    paymentDateDirty,
+    startTimeDirty,
+    endTimeDirty,
+  ]);
 
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
@@ -1420,18 +1454,21 @@ function BookingDetailDrawer({
     !isCompleted &&
     ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) &&
     allPayments.some((pmt) => pmt.status === "confirmed" && pmt.proofUrl);
+  const bookingDateChanged = bookingDateDirty && bookingDate !== originalBookingDate;
+  const paymentDateChanged = paymentDateDirty && paymentDate !== originalPaymentDate;
+  const startTimeChanged = startTimeDirty && startTime !== originalStartTime;
+  const endTimeChanged = endTimeDirty && endTime !== originalEndTime;
   const datesChanged =
-    bookingDate !== originalBookingDate ||
-    paymentDate !== originalPaymentDate ||
-    startTime !== originalStartTime ||
-    endTime !== originalEndTime;
+    bookingDateChanged ||
+    paymentDateChanged ||
+    startTimeChanged ||
+    endTimeChanged;
 
   const saveDates = async () => {
-    const nextBookingDate = bookingDate !== originalBookingDate ? bookingDate : undefined;
-    const nextPaymentDate =
-      paymentDate !== originalPaymentDate ? paymentDate || undefined : undefined;
-    const nextStartTime = startTime !== originalStartTime ? startTime : undefined;
-    const nextEndTime = endTime !== originalEndTime ? endTime : undefined;
+    const nextBookingDate = bookingDateChanged ? bookingDate : undefined;
+    const nextPaymentDate = paymentDateChanged ? paymentDate || undefined : undefined;
+    const nextStartTime = startTimeChanged ? startTime : undefined;
+    const nextEndTime = endTimeChanged ? endTime : undefined;
     const timeChanged = nextStartTime !== undefined || nextEndTime !== undefined;
 
     if (
@@ -1457,6 +1494,10 @@ function BookingDetailDrawer({
         nextStartTime,
         nextEndTime,
       );
+      if (nextBookingDate !== undefined) setBookingDateDirty(false);
+      if (nextPaymentDate !== undefined) setPaymentDateDirty(false);
+      if (nextStartTime !== undefined) setStartTimeDirty(false);
+      if (nextEndTime !== undefined) setEndTimeDirty(false);
     } finally {
       setSavingDates(false);
     }
@@ -1656,7 +1697,10 @@ function BookingDetailDrawer({
                     <Input
                       type="date"
                       value={bookingDate}
-                      onChange={(event) => setBookingDate(event.target.value)}
+                      onChange={(event) => {
+                        setBookingDate(event.target.value);
+                        setBookingDateDirty(true);
+                      }}
                       className="h-8 text-xs bg-white dark:bg-slate-900"
                     />
                   </div>
@@ -1665,7 +1709,10 @@ function BookingDetailDrawer({
                     <Input
                       type="date"
                       value={paymentDate}
-                      onChange={(event) => setPaymentDate(event.target.value)}
+                      onChange={(event) => {
+                        setPaymentDate(event.target.value);
+                        setPaymentDateDirty(true);
+                      }}
                       disabled={!hasPaymentData}
                       className="h-8 text-xs bg-white dark:bg-slate-900"
                     />
@@ -1677,7 +1724,10 @@ function BookingDetailDrawer({
                     <Input
                       type="time"
                       value={startTime}
-                      onChange={(event) => setStartTime(event.target.value)}
+                      onChange={(event) => {
+                        setStartTime(event.target.value);
+                        setStartTimeDirty(true);
+                      }}
                       className="h-8 text-xs bg-white dark:bg-slate-900"
                     />
                   </div>
@@ -1686,7 +1736,10 @@ function BookingDetailDrawer({
                     <Input
                       type="time"
                       value={endTime}
-                      onChange={(event) => setEndTime(event.target.value)}
+                      onChange={(event) => {
+                        setEndTime(event.target.value);
+                        setEndTimeDirty(true);
+                      }}
                       className="h-8 text-xs bg-white dark:bg-slate-900"
                     />
                   </div>
