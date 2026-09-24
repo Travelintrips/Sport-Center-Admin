@@ -3,6 +3,13 @@ import { db, bookingsTable, bookingExtensionRequestsTable, facilitiesTable, book
 import { eq, and, not, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import {
+  recordTaxTransaction,
+  resolveCustomerTax,
+  resolveWithholdingTax,
+  reverseTaxTransaction,
+} from "../lib/tax";
+import { syncBookingGroupTotal } from "../lib/groupTotals";
 
 const router = Router();
 
@@ -218,13 +225,39 @@ router.patch("/extension-requests/:id", adminMiddleware, async (req, res) => {
       const newEndTime = addHours(booking.endTime, request.extraHours);
       const newDuration = booking.durationHours + request.extraHours;
       const newTotal = Number(booking.totalPrice) + Number(request.additionalPrice);
+      const taxCalc = await resolveCustomerTax(newTotal, {
+        customerId: booking.customerId,
+        companyCustomerId: booking.companyCustomerId,
+        bookingDate: booking.bookingDate,
+      });
+      const pphCalc = await resolveWithholdingTax(
+        booking.companyCustomerId,
+        taxCalc.grandTotal,
+        taxCalc.dpp,
+      );
 
+      await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
       await db.update(bookingsTable).set({
         endTime: newEndTime,
         durationHours: newDuration,
         totalPrice: String(newTotal),
+        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+        dpp: String(taxCalc.dpp),
+        ppnAmount: String(taxCalc.taxAmount),
+        grandTotal: String(taxCalc.grandTotal),
+        ppnTreatment: taxCalc.ppnTreatment,
+        ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
+        pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+        pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+        netAmount: String(pphCalc.netAmount),
         updatedAt: new Date(),
       }).where(eq(bookingsTable.id, request.bookingId));
+      if (taxCalc.taxCode) {
+        await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+      }
+      if (booking.groupRef) {
+        await syncBookingGroupTotal(booking.groupRef);
+      }
 
       await db.insert(bookingHistoryTable).values({
         bookingId: request.bookingId,
@@ -306,13 +339,39 @@ router.patch("/bookings/:id/extend-direct", adminMiddleware, async (req, res) =>
     const additionalPrice = Number(facility.pricePerHour) * extraHours;
     const newDuration = booking.durationHours + extraHours;
     const newTotal = Number(booking.totalPrice) + additionalPrice;
+    const taxCalc = await resolveCustomerTax(newTotal, {
+      customerId: booking.customerId,
+      companyCustomerId: booking.companyCustomerId,
+      bookingDate: booking.bookingDate,
+    });
+    const pphCalc = await resolveWithholdingTax(
+      booking.companyCustomerId,
+      taxCalc.grandTotal,
+      taxCalc.dpp,
+    );
 
+    await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
     await db.update(bookingsTable).set({
       endTime: newEndTime,
       durationHours: newDuration,
       totalPrice: String(newTotal),
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      dpp: String(taxCalc.dpp),
+      ppnAmount: String(taxCalc.taxAmount),
+      grandTotal: String(taxCalc.grandTotal),
+      ppnTreatment: taxCalc.ppnTreatment,
+      ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
+      pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+      pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+      netAmount: String(pphCalc.netAmount),
       updatedAt: new Date(),
     }).where(eq(bookingsTable.id, bookingId));
+    if (taxCalc.taxCode) {
+      await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+    }
+    if (booking.groupRef) {
+      await syncBookingGroupTotal(booking.groupRef);
+    }
 
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
