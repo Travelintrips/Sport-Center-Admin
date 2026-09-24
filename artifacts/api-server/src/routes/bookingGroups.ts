@@ -123,6 +123,7 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
         customerPhone: customer_phone,
         customerName: current[0].customerName,
         totalPayment: String(computedTotal),
+        totalPaymentOverride: total_payment != null ? String(computedTotal) : null,
         status: "pending",
         notes: notes ?? null,
       });
@@ -145,15 +146,49 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
 router.patch("/bookings/groups/:groupRef", adminMiddleware, async (req, res) => {
   try {
     const groupRef = req.params.groupRef as string;
-    const { status, total_payment, notes } = req.body as {
+    const { status, total_payment, notes, ppn_rate, dpp, ppn_amount, ppn_treatment, pph_rate, pph_amount, net_payment } = req.body as {
       status?: "pending" | "paid";
       total_payment?: number;
       notes?: string;
+      ppn_rate?: number | null;
+      dpp?: number | null;
+      ppn_amount?: number | null;
+      ppn_treatment?: string | null;
+      pph_rate?: number | null;
+      pph_amount?: number | null;
+      net_payment?: number | null;
     };
 
-    const setData: { updatedAt: Date; status?: "pending" | "paid"; totalPayment?: string; notes?: string | null } = { updatedAt: new Date() };
+    const setData: {
+      updatedAt: Date;
+      status?: "pending" | "paid";
+      totalPayment?: string;
+      totalPaymentOverride?: string | null;
+      ppnRate?: string | null;
+      dpp?: string | null;
+      ppnAmount?: string | null;
+      ppnTreatment?: string | null;
+      pphRate?: string | null;
+      pphAmount?: string | null;
+      netPayment?: string | null;
+      notes?: string | null;
+    } = { updatedAt: new Date() };
     if (status) setData.status = status;
-    if (total_payment != null) setData.totalPayment = String(total_payment);
+    if (total_payment != null) {
+      if (!Number.isFinite(Number(total_payment)) || Number(total_payment) < 0) {
+        res.status(400).json({ error: "total_payment tidak valid" });
+        return;
+      }
+      setData.totalPayment = String(Math.round(Number(total_payment)));
+      setData.totalPaymentOverride = String(Math.round(Number(total_payment)));
+    }
+    if (ppn_rate !== undefined) setData.ppnRate = ppn_rate == null ? null : String(ppn_rate);
+    if (dpp !== undefined) setData.dpp = dpp == null ? null : String(dpp);
+    if (ppn_amount !== undefined) setData.ppnAmount = ppn_amount == null ? null : String(ppn_amount);
+    if (ppn_treatment !== undefined) setData.ppnTreatment = ppn_treatment ?? null;
+    if (pph_rate !== undefined) setData.pphRate = pph_rate == null ? null : String(pph_rate);
+    if (pph_amount !== undefined) setData.pphAmount = pph_amount == null ? null : String(pph_amount);
+    if (net_payment !== undefined) setData.netPayment = net_payment == null ? null : String(net_payment);
     if (notes !== undefined) setData.notes = notes ?? null;
 
     await db.update(bookingGroupsTable).set(setData).where(eq(bookingGroupsTable.groupRef, groupRef));

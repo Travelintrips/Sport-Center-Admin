@@ -30,6 +30,7 @@ import { calculateBookingWithholdingTax, calculateWithholdingTax, recordTaxTrans
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
+import { syncBookingGroupTotal } from "../lib/groupTotals";
 import {
   FINAL_BANK_MATCH_STATUSES,
   getReconciledPaymentIds,
@@ -269,19 +270,21 @@ async function getBookingWithPayment(id: number) {
       groupInfo = {
         groupRef: booking.groupRef,
         groupTotalPayment: Number(group.totalPayment),
-        groupNetTotalPayment: groupBookings.reduce((sum, row) => {
-          const grandTotal = Number(row.grandTotal ?? row.totalPrice ?? 0);
-          const dpp = Math.max(0, Number(row.dpp ?? grandTotal - Number(row.ppnAmount ?? 0)));
-          const storedPphAmount = Math.max(0, Number(row.pphAmount ?? 0));
-          const configuredPphRate = Math.max(0, Number(row.pphRate ?? 0));
-          const withholding = calculateWithholdingTax(
-            grandTotal,
-            dpp,
-            row.companyCustomerId != null && (configuredPphRate > 0 || storedPphAmount > 0),
-            configuredPphRate > 0 ? configuredPphRate : 10,
-          );
-          return sum + withholding.netAmount;
-        }, 0),
+        groupNetTotalPayment: group.netPayment != null
+          ? Number(group.netPayment)
+          : groupBookings.reduce((sum, row) => {
+            const grandTotal = Number(row.grandTotal ?? row.totalPrice ?? 0);
+            const dpp = Math.max(0, Number(row.dpp ?? grandTotal - Number(row.ppnAmount ?? 0)));
+            const storedPphAmount = Math.max(0, Number(row.pphAmount ?? 0));
+            const configuredPphRate = Math.max(0, Number(row.pphRate ?? 0));
+            const withholding = calculateWithholdingTax(
+              grandTotal,
+              dpp,
+              row.companyCustomerId != null && (configuredPphRate > 0 || storedPphAmount > 0),
+              configuredPphRate > 0 ? configuredPphRate : 10,
+            );
+            return sum + withholding.netAmount;
+          }, 0),
         groupSessionCount: groupBookings.length,
         additionalCharges: groupCharges,
       };
@@ -2302,17 +2305,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         }
       }
 
-      const updatedGroupRows = await db
-        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
-        .from(bookingsTable)
-        .where(eq(bookingsTable.groupRef, beforeUpdate.groupRef));
-      const groupTotal = updatedGroupRows.reduce(
-        (sum, row) => sum + Number(row.grandTotal ?? row.totalPrice),
-        0,
-      );
-      await db.update(bookingGroupsTable)
-        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
-        .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef));
+      await syncBookingGroupTotal(beforeUpdate.groupRef);
     } else if (hasAdditionalChargesUpdate) {
       let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
       try {
@@ -3052,17 +3045,7 @@ router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) =>
     }
 
     if (booking.groupRef) {
-      const groupBookings = await db
-        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
-        .from(bookingsTable)
-        .where(eq(bookingsTable.groupRef, booking.groupRef));
-      const groupTotal = groupBookings.reduce(
-        (sum, item) => sum + (item.grandTotal != null ? Number(item.grandTotal) : Number(item.totalPrice)),
-        0,
-      );
-      await db.update(bookingGroupsTable)
-        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
-        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+      await syncBookingGroupTotal(booking.groupRef);
     }
 
     const [updatedBooking] = await db.select().from(bookingsTable)
@@ -3351,12 +3334,7 @@ async function runApVerification(
 
     // Update totalPayment di booking_groups — selalu recalculate ketika ada groupRef,
     // termasuk ketika groupUpdatedCount=0 (booking ini adalah satu-satunya / terakhir yang pending)
-    const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
-      .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
-    const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
-    await db.update(bookingGroupsTable)
-      .set({ totalPayment: String(newGroupTotal) })
-      .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    await syncBookingGroupTotal(booking.groupRef);
   }
 
   return {
@@ -3466,17 +3444,7 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
 
     // Keep a recurring/cart group total in sync when one session is corrected.
     if (booking.groupRef) {
-      const groupBookings = await db
-        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
-        .from(bookingsTable)
-        .where(eq(bookingsTable.groupRef, booking.groupRef));
-      const groupTotal = groupBookings.reduce(
-        (sum, item) => sum + (item.grandTotal != null ? Number(item.grandTotal) : Number(item.totalPrice)),
-        0,
-      );
-      await db.update(bookingGroupsTable)
-        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
-        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+      await syncBookingGroupTotal(booking.groupRef);
     }
 
     const [updatedBooking] = await db.select().from(bookingsTable)
@@ -3636,10 +3604,7 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
     }
 
     // Update group total
-    const newGroupTotal = details.reduce((sum, d) => sum + d.after, 0);
-    await db.update(bookingGroupsTable)
-      .set({ totalPayment: String(newGroupTotal) })
-      .where(eq(bookingGroupsTable.groupRef, String(groupRef)));
+    const newGroupTotal = await syncBookingGroupTotal(String(groupRef));
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
@@ -3830,13 +3795,8 @@ router.post("/bookings/verify-by-order", async (req, res) => {
         if ("success" in sibResult && sibResult.success) groupVerifiedCount++;
       }
 
-      // Recalculate group total_payment dari sum totalPrice terbaru
-      const allInGroup = await db.select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
-        .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
-      const newGroupTotal = allInGroup.reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
-      await db.update(bookingGroupsTable)
-        .set({ totalPayment: String(newGroupTotal) })
-        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+      // Preserve a manually agreed invoice total when one exists.
+      await syncBookingGroupTotal(booking.groupRef);
     }
 
     const updated = await getBookingWithPayment(booking.id);

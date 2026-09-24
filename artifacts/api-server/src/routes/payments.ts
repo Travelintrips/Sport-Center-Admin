@@ -61,6 +61,19 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
   let ppnCollectedByCustomer = booking.ppnCollectedByCustomer === true;
 
   if (booking.groupRef) {
+    const [group] = await db
+      .select({
+        totalPaymentOverride: bookingGroupsTable.totalPaymentOverride,
+        dpp: bookingGroupsTable.dpp,
+        ppnRate: bookingGroupsTable.ppnRate,
+        ppnAmount: bookingGroupsTable.ppnAmount,
+        ppnTreatment: bookingGroupsTable.ppnTreatment,
+        pphRate: bookingGroupsTable.pphRate,
+        pphAmount: bookingGroupsTable.pphAmount,
+      })
+      .from(bookingGroupsTable)
+      .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+      .limit(1);
     const groupBookings = await db
       .select({
         dpp: bookingsTable.dpp,
@@ -75,26 +88,35 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
       })
       .from(bookingsTable)
       .where(eq(bookingsTable.groupRef, booking.groupRef));
-    dpp = 0;
-    ppnAmount = 0;
+    if (group?.totalPaymentOverride != null) {
+      dpp = Number(group.dpp ?? 0);
+      ppnAmount = Number(group.ppnAmount ?? 0);
+      pphAmount = Number(group.pphAmount ?? 0);
+      pphRate = group.pphRate == null ? null : Number(group.pphRate);
+      ppnTreatment = group.ppnTreatment ?? "inclusive";
+      ppnCollectedByCustomer = false;
+    } else {
+      dpp = 0;
+      ppnAmount = 0;
 
-    pphAmount = 0;
-    pphRate = null;
-    ppnTreatment = null;
-    ppnCollectedByCustomer = false;
-    for (const groupBooking of groupBookings) {
-      const extracted = extractBookingDpp(groupBooking);
-      dpp += extracted.dpp;
-      ppnAmount += extracted.ppnAmount;
-      if (groupBooking.companyCustomerId != null) {
-        const groupWithholding = calculateBookingWithholdingTax(groupBooking);
-        if (groupWithholding.enabled) {
-          pphAmount += groupWithholding.amount;
-          pphRate ??= groupWithholding.rate;
+      pphAmount = 0;
+      pphRate = null;
+      ppnTreatment = null;
+      ppnCollectedByCustomer = false;
+      for (const groupBooking of groupBookings) {
+        const extracted = extractBookingDpp(groupBooking);
+        dpp += extracted.dpp;
+        ppnAmount += extracted.ppnAmount;
+        if (groupBooking.companyCustomerId != null) {
+          const groupWithholding = calculateBookingWithholdingTax(groupBooking);
+          if (groupWithholding.enabled) {
+            pphAmount += groupWithholding.amount;
+            pphRate ??= groupWithholding.rate;
+          }
         }
+        ppnTreatment ??= groupBooking.ppnTreatment;
+        ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
       }
-      ppnTreatment ??= groupBooking.ppnTreatment;
-      ppnCollectedByCustomer ||= extracted.ppnCollectedByCustomer;
     }
   }
 
@@ -243,10 +265,12 @@ router.get("/payments/grouped", adminMiddleware, async (req, res) => {
         b.grand_total,
         b.status        AS booking_status,
         b.group_ref,
-        f.name          AS facility_name
+         f.name          AS facility_name,
+         bg.total_payment AS group_total_payment
       FROM sport_center.payments p
       JOIN sport_center.bookings b ON b.id = p.booking_id
       LEFT JOIN sport_center.facilities f ON f.id = b.facility_id
+      LEFT JOIN sport_center.booking_groups bg ON bg.group_ref = b.group_ref
       ORDER BY p.created_at DESC
     `);
 
@@ -257,7 +281,7 @@ router.get("/payments/grouped", adminMiddleware, async (req, res) => {
       bid: number; order_number: string; customer_name: string; customer_phone: string;
       booking_date: string; start_time: string; end_time: string;
       total_price: string; grand_total: string | null; booking_status: string;
-      group_ref: string | null; facility_name: string | null;
+      group_ref: string | null; facility_name: string | null; group_total_payment: string | null;
     };
 
     const allRows = rows.rows as Row[];
@@ -287,7 +311,9 @@ router.get("/payments/grouped", adminMiddleware, async (req, res) => {
       const withProof = groupRows.find(r => r.proof_url);
       const repPayment = withProof ?? repRow;
 
-      const totalAmount = groupRows.reduce((s, r) => s + Number(r.grand_total ?? r.total_price), 0);
+       const totalAmount = groupRows[0]?.group_total_payment != null
+         ? Number(groupRows[0].group_total_payment)
+         : groupRows.reduce((s, r) => s + Number(r.grand_total ?? r.total_price), 0);
       const childBookings = groupRows.map(r => ({
         bookingId: r.booking_id,
         orderNumber: r.order_number,
@@ -532,7 +558,10 @@ router.post("/payments", async (req, res) => {
     // the customer-facing page correctly shows booking_groups.total_payment.
     // Use the group total for payment-type validation as well.
     const [bookingGroup] = booking.groupRef
-      ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+      ? await db.select({
+          totalPayment: bookingGroupsTable.totalPayment,
+          netPayment: bookingGroupsTable.netPayment,
+        })
           .from(bookingGroupsTable)
           .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
           .limit(1)
@@ -557,7 +586,7 @@ router.post("/payments", async (req, res) => {
       const withholding = calculateBookingWithholdingTax(row);
       netTotal += withholding.netAmount;
     }
-    const total = Math.round(netTotal || grossTotal);
+    const total = Math.round(Number(bookingGroup?.netPayment ?? netTotal) || grossTotal);
     const confirmedDp = Math.max(
       0,
       ...groupPayments

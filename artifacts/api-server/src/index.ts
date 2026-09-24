@@ -482,6 +482,22 @@ async function runStartupMigrations() {
         ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
      `ALTER TABLE sport_center.booking_groups
         ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS total_payment_override numeric(12,2)`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS dpp numeric(14,2)`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS ppn_amount numeric(12,2)`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS ppn_treatment text`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS pph_rate numeric(5,2)`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2)`,
+      `ALTER TABLE sport_center.booking_groups
+         ADD COLUMN IF NOT EXISTS net_payment numeric(14,2)`,
     // wa_booking_sessions
     `CREATE TABLE IF NOT EXISTS sport_center.wa_booking_sessions (
        id serial PRIMARY KEY,

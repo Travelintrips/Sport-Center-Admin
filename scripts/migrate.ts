@@ -1170,11 +1170,29 @@ CREATE TABLE IF NOT EXISTS sport_center.booking_groups (
   customer_phone TEXT NOT NULL,
   customer_name  TEXT NOT NULL,
   total_payment  NUMERIC(12,2) NOT NULL,
+  total_payment_override NUMERIC(12,2),
+  ppn_rate       NUMERIC(5,2),
+  dpp            NUMERIC(14,2),
+  ppn_amount     NUMERIC(12,2),
+  ppn_treatment  TEXT,
+  pph_rate       NUMERIC(5,2),
+  pph_amount     NUMERIC(14,2),
+  net_payment    NUMERIC(14,2),
   status         sport_center.booking_group_status NOT NULL DEFAULT 'pending',
   notes          TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE sport_center.booking_groups
+  ADD COLUMN IF NOT EXISTS total_payment_override NUMERIC(12,2),
+  ADD COLUMN IF NOT EXISTS ppn_rate NUMERIC(5,2),
+  ADD COLUMN IF NOT EXISTS dpp NUMERIC(14,2),
+  ADD COLUMN IF NOT EXISTS ppn_amount NUMERIC(12,2),
+  ADD COLUMN IF NOT EXISTS ppn_treatment TEXT,
+  ADD COLUMN IF NOT EXISTS pph_rate NUMERIC(5,2),
+  ADD COLUMN IF NOT EXISTS pph_amount NUMERIC(14,2),
+  ADD COLUMN IF NOT EXISTS net_payment NUMERIC(14,2);
 
 ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS group_ref TEXT REFERENCES sport_center.booking_groups(group_ref) ON DELETE SET NULL;
