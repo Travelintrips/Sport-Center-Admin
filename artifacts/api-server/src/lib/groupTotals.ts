@@ -29,7 +29,10 @@ export async function syncBookingGroupTotal(groupRef: string): Promise<number | 
         .from(bookingsTable)
         .where(eq(bookingsTable.groupRef, groupRef))
     ).reduce(
-      (sum, row) => sum + Number(row.grandTotal ?? row.totalPrice ?? 0),
+      // totalPrice is the canonical PPN-inclusive selling price. Some legacy
+      // rows still have grandTotal = totalPrice + ppnAmount, so preferring
+      // grandTotal would double-count PPN at group level.
+      (sum, row) => sum + Number(row.totalPrice ?? row.grandTotal ?? 0),
       0,
     );
 
