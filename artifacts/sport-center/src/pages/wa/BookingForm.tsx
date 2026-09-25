@@ -905,11 +905,6 @@ export default function WaBookingForm() {
                         ? "Belum terbaca"
                         : `Rp ${Number(proofOcrPreview.amount).toLocaleString("id-ID")}`}
                   </p>
-                  {!proofScanning && proofOcrPreview?.amountMatch && (
-                    <p className="mt-1 font-semibold">
-                      Nominal cocok. Booking dapat dikirim.
-                    </p>
-                  )}
                 </div>
               )}
 
@@ -947,7 +942,7 @@ export default function WaBookingForm() {
                     ? "Memeriksa Bukti..."
                     : "Memproses..."}
               </span>
-            ) : proofFile ? "🏅 Booking & Kirim Bukti" : "🏅 Booking Sekarang"}
+            ) : "🏅 Booking Sekarang"}
           </Button>
         </form>
       </div>
