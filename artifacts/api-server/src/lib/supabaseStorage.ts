@@ -203,8 +203,34 @@ export async function validateBuckets(): Promise<void> {
         }
       } else {
         const source = IS_DEV ? "dev" : "prod";
-        console.info(`[Storage] ✓ Bucket "${bucket}" exists (public=${data.public}, env=${source}).`);
-        bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
+        const requiredRuntimeBucket = bucket === BUCKETS.facility || bucket === BUCKETS.proof;
+
+        // These buckets return direct getPublicUrl() links to the Sport Center
+        // UI/WhatsApp flow. If an existing bucket was created as private,
+        // uploads succeed but every generated public URL returns 404/NoSuchBucket.
+        // Keep the runtime contract self-healing without touching objects.
+        if (requiredRuntimeBucket && !data.public) {
+          const mimeTypes = bucket === BUCKETS.facility
+            ? ["image/jpeg", "image/png", "image/webp"]
+            : ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"];
+          const sizeLimit = bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+          const { error: updateErr } = await supabase.storage.updateBucket(bucket, {
+            public: true,
+            allowedMimeTypes: mimeTypes,
+            fileSizeLimit: sizeLimit,
+          });
+
+          if (updateErr) {
+            console.error(`[Storage] ❌ Failed to make bucket "${bucket}" public: ${updateErr.message}`);
+            bucketStatus[bucket] = { ok: false, checkedAt: now, error: updateErr.message };
+          } else {
+            console.info(`[Storage] ✓ Bucket "${bucket}" updated to public (env=${source}).`);
+            bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
+          }
+        } else {
+          console.info(`[Storage] ✓ Bucket "${bucket}" exists (public=${data.public}, env=${source}).`);
+          bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
+        }
       }
     } catch (err: any) {
       console.error(`[Storage] ❌ Error checking bucket "${bucket}": ${err?.message}`);
