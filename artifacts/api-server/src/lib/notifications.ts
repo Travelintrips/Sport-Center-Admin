@@ -896,10 +896,8 @@ export async function notifyWaBookingPendingApproval(data: WaBookingPendingAppro
     `• Kode: *${data.orderNumber}*\n` +
     `• Fasilitas: *${data.facilityName}*\n` +
     `• Tanggal: *${data.bookingDate}*\n` +
-    (data.hideTimeAndDuration
-      ? ""
-      : `• Jam: *${data.startTime} – ${data.endTime}*\n` +
-        `• Durasi: *${data.durationHours} jam*\n`) +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Durasi: *${data.durationHours} jam*\n` +
     `• Total: *Rp ${data.totalPrice}*\n\n` +
     `Status: *Menunggu approval admin* ⏳\n\n` +
     `Kamu akan segera mendapat notifikasi jika booking disetujui. Terima kasih! 🙏\n\n` +
@@ -924,8 +922,10 @@ export async function notifyWaBookingPaymentRequired(data: WaBookingPaymentRequi
     `• Kode: *${data.orderNumber}*\n` +
     `• Fasilitas: *${data.facilityName}*\n` +
     `• Tanggal: *${data.bookingDate}*\n` +
-    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
-    `• Durasi: *${data.durationHours} jam*\n` +
+    (data.hideTimeAndDuration
+      ? ""
+      : `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+        `• Durasi: *${data.durationHours} jam*\n`) +
     `• Total: *Rp ${data.totalPrice}*\n\n` +
     `💳 *Langkah selanjutnya:*\n` +
     `Buka halaman pembayaran untuk memilih metode pembayaran dan upload bukti:\n` +
