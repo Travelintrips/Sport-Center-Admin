@@ -73,6 +73,7 @@ import {
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import {
   getFonnteConfig,
+  normalizeFonnteDevice,
   selectFonnteToken,
   validateMinaFonnteWebhookDevice,
 } from "../lib/fonnteConfig";
@@ -889,6 +890,12 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
     const proofToken = tokens[0]?.token ?? null;
 
     const baseUrl = await getBaseUrl();
+    const [supportSettings] = await db.select({
+      customerServiceWhatsapp: settingsTable.customerServiceWhatsapp,
+    }).from(settingsTable).limit(1);
+    const supportWhatsapp = normalizeFonnteDevice(
+      supportSettings?.customerServiceWhatsapp,
+    ) || null;
     const withholding = calculateBookingWithholdingTax(booking);
     res.json({
       orderNumber: booking.orderNumber,
@@ -920,6 +927,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
         confirmedAt: payment.confirmedAt,
       } : null,
       uploadProofUrl: proofToken ? `${baseUrl}/bukti/${proofToken}` : null,
+      supportWhatsapp,
       invoicePdfUrl: ["confirmed", "completed"].includes(booking.status)
         ? `${baseUrl}/api/public/invoices/${booking.orderNumber}/pdf`
         : null,
@@ -985,8 +993,14 @@ router.get("/wa/action/:token", async (req, res) => {
       };
     }
 
-    const adminPhones = tokenRow.action === "upload_proof" ? await getAdminPhones() : [];
-    const supportWhatsapp = adminPhones[0] ?? null;
+    const [supportSettings] = tokenRow.action === "upload_proof"
+      ? await db.select({
+          customerServiceWhatsapp: settingsTable.customerServiceWhatsapp,
+        }).from(settingsTable).limit(1)
+      : [];
+    const supportWhatsapp = normalizeFonnteDevice(
+      supportSettings?.customerServiceWhatsapp,
+    ) || null;
 
     res.json({
       action: tokenRow.action,
@@ -5578,9 +5592,12 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
 
       // talk_to_admin: langsung kirim kontak admin, tidak perlu OpenAI
       if (intent === "talk_to_admin") {
-        const [settingsRow] = await db.select({ whatsapp: settingsTable.whatsapp, phone: settingsTable.phone, openHour: settingsTable.openHour, closeHour: settingsTable.closeHour })
-          .from(settingsTable).limit(1);
-        const adminContact = settingsRow?.whatsapp || settingsRow?.phone || (await getAdminPhones())[0] || "";
+        const [settingsRow] = await db.select({
+          customerServiceWhatsapp: settingsTable.customerServiceWhatsapp,
+          openHour: settingsTable.openHour,
+          closeHour: settingsTable.closeHour,
+        }).from(settingsTable).limit(1);
+        const adminContact = normalizeFonnteDevice(settingsRow?.customerServiceWhatsapp);
         const reply = adminContact
           ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${settingsRow?.openHour ?? "06:00"}–${settingsRow?.closeHour ?? "22:00"}*. 🙏`
           : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${await getBaseUrl()}/contact.\n\nKami siap membantu! 🏅`;
