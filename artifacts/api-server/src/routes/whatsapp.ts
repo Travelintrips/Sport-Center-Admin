@@ -1386,7 +1386,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const dateMatch = proofValidation.dateMatch;
     const recipientMatch = proofValidation.recipientMatch;
     const resolvedPaymentMethod = selectedPaymentMethod;
-    const resolvedProvider = resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
+    const resolvedProvider: "mandiri_direct" | "unknown" =
+      resolvedPaymentMethod === "QRIS" ? "mandiri_direct" : "unknown";
 
     // Temporary WA proof-upload test: only a matching amount is required.
     // Keep the other OCR results for audit/review, but do not block submission on them.
