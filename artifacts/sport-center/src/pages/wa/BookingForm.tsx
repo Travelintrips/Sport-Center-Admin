@@ -790,7 +790,7 @@ export default function WaBookingForm() {
             <CardContent className="space-y-3">
               <p className="text-xs text-gray-600">
                 Setelah melakukan pembayaran, upload foto atau screenshot bukti di sini.
-                Jika belum siap, booking tetap bisa dibuat dan bukti dapat diupload dari link WhatsApp.
+                Bukti pembayaran wajib diupload sebelum booking dapat dikirim.
               </p>
 
               {proofPreview ? (
@@ -845,7 +845,8 @@ export default function WaBookingForm() {
               !form.customerName ||
               !form.customerPhone ||
               !form.bookingDate ||
-              !form.startTime
+              !form.startTime ||
+              !proofFile
             }
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
             {submitting || uploadingProof ? (
