@@ -896,8 +896,10 @@ export async function notifyWaBookingPendingApproval(data: WaBookingPendingAppro
     `• Kode: *${data.orderNumber}*\n` +
     `• Fasilitas: *${data.facilityName}*\n` +
     `• Tanggal: *${data.bookingDate}*\n` +
-    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
-    `• Durasi: *${data.durationHours} jam*\n` +
+    (data.hideTimeAndDuration
+      ? ""
+      : `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+        `• Durasi: *${data.durationHours} jam*\n`) +
     `• Total: *Rp ${data.totalPrice}*\n\n` +
     `Status: *Menunggu approval admin* ⏳\n\n` +
     `Kamu akan segera mendapat notifikasi jika booking disetujui. Terima kasih! 🙏\n\n` +
@@ -910,6 +912,7 @@ export interface WaBookingPaymentRequiredData extends BookingNotifData {
   paymentUrl: string;
   statusUrl: string;
   paymentDeadline?: string;
+  hideTimeAndDuration?: boolean;
 }
 
 export async function notifyWaBookingPaymentRequired(data: WaBookingPaymentRequiredData): Promise<void> {

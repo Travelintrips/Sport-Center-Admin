@@ -641,14 +641,18 @@ export function formatSessionSummary(params: {
   pricePerHour: number;
   totalPrice: number;
   notes?: string | null;
+  hideTimeAndDuration?: boolean;
 }): string {
   const notesLine = params.notes ? `Catatan: *${params.notes}*\n` : "";
+  const timeLines = params.hideTimeAndDuration
+    ? ""
+    : `Jam: *${params.startTime} – ${params.endTime}*\n` +
+      `Durasi: *${params.durationHours} jam*\n`;
   return (
     `✅ Saya cek tersedia. Berikut detail booking:\n\n` +
     `Fasilitas: *${params.facilityName}*\n` +
     `Tanggal: *${params.bookingDate}*\n` +
-    `Jam: *${params.startTime} – ${params.endTime}*\n` +
-    `Durasi: *${params.durationHours} jam*\n` +
+    timeLines +
     `Nama: *${params.customerName}*\n` +
     notesLine +
     `Total: *${formatIDR(params.totalPrice)}*\n\n` +

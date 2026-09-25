@@ -86,6 +86,13 @@ import {
 } from "../lib/paymentProofOcr";
 import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 import {
+  GYM_WALK_IN_DURATION_HOURS,
+  GYM_WALK_IN_DURATION_MINUTES,
+  GYM_WALK_IN_END_TIME,
+  GYM_WALK_IN_START_TIME,
+  isGymWalkInFacility,
+} from "../lib/waGymBooking";
+import {
   getNearestAvailableSlots,
   hasSlotConflict,
   isRecentMessageDuplicate,
@@ -3253,16 +3260,27 @@ async function presentBookingSession(
   const facility = session.facilityId
     ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
     : null;
-  const nextStep = session.currentStep === "choose_mode"
+  const gymWalkIn = isGymWalkInFacility(facility);
+  let current = session;
+  if (
+    gymWalkIn &&
+    (current.startTime !== GYM_WALK_IN_START_TIME ||
+      current.durationMinutes !== GYM_WALK_IN_DURATION_MINUTES)
+  ) {
+    current = await updateSession(current.id, {
+      startTime: GYM_WALK_IN_START_TIME,
+      durationMinutes: GYM_WALK_IN_DURATION_MINUTES,
+    });
+  }
+  const nextStep = current.currentStep === "choose_mode"
     ? "choose_mode"
     : getNextStep({
-      facilityId: session.facilityId,
-      bookingDate: session.bookingDate,
-      startTime: session.startTime,
-      durationMinutes: session.durationMinutes,
-      customerName: session.customerName,
+      facilityId: current.facilityId,
+      bookingDate: current.bookingDate,
+      startTime: current.startTime,
+      durationMinutes: current.durationMinutes,
+      customerName: current.customerName,
     });
-  let current = session;
   if (current.currentStep !== nextStep) {
     current = await updateSession(current.id, { currentStep: nextStep });
   }
@@ -3307,8 +3325,12 @@ async function presentBookingSession(
     return;
   }
 
-  const durationHours = minutesToHours(current.durationMinutes!);
-  const endTime = addHoursToTime(current.startTime!, durationHours);
+  const durationHours = gymWalkIn
+    ? GYM_WALK_IN_DURATION_HOURS
+    : minutesToHours(current.durationMinutes!);
+  const endTime = gymWalkIn
+    ? GYM_WALK_IN_END_TIME
+    : addHoursToTime(current.startTime!, durationHours);
   if (facility && facility.bookingMode !== "walk_in") {
     const available = await checkSlotAvailable(current.facilityId!, current.bookingDate!, current.startTime!, durationHours);
     if (!available) {
@@ -3343,6 +3365,7 @@ async function presentBookingSession(
     pricePerHour: Number(facility!.pricePerHour),
     totalPrice: taxCalc.grandTotal,
     notes: current.notes,
+    hideTimeAndDuration: gymWalkIn,
   });
   await appendMessage(current.id, "bot", reply);
   await sendReply(reply);
@@ -3842,12 +3865,44 @@ async function continueSession(
         await sendReply(reply);
         return;
       }
+      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
+      const gymWalkIn = isGymWalkInFacility(fac);
+      const nextDraft = {
+        ...session,
+        bookingDate: parsed.bookingDate,
+        ...(gymWalkIn
+          ? {
+              startTime: GYM_WALK_IN_START_TIME,
+              durationMinutes: GYM_WALK_IN_DURATION_MINUTES,
+            }
+          : {}),
+      };
       const updated = await updateSession(session.id, {
         bookingDate: parsed.bookingDate,
-        currentStep: getNextStep({ ...session, bookingDate: parsed.bookingDate }),
+        ...(gymWalkIn
+          ? {
+              startTime: GYM_WALK_IN_START_TIME,
+              durationMinutes: GYM_WALK_IN_DURATION_MINUTES,
+            }
+          : {}),
+        currentStep: getNextStep(nextDraft),
       });
-      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_date", bookingDate: parsed.bookingDate } });
-      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
+      await logAudit({
+        action: "booking_session_updated",
+        entity: "wa_booking_session",
+        entityId: session.id,
+        after: {
+          step: "ask_date",
+          bookingDate: parsed.bookingDate,
+          ...(gymWalkIn
+            ? {
+                hiddenStartTime: GYM_WALK_IN_START_TIME,
+                hiddenEndTime: GYM_WALK_IN_END_TIME,
+                gymWalkIn: true,
+              }
+            : {}),
+        },
+      });
 
       const baseQuestion = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
       const reply = baseQuestion;
@@ -4165,14 +4220,31 @@ async function continueSession(
         return;
       }
 
+      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
+      const gymWalkIn = isGymWalkInFacility(fac);
+      const nextDraft = {
+        ...session,
+        customerName: rawName,
+        ...(gymWalkIn
+          ? {
+              startTime: GYM_WALK_IN_START_TIME,
+              durationMinutes: GYM_WALK_IN_DURATION_MINUTES,
+            }
+          : {}),
+      };
       const updated = await updateSession(session.id, {
         customerName: rawName,
+        ...(gymWalkIn
+          ? {
+              startTime: GYM_WALK_IN_START_TIME,
+              durationMinutes: GYM_WALK_IN_DURATION_MINUTES,
+            }
+          : {}),
         // Notes are optional and are only persisted when the customer
         // mentioned them in natural language. Do not add an extra question.
-        currentStep: getNextStep({ ...session, customerName: rawName }),
+        currentStep: getNextStep(nextDraft),
       });
-      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName } });
-      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName, gymWalkIn } });
 
       const reply = await buildStepQuestion(
         updated.currentStep as WaStep,
@@ -4302,8 +4374,16 @@ async function buildStepQuestion(
       if (!session.facilityId || !session.bookingDate || !session.startTime || !session.durationMinutes || !session.customerName) {
         return `Ada data yang belum lengkap. Ketik *batal* dan mulai ulang.`;
       }
-      const durationHours = minutesToHours(session.durationMinutes);
-      const endTime = addHoursToTime(session.startTime, durationHours);
+      const [fac] = await db.select().from(facilitiesTable)
+        .where(eq(facilitiesTable.id, session.facilityId))
+        .limit(1);
+      const gymWalkIn = isGymWalkInFacility(fac);
+      const durationHours = gymWalkIn
+        ? GYM_WALK_IN_DURATION_HOURS
+        : minutesToHours(session.durationMinutes);
+      const endTime = gymWalkIn
+        ? GYM_WALK_IN_END_TIME
+        : addHoursToTime(session.startTime, durationHours);
       let totalPrice = pricePerHour * durationHours;
       try {
         const priceCalc = await calculatePrice(
@@ -4331,6 +4411,7 @@ async function buildStepQuestion(
         customerName: session.customerName,
         pricePerHour,
         totalPrice,
+        hideTimeAndDuration: gymWalkIn,
       });
     }
 
@@ -4711,13 +4792,21 @@ async function execCreateBookingFromSession(
   }
 
   // ── 2. Hitung durasi & end time ────────────────────────────────────────────
-  const durationHours = minutesToHours(session.durationMinutes);
-  const endTime = addHoursToTime(session.startTime, durationHours);
+  const gymWalkIn = isGymWalkInFacility(facility);
+  const effectiveStartTime = gymWalkIn
+    ? GYM_WALK_IN_START_TIME
+    : session.startTime;
+  const durationHours = gymWalkIn
+    ? GYM_WALK_IN_DURATION_HOURS
+    : minutesToHours(session.durationMinutes);
+  const endTime = gymWalkIn
+    ? GYM_WALK_IN_END_TIME
+    : addHoursToTime(effectiveStartTime, durationHours);
 
   // ── 3. Validasi jam operasional ────────────────────────────────────────────
   const openMin = timeToMinutes(facility.openTime);
   const closeMin = timeToMinutes(facility.closeTime);
-  const startMin = timeToMinutes(session.startTime);
+  const startMin = timeToMinutes(effectiveStartTime);
   const endMin = timeToMinutes(endTime);
   if (startMin < openMin || endMin > closeMin) {
     const reply =
@@ -4748,7 +4837,7 @@ async function execCreateBookingFromSession(
       facilityId: session.facilityId,
       facilityName: facility.name,
       bookingDate: session.bookingDate,
-      startTime: session.startTime,
+      startTime: effectiveStartTime,
       endTime,
       durationHours,
       customerName: session.customerName,
@@ -4756,23 +4845,25 @@ async function execCreateBookingFromSession(
   });
 
   // ── 6. Cek bentrok jadwal ──────────────────────────────────────────────────
-  const conflict = await checkConflict(facility.id, session.bookingDate, session.startTime, endTime);
+  const conflict = gymWalkIn
+    ? false
+    : await checkConflict(facility.id, session.bookingDate, effectiveStartTime, endTime);
   if (conflict) {
     const alternativeFacilities = await getAvailableAlternativeFacilities(
       facility.id,
       session.bookingDate,
-      session.startTime,
+      effectiveStartTime,
       durationHours,
     );
     const alternatives = await getAlternativeSlots(
-      facility.id, session.bookingDate, session.startTime, durationHours, facility.openTime, facility.closeTime
+      facility.id, session.bookingDate, effectiveStartTime, durationHours, facility.openTime, facility.closeTime
     );
 
     await logAudit({
       action: "schedule_conflict_detected",
       entity: "wa_booking_session",
       entityId: session.id,
-      after: { phone, facilityId: facility.id, bookingDate: session.bookingDate, startTime: session.startTime, endTime, alternatives },
+      after: { phone, facilityId: facility.id, bookingDate: session.bookingDate, startTime: effectiveStartTime, endTime, alternatives },
     });
 
     let reply =
@@ -4783,7 +4874,7 @@ async function execCreateBookingFromSession(
       reply = buildAlternativeFacilityChoiceReply({
         facilityName: facility.name,
         bookingDate: session.bookingDate,
-        startTime: session.startTime,
+        startTime: effectiveStartTime,
         endTime,
         alternatives: alternativeFacilities,
         sameFacilitySlots: alternatives.map((alternative) => alternative.split("–")[0]),
@@ -4810,7 +4901,7 @@ async function execCreateBookingFromSession(
   // ── 8. Hitung harga dari pricing rules (weekday/weekend/peak) ─────────────
   let priceCalc;
   try {
-    priceCalc = await calculatePrice(facility.id, session.bookingDate, session.startTime, endTime, durationHours);
+    priceCalc = await calculatePrice(facility.id, session.bookingDate, effectiveStartTime, endTime, durationHours);
   } catch {
     priceCalc = { basePrice: Number(facility.pricePerHour) * durationHours, finalPrice: Number(facility.pricePerHour) * durationHours, appliedRules: [] };
   }
@@ -4859,8 +4950,8 @@ async function execCreateBookingFromSession(
         )),
       ]);
 
-      if (hasSlotConflict({
-        startTime,
+      if (!gymWalkIn && hasSlotConflict({
+        startTime: effectiveStartTime,
         endTime,
         bookings: sameDayBookings,
         blockedSchedules: blocked,
@@ -4876,7 +4967,7 @@ async function execCreateBookingFromSession(
         customerId: customer.id,
         facilityId: facility.id,
         bookingDate,
-        startTime,
+        startTime: effectiveStartTime,
         endTime,
         durationHours,
         totalPrice: String(totalPrice),
@@ -4912,7 +5003,7 @@ async function execCreateBookingFromSession(
     const alternatives = await getAlternativeSlots(
       facility.id,
       session.bookingDate,
-      session.startTime,
+      effectiveStartTime,
       durationHours,
       facility.openTime,
       facility.closeTime,
@@ -4923,14 +5014,14 @@ async function execCreateBookingFromSession(
     const alternativeFacilities = await getAvailableAlternativeFacilities(
       facility.id,
       session.bookingDate,
-      session.startTime,
+      effectiveStartTime,
       durationHours,
     );
     if (alternativeFacilities.length > 0) {
       reply = buildAlternativeFacilityChoiceReply({
         facilityName: facility.name,
         bookingDate: session.bookingDate,
-        startTime: session.startTime,
+        startTime: effectiveStartTime,
         endTime,
         alternatives: alternativeFacilities,
         sameFacilitySlots: alternatives.map((alternative) => alternative.split("–")[0]),
@@ -4994,7 +5085,7 @@ async function execCreateBookingFromSession(
        status: "pending_payment",
       facilityId: facility.id,
       bookingDate: session.bookingDate,
-      startTime: session.startTime,
+      startTime: effectiveStartTime,
       endTime,
       totalPrice: grandTotal,
       customerId: customer.id,
@@ -5023,6 +5114,7 @@ async function execCreateBookingFromSession(
     statusUrl,
     paymentUrl,
     paymentDeadline: paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false }),
+    hideTimeAndDuration: gymWalkIn,
   });
 
   // The customer sends the proof through the payment page; staff notification

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   detectFacilityKeyword,
+  formatSessionSummary,
   getNextStep,
   parseIntent,
   resolveBookingCustomerName,
@@ -81,5 +82,28 @@ describe("Mina natural-language booking session", () => {
       customerName: "Alif",
       notes: null,
     })).toBe("confirm");
+  });
+});
+
+describe("Gym summary rendering", () => {
+  it("can hide synthetic time and duration while preserving booking details", () => {
+    const summary = formatSessionSummary({
+      facilityName: "Gym / Fitness Center",
+      bookingDate: "2026-09-25",
+      startTime: "06:00",
+      endTime: "14:00",
+      durationHours: 1,
+      customerName: "Sandi Tes",
+      pricePerHour: 30000,
+      totalPrice: 30000,
+      hideTimeAndDuration: true,
+    });
+
+    expect(summary).toContain("Fasilitas: *Gym / Fitness Center*");
+    expect(summary).toContain("Tanggal: *2026-09-25*");
+    expect(summary).toContain("Nama: *Sandi Tes*");
+    expect(summary).toContain("Total: *Rp 30.000*");
+    expect(summary).not.toContain("Jam:");
+    expect(summary).not.toContain("Durasi:");
   });
 });
