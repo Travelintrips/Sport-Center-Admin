@@ -1444,6 +1444,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         res.status(400).json({ error: "Tidak ada bukti yang diupload" });
         return;
       }
+      const confirmedProofUrl = proofUrl;
 
       const confirmedAt = new Date();
       const enrichment = await resolveRequiredPaymentEnrichment(
@@ -1519,7 +1520,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         );
         const paymentValues = {
           amount: String(payableTotal),
-          proofUrl,
+          proofUrl: confirmedProofUrl,
           paymentMethod: resolvedPaymentMethod,
           paymentProvider: resolvedProvider,
           providerName,
@@ -1625,7 +1626,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
             endTime: booking.endTime,
             totalPrice: Number(payableTotal).toLocaleString("id-ID"),
             paymentMethod: resolvedPaymentMethod,
-            proofUrl,
+            proofUrl: confirmedProofUrl,
             statusUrl,
           }),
           notifyWaBookingConfirmed({
@@ -1638,7 +1639,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
             endTime: booking.endTime,
             totalPrice: Number(payableTotal).toLocaleString("id-ID"),
             paymentMethod: resolvedPaymentMethod,
-            proofUrl,
+            proofUrl: confirmedProofUrl,
             statusUrl,
           }),
         ]);
