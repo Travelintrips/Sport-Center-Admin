@@ -177,6 +177,14 @@ async function runStartupMigrations() {
        created_at timestamptz NOT NULL DEFAULT NOW(),
        updated_at timestamptz NOT NULL DEFAULT NOW()
      )`,
+    // Branded 8-character payment proof links used in WhatsApp messages.
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_proof_short_links (
+       code varchar(8) PRIMARY KEY,
+       proof_url text NOT NULL UNIQUE,
+       created_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_proof_short_links_created_at
+       ON sport_center.payment_proof_short_links (created_at DESC)`,
     // Kolom lama (idempotent)
     `ALTER TABLE sport_center.bank_reconciliation_matches
        ADD COLUMN IF NOT EXISTS status_valid_match boolean NOT NULL DEFAULT false`,

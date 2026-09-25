@@ -5,6 +5,7 @@ import * as _pinoHttpModule from "pino-http";
 const pinoHttp: any = (_pinoHttpModule as any).default ?? _pinoHttpModule;
 import router from "./routes";
 import healthRouter from "./routes/health";
+import paymentProofShortLinkRouter from "./routes/paymentProofShortLink";
 import { logger } from "./lib/logger";
 import { isStartupReady } from "./lib/startupReadiness";
 import path from "path";
@@ -81,6 +82,7 @@ app.use((req, res, next) => {
 //   GET /readiness  — readiness (lightweight DB SELECT 1)
 // They are also available under /api/health etc. via the api router below.
 app.use(healthRouter);
+app.use(paymentProofShortLinkRouter);
 
 app.get("/api", (_req, res) => {
   res.json({ status: "ok" });

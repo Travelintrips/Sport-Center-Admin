@@ -5,6 +5,7 @@ import { trackSentMessage } from "./waSentTracker";
 import { logger } from "./logger";
 import { signKwitansiToken } from "./kwitansiToken";
 import { getBaseUrl } from "./appUrl";
+import { getOrCreatePaymentProofShortUrl } from "./paymentProofShortLink";
 import { allowWhatsAppProviderSend, getWhatsAppDispatchMode } from "./whatsappSafety";
 import { getFonnteConfig } from "./fonnteConfig";
 
@@ -662,6 +663,7 @@ export async function notifyWaProofAutoConfirmed(data: {
   proofUrl: string;
   statusUrl: string;
 }): Promise<void> {
+  const brandedProofUrl = await getOrCreatePaymentProofShortUrl(data.proofUrl);
   await sendWAToAdmins(
     `✅ *PEMBAYARAN OTOMATIS TERKONFIRMASI*\n\n` +
     `Order: *${data.orderNumber}*\n` +
@@ -671,7 +673,7 @@ export async function notifyWaProofAutoConfirmed(data: {
     `Total: *Rp ${data.totalPrice}*\n` +
     (data.paymentMethod ? `Metode: *${data.paymentMethod}*\n` : "") +
     `Status: *DIKONFIRMASI* ✅\n\n` +
-    `Bukti pembayaran: ${data.proofUrl}\n` +
+    `Bukti pembayaran: ${brandedProofUrl}\n` +
     `Detail: ${data.statusUrl}`,
   );
 }
@@ -684,6 +686,9 @@ export interface WaBookingConfirmedData extends BookingNotifData {
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
   const appUrl = await getBaseUrl();
+  const brandedProofUrl = data.proofUrl
+    ? await getOrCreatePaymentProofShortUrl(data.proofUrl)
+    : undefined;
   const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : data.statusUrl;
   const msg =
     `🎉 *Booking Dikonfirmasi!*\n\n` +
@@ -697,7 +702,7 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
       `• Total: *Rp ${data.totalPrice}*\n` +
     (data.paymentMethod ? `• Metode: *${data.paymentMethod}*\n` : "") +
     `\n` +
-    (data.proofUrl ? `📎 Bukti pembayaran: ${data.proofUrl}\n\n` : "") +
+    (brandedProofUrl ? `📎 Bukti pembayaran: ${brandedProofUrl}\n\n` : "") +
     `Sampai jumpa di lapangan! 🏆\n\n` +
     `🧾 Kwitansi: ${kwitansiUrl}`;
   await sendWAToCustomer(data.customerPhone, msg);
