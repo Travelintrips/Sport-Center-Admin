@@ -410,6 +410,27 @@ export type AiIntent =
   | "general_question"
   | "out_of_scope";
 
+function isPaymentDeadlineQuestionText(value: string): boolean {
+  const lower = value.toLowerCase();
+  return [
+    "batas pembayaran",
+    "batas pembayarannya",
+    "batas akhir pembayaran",
+    "batas akhir pembayarannya",
+    "batas bayar",
+    "batas bayarnya",
+    "deadline pembayaran",
+    "deadline pembayarannya",
+    "deadline bayar",
+    "deadline bayarnya",
+    "jatuh tempo pembayaran",
+    "jatuh tempo pembayarannya",
+    "jatuh tempo bayar",
+    "sampai kapan bayar",
+    "sampai kapan pembayarannya",
+  ].some((phrase) => lower.includes(phrase));
+}
+
 export function detectIntent(msg: string): AiIntent {
   const lower = msg.toLowerCase().trim();
 
@@ -436,9 +457,7 @@ export function detectIntent(msg: string): AiIntent {
   }
 
   // Payment deadline / due-date questions are booking-status questions, not price.
-  if (
-    /\b(batas(?:\s+akhir)?\s+(?:pembayaran|bayar)|deadline\s+(?:pembayaran|bayar)|jatuh\s+tempo\s+(?:pembayaran|bayar)|sampai\s+kapan\s+(?:bayar|pembayaran))\b/.test(lower)
-  ) return "status_check";
+  if (isPaymentDeadlineQuestionText(lower)) return "status_check";
 
   // Price inquiry
   if (/\b(harga|tarif|biaya|berapa|price|cost|sewa berapa|bayar berapa|ongkos|rate|mahal|murah|seberapa)\b/.test(lower)) return "price_inquiry";
@@ -1084,8 +1103,7 @@ export async function generateAiReply(
     after: { phone: customerPhone, intent, facilitiesCount: ctx.facilities.length },
   }).catch(() => {});
 
-  const isPaymentDeadlineQuestion =
-    /\b(batas(?:\s+akhir)?\s+(?:pembayaran|bayar)|deadline\s+(?:pembayaran|bayar)|jatuh\s+tempo\s+(?:pembayaran|bayar)|sampai\s+kapan\s+(?:bayar|pembayaran))\b/i.test(message);
+  const isPaymentDeadlineQuestion = isPaymentDeadlineQuestionText(message);
 
   if (isPaymentDeadlineQuestion) {
     const requestedOrder = message.match(/\bSC-\d+\b/i)?.[0]?.toUpperCase();
