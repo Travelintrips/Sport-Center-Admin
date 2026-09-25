@@ -484,6 +484,9 @@ export function detectIntent(msg: string): AiIntent {
   if (/\b(fasilitas apa|ada apa aja|list fasilitas|lapangan apa saja|apa saja|ada lapangan|tersedia apa|fasilitas ada|ada gym|ada kolam|ada futsal|ada basket|ada badminton|sport apa|olahraga apa|ada sport|pilihan fasilitas)\b/.test(lower)) return "facility_info";
 
   // ── Booking intent — last resort (many natural language variations) ────────
+  // Direct CTA from Mina's greeting must enter the booking flow immediately.
+  if (/\b(langsung booking|booking sekarang|langsung pesan|langsung reservasi)\b/.test(lower)) return "booking_intent";
+
   // Explicit action verbs
   if (/\b(mau book|mau pesan|mau sewa|mau booking|mau reservasi|mau daftar|saya booking|reservasi|pesan lapangan|book lapangan|booking lapangan|mulai booking|mau main|pengen main|ingin main|mau nge-book|ngebook|ngebuking|mau ngebook|mau ngebuking)\b/.test(lower)) return "booking_intent";
   // Typos / informal
@@ -1151,6 +1154,27 @@ export async function generateAiReply(
   }
 
   // ── Guardrail shortcuts (no OpenAI needed) ────────────────────────────────
+  if (
+    intent === "general_question" &&
+    /\b(halo|hai|hi|hello)\b/i.test(message) &&
+    /\b(ingin|mau|boleh)?\s*(bertanya|tanya|nanya)\b/i.test(message) &&
+    /\bsport\s*center\b/i.test(message)
+  ) {
+    const reply =
+      "Halo! Ada yang bisa Mina bantu mengenai Sport Center? Kamu bisa tanya tentang fasilitas, harga, ketersediaan slot, atau mau langsung booking. 😊";
+    await logAudit({
+      action: "ai_sport_center_greeting_answered",
+      entity: "wa_ai",
+      after: { phone: customerPhone, source: "deterministic" },
+    }).catch(() => {});
+    return {
+      reply,
+      intent,
+      shouldHandoffToBookingFlow: false,
+      fallbackToAdmin: false,
+    };
+  }
+
   if (intent === "admin_action_attempt") {
     await logAudit({ action: "ai_fallback_to_admin", entity: "wa_ai", after: { phone: customerPhone, reason: "admin_action_attempt" } }).catch(() => {});
     return {

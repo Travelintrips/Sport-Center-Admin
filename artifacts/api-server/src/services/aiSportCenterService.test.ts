@@ -13,6 +13,8 @@ describe("Mina Gym & Membership intent routing", () => {
     ["saya mau perpanjang membership", "membership_inquiry"],
     ["Ini tgl berapa batas akhir pembayarannya?", "status_check"],
     ["deadline bayar booking saya kapan?", "status_check"],
+    ["langsung booking", "booking_intent"],
+    ["booking sekarang", "booking_intent"],
   ] as const)("routes %s to %s", (message, expectedIntent) => {
     expect(detectIntent(message)).toBe(expectedIntent);
   });
