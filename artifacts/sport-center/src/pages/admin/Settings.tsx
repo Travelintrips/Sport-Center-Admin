@@ -490,7 +490,7 @@ export default function AdminSettings() {
     paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "", fonnteCustomerToken: "", fonnteCustomerDevice: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+    fonnteToken: "", fonnteCustomerToken: "", fonnteCustomerDevice: "", customerServiceWhatsapp: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
   });
   const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -519,6 +519,7 @@ export default function AdminSettings() {
         fonnteToken: (settings as any).fonnteToken ?? "",
         fonnteCustomerToken: (settings as any).fonnteCustomerToken ?? "",
         fonnteCustomerDevice: (settings as any).fonnteCustomerDevice ?? "",
+        customerServiceWhatsapp: (settings as any).customerServiceWhatsapp ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
         appUrl: (settings as any).appUrl ?? "",
@@ -555,7 +556,10 @@ export default function AdminSettings() {
   const handleWaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const payload: any = { ...waForm };
-    Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+    payload.customerServiceWhatsapp = waForm.customerServiceWhatsapp.trim() || null;
+    Object.keys(payload).forEach(k => {
+      if (k !== "customerServiceWhatsapp" && !payload[k]) delete payload[k];
+    });
     updateMutation.mutate({ data: payload });
   };
 
@@ -765,7 +769,7 @@ export default function AdminSettings() {
             </div>
             <div className="grid md:grid-cols-2 gap-4">
               <div className="md:col-span-2 space-y-2">
-                <Label>Token Fonnte — Nomor Admin (085121073537)</Label>
+                <Label>Token Fonnte — Device Admin / Notifikasi</Label>
                 <div className="relative">
                   <Input
                     type={showToken ? "text" : "password"}
@@ -832,15 +836,29 @@ export default function AdminSettings() {
                  </p>
                </div>
 
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="customerServiceWhatsapp">Nomor WA Customer Service / Hubungi Admin</Label>
+                <Input
+                  id="customerServiceWhatsapp"
+                  value={waForm.customerServiceWhatsapp}
+                  onChange={(e) => setWaForm(f => ({ ...f, customerServiceWhatsapp: e.target.value }))}
+                  placeholder="628xxxxxxxxxxx"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Nomor manusia yang menerima chat dari tombol <strong>Hubungi Admin via WhatsApp</strong> dan eskalasi Mina.
+                  Harus berbeda dari Device Mina/customer. Jika kosong, tombol kontak admin tidak ditampilkan ke customer.
+                </p>
+              </div>
+
               <div className="space-y-2">
-                <Label>Nomor WA Admin Utama</Label>
+                <Label>Nomor Admin Utama Penerima Notifikasi</Label>
                 <Input
                   value={waForm.fonnteAdminWa}
                   onChange={(e) => setWaForm(f => ({ ...f, fonnteAdminWa: e.target.value }))}
                   placeholder="628123456789 (tanpa + atau spasi)"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Nomor admin utama penerima notifikasi (jika kolom bawah kosong).
+                  Penerima notifikasi internal jika daftar Admin & Grup WA kosong. Bukan nomor tombol Hubungi Admin.
                 </p>
               </div>
 
