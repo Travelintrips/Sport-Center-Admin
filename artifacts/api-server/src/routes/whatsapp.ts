@@ -3490,6 +3490,40 @@ async function continueSession(
     return;
   }
 
+  // Sessions created before the Gym no-time/no-duration flow was deployed may
+  // already be parked on ask_duration/ask_time. Migrate only that Gym walk-in
+  // session in place so the customer does not have to restart the booking.
+  if (
+    (step === "ask_duration" || step === "ask_time") &&
+    session.facilityId &&
+    session.bookingDate &&
+    session.customerName
+  ) {
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, session.facilityId))
+      .limit(1);
+    if (isGymWalkInFacility(facility)) {
+      const migrated = await updateSession(session.id, {
+        startTime: GYM_WALK_IN_START_TIME,
+        durationMinutes: GYM_WALK_IN_DURATION_MINUTES,
+        currentStep: "confirm",
+      });
+      await logAudit({
+        action: "gym_walk_in_session_migrated",
+        entity: "wa_booking_session",
+        entityId: session.id,
+        after: {
+          fromStep: step,
+          toStep: "confirm",
+          hiddenStartTime: GYM_WALK_IN_START_TIME,
+          hiddenEndTime: GYM_WALK_IN_END_TIME,
+        },
+      }).catch(() => {});
+      await presentBookingSession(migrated, phone, useCustomerToken);
+      return;
+    }
+  }
+
   switch (step) {
     case "wait_registration": {
       // Kirim ulang link registrasi — belum selesai mengisi form
