@@ -33,6 +33,7 @@ import {
   notifyWaBookingPendingApproval,
   notifyWaBookingPaymentRequired,
   notifyWaProofReceived,
+  notifyWaProofAutoConfirmed,
   notifyWaAdminNewBooking,
   notifyWaBookingApproved,
   notifyWaBookingRejectedByAdmin,
@@ -1335,8 +1336,28 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       .where(eq(bookingsTable.id, bookingId)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
     if (!["pending_payment", "expired"].includes(booking.status)) {
+      if (booking.status === "confirmed" && tokenRow.usedAt) {
+        const [confirmedPayment] = await db.select().from(paymentsTable)
+          .where(and(
+            eq(paymentsTable.bookingId, booking.id),
+            eq(paymentsTable.status, "confirmed"),
+          ))
+          .orderBy(desc(paymentsTable.createdAt))
+          .limit(1);
+        if (confirmedPayment) {
+          res.json({
+            success: true,
+            orderNumber: booking.orderNumber,
+            status: "confirmed",
+            idempotent: true,
+            paymentId: confirmedPayment.id,
+            message: "Pembayaran sudah dikonfirmasi sebelumnya.",
+          });
+          return;
+        }
+      }
       res.status(409).json({
-        error: "Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.",
+        error: "Bukti pembayaran sudah diproses untuk booking ini.",
       });
       return;
     }
@@ -1396,6 +1417,275 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 
     const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+    // Auto-confirm is intentionally narrow so company billing, membership,
+    // event, grouped, DP/pelunasan, and other special booking flows keep their
+    // existing behavior. The customer-facing regular personal booking is the
+    // only flow changed here.
+    const autoConfirmEligible =
+      booking.status === "pending_payment" &&
+      (booking.payerType == null || booking.payerType === "personal") &&
+      booking.paymentRequiredNow !== false &&
+      booking.bookingType === "regular" &&
+      booking.companyInvoiceId == null &&
+      booking.membershipId == null &&
+      booking.membershipPaymentId == null &&
+      booking.groupRef == null &&
+      Number(booking.downPayment ?? 0) === 0 &&
+      booking.isDpPaid !== true;
+
+    if (autoConfirmEligible) {
+      proofUrl = await uploadProofWithFallback(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+      );
+      if (!proofUrl) {
+        res.status(400).json({ error: "Tidak ada bukti yang diupload" });
+        return;
+      }
+
+      const confirmedAt = new Date();
+      const enrichment = await resolveRequiredPaymentEnrichment(
+        booking,
+        resolvedProvider,
+        confirmedAt,
+      );
+      const providerName = normalizeProviderName(resolvedProvider);
+      const providerId = createPaymentProviderId(
+        resolvedProvider,
+        `wa-proof-${booking.id}`,
+      );
+      const providerOrderId = createPaymentProviderOrderId(
+        resolvedProvider,
+        `wa-proof-order-${booking.id}`,
+      );
+
+      const result = await db.transaction(async (tx) => {
+        // Serialize submit/retry/double-click attempts for this one booking.
+        // This deliberately avoids a global UNIQUE(booking_id), because valid
+        // DP + pelunasan flows can have multiple payment rows.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(
+          hashtextextended(${`sport-center:wa-proof-confirm:${booking.id}`}, 0)
+        )`);
+
+        const [lockedBooking] = await tx.select().from(bookingsTable)
+          .where(eq(bookingsTable.id, booking.id))
+          .limit(1);
+        if (!lockedBooking) {
+          return { kind: "not_found" as const };
+        }
+
+        const [lockedToken] = await tx.select().from(waActionTokensTable)
+          .where(eq(waActionTokensTable.id, tokenRow.id))
+          .limit(1);
+        if (!lockedToken) {
+          return { kind: "invalid_token" as const };
+        }
+
+        const paymentRows = await tx.select().from(paymentsTable)
+          .where(eq(paymentsTable.bookingId, lockedBooking.id))
+          .orderBy(desc(paymentsTable.createdAt));
+
+        const alreadyConfirmed = paymentRows.find((p) => p.status === "confirmed");
+        if (alreadyConfirmed) {
+          if (!lockedToken.usedAt) {
+            await tx.update(waActionTokensTable)
+              .set({ usedAt: confirmedAt })
+              .where(eq(waActionTokensTable.id, lockedToken.id));
+          }
+          return {
+            kind: "confirmed" as const,
+            payment: alreadyConfirmed,
+            newlyConfirmed: false,
+          };
+        }
+
+        if (lockedToken.usedAt) {
+          return { kind: "used_token" as const };
+        }
+        if (lockedToken.expiresAt && lockedToken.expiresAt < confirmedAt) {
+          return { kind: "expired_token" as const };
+        }
+        if (lockedBooking.status !== "pending_payment") {
+          return {
+            kind: "status_conflict" as const,
+            status: lockedBooking.status,
+          };
+        }
+
+        const existingPending = paymentRows.find(
+          (p) => p.status === "pending" || p.status === "waiting_confirmation",
+        );
+        const paymentValues = {
+          amount: String(payableTotal),
+          proofUrl,
+          paymentMethod: resolvedPaymentMethod,
+          paymentProvider: resolvedProvider,
+          providerName,
+          providerId: existingPending?.providerId?.trim() || providerId,
+          providerOrderId: existingPending?.providerOrderId?.trim() || providerOrderId,
+          companyId: enrichment.companyId,
+          bankAccountId: enrichment.bankAccountId,
+          expectedSettlementDate: enrichment.expectedSettlementDate,
+          paidAt: confirmedAt,
+          confirmedAt,
+          ocrName: proofOcr?.name ?? null,
+          ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+          ocrDate: proofOcr?.date ?? null,
+          ocrRaw: proofOcr?.rawText ?? null,
+          ocrData: proofOcr ? {
+            paymentMethod: proofOcr.paymentMethod,
+            confidence: proofOcr.confidence,
+            signals: proofOcr.signals,
+            recipient: proofOcr.recipient,
+            engine: proofOcr.engine,
+            scannedAt: proofOcr.scannedAt,
+            methodMatch: ocrMethodMatch,
+            amountMatch,
+            dateMatch,
+            recipientMatch,
+          } : null,
+          status: "confirmed" as const,
+          updatedAt: confirmedAt,
+        };
+
+        let paymentForFlow: typeof paymentsTable.$inferSelect;
+        if (existingPending) {
+          const [updatedPayment] = await tx.update(paymentsTable)
+            .set(paymentValues)
+            .where(eq(paymentsTable.id, existingPending.id))
+            .returning();
+          if (!updatedPayment) throw new Error("PAYMENT_CONFIRM_UPDATE_FAILED");
+          paymentForFlow = updatedPayment;
+        } else {
+          const [insertedPayment] = await tx.insert(paymentsTable).values({
+            bookingId: lockedBooking.id,
+            ...paymentValues,
+          }).returning();
+          if (!insertedPayment) throw new Error("PAYMENT_CONFIRM_INSERT_FAILED");
+          paymentForFlow = insertedPayment;
+        }
+
+        await tx.update(bookingsTable).set({
+          status: "confirmed",
+          paidAt: confirmedAt,
+          updatedAt: confirmedAt,
+        }).where(eq(bookingsTable.id, lockedBooking.id));
+
+        await tx.insert(bookingHistoryTable).values({
+          bookingId: lockedBooking.id,
+          fromStatus: lockedBooking.status,
+          toStatus: "confirmed",
+          changedByName: lockedBooking.customerName,
+          note:
+            `Pembayaran otomatis dikonfirmasi setelah bukti lolos pemeriksaan nominal. Metode: ${resolvedPaymentMethod}.`,
+        });
+
+        await tx.update(waActionTokensTable)
+          .set({ usedAt: confirmedAt })
+          .where(eq(waActionTokensTable.id, lockedToken.id));
+
+        return {
+          kind: "confirmed" as const,
+          payment: paymentForFlow,
+          newlyConfirmed: true,
+        };
+      });
+
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "Booking tidak ditemukan" });
+        return;
+      }
+      if (result.kind === "invalid_token" || result.kind === "used_token") {
+        res.status(409).json({ error: "Link pembayaran sudah digunakan." });
+        return;
+      }
+      if (result.kind === "expired_token") {
+        res.status(410).json({ error: "Link sudah kedaluwarsa" });
+        return;
+      }
+      if (result.kind === "status_conflict") {
+        res.status(409).json({
+          error: `Booking dengan status ${result.status} tidak dapat dikonfirmasi otomatis.`,
+        });
+        return;
+      }
+
+      if (result.newlyConfirmed) {
+        const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+        await Promise.allSettled([
+          notifyWaProofAutoConfirmed({
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone,
+            orderNumber: booking.orderNumber,
+            facilityName: facility?.name ?? "",
+            bookingDate: booking.bookingDate,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            totalPrice: Number(payableTotal).toLocaleString("id-ID"),
+            paymentMethod: resolvedPaymentMethod,
+            proofUrl,
+            statusUrl,
+          }),
+          notifyWaBookingConfirmed({
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone,
+            orderNumber: booking.orderNumber,
+            facilityName: facility?.name ?? "",
+            bookingDate: booking.bookingDate,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            totalPrice: Number(payableTotal).toLocaleString("id-ID"),
+            paymentMethod: resolvedPaymentMethod,
+            proofUrl,
+            statusUrl,
+          }),
+        ]);
+
+        const checkinToken = await createWaToken(booking.id, "checkin", 30);
+        const finishToken = await createWaToken(booking.id, "finish", 30);
+        notifyWaStaffCheckin({
+          orderNumber: booking.orderNumber,
+          customerName: booking.customerName,
+          facilityName: facility?.name ?? "",
+          bookingDate: booking.bookingDate,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+          finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
+        }).catch(() => {});
+
+        await logAudit({
+          action: "wa_proof_auto_confirmed",
+          entity: "booking",
+          entityId: booking.id,
+          before: { status: booking.status },
+          after: {
+            status: "confirmed",
+            paymentId: result.payment.id,
+            paymentStatus: "confirmed",
+            paymentMethod: resolvedPaymentMethod,
+            ocrAmount: proofOcr.amount,
+            expectedAmount: payableTotal,
+          },
+          userName: booking.customerName,
+        });
+      }
+
+      res.json({
+        success: true,
+        orderNumber: booking.orderNumber,
+        status: "confirmed",
+        paymentId: result.payment.id,
+        idempotent: !result.newlyConfirmed,
+        ocrPassed: true,
+        message: result.newlyConfirmed
+          ? "Pembayaran dan booking otomatis dikonfirmasi."
+          : "Pembayaran sudah dikonfirmasi sebelumnya.",
+      });
+      return;
+    }
 
     const groupBookings = booking.groupRef
       ? await db.select({

@@ -658,6 +658,7 @@ export async function notifyWaProofAutoConfirmed(data: {
   startTime: string;
   endTime: string;
   totalPrice: string;
+  paymentMethod?: string;
   proofUrl: string;
   statusUrl: string;
 }): Promise<void> {
@@ -668,6 +669,7 @@ export async function notifyWaProofAutoConfirmed(data: {
     `Fasilitas: *${data.facilityName}*\n` +
     `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
     `Total: *Rp ${data.totalPrice}*\n` +
+    (data.paymentMethod ? `Metode: *${data.paymentMethod}*\n` : "") +
     `Status: *DIKONFIRMASI* ✅\n\n` +
     `Bukti pembayaran: ${data.proofUrl}\n` +
     `Detail: ${data.statusUrl}`,
@@ -677,6 +679,7 @@ export async function notifyWaProofAutoConfirmed(data: {
 export interface WaBookingConfirmedData extends BookingNotifData {
   statusUrl: string;
   proofUrl?: string;
+  paymentMethod?: string;
 }
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
@@ -691,7 +694,9 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
     `• Fasilitas: *${data.facilityName}*\n` +
     `• Tanggal: *${data.bookingDate}*\n` +
     `• Jam: *${data.startTime} – ${data.endTime}*\n\n` +
-      `• Total: *Rp ${data.totalPrice}*\n\n` +
+      `• Total: *Rp ${data.totalPrice}*\n` +
+    (data.paymentMethod ? `• Metode: *${data.paymentMethod}*\n` : "") +
+    `\n` +
     (data.proofUrl ? `📎 Bukti pembayaran: ${data.proofUrl}\n\n` : "") +
     `Sampai jumpa di lapangan! 🏆\n\n` +
     `🧾 Kwitansi: ${kwitansiUrl}`;
