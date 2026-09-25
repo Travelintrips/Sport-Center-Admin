@@ -7,7 +7,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle, Building2, CheckCircle, Clock, MapPin, Phone, QrCode } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { AlertCircle, Building2, CheckCircle, Clock, Download, MapPin, Phone, QrCode, ZoomIn } from "lucide-react";
 
 interface Facility {
   id: number;
@@ -87,6 +94,7 @@ export default function WaBookingForm() {
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+  const [showQrisDialog, setShowQrisDialog] = useState(false);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -214,6 +222,42 @@ export default function WaBookingForm() {
   const endTime = form.startTime
     ? addHoursToTime(form.startTime, effectiveDurationHours)
     : "";
+
+  async function handleDownloadQris() {
+    const imageUrl = paymentSettings?.qrisImageUrl;
+    if (!imageUrl) return;
+
+    const safeFacilityName = (facility?.name || "Sport-Center")
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-+|-+$/g, "");
+    const fileName = `QRIS-${safeFacilityName || "Sport-Center"}.png`;
+
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error("QRIS image download failed");
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      // Cross-origin storage can prevent fetch/download. Opening the original
+      // image still lets the customer save it from the browser/device.
+      const link = document.createElement("a");
+      link.href = imageUrl;
+      link.download = fileName;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -549,16 +593,63 @@ export default function WaBookingForm() {
                       })}
                     </div>
                     {form.paymentMethod === "qris" && paymentSettings?.qrisImageUrl && (
-                      <div className="rounded-lg border border-orange-200 bg-white p-3 text-center">
-                        <p className="mb-2 text-xs font-semibold text-gray-600">
-                          Scan gambar QRIS untuk melakukan pembayaran
-                        </p>
-                        <img
-                          src={paymentSettings.qrisImageUrl}
-                          alt="QRIS pembayaran"
-                          className="mx-auto max-h-64 w-auto max-w-full rounded-md object-contain"
-                        />
-                      </div>
+                      <>
+                        <div className="rounded-lg border border-orange-200 bg-white p-3 text-center">
+                          <p className="mb-2 text-xs font-semibold text-gray-600">
+                            Scan gambar QRIS untuk melakukan pembayaran
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setShowQrisDialog(true)}
+                            className="mx-auto block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                            aria-label="Perbesar kode QRIS"
+                          >
+                            <img
+                              src={paymentSettings.qrisImageUrl}
+                              alt="QRIS pembayaran"
+                              className="mx-auto max-h-64 w-auto max-w-full rounded-md object-contain"
+                            />
+                            <span className="mt-2 flex items-center justify-center gap-1 text-xs font-semibold text-orange-700">
+                              <ZoomIn className="h-4 w-4" />
+                              Ketuk untuk memperbesar
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadQris()}
+                            className="mx-auto mt-2 flex items-center justify-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                            aria-label="Download kode QRIS"
+                          >
+                            <Download className="h-4 w-4" />
+                            Download QRIS
+                          </button>
+                        </div>
+
+                        <Dialog open={showQrisDialog} onOpenChange={setShowQrisDialog}>
+                          <DialogContent className="max-h-[92vh] max-w-[min(92vw,560px)] overflow-y-auto">
+                            <DialogHeader>
+                              <DialogTitle>Kode QRIS Sport Center</DialogTitle>
+                              <DialogDescription>
+                                Perbesar kode ini agar lebih mudah dipindai dari aplikasi pembayaran.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <img
+                              src={paymentSettings.qrisImageUrl}
+                              alt="Kode QRIS Sport Center ukuran besar"
+                              className="mx-auto max-h-[70vh] w-full object-contain"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full border-orange-300 text-orange-700 hover:bg-orange-50"
+                              onClick={() => void handleDownloadQris()}
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              Download QRIS
+                            </Button>
+                          </DialogContent>
+                        </Dialog>
+                      </>
                     )}
                     {form.paymentMethod === "transfer" &&
                       paymentSettings?.bankName &&
