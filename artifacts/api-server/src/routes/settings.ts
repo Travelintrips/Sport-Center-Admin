@@ -87,7 +87,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
       "centerName","address","phone","whatsapp","email",
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
       "fonnteToken","fonnteCustomerToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
-      "fonnteCustomerDevice",
+      "fonnteCustomerDevice","customerServiceWhatsapp",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -102,6 +102,33 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
             return;
           }
           patch[key] = deviceNumber;
+        } else if (key === "customerServiceWhatsapp") {
+          const raw = String(req.body[key] ?? "").trim();
+          if (!raw) {
+            patch[key] = null;
+          } else {
+            const customerServiceWhatsapp = normalizeFonnteDevice(raw);
+            if (!customerServiceWhatsapp) {
+              res.status(400).json({
+                error: "Nomor WA Customer Service harus berupa nomor WhatsApp Indonesia yang valid.",
+                code: "INVALID_CUSTOMER_SERVICE_WHATSAPP",
+              });
+              return;
+            }
+            const minaDevice = normalizeFonnteDevice(
+              Object.prototype.hasOwnProperty.call(req.body, "fonnteCustomerDevice")
+                ? req.body.fonnteCustomerDevice
+                : settings.fonnteCustomerDevice,
+            );
+            if (minaDevice && customerServiceWhatsapp === minaDevice) {
+              res.status(400).json({
+                error: "Nomor WA Customer Service harus berbeda dari Device Mina/customer.",
+                code: "CUSTOMER_SERVICE_EQUALS_MINA",
+              });
+              return;
+            }
+            patch[key] = customerServiceWhatsapp;
+          }
         } else {
           patch[key] = req.body[key] ?? null;
         }
