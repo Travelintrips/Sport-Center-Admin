@@ -35,6 +35,7 @@ interface BookingStatus {
   } | null;
   uploadProofUrl: string | null;
   invoicePdfUrl: string | null;
+  supportWhatsapp?: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -269,14 +270,16 @@ export default function WaBookingStatus() {
             </a>
           )}
 
-          <a
-            href="https://wa.me/6281382702074"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 w-full border border-green-500 text-green-700 font-semibold py-3 px-4 rounded-xl text-sm hover:bg-green-50 transition-colors">
-            <MessageCircle className="w-5 h-5" />
-            Hubungi Admin via WhatsApp
-          </a>
+          {booking.supportWhatsapp && (
+            <a
+              href={`https://wa.me/${booking.supportWhatsapp}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full border border-green-500 text-green-700 font-semibold py-3 px-4 rounded-xl text-sm hover:bg-green-50 transition-colors">
+              <MessageCircle className="w-5 h-5" />
+              Hubungi Admin via WhatsApp
+            </a>
+          )}
         </div>
       </div>
     </div>
