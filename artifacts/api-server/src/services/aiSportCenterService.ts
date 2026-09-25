@@ -99,6 +99,7 @@ interface BookingInfo {
   totalPrice: number;
   status: string;
   createdAt: string;
+  paymentDeadline: string | null;
 }
 
 interface MembershipInfo {
@@ -300,6 +301,7 @@ export async function loadDbContext(
     totalPrice: Number(b.grandTotal ?? b.totalPrice),
     status: b.status,
     createdAt: b.createdAt?.toISOString?.() ?? "",
+    paymentDeadline: b.paymentDeadline?.toISOString?.() ?? null,
   }));
 
   // Membership
@@ -431,6 +433,11 @@ export function detectIntent(msg: string): AiIntent {
     return "membership_inquiry";
   }
 
+  // Payment deadline / due-date questions are booking-status questions, not price.
+  if (
+    /\b(batas(?:\s+akhir)?\s+(?:pembayaran|bayar)|deadline\s+(?:pembayaran|bayar)|jatuh\s+tempo\s+(?:pembayaran|bayar)|sampai\s+kapan\s+(?:bayar|pembayaran))\b/.test(lower)
+  ) return "status_check";
+
   // Price inquiry
   if (/\b(harga|tarif|biaya|berapa|price|cost|sewa berapa|bayar berapa|ongkos|rate|mahal|murah|seberapa)\b/.test(lower)) return "price_inquiry";
 
@@ -516,9 +523,20 @@ function buildSystemPrompt(
     : "  Tidak ada promo aktif.";
 
   const bookingsText = ctx.customerBookings.length > 0
-    ? ctx.customerBookings.map((b) =>
-        `  • ${b.orderNumber}: ${b.facilityName} | ${b.bookingDate} ${b.startTime}–${b.endTime} | ${fmtIDR(b.totalPrice)} | ${b.status.replace(/_/g, " ").toUpperCase()}`
-      ).join("\n")
+    ? ctx.customerBookings.map((b) => {
+        const deadlineText = b.paymentDeadline
+          ? new Date(b.paymentDeadline).toLocaleString("id-ID", {
+              timeZone: "Asia/Jakarta",
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+          : "-";
+        return `  • ${b.orderNumber}: ${b.facilityName} | ${b.bookingDate} ${b.startTime}–${b.endTime} | ${fmtIDR(b.totalPrice)} | ${b.status.replace(/_/g, " ").toUpperCase()} | batas bayar: ${deadlineText}`;
+      }).join("\n")
     : "  Belum ada riwayat booking dari nomor ini.";
 
   const membershipText = ctx.customerMembership
@@ -1063,6 +1081,54 @@ export async function generateAiReply(
     entity: "wa_ai",
     after: { phone: customerPhone, intent, facilitiesCount: ctx.facilities.length },
   }).catch(() => {});
+
+  const isPaymentDeadlineQuestion =
+    /\b(batas(?:\s+akhir)?\s+(?:pembayaran|bayar)|deadline\s+(?:pembayaran|bayar)|jatuh\s+tempo\s+(?:pembayaran|bayar)|sampai\s+kapan\s+(?:bayar|pembayaran))\b/i.test(message);
+
+  if (isPaymentDeadlineQuestion) {
+    const requestedOrder = message.match(/\bSC-\d+\b/i)?.[0]?.toUpperCase();
+    const eligible = ctx.customerBookings.filter((booking) =>
+      ["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(booking.status),
+    );
+    const booking = requestedOrder
+      ? ctx.customerBookings.find((item) => item.orderNumber.toUpperCase() === requestedOrder)
+      : eligible[0] ?? ctx.customerBookings[0];
+
+    if (booking) {
+      const deadline = booking.paymentDeadline
+        ? new Date(booking.paymentDeadline).toLocaleString("id-ID", {
+            timeZone: "Asia/Jakarta",
+            day: "2-digit",
+            month: "long",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          })
+        : null;
+      const reply = deadline
+        ? `Batas pembayaran untuk booking *${booking.orderNumber}* adalah *${deadline} WIB*.\nJadwal booking: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*. Status saat ini: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`
+        : `Booking *${booking.orderNumber}* belum memiliki batas pembayaran yang tercatat. Silakan cek status booking atau hubungi admin.`;
+
+      await logAudit({
+        action: "ai_payment_deadline_answered",
+        entity: "wa_ai",
+        after: {
+          phone: customerPhone,
+          orderNumber: booking.orderNumber,
+          paymentDeadline: booking.paymentDeadline,
+          source: "database",
+        },
+      }).catch(() => {});
+
+      return {
+        reply,
+        intent: "status_check",
+        shouldHandoffToBookingFlow: false,
+        fallbackToAdmin: false,
+      };
+    }
+  }
 
   // ── Guardrail shortcuts (no OpenAI needed) ────────────────────────────────
   if (intent === "admin_action_attempt") {
