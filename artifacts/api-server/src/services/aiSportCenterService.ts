@@ -83,6 +83,7 @@ interface SettingsInfo {
   address: string;
   phone: string;
   whatsapp: string;
+  customerServiceWhatsapp: string;
   openHour: string;
   closeHour: string;
   bankName: string;
@@ -219,6 +220,7 @@ export async function loadDbContext(
     address: s?.address ?? "",
     phone: s?.phone ?? "",
     whatsapp: s?.whatsapp ?? "",
+    customerServiceWhatsapp: s?.customerServiceWhatsapp ?? "",
     openHour: s?.openHour ?? "06:00",
     closeHour: s?.closeHour ?? "22:00",
     bankName: s?.bankName ?? "",
