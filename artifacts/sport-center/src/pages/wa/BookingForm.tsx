@@ -57,6 +57,18 @@ function addHoursToTime(time: string, hours: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 
+function minutesToTime(total: number): string {
+  const normalized = Math.max(0, Math.min(total, 23 * 60 + 59));
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+function isGymWalkInFacility(facility: Facility | null): boolean {
+  if (!facility || facility.bookingMode !== "walk_in") return false;
+  return /\bgym\b|fitness/i.test(`${facility.name} ${facility.category}`);
+}
+
 export default function WaBookingForm() {
   const params = useParams<{ facilityId: string }>();
   const search = useSearch();
@@ -109,7 +121,7 @@ export default function WaBookingForm() {
   }, []);
 
   useEffect(() => {
-    if (!facility || !form.bookingDate) {
+    if (!facility || !form.bookingDate || isGymWalkInFacility(facility)) {
       setAvailabilitySlots(null);
       setAvailabilityLoading(false);
       setAvailabilityError("");
@@ -163,6 +175,11 @@ export default function WaBookingForm() {
   }, [facility, form.bookingDate, form.durationHours]);
 
   const today = new Date().toISOString().split("T")[0];
+  const gymWalkIn = isGymWalkInFacility(facility);
+  const gymDurationHours = 1;
+  const gymLatestStart = facility
+    ? minutesToTime(timeToMinutes(facility.closeTime) - gymDurationHours * 60)
+    : "";
   const maxDuration = facility?.maxDuration ?? 8;
   const minDuration = facility?.minDuration ?? 1;
   const durationOptions = Array.from(
@@ -172,8 +189,9 @@ export default function WaBookingForm() {
 
   const timeSlots = availabilitySlots?.filter((slot) => slot.available).map((slot) => slot.time) ?? [];
 
+  const effectiveDurationHours = gymWalkIn ? gymDurationHours : Number(form.durationHours);
   const totalPrice = facility
-    ? facility.pricePerHour * Number(form.durationHours)
+    ? facility.pricePerHour * effectiveDurationHours
     : 0;
 
   const paymentOptions: Array<{
@@ -194,7 +212,7 @@ export default function WaBookingForm() {
   ];
 
   const endTime = form.startTime
-    ? addHoursToTime(form.startTime, Number(form.durationHours))
+    ? addHoursToTime(form.startTime, effectiveDurationHours)
     : "";
 
   async function handleSubmit(e: React.FormEvent) {
@@ -215,7 +233,7 @@ export default function WaBookingForm() {
           facilityId: params.facilityId,
           bookingDate: form.bookingDate,
           startTime: form.startTime,
-          durationHours: Number(form.durationHours),
+          durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
         }),
@@ -279,8 +297,10 @@ export default function WaBookingForm() {
                 <span className="font-semibold">{result.bookingDate}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Jam</span>
-                <span className="font-semibold">{result.startTime} – {result.endTime}</span>
+                <span className="text-gray-500">{gymWalkIn ? "Jam Mulai" : "Jam"}</span>
+                <span className="font-semibold">
+                  {gymWalkIn ? result.startTime : `${result.startTime} – ${result.endTime}`}
+                </span>
               </div>
               <div className="flex justify-between border-t border-gray-200 pt-1.5">
                 <span className="font-bold text-gray-700">Grand Total</span>
@@ -326,7 +346,7 @@ export default function WaBookingForm() {
         </div>
         <div className="mt-3">
           <Badge className="bg-white/20 text-white border-white/30 font-bold text-base">
-            Rp {facility?.pricePerHour.toLocaleString("id-ID")}/jam
+            Rp {facility?.pricePerHour.toLocaleString("id-ID")}{gymWalkIn ? "" : "/jam"}
           </Badge>
         </div>
       </div>
@@ -378,25 +398,27 @@ export default function WaBookingForm() {
               <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Jadwal Booking</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-sm font-semibold">Durasi *</Label>
-                <Select
-                  value={form.durationHours}
-                  onValueChange={(v) => {
-                    setAvailabilitySlots(null);
-                    setAvailabilityError("");
-                    setForm((f) => ({ ...f, durationHours: v, startTime: "" }));
-                  }}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {durationOptions.map((d) => (
-                      <SelectItem key={d} value={d}>{d} jam</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {!gymWalkIn && (
+                <div className="space-y-1">
+                  <Label className="text-sm font-semibold">Durasi *</Label>
+                  <Select
+                    value={form.durationHours}
+                    onValueChange={(v) => {
+                      setAvailabilitySlots(null);
+                      setAvailabilityError("");
+                      setForm((f) => ({ ...f, durationHours: v, startTime: "" }));
+                    }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {durationOptions.map((d) => (
+                        <SelectItem key={d} value={d}>{d} jam</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <Label htmlFor="date" className="text-sm font-semibold">Tanggal *</Label>
@@ -408,7 +430,11 @@ export default function WaBookingForm() {
                   onChange={(e) => {
                     setAvailabilitySlots(null);
                     setAvailabilityError("");
-                    setForm((f) => ({ ...f, bookingDate: e.target.value, startTime: "" }));
+                    setForm((f) => ({
+                      ...f,
+                      bookingDate: e.target.value,
+                      startTime: gymWalkIn ? f.startTime : "",
+                    }));
                   }}
                   required
                 />
@@ -416,41 +442,59 @@ export default function WaBookingForm() {
 
               <div className="space-y-1">
                 <Label className="text-sm font-semibold">Jam Mulai *</Label>
-                <Select
-                  value={form.startTime}
-                  onValueChange={(v) => setForm((f) => ({ ...f, startTime: v }))}>
-                  <SelectTrigger disabled={availabilityLoading || !form.bookingDate || availabilitySlots === null || timeSlots.length === 0}>
-                    <SelectValue
-                      placeholder={
-                        availabilityLoading
-                          ? "Memeriksa ketersediaan..."
-                          : !form.bookingDate
-                            ? "Pilih tanggal terlebih dahulu"
-                            : availabilitySlots === null
-                              ? "Memeriksa ketersediaan..."
-                              : timeSlots.length === 0
-                                ? "Tidak ada jam tersedia"
-                                : "Pilih jam mulai"
-                      }
+                {gymWalkIn ? (
+                  <>
+                    <Input
+                      type="time"
+                      min={facility?.openTime ?? undefined}
+                      max={gymLatestStart || undefined}
+                      value={form.startTime}
+                      onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+                      required
                     />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timeSlots.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {availabilityLoading && (
-                  <p className="text-xs text-gray-500">Sedang memeriksa ketersediaan untuk tanggal dan durasi ini...</p>
-                )}
-                {!availabilityLoading && availabilityError && (
-                  <p className="text-xs text-red-600">{availabilityError}</p>
-                )}
-                {!availabilityLoading && !availabilityError && availabilitySlots && timeSlots.length === 0 && (
-                  <p className="text-xs text-red-600">Tidak ada jam yang tersedia untuk tanggal dan durasi tersebut.</p>
-                )}
-                {form.startTime && endTime && (
-                  <p className="text-xs text-gray-500">Selesai jam: <strong>{endTime}</strong></p>
+                    <p className="text-xs text-gray-500">
+                      Pilih jam mulai antara {facility?.openTime}–{gymLatestStart}. Tidak ada pengecekan slot untuk Gym.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Select
+                      value={form.startTime}
+                      onValueChange={(v) => setForm((f) => ({ ...f, startTime: v }))}>
+                      <SelectTrigger disabled={availabilityLoading || !form.bookingDate || availabilitySlots === null || timeSlots.length === 0}>
+                        <SelectValue
+                          placeholder={
+                            availabilityLoading
+                              ? "Memeriksa ketersediaan..."
+                              : !form.bookingDate
+                                ? "Pilih tanggal terlebih dahulu"
+                                : availabilitySlots === null
+                                  ? "Memeriksa ketersediaan..."
+                                  : timeSlots.length === 0
+                                    ? "Tidak ada jam tersedia"
+                                    : "Pilih jam mulai"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {timeSlots.map((t) => (
+                          <SelectItem key={t} value={t}>{t}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {availabilityLoading && (
+                      <p className="text-xs text-gray-500">Sedang memeriksa ketersediaan untuk tanggal dan durasi ini...</p>
+                    )}
+                    {!availabilityLoading && availabilityError && (
+                      <p className="text-xs text-red-600">{availabilityError}</p>
+                    )}
+                    {!availabilityLoading && !availabilityError && availabilitySlots && timeSlots.length === 0 && (
+                      <p className="text-xs text-red-600">Tidak ada jam yang tersedia untuk tanggal dan durasi tersebut.</p>
+                    )}
+                    {form.startTime && endTime && (
+                      <p className="text-xs text-gray-500">Selesai jam: <strong>{endTime}</strong></p>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -545,7 +589,9 @@ export default function WaBookingForm() {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500">
-                  {facility?.pricePerHour.toLocaleString("id-ID")}/jam × {form.durationHours} jam
+                  {gymWalkIn
+                    ? `Tarif Gym / Fitness Center: Rp ${facility?.pricePerHour.toLocaleString("id-ID")}`
+                    : `${facility?.pricePerHour.toLocaleString("id-ID")}/jam × ${form.durationHours} jam`}
                 </p>
               </CardContent>
             </Card>
@@ -555,9 +601,11 @@ export default function WaBookingForm() {
             type="submit"
             disabled={
               submitting ||
-              availabilityLoading ||
-              !availabilitySlots ||
-              !timeSlots.includes(form.startTime) ||
+              (!gymWalkIn && (
+                availabilityLoading ||
+                !availabilitySlots ||
+                !timeSlots.includes(form.startTime)
+              )) ||
               !form.customerName ||
               !form.customerPhone ||
               !form.bookingDate ||

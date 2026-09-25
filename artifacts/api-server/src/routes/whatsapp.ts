@@ -741,7 +741,9 @@ router.post("/wa/booking", async (req, res) => {
       .limit(1);
     if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
 
-    const endTime = addHours(startTime, Number(durationHours));
+    const gymWalkIn = isGymWalkInFacility(facility);
+    const effectiveDurationHours = gymWalkIn ? 1 : Number(durationHours);
+    const endTime = addHours(startTime, effectiveDurationHours);
 
     // Operating hours validation
     const openMin = timeToMinutes(facility.openTime);
@@ -753,14 +755,17 @@ router.post("/wa/booking", async (req, res) => {
       return;
     }
 
-    // Conflict check
-    const conflict = await checkConflict(Number(facilityId), bookingDate, startTime, endTime);
-    if (conflict) {
-      res.status(409).json({ error: "Slot waktu ini sudah dipesan. Pilih jam lain." });
-      return;
+    // Scheduled facilities must still respect slot conflicts. Gym is walk-in,
+    // so its form intentionally does not reserve/check an exclusive time slot.
+    if (!gymWalkIn) {
+      const conflict = await checkConflict(Number(facilityId), bookingDate, startTime, endTime);
+      if (conflict) {
+        res.status(409).json({ error: "Slot waktu ini sudah dipesan. Pilih jam lain." });
+        return;
+      }
     }
 
-    const totalPrice = Number(facility.pricePerHour) * Number(durationHours);
+    const totalPrice = Number(facility.pricePerHour) * effectiveDurationHours;
     const customer = await ensureCustomer(customerPhone, customerName);
     const taxCalc = await resolveCustomerTax(totalPrice, {
       customerId: customer.id,
@@ -779,7 +784,7 @@ router.post("/wa/booking", async (req, res) => {
       bookingDate,
       startTime,
       endTime,
-      durationHours: Number(durationHours),
+      durationHours: effectiveDurationHours,
       totalPrice: String(totalPrice),
       discountAmount: "0",
       apDiscountAmount: "0",
@@ -3595,9 +3600,12 @@ async function continueSession(
           return;
         }
         const query = new URLSearchParams({ phone });
+        const gymWalkIn = isGymWalkInFacility(fac);
         if (session.bookingDate) query.set("date", session.bookingDate);
-        if (session.startTime) query.set("startTime", session.startTime);
-        if (session.durationMinutes) query.set("duration", String(minutesToHours(session.durationMinutes)));
+        if (!gymWalkIn && session.startTime) query.set("startTime", session.startTime);
+        if (!gymWalkIn && session.durationMinutes) {
+          query.set("duration", String(minutesToHours(session.durationMinutes)));
+        }
         const formUrl = `${await getBaseUrl()}/wa/booking/${fac.id}?${query.toString()}`;
         const reply =
           `📝 Baik, silakan isi form booking berikut:\n\n${formUrl}\n\n` +
