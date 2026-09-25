@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, Building2, CheckCircle, Clock, Download, MapPin, Phone, QrCode, ZoomIn } from "lucide-react";
+import { AlertCircle, Building2, CheckCircle, Clock, Download, MapPin, Phone, QrCode, Upload, ZoomIn } from "lucide-react";
 
 interface Facility {
   id: number;
@@ -76,6 +76,16 @@ function isGymWalkInFacility(facility: Facility | null): boolean {
   return /\bgym\b|fitness/i.test(`${facility.name} ${facility.category}`);
 }
 
+function extractProofToken(uploadProofUrl: string): string | null {
+  try {
+    const url = new URL(uploadProofUrl, window.location.origin);
+    const match = url.pathname.match(/\/(?:bukti|wa\/proof|bayar)\/([^/?#]+)/);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function WaBookingForm() {
   const params = useParams<{ facilityId: string }>();
   const search = useSearch();
@@ -95,6 +105,11 @@ export default function WaBookingForm() {
   const [availabilityError, setAvailabilityError] = useState("");
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
   const [showQrisDialog, setShowQrisDialog] = useState(false);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [proofUploadError, setProofUploadError] = useState("");
+  const [proofConfirmed, setProofConfirmed] = useState(false);
+  const [uploadingProof, setUploadingProof] = useState(false);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -259,6 +274,66 @@ export default function WaBookingForm() {
     }
   }
 
+  function handleProofFile(file: File | null) {
+    if (!file) {
+      setProofFile(null);
+      if (proofPreview) URL.revokeObjectURL(proofPreview);
+      setProofPreview(null);
+      setProofUploadError("");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setProofUploadError("Gunakan foto atau screenshot bukti pembayaran.");
+      return;
+    }
+    if (proofPreview) URL.revokeObjectURL(proofPreview);
+    setProofFile(file);
+    setProofPreview(URL.createObjectURL(file));
+    setProofUploadError("");
+  }
+
+  async function uploadProofForBooking(booking: BookingResult): Promise<boolean> {
+    if (!proofFile || !form.paymentMethod) return false;
+    const token = extractProofToken(booking.uploadProofUrl);
+    if (!token) {
+      setProofUploadError("Link upload bukti tidak valid. Gunakan tombol Upload Bukti Pembayaran.");
+      return false;
+    }
+
+    setUploadingProof(true);
+    setProofUploadError("");
+    try {
+      const fd = new FormData();
+      fd.append("proof", proofFile);
+      fd.append(
+        "paymentMethod",
+        form.paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
+      );
+      const response = await fetch(`/api/wa/proof/${encodeURIComponent(token)}`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setProofUploadError(
+          data?.error ??
+            "Bukti belum dapat diverifikasi. Booking sudah dibuat; silakan ganti foto dan upload kembali.",
+        );
+        return false;
+      }
+      const confirmed = data?.status === "confirmed";
+      setProofConfirmed(confirmed);
+      return confirmed;
+    } catch {
+      setProofUploadError(
+        "Upload bukti gagal. Booking sudah dibuat; silakan coba upload kembali.",
+      );
+      return false;
+    } finally {
+      setUploadingProof(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -284,7 +359,11 @@ export default function WaBookingForm() {
       });
       const data = await resp.json();
       if (!resp.ok) { setError(data.error ?? "Terjadi kesalahan"); return; }
-      setResult(data);
+      const bookingResult = data as BookingResult;
+      setResult(bookingResult);
+      if (proofFile && form.paymentMethod) {
+        await uploadProofForBooking(bookingResult);
+      }
     } catch {
       setError("Gagal mengirim booking. Coba lagi.");
     } finally {
@@ -324,7 +403,9 @@ export default function WaBookingForm() {
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <CheckCircle className="w-9 h-9 text-green-600" />
             </div>
-            <CardTitle className="text-green-700 font-black text-xl">Booking Berhasil!</CardTitle>
+            <CardTitle className="text-green-700 font-black text-xl">
+              {proofConfirmed ? "Booking Dikonfirmasi!" : "Booking Berhasil!"}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
@@ -353,14 +434,26 @@ export default function WaBookingForm() {
             </div>
 
             <p className="text-sm text-gray-600 text-center">
-              Detail & instruksi pembayaran sudah dikirim ke WhatsApp kamu.
+              {proofConfirmed
+                ? "Bukti pembayaran cocok dan booking otomatis dikonfirmasi."
+                : proofUploadError
+                  ? "Booking sudah dibuat. Bukti pembayaran perlu diupload atau diperbaiki."
+                  : "Detail & instruksi pembayaran sudah dikirim ke WhatsApp kamu."}
             </p>
 
+            {proofUploadError && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                {proofUploadError}
+              </div>
+            )}
+
             <div className="space-y-2">
-              <a href={result.uploadProofUrl}
-                className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg text-center text-sm transition-colors">
-                📎 Upload Bukti Pembayaran
-              </a>
+              {!proofConfirmed && (
+                <a href={result.uploadProofUrl}
+                  className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg text-center text-sm transition-colors">
+                  📎 {proofUploadError ? "Upload / Ganti Bukti Pembayaran" : "Upload Bukti Pembayaran"}
+                </a>
+              )}
               <a href={result.statusUrl}
                 className="block w-full border border-orange-300 text-orange-700 font-semibold py-3 px-4 rounded-lg text-center text-sm hover:bg-orange-50 transition-colors">
                 🔍 Cek Status Booking
@@ -688,10 +781,62 @@ export default function WaBookingForm() {
             </Card>
           )}
 
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">
+                Upload Bukti Bayar
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-gray-600">
+                Setelah melakukan pembayaran, upload foto atau screenshot bukti di sini.
+                Jika belum siap, booking tetap bisa dibuat dan bukti dapat diupload dari link WhatsApp.
+              </p>
+
+              {proofPreview ? (
+                <div className="space-y-3">
+                  <div className="rounded-lg border bg-gray-50 p-2">
+                    <img
+                      src={proofPreview}
+                      alt="Preview bukti pembayaran"
+                      className="mx-auto max-h-64 w-auto max-w-full rounded-md object-contain"
+                    />
+                  </div>
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-orange-300 bg-white px-4 py-3 text-sm font-bold text-orange-700 hover:bg-orange-50">
+                    <Upload className="h-4 w-4" />
+                    Ganti Foto Bukti
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleProofFile(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-orange-300 bg-orange-50 px-4 py-5 text-sm font-bold text-orange-700 hover:bg-orange-100">
+                  <Upload className="h-5 w-5" />
+                  Pilih Foto Bukti Pembayaran
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleProofFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              )}
+
+              {proofUploadError && !result && (
+                <p className="text-xs text-red-600">{proofUploadError}</p>
+              )}
+            </CardContent>
+          </Card>
+
           <Button
             type="submit"
             disabled={
               submitting ||
+              uploadingProof ||
               (!gymWalkIn && (
                 availabilityLoading ||
                 !availabilitySlots ||
@@ -703,12 +848,12 @@ export default function WaBookingForm() {
               !form.startTime
             }
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
-            {submitting ? (
+            {submitting || uploadingProof ? (
               <span className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Memproses...
+                {uploadingProof ? "Memeriksa Bukti..." : "Memproses..."}
               </span>
-            ) : "🏅 Booking Sekarang"}
+            ) : proofFile ? "🏅 Booking & Kirim Bukti" : "🏅 Booking Sekarang"}
           </Button>
         </form>
       </div>
