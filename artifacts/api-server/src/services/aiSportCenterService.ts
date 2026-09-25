@@ -547,7 +547,7 @@ function buildSystemPrompt(
     ? `Bank: ${ctx.settings.bankName} | Rek: ${ctx.settings.bankAccount} | a/n: ${ctx.settings.bankAccountName}`
     : "Informasi rekening belum dikonfigurasi.";
 
-  const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "Admin";
+  const adminContact = ctx.settings.customerServiceWhatsapp || "Admin";
   const maxLen = process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? 900;
 
   const channel = options.channel ?? "whatsapp";
@@ -1140,7 +1140,7 @@ export async function generateAiReply(
   }
 
   if (intent === "talk_to_admin") {
-    const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "";
+    const adminContact = ctx.settings.customerServiceWhatsapp || "";
     const reply = adminContact
       ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nJam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*. 🙏`
       : `👋 Untuk berbicara langsung dengan admin, silakan hubungi kami melalui kontak di website.\n\nJam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*.`;
