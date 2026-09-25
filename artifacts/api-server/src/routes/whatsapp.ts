@@ -1267,6 +1267,38 @@ async function getWaProofValidationContext(
   return { expectedAmount, expectedRecipients };
 }
 
+router.post("/wa/booking/proof-scan", uploadProof.single("proof"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: "Tidak ada file" });
+      return;
+    }
+
+    const expectedAmount = Number(req.body?.expectedAmount);
+    if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
+      res.status(400).json({ error: "Nominal tagihan tidak valid." });
+      return;
+    }
+
+    const scan = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    const amountMatch =
+      scan.amount != null &&
+      Number(scan.amount) === Number(expectedAmount);
+
+    res.json({
+      ocrScan: {
+        amount: scan.amount,
+        engine: scan.engine,
+        amountMatch,
+      },
+      expectedAmount,
+    });
+  } catch (err) {
+    req.log?.error?.({ err }, "Booking form proof OCR preview error");
+    res.status(500).json({ error: "Pengecekan bukti gagal" });
+  }
+});
+
 router.post("/wa/proof/scan", uploadProof.single("proof"), async (req, res) => {
   try {
     if (!req.file) {

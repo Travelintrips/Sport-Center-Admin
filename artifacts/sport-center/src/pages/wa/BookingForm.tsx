@@ -52,6 +52,12 @@ interface PaymentSettings {
   qrisImageUrl?: string | null;
 }
 
+interface BookingProofOcrPreview {
+  amount: number | null;
+  engine: string;
+  amountMatch: boolean;
+}
+
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + (m || 0);
@@ -110,6 +116,8 @@ export default function WaBookingForm() {
   const [proofUploadError, setProofUploadError] = useState("");
   const [proofConfirmed, setProofConfirmed] = useState(false);
   const [uploadingProof, setUploadingProof] = useState(false);
+  const [proofScanning, setProofScanning] = useState(false);
+  const [proofOcrPreview, setProofOcrPreview] = useState<BookingProofOcrPreview | null>(null);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -238,6 +246,17 @@ export default function WaBookingForm() {
     ? addHoursToTime(form.startTime, effectiveDurationHours)
     : "";
 
+  useEffect(() => {
+    if (proofOcrPreview && proofOcrPreview.amount != null) {
+      const stillMatches = Number(proofOcrPreview.amount) === Number(totalPrice);
+      if (proofOcrPreview.amountMatch !== stillMatches) {
+        setProofOcrPreview((current) =>
+          current ? { ...current, amountMatch: stillMatches } : current,
+        );
+      }
+    }
+  }, [totalPrice, proofOcrPreview?.amount, proofOcrPreview?.amountMatch]);
+
   async function handleDownloadQris() {
     const imageUrl = paymentSettings?.qrisImageUrl;
     if (!imageUrl) return;
@@ -274,22 +293,62 @@ export default function WaBookingForm() {
     }
   }
 
-  function handleProofFile(file: File | null) {
+  async function handleProofFile(file: File | null) {
     if (!file) {
       setProofFile(null);
       if (proofPreview) URL.revokeObjectURL(proofPreview);
       setProofPreview(null);
       setProofUploadError("");
+      setProofOcrPreview(null);
       return;
     }
     if (!file.type.startsWith("image/")) {
       setProofUploadError("Gunakan foto atau screenshot bukti pembayaran.");
+      setProofOcrPreview(null);
       return;
     }
+
     if (proofPreview) URL.revokeObjectURL(proofPreview);
     setProofFile(file);
     setProofPreview(URL.createObjectURL(file));
     setProofUploadError("");
+    setProofOcrPreview(null);
+    setProofScanning(true);
+
+    try {
+      const fd = new FormData();
+      fd.append("proof", file);
+      fd.append("expectedAmount", String(totalPrice));
+
+      const response = await fetch("/api/wa/booking/proof-scan", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setProofUploadError(data?.error ?? "Bukti pembayaran belum dapat diperiksa.");
+        return;
+      }
+
+      const preview = data?.ocrScan as BookingProofOcrPreview | undefined;
+      if (!preview) {
+        setProofUploadError("Nominal pada bukti belum terbaca.");
+        return;
+      }
+      setProofOcrPreview(preview);
+
+      if (!preview.amountMatch) {
+        setProofUploadError(
+          preview.amount == null
+            ? "Nominal pada bukti belum terbaca. Ganti foto bukti pembayaran."
+            : `Nominal bukti Rp ${Number(preview.amount).toLocaleString("id-ID")} tidak sama dengan tagihan Rp ${totalPrice.toLocaleString("id-ID")}.`,
+        );
+      }
+    } catch {
+      setProofUploadError("Pengecekan OCR gagal. Silakan coba foto bukti yang lain.");
+    } finally {
+      setProofScanning(false);
+    }
   }
 
   async function uploadProofForBooking(booking: BookingResult): Promise<boolean> {
@@ -826,6 +885,34 @@ export default function WaBookingForm() {
                 </label>
               )}
 
+              {proofFile && (
+                <div
+                  className={`rounded-lg border p-3 text-sm ${
+                    proofOcrPreview?.amountMatch
+                      ? "border-green-200 bg-green-50 text-green-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  <p className="font-bold">Hasil pengecekan awal</p>
+                  <p className="mt-1">
+                    <strong>Nominal tagihan:</strong> Rp {totalPrice.toLocaleString("id-ID")}
+                  </p>
+                  <p className="mt-1">
+                    <strong>Bukti Scan:</strong>{" "}
+                    {proofScanning
+                      ? "Sedang membaca..."
+                      : proofOcrPreview?.amount == null
+                        ? "Belum terbaca"
+                        : `Rp ${Number(proofOcrPreview.amount).toLocaleString("id-ID")}`}
+                  </p>
+                  {!proofScanning && proofOcrPreview?.amountMatch && (
+                    <p className="mt-1 font-semibold">
+                      Nominal cocok. Booking dapat dikirim.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {proofUploadError && !result && (
                 <p className="text-xs text-red-600">{proofUploadError}</p>
               )}
@@ -837,6 +924,8 @@ export default function WaBookingForm() {
             disabled={
               submitting ||
               uploadingProof ||
+              proofScanning ||
+              !proofOcrPreview?.amountMatch ||
               (!gymWalkIn && (
                 availabilityLoading ||
                 !availabilitySlots ||
@@ -849,10 +938,14 @@ export default function WaBookingForm() {
               !proofFile
             }
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
-            {submitting || uploadingProof ? (
+            {submitting || uploadingProof || proofScanning ? (
               <span className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                {uploadingProof ? "Memeriksa Bukti..." : "Memproses..."}
+                {proofScanning
+                  ? "Membaca Nominal..."
+                  : uploadingProof
+                    ? "Memeriksa Bukti..."
+                    : "Memproses..."}
               </span>
             ) : proofFile ? "🏅 Booking & Kirim Bukti" : "🏅 Booking Sekarang"}
           </Button>
