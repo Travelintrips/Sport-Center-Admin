@@ -32,6 +32,8 @@ export interface Settings {
   /** @nullable */
   fonnteCustomerDevice?: string | null;
   /** @nullable */
+  customerServiceWhatsapp?: string | null;
+  /** @nullable */
   fonnteAdminWa?: string | null;
   /** @nullable */
   adminWaPhones?: string | null;
