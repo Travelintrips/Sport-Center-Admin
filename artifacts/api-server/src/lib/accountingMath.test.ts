@@ -88,7 +88,7 @@ describe("confirmed booking payment accounting", () => {
     });
   });
 
-  it("rounds PPh from the precise inclusive DPP, not the displayed DPP", () => {
+  it("rounds PPh from the displayed DPP so DPP x rate equals PPh", () => {
     expect(calculateWithholdingTax(6000000, 5405405, true, 10)).toEqual({
       enabled: true,
       rate: 10,
@@ -96,7 +96,13 @@ describe("confirmed booking payment accounting", () => {
       grossAmount: 6000000,
       netAmount: 5459459,
     });
-    expect(calculateWithholdingTax(6000000, 5405404, true, 10).netAmount).toBe(5459459);
+    expect(calculateWithholdingTax(6000000, 5405404, true, 10)).toEqual({
+      enabled: true,
+      rate: 10,
+      amount: 540540,
+      grossAmount: 6000000,
+      netAmount: 5459460,
+    });
   });
 
   it("calculates the inclusive company group invoice from aggregate DPP", () => {
