@@ -20,6 +20,7 @@ export const settingsTable = scSchema.table("sport_settings", {
   fonnteToken: text("fonnte_token"),
   fonnteCustomerToken: text("fonnte_customer_token"),
   fonnteCustomerDevice: text("fonnte_customer_device"),
+  customerServiceWhatsapp: text("customer_service_whatsapp"),
   fonnteAdminWa: text("fonnte_admin_wa"),
   adminWaPhones: text("admin_wa_phones"),
   appUrl: text("app_url"),
