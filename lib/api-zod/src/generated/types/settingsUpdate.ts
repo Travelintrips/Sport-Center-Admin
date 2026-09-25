@@ -21,6 +21,7 @@ export interface SettingsUpdate {
   qrisImageUrl?: string;
   fonnteToken?: string;
   fonnteCustomerDevice?: string;
+  customerServiceWhatsapp?: string | null;
   fonnteAdminWa?: string;
   adminWaPhones?: string;
   appUrl?: string;
