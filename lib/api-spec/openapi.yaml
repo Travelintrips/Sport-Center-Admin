@@ -3912,6 +3912,8 @@ components:
           type: ["string", "null"]
         fonnteCustomerDevice:
           type: ["string", "null"]
+        customerServiceWhatsapp:
+          type: ["string", "null"]
         fonnteAdminWa:
           type: ["string", "null"]
         adminWaPhones:
@@ -3950,6 +3952,8 @@ components:
           type: string
         fonnteCustomerDevice:
           type: string
+        customerServiceWhatsapp:
+          type: ["string", "null"]
         fonnteAdminWa:
           type: string
         adminWaPhones:
