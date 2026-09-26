@@ -406,7 +406,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
         </svg>
       </a>
 
-      <MinaChatWidget />
+      {settings?.minaWebChatEnabled !== false && <MinaChatWidget />}
 
       {/* ── Back to top ── */}
       <button
