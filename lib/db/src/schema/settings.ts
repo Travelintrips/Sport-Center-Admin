@@ -1,4 +1,4 @@
-import { text, serial, timestamp } from "drizzle-orm/pg-core";
+import { boolean, text, serial, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
@@ -21,6 +21,9 @@ export const settingsTable = scSchema.table("sport_settings", {
   fonnteCustomerToken: text("fonnte_customer_token"),
   fonnteCustomerDevice: text("fonnte_customer_device"),
   customerServiceWhatsapp: text("customer_service_whatsapp"),
+  minaWebChatEnabled: boolean("mina_web_chat_enabled").notNull().default(true),
+  minaWebChatGreeting: text("mina_web_chat_greeting").notNull().default("Halo! Saya Mina, asisten Sport Center. Ada yang bisa saya bantu?"),
+  minaWebChatQuickActions: text("mina_web_chat_quick_actions").notNull().default("Booking Fasilitas\nCek Jadwal\nCek Harga\nGym & Membership"),
   fonnteAdminWa: text("fonnte_admin_wa"),
   adminWaPhones: text("admin_wa_phones"),
   appUrl: text("app_url"),
