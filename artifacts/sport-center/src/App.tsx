@@ -91,6 +91,7 @@ const AdminOperatorAccounts = lazy(() => import("@/pages/admin/OperatorAccounts"
 const AdminBankReconciliation = lazy(() => import("@/pages/admin/BankReconciliation"));
 const AdminWaBookings = lazy(() => import("@/pages/admin/WaBookings"));
 const AdminWaAiAssistant = lazy(() => import("@/pages/admin/WaAiAssistant"));
+const AdminMinaWidget = lazy(() => import("@/pages/admin/MinaWidget"));
 const AdminExpenses = lazy(() => import("@/pages/admin/Expenses"));
 const AdminDocumentTemplates = lazy(() => import("@/pages/admin/DocumentTemplates"));
 const AdminInvoiceSettings = lazy(() => import("@/pages/admin/InvoiceSettings"));
@@ -169,6 +170,7 @@ function AdminRouter() {
     if (location === "/admin/bank-reconciliation") return <AdminBankReconciliation />;
     if (location === "/admin/wa-bookings") return <AdminWaBookings />;
     if (location === "/admin/wa-ai") return <AdminWaAiAssistant />;
+    if (location === "/admin/mina-widget") return <AdminMinaWidget />;
     if (location === "/admin/expenses") return <AdminExpenses />;
     if (location === "/admin/vendors") return <AdminVendors />;
     if (location === "/admin/invoice-settings") return <AdminInvoiceSettings />;
@@ -221,6 +223,7 @@ function Router() {
       <Route path="/admin/bank-reconciliation" component={AdminRouter} />
       <Route path="/admin/wa-bookings" component={AdminRouter} />
       <Route path="/admin/wa-ai" component={AdminRouter} />
+      <Route path="/admin/mina-widget" component={AdminRouter} />
       <Route path="/admin/expenses" component={AdminRouter} />
       <Route path="/admin/vendors" component={AdminRouter} />
       <Route path="/admin/invoice-settings" component={AdminRouter} />
