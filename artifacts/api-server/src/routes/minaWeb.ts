@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
 import { and, eq } from "drizzle-orm";
-import { db, facilitiesTable } from "@workspace/db";
+import { db, facilitiesTable, settingsTable } from "@workspace/db";
 import {
   generateAiReply,
   type AiPageContext,
@@ -55,6 +55,20 @@ function setSessionCookie(res: Response, sessionId: string): void {
 }
 
 router.post("/mina/web/message", async (req, res) => {
+  const [webChatSettings] = await db
+    .select({ minaWebChatEnabled: settingsTable.minaWebChatEnabled })
+    .from(settingsTable)
+    .limit(1);
+
+  if (webChatSettings?.minaWebChatEnabled === false) {
+    res.status(503).json({
+      error: "Chat Mina sedang dinonaktifkan.",
+      code: "MINA_WEB_DISABLED",
+      fallbackToWhatsapp: false,
+    });
+    return;
+  }
+
   const sessionId = getOrCreateSession(req, res);
   const rateKey = getRateKey(req, sessionId);
   if (isRateLimited(rateKey)) {
