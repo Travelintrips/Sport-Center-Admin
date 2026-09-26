@@ -22,6 +22,9 @@ export interface SettingsUpdate {
   fonnteToken?: string;
   fonnteCustomerDevice?: string;
   customerServiceWhatsapp?: string | null;
+  minaWebChatEnabled?: boolean;
+  minaWebChatGreeting?: string;
+  minaWebChatQuickActions?: string;
   fonnteAdminWa?: string;
   adminWaPhones?: string;
   appUrl?: string;
