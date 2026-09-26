@@ -33,6 +33,9 @@ export interface Settings {
   fonnteCustomerDevice?: string | null;
   /** @nullable */
   customerServiceWhatsapp?: string | null;
+  minaWebChatEnabled?: boolean;
+  minaWebChatGreeting?: string;
+  minaWebChatQuickActions?: string;
   /** @nullable */
   fonnteAdminWa?: string | null;
   /** @nullable */
