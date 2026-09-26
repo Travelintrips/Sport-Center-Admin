@@ -88,6 +88,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
       "fonnteToken","fonnteCustomerToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
       "fonnteCustomerDevice","customerServiceWhatsapp",
+      "minaWebChatEnabled","minaWebChatGreeting","minaWebChatQuickActions",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -129,6 +130,38 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
             }
             patch[key] = customerServiceWhatsapp;
           }
+        } else if (key === "minaWebChatEnabled") {
+          if (typeof req.body[key] !== "boolean") {
+            res.status(400).json({
+              error: "Status Widget Chat Mina harus berupa boolean.",
+              code: "INVALID_MINA_WEB_CHAT_ENABLED",
+            });
+            return;
+          }
+          patch[key] = req.body[key];
+        } else if (key === "minaWebChatGreeting") {
+          const greeting = String(req.body[key] ?? "").trim();
+          if (!greeting || greeting.length > 500) {
+            res.status(400).json({
+              error: "Salam Chat Mina wajib diisi dan maksimal 500 karakter.",
+              code: "INVALID_MINA_WEB_CHAT_GREETING",
+            });
+            return;
+          }
+          patch[key] = greeting;
+        } else if (key === "minaWebChatQuickActions") {
+          const actions = String(req.body[key] ?? "")
+            .split(/\r?\n/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+          if (actions.length > 6 || actions.some((item) => item.length > 80)) {
+            res.status(400).json({
+              error: "Quick action Chat Mina maksimal 6 baris dan 80 karakter per baris.",
+              code: "INVALID_MINA_WEB_CHAT_QUICK_ACTIONS",
+            });
+            return;
+          }
+          patch[key] = actions.join("\n");
         } else {
           patch[key] = req.body[key] ?? null;
         }
