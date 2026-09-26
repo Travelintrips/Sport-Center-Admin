@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { ArrowUpRight, LoaderCircle, MessageCircle, Minus, Send, Sparkles, X } from "lucide-react";
 import { useGetSettings } from "@workspace/api-client-react";
@@ -9,7 +9,8 @@ type ChatMessage = {
   content: string;
 };
 
-const QUICK_ACTIONS = [
+const DEFAULT_GREETING = "Halo! Saya Mina, asisten Sport Center. Ada yang bisa saya bantu?";
+const DEFAULT_QUICK_ACTIONS = [
   "Booking Fasilitas",
   "Cek Jadwal",
   "Cek Harga",
@@ -52,10 +53,29 @@ export default function MinaChatWidget() {
     {
       id: 1,
       role: "assistant",
-      content: "Halo! Saya Mina, asisten Sport Center. Ada yang bisa saya bantu?",
+      content: DEFAULT_GREETING,
     },
   ]);
   const nextMessageId = useRef(2);
+
+  const greeting = settings?.minaWebChatGreeting?.trim() || DEFAULT_GREETING;
+  const quickActions = useMemo(() => {
+    const source = settings?.minaWebChatQuickActions;
+    if (source == null) return DEFAULT_QUICK_ACTIONS;
+    return source
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+  }, [settings?.minaWebChatQuickActions]);
+
+  useEffect(() => {
+    setMessages((current) =>
+      current.length === 1 && current[0]?.id === 1 && current[0]?.role === "assistant"
+        ? [{ ...current[0], content: greeting }]
+        : current,
+    );
+  }, [greeting]);
 
   const pageContext = useMemo(() => {
     const match = location.match(/^\/facilities\/(\d+)/);
@@ -66,13 +86,13 @@ export default function MinaChatWidget() {
   }, [location]);
 
   const waHref = useMemo(() => {
-    let phone = settings?.whatsapp || "";
+    let phone = settings?.fonnteCustomerDevice || settings?.whatsapp || "";
     if (phone.startsWith("0")) phone = `62${phone.slice(1)}`;
     phone = phone.replace(/[^0-9]/g, "");
     return phone
       ? `https://wa.me/${phone}?text=${encodeURIComponent("Halo, saya ingin melanjutkan percakapan dengan Mina.")}`
       : "";
-  }, [settings?.whatsapp]);
+  }, [settings?.fonnteCustomerDevice, settings?.whatsapp]);
 
   async function sendMessage(rawMessage?: string) {
     const message = (rawMessage ?? input).trim();
@@ -203,7 +223,7 @@ export default function MinaChatWidget() {
 
             {messages.length === 1 && !isSending && (
               <div className="grid grid-cols-2 gap-2 pt-2">
-                {QUICK_ACTIONS.map((action) => (
+                {quickActions.map((action) => (
                   <button
                     type="button"
                     key={action}
