@@ -3914,6 +3914,12 @@ components:
           type: ["string", "null"]
         customerServiceWhatsapp:
           type: ["string", "null"]
+        minaWebChatEnabled:
+          type: boolean
+        minaWebChatGreeting:
+          type: string
+        minaWebChatQuickActions:
+          type: string
         fonnteAdminWa:
           type: ["string", "null"]
         adminWaPhones:
@@ -3954,6 +3960,12 @@ components:
           type: string
         customerServiceWhatsapp:
           type: ["string", "null"]
+        minaWebChatEnabled:
+          type: boolean
+        minaWebChatGreeting:
+          type: string
+        minaWebChatQuickActions:
+          type: string
         fonnteAdminWa:
           type: string
         adminWaPhones:
