@@ -53,6 +53,7 @@ const NAV_GROUPS = [
       { href: "/admin/events", label: "Event", icon: CalendarDays },
       { href: "/admin/wa-bookings", label: "WA Booking", icon: MessageSquare },
       { href: "/admin/wa-ai", label: "AI WA Assistant", icon: Bot },
+      { href: "/admin/mina-widget", label: "Widget Chat Mina", icon: MessageSquare },
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
       { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
       { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
