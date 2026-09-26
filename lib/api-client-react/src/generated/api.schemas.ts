@@ -895,6 +895,11 @@ export interface Settings {
   /** @nullable */
   fonnteCustomerDevice?: string | null;
   /** @nullable */
+  customerServiceWhatsapp?: string | null;
+  minaWebChatEnabled?: boolean;
+  minaWebChatGreeting?: string;
+  minaWebChatQuickActions?: string;
+  /** @nullable */
   fonnteAdminWa?: string | null;
   /** @nullable */
   adminWaPhones?: string | null;
@@ -917,6 +922,10 @@ export interface SettingsUpdate {
   qrisImageUrl?: string;
   fonnteToken?: string;
   fonnteCustomerDevice?: string;
+  customerServiceWhatsapp?: string | null;
+  minaWebChatEnabled?: boolean;
+  minaWebChatGreeting?: string;
+  minaWebChatQuickActions?: string;
   fonnteAdminWa?: string;
   adminWaPhones?: string;
   appUrl?: string;
