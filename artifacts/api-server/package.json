@@ -7,7 +7,7 @@
     "dev": "export APP_ENV=development NODE_ENV=development GCP_PROJECT_ID=sport-center-506306 GCP_SECRET_ID=sport-center && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "pretypecheck": "pnpm --dir ../.. run typecheck:libs",
-    "start": "NODE_OPTIONS=--trace-deprecation node --enable-source-maps ./dist/bootstrap.mjs"
+    "start": "NODE_OPTIONS=--trace-deprecation node --enable-source-maps ./dist/bootstrap.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand --testPathIgnorePatterns=src/lib/paylabs.test.ts"
   },
