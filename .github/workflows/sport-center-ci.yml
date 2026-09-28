@@ -79,10 +79,9 @@ jobs:
             --trace-deprecation \
             -e "require('@replit/object-storage'); console.log('replit object storage loaded')"
 
-          echo "=== TRACE LEGACY TR46 ==="
+          echo "=== TRACE LEGACY TR46 RESOLUTION ==="
           pnpm --filter @workspace/api-server exec node \
-            --trace-deprecation \
-            -e "require('tr46'); console.log('tr46 loaded')"
+            -e "try { console.log(require.resolve('tr46')); } catch (e) { console.log('tr46 is transitive-only and not directly resolvable from api-server'); }"
 
       - name: Typecheck
         run: pnpm typecheck
@@ -92,3 +91,8 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Inspect production bundle punycode source
+        run: |
+          echo "=== BUNDLE PUNYCODE REFERENCES ==="
+          grep -n -B 12 -A 24 -E 'require\(["'"']punycode["'"']\)|node:punycode|punycode' artifacts/api-server/dist/bootstrap.mjs || true
