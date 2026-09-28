@@ -170,7 +170,6 @@ async function sendReminderH1(): Promise<void> {
       );
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
-    const appUrl = await getBaseUrl();
     const facilityMap: Record<number, string> = {};
     for (const f of facilities) facilityMap[f.id] = f.name;
 
@@ -222,6 +221,7 @@ async function sendDayOfReminder(): Promise<void> {
       );
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const appUrl = await getBaseUrl();
     const facilityMap: Record<number, string> = {};
     for (const f of facilities) facilityMap[f.id] = f.name;
 
