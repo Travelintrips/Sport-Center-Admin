@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { isTransientDbError } from "./dbRetry";
 import manualProviderMirrorMigration from "../../../../scripts/patch_manual_provider_mirror_function.sql";
 import paymentMetadataResolverMigration from "../../../../scripts/patch_resolve_function.sql";
 import publicPaymentEntryMetadataSyncMigration from "../../../../scripts/patch_public_payment_entry_metadata_sync.sql";
@@ -271,7 +272,16 @@ export function startPaymentMirrorMigration(): Promise<void> {
       state = { status: "ready" };
     })
     .catch((error) => {
-      state = { status: "failed", error };
+      if (isTransientDbError(error)) {
+        // A dropped Supabase/Supavisor connection is retryable. Reset the
+        // memoized promise so initializeRuntime() can retry the full
+        // transaction from a fresh connection without weakening fail-closed
+        // readiness.
+        state = { status: "pending" };
+        startupPromise = null;
+      } else {
+        state = { status: "failed", error };
+      }
       throw error;
     });
 
