@@ -31,7 +31,6 @@ const REQUIRED_STARTUP: Array<{ name: string; description: string }> = [
 const OPTIONAL: Array<{ name: string; description: string }> = [
   { name: "SUPABASE_URL",             description: "Supabase project URL — required for realtime availability broadcasts" },
   { name: "SUPABASE_ANON_KEY",        description: "Supabase anon key — required for realtime availability broadcasts" },
-  { name: "APP_URL",                  description: "Production base URL (e.g. https://sc.travelintrips.co.id) — used in invoice links, WA messages" },
 ];
 
 /** Only needed when the feature is actively used; no warning at startup. */
@@ -138,10 +137,6 @@ export function validateEnv(): EnvValidationResult {
       fatal.push(`"ALLOW_DEV_ON_PROD_STORAGE=true" is forbidden in production`);
     }
 
-    // Production should have APP_URL set (hard to generate correct invoice links otherwise)
-    if (!process.env.APP_URL) {
-      warnings.push(`"APP_URL" is not set — invoice links and WA messages will use fallback base URL`);
-    }
   }
 
   for (const w of warnings) {
