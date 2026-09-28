@@ -51,10 +51,9 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 
-// The development server binds its port before the background schema setup
-// completes so the workflow health check can connect. Do not let application
-// requests race that setup: otherwise an admin can submit against a table that
-// has not been created yet and receive an opaque Drizzle query error.
+// The bootstrap listener opens the port before external startup dependencies
+// finish. Keep all business traffic fail-closed until runtime initialization
+// completes; health/readiness probes remain reachable during startup.
 app.use((req, res, next) => {
   const isHealthProbe =
     req.path === "/health" ||
@@ -63,11 +62,11 @@ app.use((req, res, next) => {
     req.path === "/api/health" ||
     req.path === "/api/healthz" ||
     req.path === "/api/readiness";
-  if (process.env.NODE_ENV !== "production" && !isStartupReady() && !isHealthProbe) {
+  if (!isStartupReady() && !isHealthProbe) {
     res.setHeader("Retry-After", "2");
     res.status(503).json({
-      error: "Server sedang menyiapkan database. Coba lagi sebentar.",
-      code: "STARTUP_MIGRATIONS_PENDING",
+      error: "Server sedang menyiapkan runtime. Coba lagi sebentar.",
+      code: "STARTUP_INITIALIZATION_PENDING",
     });
     return;
   }
