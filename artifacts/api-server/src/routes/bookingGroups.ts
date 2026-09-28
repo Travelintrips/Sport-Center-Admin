@@ -4,6 +4,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import type { BookingGroup } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { syncBookingGroupTotal } from "../lib/groupTotals";
+import { withTransientDbRetry } from "../lib/dbRetry";
 
 const router = Router();
 
@@ -29,31 +30,34 @@ async function uniqueGroupRef(tx: DbTransaction): Promise<string> {
 // GET /bookings/groups — list all groups with booking summaries
 router.get("/bookings/groups", adminMiddleware, async (req, res) => {
   try {
-    const groups = await db.select().from(bookingGroupsTable).orderBy(bookingGroupsTable.createdAt);
+    const result = await withTransientDbRetry(async () => {
+      const groups = await db.select().from(bookingGroupsTable).orderBy(bookingGroupsTable.createdAt);
 
-    // For each group, fetch associated bookings
-    const result = await Promise.all(groups.map(async (g) => {
-      const bookings = await db.select({
-        id: bookingsTable.id,
-        orderNumber: bookingsTable.orderNumber,
-        facilityId: bookingsTable.facilityId,
-        bookingDate: bookingsTable.bookingDate,
-        startTime: bookingsTable.startTime,
-        endTime: bookingsTable.endTime,
-        durationHours: bookingsTable.durationHours,
-        totalPrice: bookingsTable.totalPrice,
-        grandTotal: bookingsTable.grandTotal,
-        status: bookingsTable.status,
-        customerName: bookingsTable.customerName,
-        customerPhone: bookingsTable.customerPhone,
-      }).from(bookingsTable).where(eq(bookingsTable.groupRef, g.groupRef));
+      // For each group, fetch associated bookings. A transient Supabase/Supavisor
+      // reset retries the entire read once; this endpoint is read-only/idempotent.
+      return Promise.all(groups.map(async (g) => {
+        const bookings = await db.select({
+          id: bookingsTable.id,
+          orderNumber: bookingsTable.orderNumber,
+          facilityId: bookingsTable.facilityId,
+          bookingDate: bookingsTable.bookingDate,
+          startTime: bookingsTable.startTime,
+          endTime: bookingsTable.endTime,
+          durationHours: bookingsTable.durationHours,
+          totalPrice: bookingsTable.totalPrice,
+          grandTotal: bookingsTable.grandTotal,
+          status: bookingsTable.status,
+          customerName: bookingsTable.customerName,
+          customerPhone: bookingsTable.customerPhone,
+        }).from(bookingsTable).where(eq(bookingsTable.groupRef, g.groupRef));
 
-      return {
-        ...g,
-        totalPayment: Number(g.totalPayment),
-        bookings,
-      };
-    }));
+        return {
+          ...g,
+          totalPayment: Number(g.totalPayment),
+          bookings,
+        };
+      }));
+    });
 
     res.json(result);
   } catch (err) {
