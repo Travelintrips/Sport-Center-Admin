@@ -12,6 +12,7 @@ import pg from "pg";
 import { extractBookingDpp } from "./accountingMath";
 import { ensureCanonicalSportCenterBankMutation } from "./canonicalBankMutation";
 import { ensureCentralPaymentSettlement } from "./centralSettlement";
+import { resolvePublicPaymentAccount } from "./publicPaymentAccount";
 
 export { extractBookingDpp } from "./accountingMath";
 
@@ -39,32 +40,24 @@ function getPublicPool(): pg.Pool | null {
 const TAX_ID_PPN_11 = 1;
 const COMPANY_ID = 1;
 
-type PublicPaymentMethod = "QRIS" | "Transfer Bank";
-
-function normalizePublicPaymentMethod(paymentMethod?: string): PublicPaymentMethod {
-  return String(paymentMethod ?? "").trim().toLowerCase().includes("qris")
-    ? "QRIS"
-    : "Transfer Bank";
-}
-
 async function getPublicPaymentAccount(
   pool: pg.Pool | pg.PoolClient,
   paymentMethod?: string,
-): Promise<{ id: number; code: string; name: string; label: PublicPaymentMethod }> {
-  const label = normalizePublicPaymentMethod(paymentMethod);
-  // QRIS settles into Bank Mandiri CST, so it uses the same public COA
-  // as transfer bank. Never look up a separate "QRIS" cash account.
+  paymentProvider?: string,
+) {
+  const account = resolvePublicPaymentAccount(paymentMethod, paymentProvider);
   const result = await pool.query(
     `SELECT id, code, name
        FROM public.chart_of_accounts
-      WHERE code = '1-1020-CST'
+      WHERE code = $1
         AND is_active = true
       LIMIT 1`,
+    [account.code],
   );
 
   if (result.rows.length !== 1) {
     throw new Error(
-      "[accounting] COA Bank Mandiri CST (1-1020-CST) tidak ditemukan; jurnal tidak diubah.",
+      `[accounting] COA ${account.name} (${account.code}) tidak ditemukan/aktif; jurnal tidak diubah.`,
     );
   }
 
@@ -72,7 +65,7 @@ async function getPublicPaymentAccount(
     id: Number(result.rows[0].id),
     code: String(result.rows[0].code),
     name: String(result.rows[0].name),
-    label,
+    label: account.label,
   };
 }
 
@@ -86,7 +79,6 @@ async function getPublicPaymentAccount(
 // Cache COA/journal IDs dari public schema
 let _publicIds: {
   journalId: number;
-  coaKas: number;
   coaPendapatan: number;
   coaPpnKeluaran: number;
   coaPphDipotong: number | null;
@@ -99,9 +91,8 @@ async function getPublicIds() {
   const pool = getPublicPool();
   if (!pool) throw new Error("[accounting] Tidak ada Supabase URL — tidak bisa write ke public.accounting_entries");
 
-  const [journal, kas, pendapatan, ppn, pph, tax] = await Promise.all([
+  const [journal, pendapatan, ppn, pph, tax] = await Promise.all([
     pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`),
-    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id
@@ -117,21 +108,20 @@ async function getPublicIds() {
   ]);
 
   const journalId = Number(journal.rows[0]?.id);
-  const coaKas = Number(kas.rows[0]?.id);
   const coaPendapatan = Number(pendapatan.rows[0]?.id);
   const coaPpnKeluaran = Number(ppn.rows[0]?.id);
   const coaPphDipotong = pph.rows[0]?.id == null ? null : Number(pph.rows[0].id);
   const taxIdPpn = Number(tax.rows[0]?.id ?? 1);
 
-  if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
+  if (!journalId || !coaPendapatan || !coaPpnKeluaran) {
     throw new Error(
       `[accounting] Public COA/journal lookup gagal. ` +
-      `journalId=${journalId} coaKas=${coaKas} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}. ` +
-      `Pastikan public.accounting_journals code=BNK-CST dan chart_of_accounts 1-1020-CST, 4-1017-CST, 2-1020-CST ada.`
+      `journalId=${journalId} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}. ` +
+      `Pastikan public.accounting_journals code=BNK-CST dan chart_of_accounts 4-1017-CST, 2-1020-CST ada.`
     );
   }
 
-  _publicIds = { journalId, coaKas, coaPendapatan, coaPpnKeluaran, coaPphDipotong, taxIdPpn };
+  _publicIds = { journalId, coaPendapatan, coaPpnKeluaran, coaPphDipotong, taxIdPpn };
   return _publicIds;
 }
 
@@ -192,7 +182,7 @@ export async function createPublicAccountingEntry(
   //               dpp = grandTotalInklusif - ppnAmount
   //             Jangan kirim booking.totalPrice langsung — akan double-count PPN.
   // ppnAmount = PPN yang sudah dihitung (terpisah dari DPP)
-  // grandTotal = DPP + PPN = jumlah yang diterima dari customer (masuk ke Bank Mandiri CST)
+  // grandTotal = DPP + PPN = jumlah yang diterima dari customer (masuk ke akun penerimaan canonical)
   const grandTotal = subtotal + ppnAmount;
   const netRevenue = subtotal;
   const hasPpn = ppnAmount > 0;
@@ -830,8 +820,8 @@ export async function postSportCenterBookingPayment(
     const year = new Date(journalDate).getFullYear();
     const entryNumber = await nextPublicEntryNumber(client, year);
     const ids = await getPublicIdsForQuery(client);
-    const paymentAccount = await getPublicPaymentAccount(client, canonicalMethod);
-    const methodLabel = normalizePublicPaymentMethod(canonicalMethod);
+    const paymentAccount = await getPublicPaymentAccount(client, canonicalMethod, canonicalProvider);
+    const methodLabel = paymentAccount.label;
     const hasPpn = ppnAmount > 0;
     const hasPph = pphAmount > 0;
     if (hasPph && !ids.coaPphDipotong) {
@@ -1089,7 +1079,6 @@ export async function postSportCenterBookingPayment(
 
 async function getPublicIdsForQuery(pool: pg.Pool | pg.PoolClient) {
   const journal = await pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`);
-  const kas = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`);
   const pendapatan = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`);
   const ppn = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`);
   const pph = await pool.query(
@@ -1104,16 +1093,15 @@ async function getPublicIdsForQuery(pool: pg.Pool | pg.PoolClient) {
       LIMIT 1`,
   );
   const journalId = Number(journal.rows[0]?.id);
-  const coaKas = Number(kas.rows[0]?.id);
   const coaPendapatan = Number(pendapatan.rows[0]?.id);
   const coaPpnKeluaran = Number(ppn.rows[0]?.id);
   const coaPphDipotong = pph.rows[0]?.id == null ? null : Number(pph.rows[0].id);
-  if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
+  if (!journalId || !coaPendapatan || !coaPpnKeluaran) {
     throw new Error(
-      `[accounting] Public COA/journal lookup gagal untuk payment posting: journalId=${journalId} coaKas=${coaKas} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}.`,
+      `[accounting] Public COA/journal lookup gagal untuk payment posting: journalId=${journalId} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}.`,
     );
   }
-  return { journalId, coaKas, coaPendapatan, coaPpnKeluaran, coaPphDipotong };
+  return { journalId, coaPendapatan, coaPpnKeluaran, coaPphDipotong };
 }
 
 
@@ -1233,6 +1221,7 @@ export async function createPublicMembershipAccountingEntry(
   const period      = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids         = await getPublicIds();
+  const paymentAccount = await getPublicPaymentAccount(pool, "Transfer Bank", "manual");
 
   const entryResult = await pool.query(
     `INSERT INTO public.accounting_entries
@@ -1258,7 +1247,7 @@ export async function createPublicMembershipAccountingEntry(
       [
         entryId,
 
-        ids.coaKas,         `Penerimaan member gym ${refNumber}`, grandTotal,
+        paymentAccount.id,         `Penerimaan member gym ${refNumber}`, grandTotal,
         ids.coaPendapatan,  `Pendapatan member gym ${refNumber}`, dpp,
         ids.coaPpnKeluaran, `PPN Keluaran member gym ${refNumber}`, ppnAmount,
       ]
@@ -1282,7 +1271,7 @@ export async function createPublicMembershipAccountingEntry(
       `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
         ($1,$2,$3,$4,0),
         ($1,$5,$6,0,$4)`,
-      [entryId, ids.coaKas, `Penerimaan member gym ${refNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan member gym ${refNumber}`]
+      [entryId, paymentAccount.id, `Penerimaan member gym ${refNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan member gym ${refNumber}`]
     );
   }
 
@@ -1313,6 +1302,7 @@ export async function createPublicInvoiceAccountingEntry(
   const period      = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids         = await getPublicIds();
+  const paymentAccount = await getPublicPaymentAccount(pool, "Transfer Bank", "manual");
   if (hasPph && !ids.coaPphDipotong) {
     throw new Error("[accounting] COA PPh Dipotong Pelanggan tidak ditemukan di public chart_of_accounts.");
   }
@@ -1333,7 +1323,7 @@ export async function createPublicInvoiceAccountingEntry(
   const entryId = Number(entryResult.rows[0]?.id);
 
   const lines = [
-    { accountId: ids.coaKas, description: `Penerimaan invoice ${invoiceNumber}`, debit: cashAmount, credit: 0 },
+    { accountId: paymentAccount.id, description: `Penerimaan invoice ${invoiceNumber}`, debit: cashAmount, credit: 0 },
     ...(hasPph ? [{ accountId: ids.coaPphDipotong!, description: `PPh dipotong invoice ${invoiceNumber}`, debit: pphAmount, credit: 0 }] : []),
     { accountId: ids.coaPendapatan, description: `Pendapatan invoice ${invoiceNumber}`, debit: 0, credit: netRevenue },
     ...(hasPpn ? [{ accountId: ids.coaPpnKeluaran, description: `PPN Keluaran invoice ${invoiceNumber}`, debit: 0, credit: ppnAmount }] : []),
@@ -2078,7 +2068,7 @@ export async function createExpenseJournalEntry(
 
 // ─── Public Accounting: Expense (Pengeluaran) ────────────────────────────────
 // Debit: akun expense COA → Kredit: akun bank berdasarkan payment method
-// Ini memastikan Bank Mandiri CST HANYA di sisi kredit untuk pengeluaran,
+// Ini memastikan akun bank canonical HANYA di sisi kredit untuk pengeluaran,
 // tidak pernah muncul sebagai debit.
 
 const EXP_JOURNAL_CODE = "EXP-CST";
@@ -2112,8 +2102,8 @@ function mapPaymentMethodToBankCoaCode(paymentMethod: string): string {
   if (pm.includes("bca")) return "1-1021-CST";
   if (pm.includes("bni")) return "1-1022-CST";
   if (pm.includes("kas") || pm.includes("cash") || pm.includes("tunai")) return "1-1010-CST";
-  // Default: Bank Mandiri CST (transfer / bank_mandiri / kosong)
-  return "1-1020-CST";
+  // Default/current transfer account after Bank Mandiri CST consolidation.
+  return "1-1023-CST";
 }
 
 // Cache lookup COA by code
