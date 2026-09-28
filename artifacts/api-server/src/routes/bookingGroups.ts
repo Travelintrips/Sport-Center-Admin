@@ -31,13 +31,18 @@ async function uniqueGroupRef(tx: DbTransaction): Promise<string> {
 router.get("/bookings/groups", adminMiddleware, async (req, res) => {
   try {
     const result = await withTransientDbRetry(async () => {
-      const groups = await db.select().from(bookingGroupsTable).orderBy(bookingGroupsTable.createdAt);
+      const groups = await db
+        .select()
+        .from(bookingGroupsTable)
+        .orderBy(bookingGroupsTable.createdAt);
 
-      // For each group, fetch associated bookings. A transient Supabase/Supavisor
-      // reset retries the entire read once; this endpoint is read-only/idempotent.
-      return Promise.all(groups.map(async (g) => {
-        const bookings = await db.select({
+      if (groups.length === 0) return [];
+
+      const groupRefs = groups.map((group) => group.groupRef);
+      const bookings = await db
+        .select({
           id: bookingsTable.id,
+          groupRef: bookingsTable.groupRef,
           orderNumber: bookingsTable.orderNumber,
           facilityId: bookingsTable.facilityId,
           bookingDate: bookingsTable.bookingDate,
@@ -49,13 +54,22 @@ router.get("/bookings/groups", adminMiddleware, async (req, res) => {
           status: bookingsTable.status,
           customerName: bookingsTable.customerName,
           customerPhone: bookingsTable.customerPhone,
-        }).from(bookingsTable).where(eq(bookingsTable.groupRef, g.groupRef));
+        })
+        .from(bookingsTable)
+        .where(inArray(bookingsTable.groupRef, groupRefs));
 
-        return {
-          ...g,
-          totalPayment: Number(g.totalPayment),
-          bookings,
-        };
+      const bookingsByGroup = new Map<string, typeof bookings>();
+      for (const booking of bookings) {
+        if (!booking.groupRef) continue;
+        const current = bookingsByGroup.get(booking.groupRef) ?? [];
+        current.push(booking);
+        bookingsByGroup.set(booking.groupRef, current);
+      }
+
+      return groups.map((group) => ({
+        ...group,
+        totalPayment: Number(group.totalPayment),
+        bookings: bookingsByGroup.get(group.groupRef) ?? [],
       }));
     });
 
