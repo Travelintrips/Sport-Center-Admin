@@ -10,14 +10,6 @@ import { validateEnv } from "./lib/envValidation";
 import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
 import { markStartupReady } from "./lib/startupReadiness";
 
-const rawPort = process.env["PORT"]?.trim() || "3000";
-const port = Number(rawPort);
-const host = process.env["HOST"]?.trim() || "0.0.0.0";
-
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
 // ── 2. Validate environment variables — fails fast in production if critical vars are missing ──
 const envResult = validateEnv();
 if (!envResult.ok) {
@@ -1305,35 +1297,33 @@ async function runStartupSeed() {
   }
 }
 
-// This is a financial safety migration, not a best-effort schema migration.
-// Finish it before binding the port so every confirmation entry point
-// (admin, WhatsApp, reconciliation, and gateway callbacks) sees the same
-// verified trigger from its first request.
-try {
-  await startPaymentMirrorMigration();
-  logger.info("Payment mirror migration verified");
-} catch (err) {
-  logger.error({ err }, "Payment mirror migration FAILED; refusing to accept traffic");
-  throw err;
-}
-
-// Bind the port immediately so the deployment health check passes, then run
-// migrations and seed in the background. Previously migrations ran before
-// app.listen(), which meant a slow/paused Supabase DB would timeout and
-// the port would never open, causing the deploy to fail.
-app.listen(port, host, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
+// Runtime initialization happens after bootstrap.ts has already opened the
+// Hostinger-assigned port. Business routes remain fail-closed through the
+// startup readiness middleware until this function completes.
+export async function initializeRuntime(): Promise<void> {
+  // This is a financial safety migration, not a best-effort schema migration.
+  // It still completes before business traffic is marked ready, but no longer
+  // blocks the platform from observing listen() within its startup deadline.
+  try {
+    await startPaymentMirrorMigration();
+    logger.info("Payment mirror migration verified");
+  } catch (err) {
+    logger.error({ err }, "Payment mirror migration FAILED; refusing business traffic");
+    throw err;
   }
 
-  logger.info({ port, host }, "Server listening");
   if (process.env.NODE_ENV !== "production") {
     initBizportalTables().catch(() => {});
     ensureDefaultTemplates().catch(() => {});
+
+    // Development-only schema/data setup. The bootstrap server is already
+    // listening, while the app readiness guard returns 503 to business routes.
+    await runStartupMigrations();
+    await runStartupSeed();
   } else {
     logger.info("Production schema provisioning is external; skipping BizPortal setup and template seeding");
   }
+
   // Local development can use the configured local database without requiring
   // Supabase Storage. Production always verifies its remote storage only.
   if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
@@ -1346,18 +1336,10 @@ app.listen(port, host, (err) => {
     });
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    // Development-only schema/data setup. Production schema provisioning is
-    // handled externally and must never be performed by application startup.
-    runStartupMigrations()
-      .then(() => runStartupSeed())
-      .then(() => {
-        markStartupReady();
-        return startScheduler();
-      })
-      .catch((err) => logger.error({ err }, "Background development startup task error"));
-  } else {
-    logger.info("Production startup migrations and seed disabled");
-    startScheduler();
-  }
-});
+  // Mark ready only after the accounting safety gate and required development
+  // provisioning have completed. Scheduler starts only after this point.
+  markStartupReady();
+  startScheduler();
+}
+
+export { app };
