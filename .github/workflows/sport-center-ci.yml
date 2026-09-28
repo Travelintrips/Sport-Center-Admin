@@ -82,3 +82,16 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Guard against deprecated Node punycode core module
+        run: |
+          if grep -Fq '__require("punycode")' artifacts/api-server/dist/bootstrap.mjs; then
+            echo "ERROR: production bundle still requires deprecated Node core punycode"
+            grep -n -B 4 -A 4 -F '__require("punycode")' artifacts/api-server/dist/bootstrap.mjs || true
+            exit 1
+          fi
+          if ! grep -Fq 'punycode@2.3.1' artifacts/api-server/dist/bootstrap.mjs; then
+            echo "ERROR: userland punycode is not present in production bundle"
+            exit 1
+          fi
+          echo "PASS: production bundle uses userland punycode"
