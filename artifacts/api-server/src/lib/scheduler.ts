@@ -11,14 +11,7 @@ import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePayme
 import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
 import { completeBooking } from "./bookingLifecycle";
-
-function getAppUrl(): string {
-  if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
-    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  }
-  return (process.env.APP_URL ?? "").replace(/\/$/, "");
-}
-const APP_URL = getAppUrl();
+import { getBaseUrl } from "./appUrl";
 
 function getWIBNow(): Date {
   return new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -177,6 +170,7 @@ async function sendReminderH1(): Promise<void> {
       );
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const appUrl = await getBaseUrl();
     const facilityMap: Record<number, string> = {};
     for (const f of facilities) facilityMap[f.id] = f.name;
 
@@ -238,7 +232,7 @@ async function sendDayOfReminder(): Promise<void> {
         .set({ reminderDaySentAt: new Date() })
         .where(eq(bookingsTable.id, booking.id));
 
-      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
+      const statusUrl = `${appUrl}/status/${booking.orderNumber}`;
       const facilityName = facilityMap[booking.facilityId] ?? "";
 
       // Customer reminder
@@ -265,8 +259,8 @@ async function sendDayOfReminder(): Promise<void> {
           bookingDate: booking.bookingDate,
           startTime: booking.startTime,
           endTime: booking.endTime,
-          checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-          finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+          checkinUrl: `${appUrl}/wa/action/${checkinToken}`,
+          finishUrl: `${appUrl}/wa/action/${finishToken}`,
         });
       }
 
@@ -299,6 +293,7 @@ async function sendPaymentReminder(): Promise<void> {
     if (!pending.length) return;
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const appUrl = await getBaseUrl();
     const facilityMap: Record<number, string> = {};
     for (const f of facilities) facilityMap[f.id] = f.name;
 
@@ -325,7 +320,7 @@ async function sendPaymentReminder(): Promise<void> {
 
       if (!tokenRow?.token) await createWaToken(booking.id, "upload_proof", 7);
       const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
-      const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
+      const uploadProofUrl = `${appUrl}/bukti/${proofToken}`;
       await notifyPaymentReminder({
         customerName: booking.customerName,
         customerPhone: booking.customerPhone,
