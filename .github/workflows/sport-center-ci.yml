@@ -52,6 +52,23 @@ jobs:
           echo "=== tr46 ==="
           pnpm why tr46 || true
 
+      - name: Trace punycode dependency
+        run: |
+          echo "=== TRACE TESSERACT ==="
+          pnpm --filter @workspace/api-server exec node \
+            --trace-deprecation \
+            -e "require('tesseract.js'); console.log('tesseract loaded')"
+
+          echo "=== TRACE GOOGLE CLOUD STORAGE ==="
+          pnpm --filter @workspace/api-server exec node \
+            --trace-deprecation \
+            -e "require('@google-cloud/storage'); console.log('google cloud storage loaded')"
+
+          echo "=== TRACE GOOGLE AUTH ==="
+          pnpm --filter @workspace/api-server exec node \
+            --trace-deprecation \
+            -e "require('google-auth-library'); console.log('google auth loaded')"
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -60,16 +77,3 @@ jobs:
 
       - name: Build
         run: pnpm build
-
-      - name: Trace Node deprecation warnings
-        env:
-          NODE_OPTIONS: --trace-deprecation
-        run: |
-          timeout 20s pnpm start || EXIT_CODE=$?
-
-          if [ "${EXIT_CODE:-0}" = "124" ]; then
-            echo "Server stayed running during diagnostic window"
-            exit 0
-          fi
-
-          exit ${EXIT_CODE:-0}
