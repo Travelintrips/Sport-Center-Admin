@@ -52,6 +52,11 @@ jobs:
           echo "=== API SERVER: tr46 ==="
           pnpm --filter @workspace/api-server why tr46 --depth 20 || true
 
+      - name: Check outdated API dependencies
+        run: |
+          echo "=== API SERVER OUTDATED ==="
+          pnpm --filter @workspace/api-server outdated || true
+
       - name: Trace punycode dependency
         run: |
           echo "=== TRACE TESSERACT ==="
