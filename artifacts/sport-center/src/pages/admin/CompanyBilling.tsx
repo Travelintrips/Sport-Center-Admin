@@ -299,29 +299,10 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
   ${invoice.notes ? `<div style="margin-top:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:11px;"><strong>Catatan:</strong> ${invoice.notes}</div>` : ""}
   ${invoice.paidAt ? `<div style="margin-top:10px;color:#15803d;font-size:11px;">✓ Dibayar pada ${new Date(invoice.paidAt).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>` : ""}
 
-  <!-- TANDA TANGAN & MATERAI -->
-  <div class="sign-section">
-    <div class="sign-box" style="width:180px;">
-      <div style="font-size:11px;">Diterima oleh,</div>
-      <div style="font-size:10px;color:#6b7280;">(${invoice.companyName})</div>
-      <div class="sign-line"></div>
-      <div style="font-size:11px;font-weight:600;">${invoice.picName ?? "......................................"}</div>
-      <div style="font-size:10px;color:#6b7280;">Jabatan: ...............................</div>
-    </div>
-    <div class="sign-box" style="width:200px;">
-      <div style="font-size:11px;">Hormat kami,</div>
-      <div style="font-size:10px;color:#6b7280;">${ds.centerName}</div>
-      ${ds.signatureUrl
-        ? `<img src="${ds.signatureUrl}" alt="TTD" style="height:64px;margin:8px auto 0;display:block;"/>`
-        : `<div style="border:1px dashed #d1d5db;border-radius:50%;width:64px;height:64px;margin:8px auto 0;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span></div>`
-      }
-      <div class="sign-line" style="margin-top:${ds.signatureUrl ? "4px" : "-20px"};"></div>
-      <div style="font-size:11px;font-weight:600;">${ds.financeName}</div>
-      <div style="font-size:10px;color:#6b7280;">${ds.financeTitle}</div>
-
+  <!-- TANDA TANGAN FINANCE — invoice perusahaan tidak memerlukan TTD PIC/customer -->
   <!-- TANDA TANGAN -->
-  <div style="margin-top:28px;display:flex;justify-content:flex-end;">
-    <div style="text-align:center;min-width:200px;">
+  <div style="margin-top:28px;display:flex;justify-content:flex-end;page-break-inside:avoid;break-inside:avoid;">
+    <div style="text-align:center;min-width:200px;margin-left:auto;">
       <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
       ${ds.signatureUrl
         ? `<img src="${ds.signatureUrl}" alt="Tanda Tangan" style="height:72px;width:auto;object-fit:contain;margin:4px 0;" />`
