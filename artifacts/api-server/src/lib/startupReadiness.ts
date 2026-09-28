@@ -1,4 +1,4 @@
-let startupReady = process.env.NODE_ENV === "production";
+let startupReady = false;
 
 export function isStartupReady(): boolean {
   return startupReady;
