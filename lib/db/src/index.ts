@@ -79,7 +79,20 @@ export const pool = new Pool({
   idleTimeoutMillis: isProd ? 5_000 : 30_000,
   connectionTimeoutMillis: 8_000,
   query_timeout: 20_000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10_000,
   application_name: "sport-center-admin",
+});
+
+// node-postgres emits "error" on the Pool when an idle client is terminated by
+// the backend/network. Without a listener EventEmitter treats it as uncaught
+// and can terminate the whole Node process. The pool discards that client;
+// subsequent queries obtain a fresh connection.
+pool.on("error", (err) => {
+  const error = err as NodeJS.ErrnoException;
+  console.error(
+    `[DB] Idle PostgreSQL client error; connection discarded (code=${error.code ?? "unknown"}): ${error.message}`,
+  );
 });
 
 export const db = drizzle(pool, { schema });
