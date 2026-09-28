@@ -5,13 +5,21 @@ let _cacheExpiry = 0;
 let _cachedPaymentUrl: string | null = null;
 let _paymentCacheExpiry = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000;
+export const DEFAULT_PRODUCTION_APP_URL = "https://sc.travelintrips.co.id";
 
 function envFallback(): string {
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd && process.env.REPLIT_DEV_DOMAIN) {
     return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   }
-  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+
+  const explicit = (process.env.APP_URL ?? "").replace(/\/$/, "");
+  if (explicit) return explicit;
+
+  // Sport Center has a single canonical production domain. DB settings remain
+  // the primary source in getBaseUrl(); this is only the fail-safe used when
+  // settings cannot be read during a transient DB outage.
+  return isProd ? DEFAULT_PRODUCTION_APP_URL : "";
 }
 
 function normalizePaymentCallbackBase(value: string): string {
@@ -61,7 +69,7 @@ export async function getBaseUrl(): Promise<string> {
  *     PENTING: APP_URL di dev mode TIDAK digunakan karena kemungkinan menunjuk ke URL
  *     produksi (GAE/Cloud Run) sehingga Paylabs akan mengirim callback ke prod, bukan
  *     ke dev server ini.
- *  4. Prod mode → APP_URL → REPLIT_DEV_DOMAIN sebagai last resort
+ *  4. Prod mode → APP_URL override → canonical Sport Center domain as fail-safe
  */
 export async function getPaymentCallbackUrl(): Promise<string> {
   const now = Date.now();
@@ -88,7 +96,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
     return _cachedPaymentUrl;
   }
 
-  // 3. Production: DB paymentDomain (admin panel) → APP_URL → REPLIT_DEV_DOMAIN fallback
+  // 3. Production: DB paymentDomain/appUrl (admin panel) remains authoritative
   try {
     const [s] = await db
       .select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
@@ -104,13 +112,10 @@ export async function getPaymentCallbackUrl(): Promise<string> {
     // fall through
   }
 
-  // 4. Production fallback: APP_URL adalah URL stabil prod (custom domain, GAE, Cloud Run)
-  const appUrl = normalizePaymentCallbackBase(process.env.APP_URL ?? "");
-  _cachedPaymentUrl = appUrl
-    ? appUrl
-    : process.env.REPLIT_DEV_DOMAIN
-      ? normalizePaymentCallbackBase(`https://${process.env.REPLIT_DEV_DOMAIN}`)
-      : "";
+  // 4. Production fail-safe: optional APP_URL override, otherwise the canonical
+  // Sport Center domain. This keeps payment callbacks valid even if Hostinger
+  // does not inject APP_URL and the settings lookup is temporarily unavailable.
+  _cachedPaymentUrl = normalizePaymentCallbackBase(envFallback());
 
   _paymentCacheExpiry = now + CACHE_TTL_MS;
   return _cachedPaymentUrl!;
