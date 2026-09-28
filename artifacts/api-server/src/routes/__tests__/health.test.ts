@@ -34,6 +34,7 @@ jest.unstable_mockModule("@workspace/api-zod", () => ({
 
 // Dynamic import AFTER mocks are registered
 const { default: express } = await import("express");
+const { markStartupReady } = await import("../../lib/startupReadiness.js");
 const { default: healthRouter } = await import("../health.js");
 
 const app = express();
@@ -86,7 +87,21 @@ describe("GET /healthz", () => {
 
 // ── /readiness ────────────────────────────────────────────────────────────────
 
+describe("GET /readiness — runtime starting", () => {
+  it("returns 503 without touching the DB until startup initialization completes", async () => {
+    const res = await request.get("/readiness");
+
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe("starting");
+    expect(res.body.code).toBe("STARTUP_INITIALIZATION_PENDING");
+    expect(mockConnect).not.toHaveBeenCalled();
+  });
+});
+
 describe("GET /readiness — DB reachable", () => {
+  beforeAll(() => {
+    markStartupReady();
+  });
   beforeEach(() => {
     mockConnect.mockResolvedValue({ query: mockQuery, release: mockRelease });
     mockQuery.mockResolvedValue(undefined);
