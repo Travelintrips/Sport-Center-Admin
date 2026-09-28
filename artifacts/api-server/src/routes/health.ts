@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
+import { isStartupReady } from "../lib/startupReadiness";
 
 const router: IRouter = Router();
 
@@ -44,6 +45,19 @@ router.get("/healthz", (_req, res) => {
  */
 router.get("/readiness", async (_req, res) => {
   const start = Date.now();
+
+  if (!isStartupReady()) {
+    res.setHeader("Retry-After", "2");
+    res.status(503).json({
+      status: "starting",
+      db: "not_checked",
+      code: "STARTUP_INITIALIZATION_PENDING",
+      latencyMs: Date.now() - start,
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
   try {
     const client = await pool.connect();
     try {
