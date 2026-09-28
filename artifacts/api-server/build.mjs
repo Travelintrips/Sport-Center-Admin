@@ -25,6 +25,13 @@ async function buildAll() {
     // deployed API can apply them at startup; runtime file paths are not
     // reliable in the artifact deployment bundle.
     loader: { ".sql": "text" },
+    // Legacy whatwg-url@5 (via node-fetch@2) still imports bare "punycode".
+    // On Node 22 that resolves to the deprecated core module and emits DEP0040.
+    // Route it to the maintained userland package instead; "punycode/" is
+    // intentional because bare "punycode" always wins as a Node core module.
+    alias: {
+      punycode: "punycode/",
+    },
     logLevel: "info",
     // Keep only native/binary or path-sensitive packages external. Pure-JS runtime dependencies
     // must be bundled because Hostinger deploys the output directory without workspace node_modules.
