@@ -1,12 +1,29 @@
-import { Client } from "@replit/object-storage";
+import type { Client as ReplitObjectStorageClient } from "@replit/object-storage";
+
+type ReplitClientConstructor = typeof import("@replit/object-storage").Client;
+
+let _clientCtorPromise: Promise<ReplitClientConstructor> | null = null;
+
+async function getClientConstructor(): Promise<ReplitClientConstructor> {
+  if (!_clientCtorPromise) {
+    // Keep the package name runtime-computed so esbuild does not pull the
+    // Replit/legacy Google dependency tree into the production startup bundle.
+    // This branch is only reached in an actual Replit development runtime.
+    const packageName = ["@replit", "object-storage"].join("/");
+    _clientCtorPromise = import(packageName).then((mod) => mod.Client as ReplitClientConstructor);
+  }
+  return _clientCtorPromise;
+}
 
 // In production deployment, the sidecar (127.0.0.1:1106) auto-provides the
 // correct bucket ID for this project. Do NOT pass the env-var bucket ID because
 // the .replit [userenv] may hold a stale value from a previous bucket.
 // In dev workspace the sidecar returns an empty bucket ID, so we fall back to
 // the env var as a last resort.
-async function makeClient(): Promise<Client> {
-  // First: let the sidecar resolve the bucket (correct in production).
+async function makeClient(): Promise<ReplitObjectStorageClient> {
+  const Client = await getClientConstructor();
+
+  // First: let the sidecar resolve the bucket (correct in Replit runtime).
   const sidecarClient = new Client();
 
   // Probe whether the sidecar gave us a valid bucket by attempting a cheap
@@ -27,9 +44,9 @@ async function makeClient(): Promise<Client> {
   }
 }
 
-let _clientPromise: Promise<Client> | null = null;
+let _clientPromise: Promise<ReplitObjectStorageClient> | null = null;
 
-function getClientPromise(): Promise<Client> {
+function getClientPromise(): Promise<ReplitObjectStorageClient> {
   if (!_clientPromise) {
     _clientPromise = makeClient().catch((err) => {
       // Reset so next call retries
