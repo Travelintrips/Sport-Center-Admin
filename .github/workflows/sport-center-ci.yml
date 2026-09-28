@@ -95,4 +95,4 @@ jobs:
       - name: Inspect production bundle punycode source
         run: |
           echo "=== BUNDLE PUNYCODE REFERENCES ==="
-          grep -n -B 12 -A 24 -E 'require\(["'"']punycode["'"']\)|node:punycode|punycode' artifacts/api-server/dist/bootstrap.mjs || true
+          grep -n -B 12 -A 24 punycode artifacts/api-server/dist/bootstrap.mjs || true
