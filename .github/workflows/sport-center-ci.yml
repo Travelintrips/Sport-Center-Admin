@@ -74,6 +74,16 @@ jobs:
             --trace-deprecation \
             -e "require('google-auth-library'); console.log('google auth loaded')"
 
+          echo "=== TRACE REPLIT OBJECT STORAGE ==="
+          pnpm --filter @workspace/api-server exec node \
+            --trace-deprecation \
+            -e "require('@replit/object-storage'); console.log('replit object storage loaded')"
+
+          echo "=== TRACE LEGACY TR46 ==="
+          pnpm --filter @workspace/api-server exec node \
+            --trace-deprecation \
+            -e "require('tr46'); console.log('tr46 loaded')"
+
       - name: Typecheck
         run: pnpm typecheck
 
