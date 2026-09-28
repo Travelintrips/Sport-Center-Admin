@@ -9,6 +9,7 @@ import { sql, eq } from "drizzle-orm";
 import { validateEnv } from "./lib/envValidation";
 import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
 import { markStartupReady } from "./lib/startupReadiness";
+import { withTransientDbRetry } from "./lib/dbRetry";
 
 // ── 2. Validate environment variables — fails fast in production if critical vars are missing ──
 const envResult = validateEnv();
@@ -1305,7 +1306,7 @@ export async function initializeRuntime(): Promise<void> {
   // It still completes before business traffic is marked ready, but no longer
   // blocks the platform from observing listen() within its startup deadline.
   try {
-    await startPaymentMirrorMigration();
+    await withTransientDbRetry(() => startPaymentMirrorMigration(), 3);
     logger.info("Payment mirror migration verified");
   } catch (err) {
     logger.error({ err }, "Payment mirror migration FAILED; refusing business traffic");
