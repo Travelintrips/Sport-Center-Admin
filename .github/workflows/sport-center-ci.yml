@@ -43,14 +43,14 @@ jobs:
 
       - name: Check deprecated dependency chain
         run: |
-          echo "=== node-fetch ==="
-          pnpm why node-fetch || true
+          echo "=== API SERVER: node-fetch ==="
+          pnpm --filter @workspace/api-server why node-fetch --depth 20 || true
 
-          echo "=== whatwg-url ==="
-          pnpm why whatwg-url || true
+          echo "=== API SERVER: whatwg-url ==="
+          pnpm --filter @workspace/api-server why whatwg-url --depth 20 || true
 
-          echo "=== tr46 ==="
-          pnpm why tr46 || true
+          echo "=== API SERVER: tr46 ==="
+          pnpm --filter @workspace/api-server why tr46 --depth 20 || true
 
       - name: Trace punycode dependency
         run: |
