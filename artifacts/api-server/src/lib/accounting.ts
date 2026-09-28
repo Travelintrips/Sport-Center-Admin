@@ -1221,6 +1221,7 @@ export async function createPublicMembershipAccountingEntry(
   const period      = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids         = await getPublicIds();
+  const paymentAccount = await getPublicPaymentAccount(pool, "Transfer Bank", "manual");
 
   const entryResult = await pool.query(
     `INSERT INTO public.accounting_entries
@@ -1246,7 +1247,7 @@ export async function createPublicMembershipAccountingEntry(
       [
         entryId,
 
-        ids.coaKas,         `Penerimaan member gym ${refNumber}`, grandTotal,
+        paymentAccount.id,         `Penerimaan member gym ${refNumber}`, grandTotal,
         ids.coaPendapatan,  `Pendapatan member gym ${refNumber}`, dpp,
         ids.coaPpnKeluaran, `PPN Keluaran member gym ${refNumber}`, ppnAmount,
       ]
@@ -1270,7 +1271,7 @@ export async function createPublicMembershipAccountingEntry(
       `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
         ($1,$2,$3,$4,0),
         ($1,$5,$6,0,$4)`,
-      [entryId, ids.coaKas, `Penerimaan member gym ${refNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan member gym ${refNumber}`]
+      [entryId, paymentAccount.id, `Penerimaan member gym ${refNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan member gym ${refNumber}`]
     );
   }
 
@@ -1301,6 +1302,7 @@ export async function createPublicInvoiceAccountingEntry(
   const period      = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids         = await getPublicIds();
+  const paymentAccount = await getPublicPaymentAccount(pool, "Transfer Bank", "manual");
   if (hasPph && !ids.coaPphDipotong) {
     throw new Error("[accounting] COA PPh Dipotong Pelanggan tidak ditemukan di public chart_of_accounts.");
   }
@@ -1321,7 +1323,7 @@ export async function createPublicInvoiceAccountingEntry(
   const entryId = Number(entryResult.rows[0]?.id);
 
   const lines = [
-    { accountId: ids.coaKas, description: `Penerimaan invoice ${invoiceNumber}`, debit: cashAmount, credit: 0 },
+    { accountId: paymentAccount.id, description: `Penerimaan invoice ${invoiceNumber}`, debit: cashAmount, credit: 0 },
     ...(hasPph ? [{ accountId: ids.coaPphDipotong!, description: `PPh dipotong invoice ${invoiceNumber}`, debit: pphAmount, credit: 0 }] : []),
     { accountId: ids.coaPendapatan, description: `Pendapatan invoice ${invoiceNumber}`, debit: 0, credit: netRevenue },
     ...(hasPpn ? [{ accountId: ids.coaPpnKeluaran, description: `PPN Keluaran invoice ${invoiceNumber}`, debit: 0, credit: ppnAmount }] : []),
