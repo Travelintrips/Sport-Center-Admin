@@ -100,7 +100,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
   });
 
   it("greets a salutation and opens the facility list when the customer replies Booking", async () => {
-    const outboundStart = fetchMock.mock.calls.length;
+    const outboundStart = fonnteSendCalls(fetchMock).length;
 
     const greetingResponse = await request
       .post("/api/wa/fonnte/webhook")
@@ -113,7 +113,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-booking-regression-1",
       });
     expect(greetingResponse.status).toBe(200);
-    const greetingBody = fetchMock.mock.calls[outboundStart]?.[1]?.body as FormData;
+    const greetingBody = fonnteSendCalls(fetchMock)[outboundStart]?.[1]?.body as FormData;
     expect(String(greetingBody?.get("message"))).toBe(
       "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
       "Mau booking fasilitas, cukup ketik Booking.",
@@ -130,7 +130,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-booking-regression-2",
       });
     expect(bookingResponse.status).toBe(200);
-    const facilityListBody = fetchMock.mock.calls[outboundStart + 1]?.[1]?.body as FormData;
+    const facilityListBody = fonnteSendCalls(fetchMock)[outboundStart + 1]?.[1]?.body as FormData;
     const facilityListMessage = String(facilityListBody?.get("message") ?? "");
     expect(facilityListMessage).toContain("Fasilitas tersedia:");
     expect(facilityListMessage).toContain("Sebutkan nama fasilitas");
@@ -145,7 +145,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
 
   it("routes Court A → lanjut di sini → Tri → besok → 2 jam to outbound availability before webhook ACK", async () => {
     const setupMessages = ["Court A", "lanjut di sini", "Tri", "besok (tanggal 22)"];
-    const setupOutboundStart = fetchMock.mock.calls.length;
+    const setupOutboundStart = fonnteSendCalls(fetchMock).length;
 
     for (const [index, message] of setupMessages.entries()) {
       const response = await request
@@ -159,7 +159,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
           id: `mina-duration-regression-${index}`,
         });
       expect(response.status).toBe(200);
-      await waitFor(() => fetchMock.mock.calls.length >= setupOutboundStart + index + 1);
+      await waitFor(() => fonnteSendCalls(fetchMock).length >= setupOutboundStart + index + 1);
     }
 
     let releaseFinalSend!: () => void;
@@ -188,7 +188,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
       });
 
     await waitFor(() =>
-      fetchMock.mock.calls.length >= setupOutboundStart + setupMessages.length + 1,
+      fonnteSendCalls(fetchMock).length >= setupOutboundStart + setupMessages.length + 1,
     );
     expect(webhookSettled).toBe(false);
 
@@ -196,7 +196,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
     const response = await finalWebhook;
     expect(response.status).toBe(200);
 
-    const sentMessages = fetchMock.mock.calls.map(([, init]: [unknown, RequestInit?]) => {
+    const sentMessages = fonnteSendCalls(fetchMock).map(([, init]: [unknown, RequestInit?]) => {
       const body = init?.body;
       if (body instanceof FormData) {
         return {
@@ -247,7 +247,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
 
     // Fonnte may send Mina's own greeting back as an inbound webhook. It must
     // not be routed through the active ask_time session as customer input.
-    const outboundBeforeEcho = fetchMock.mock.calls.length;
+    const outboundBeforeEcho = fonnteSendCalls(fetchMock).length;
     const echoResponse = await request
       .post("/api/wa/fonnte/webhook")
       .send({
@@ -259,9 +259,15 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-echo-regression",
       });
     expect(echoResponse.status).toBe(200);
-    expect(fetchMock.mock.calls.length).toBe(outboundBeforeEcho);
+    expect(fonnteSendCalls(fetchMock).length).toBe(outboundBeforeEcho);
   }, 30_000);
 });
+
+function fonnteSendCalls(fetchMock: any): Array<[unknown, RequestInit?]> {
+  return (fetchMock.mock.calls as Array<[unknown, RequestInit?]>).filter(([url]) =>
+    String(url).startsWith("https://api.fonnte.com/send"),
+  );
+}
 
 async function waitFor(predicate: () => boolean): Promise<void> {
   const deadline = Date.now() + 10_000;
