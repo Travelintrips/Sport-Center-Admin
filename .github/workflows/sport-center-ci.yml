@@ -1,9 +1,12 @@
 name: Sport Center CI
 
 on:
+  workflow_dispatch:
+
   push:
     branches:
       - main
+
   pull_request:
     branches:
       - main
@@ -27,7 +30,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-            version: 10.33.0
+          version: 10.33.0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,6 +41,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check deprecated dependency chain
+        run: |
+          echo "=== node-fetch ==="
+          pnpm why node-fetch || true
+
+          echo "=== whatwg-url ==="
+          pnpm why whatwg-url || true
+
+          echo "=== tr46 ==="
+          pnpm why tr46 || true
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -46,3 +60,16 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Trace Node deprecation warnings
+        env:
+          NODE_OPTIONS: --trace-deprecation
+        run: |
+          timeout 20s pnpm start || EXIT_CODE=$?
+
+          if [ "${EXIT_CODE:-0}" = "124" ]; then
+            echo "Server stayed running during diagnostic window"
+            exit 0
+          fi
+
+          exit ${EXIT_CODE:-0}
