@@ -124,3 +124,79 @@ export async function sendCstWaGatewayGroupMessage(input: {
   }
   return { status, messageId };
 }
+
+
+export function getCstWaGatewayMinaDeviceId(): string {
+  return String(process.env.CST_WA_MINA_DEVICE_ID ?? "03").trim() || "03";
+}
+
+export async function sendCstWaGatewayDirectMessage(input: {
+  deviceId?: string;
+  to: string;
+  text: string;
+  idempotencyKey: string;
+}): Promise<CstWaGatewaySendResult> {
+  const response = await gatewayFetch("/v1/messages", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": input.idempotencyKey,
+    },
+    body: JSON.stringify({
+      deviceId: input.deviceId ?? getCstWaGatewayMinaDeviceId(),
+      to: input.to,
+      type: "text",
+      text: input.text,
+    }),
+  });
+
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  if (!response.ok) {
+    const code = typeof body?.error === "string" ? body.error : `HTTP_${response.status}`;
+    throw new Error(`CST WA Gateway direct send gagal: ${code}`);
+  }
+
+  const messageId = typeof body?.messageId === "string" ? body.messageId : "";
+  const status = typeof body?.status === "string" ? body.status : "";
+  if (!messageId || !status) {
+    throw new Error("CST WA Gateway direct send response tidak valid");
+  }
+  return { status, messageId };
+}
+
+export type CstWaGatewayInboundEvent = {
+  deliveryId: string;
+  eventType: string;
+  companyId: string;
+  deviceId: string;
+  payload: unknown;
+  createdAt: string;
+};
+
+export async function getCstWaGatewayInboundEvent(
+  eventId: string,
+): Promise<CstWaGatewayInboundEvent> {
+  const response = await gatewayFetch(`/v1/inbound-events/${encodeURIComponent(eventId)}`);
+  if (!response.ok) {
+    throw new Error(`CST WA Gateway inbound verification gagal: HTTP ${response.status}`);
+  }
+
+  const body = await response.json() as Record<string, unknown>;
+  if (
+    typeof body.deliveryId !== "string" ||
+    typeof body.eventType !== "string" ||
+    typeof body.companyId !== "string" ||
+    typeof body.deviceId !== "string" ||
+    typeof body.createdAt !== "string"
+  ) {
+    throw new Error("CST WA Gateway inbound verification response tidak valid");
+  }
+
+  return {
+    deliveryId: body.deliveryId,
+    eventType: body.eventType,
+    companyId: body.companyId,
+    deviceId: body.deviceId,
+    payload: body.payload,
+    createdAt: body.createdAt,
+  };
+}
