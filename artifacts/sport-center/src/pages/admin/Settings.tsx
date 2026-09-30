@@ -12,8 +12,22 @@ import { useToast } from "@/hooks/use-toast";
 import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
+type WhatsAppGatewayGroup = {
+  id: string;
+  deviceId: string;
+  jid: string;
+  name: string;
+  subject: string | null;
+  participantCount: number;
+  isActive: boolean;
+};
+
 type WhatsAppStatus = {
-  admin: { tokenConfigured: boolean; tokenSource: "settings" | "environment" | "missing" };
+  admin: {
+    tokenConfigured: boolean;
+    tokenSource: "settings" | "environment" | "missing";
+    groupProvider: "fonnte" | "cst_gateway";
+  };
   mina: {
     deviceNumber: string | null;
     deviceSource: "settings" | "environment" | "missing";
@@ -21,6 +35,16 @@ type WhatsAppStatus = {
     tokenSource: "settings" | "environment" | "missing";
     active: boolean;
     inboundDeviceValidation: string;
+  };
+  gateway: {
+    configured: boolean;
+    reachable: boolean;
+    baseUrl: string | null;
+    clientId: "sport-center";
+    selectedGroupId: string | null;
+    selectedGroup: WhatsAppGatewayGroup | null;
+    groups: WhatsAppGatewayGroup[];
+    error: string | null;
   };
 };
 
@@ -467,7 +491,7 @@ SELAMAT BEROLAHRAGA 🏆`}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Pastikan <strong>FONNTE_TOKEN</strong> dan <strong>ADMIN_WA_GROUP</strong> sudah dikonfigurasi di Secrets agar rekap terkirim ke grup WA.
+          Rekap grup mengikuti provider pada Pengaturan WhatsApp. Jika CST WA Gateway aktif, rekap dikirim melalui client <strong>sport-center</strong> ke grup yang dipilih.
         </p>
       </CardContent>
     </Card>
@@ -490,7 +514,15 @@ export default function AdminSettings() {
     paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "", fonnteCustomerToken: "", fonnteCustomerDevice: "", customerServiceWhatsapp: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+    fonnteToken: "",
+    fonnteCustomerToken: "",
+    fonnteCustomerDevice: "",
+    customerServiceWhatsapp: "",
+    fonnteAdminWa: "",
+    adminWaPhones: "",
+    adminGroupProvider: "fonnte" as "fonnte" | "cst_gateway",
+    waGatewayAdminGroupId: "",
+    appUrl: "",
   });
   const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -522,6 +554,8 @@ export default function AdminSettings() {
         customerServiceWhatsapp: (settings as any).customerServiceWhatsapp ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
+        adminGroupProvider: ((settings as any).adminGroupProvider ?? "fonnte") as "fonnte" | "cst_gateway",
+        waGatewayAdminGroupId: (settings as any).waGatewayAdminGroupId ?? "",
         appUrl: (settings as any).appUrl ?? "",
       });
       setPaymentDomain((settings as any).paymentDomain ?? "");
@@ -557,8 +591,16 @@ export default function AdminSettings() {
     e.preventDefault();
     const payload: any = { ...waForm };
     payload.customerServiceWhatsapp = waForm.customerServiceWhatsapp.trim() || null;
+    payload.waGatewayAdminGroupId = waForm.waGatewayAdminGroupId.trim() || null;
+    if (waForm.adminGroupProvider === "cst_gateway") {
+      payload.adminWaPhones = waForm.adminWaPhones
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value && !value.endsWith("@g.us"))
+        .join(",");
+    }
     Object.keys(payload).forEach(k => {
-      if (k !== "customerServiceWhatsapp" && !payload[k]) delete payload[k];
+      if (!["customerServiceWhatsapp", "waGatewayAdminGroupId"].includes(k) && !payload[k]) delete payload[k];
     });
     updateMutation.mutate({ data: payload });
   };
@@ -723,11 +765,10 @@ export default function AdminSettings() {
               <div>
                 <CardTitle className="text-base font-bold flex items-center gap-2">
                   <MessageCircle size={18} className="text-green-600" />
-                  Pengaturan Notifikasi WhatsApp (Fonnte)
+                  Pengaturan Notifikasi WhatsApp
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Konfigurasi token Fonnte dan nomor admin penerima notifikasi otomatis.
-                  Jika kosong, sistem pakai nilai dari environment variable.
+                  Customer/Mina dan admin individual tetap dapat memakai Fonnte. Notifikasi grup admin dapat dialihkan ke CST WA Gateway tanpa mengekspos token gateway ke browser.
                 </p>
               </div>
               {waStatus?.admin.tokenConfigured ? (
@@ -863,16 +904,88 @@ export default function AdminSettings() {
               </div>
 
               <div className="space-y-2">
-                <Label>Nomor Admin &amp; Grup WA</Label>
+                <Label>Nomor Admin Individu</Label>
                 <Input
                   value={waForm.adminWaPhones}
                   onChange={(e) => setWaForm(f => ({ ...f, adminWaPhones: e.target.value }))}
-                  placeholder="6281234,6289876,1203456789-1234567890@g.us"
+                  placeholder="6281234,6289876"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Pisahkan dengan koma. Bisa nomor individu (<strong>628xxx</strong>) atau ID grup WA (<strong>1234567890-123456@g.us</strong>).
-                  Semua penerima ini akan mendapat notifikasi booking baru, bukti bayar, dll.
+                  Pisahkan dengan koma. Nomor individual tetap dikirim melalui Fonnte. ID grup lama <strong>@g.us</strong> otomatis diabaikan saat CST WA Gateway aktif.
                 </p>
+              </div>
+
+              <div className="md:col-span-2 rounded-lg border p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="font-semibold text-sm">Notifikasi Grup Admin</p>
+                    <p className="text-xs text-muted-foreground">
+                      Jalur grup dipisahkan dari Fonnte agar tidak terjadi pengiriman ganda.
+                    </p>
+                  </div>
+                  {waForm.adminGroupProvider === "cst_gateway" ? (
+                    waStatus?.gateway.configured && waStatus?.gateway.reachable ? (
+                      <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Gateway siap
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
+                        <AlertCircle size={12} /> Gateway belum siap
+                      </Badge>
+                    )
+                  ) : (
+                    <Badge variant="outline">Fonnte legacy</Badge>
+                  )}
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Provider Grup</Label>
+                    <select
+                      value={waForm.adminGroupProvider}
+                      onChange={(e) => setWaForm(f => ({
+                        ...f,
+                        adminGroupProvider: e.target.value as "fonnte" | "cst_gateway",
+                      }))}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="fonnte">Fonnte (legacy)</option>
+                      <option value="cst_gateway">CST WA Gateway</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Grup CST WA Gateway</Label>
+                    <select
+                      value={waForm.waGatewayAdminGroupId}
+                      onChange={(e) => setWaForm(f => ({ ...f, waGatewayAdminGroupId: e.target.value }))}
+                      disabled={waForm.adminGroupProvider !== "cst_gateway" || !waStatus?.gateway.reachable}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+                    >
+                      <option value="">Pilih grup...</option>
+                      {(waStatus?.gateway.groups ?? []).map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name} — Device {group.deviceId} ({group.participantCount} anggota)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {waForm.adminGroupProvider === "cst_gateway" && (
+                  <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+                    <p>Gateway: <strong>{waStatus?.gateway.baseUrl ?? "belum dikonfigurasi"}</strong></p>
+                    <p>API Client: <strong>{waStatus?.gateway.clientId ?? "sport-center"}</strong></p>
+                    <p>
+                      Grup aktif: <strong>{waStatus?.gateway.selectedGroup?.name ?? "pilih grup lalu simpan"}</strong>
+                      {waStatus?.gateway.selectedGroup ? ` · Device ${waStatus.gateway.selectedGroup.deviceId}` : ""}
+                    </p>
+                    {waStatus?.gateway.error && (
+                      <p className="text-yellow-700">Status gateway: {waStatus.gateway.error}</p>
+                    )}
+                    <p>Token CST WA Gateway disimpan hanya di environment server dan tidak pernah dikirim ke browser.</p>
+                  </div>
+                )}
               </div>
 
               <div className="md:col-span-2 space-y-2">
