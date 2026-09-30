@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import {
   getCstWaGatewayPublicConfig,
+  getCstWaGatewayInboundEvent,
+  getCstWaGatewayMinaDeviceId,
   listCstWaGatewayGroups,
+  sendCstWaGatewayDirectMessage,
   sendCstWaGatewayGroupMessage,
 } from "./cstWaGateway";
 
@@ -78,4 +81,62 @@ describe("CST WA Gateway client", () => {
       text: "test",
     });
   });
+
+  it("uses a stable Mina device id so changing the paired phone does not change application routing", () => {
+    const previous = process.env.CST_WA_MINA_DEVICE_ID;
+    process.env.CST_WA_MINA_DEVICE_ID = "03";
+    expect(getCstWaGatewayMinaDeviceId()).toBe("03");
+    if (previous === undefined) delete process.env.CST_WA_MINA_DEVICE_ID;
+    else process.env.CST_WA_MINA_DEVICE_ID = previous;
+  });
+
+  it("sends Mina direct replies through device 03", async () => {
+    process.env.CST_WA_GATEWAY_URL = "https://wa.cstlogistic.co.id";
+    process.env.CST_WA_GATEWAY_TOKEN = "secret-token";
+    process.env.CST_WA_MINA_DEVICE_ID = "03";
+    const fetchMock = jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        status: "queued",
+        messageId: "11111111-1111-4111-8111-111111111111",
+      }), { status: 202, headers: { "Content-Type": "application/json" } }),
+    );
+
+    await sendCstWaGatewayDirectMessage({
+      to: "6281111111111",
+      text: "Halo dari Mina",
+      idempotencyKey: "mina-test",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://wa.cstlogistic.co.id/v1/messages");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      deviceId: "03",
+      to: "6281111111111",
+      type: "text",
+      text: "Halo dari Mina",
+    });
+  });
+
+  it("verifies inbound events through the authenticated gateway callback endpoint", async () => {
+    process.env.CST_WA_GATEWAY_URL = "https://wa.cstlogistic.co.id";
+    process.env.CST_WA_GATEWAY_TOKEN = "secret-token";
+    const fetchMock = jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        deliveryId: "22222222-2222-4222-8222-222222222222",
+        eventType: "message.received",
+        companyId: "1",
+        deviceId: "03",
+        payload: { senderPhone: "6281111111111" },
+        createdAt: "2026-09-30T06:00:00.000Z",
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    const event = await getCstWaGatewayInboundEvent("22222222-2222-4222-8222-222222222222");
+    expect(event.deviceId).toBe("03");
+    expect(event.companyId).toBe("1");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://wa.cstlogistic.co.id/v1/inbound-events/22222222-2222-4222-8222-222222222222",
+    );
+  });
+
 });
