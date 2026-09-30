@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "path";
-import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
+import { randomUUID, randomBytes, createHmac, createHash, timingSafeEqual } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { db, auditLogsTable, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
@@ -72,6 +72,10 @@ import {
 } from "../lib/waSentTracker";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import {
+  sendCstWaGatewayTextMessage,
+  verifyCstWaGatewayWebhookSignature,
+} from "../lib/cstWaGateway";
+import {
   getFonnteConfig,
   selectFonnteToken,
   validateMinaFonnteWebhookDevice,
@@ -111,7 +115,13 @@ type FonnteReplyContext = {
   inboxId?: string;
 };
 
+type GatewayReplyContext = {
+  deviceId: string;
+  providerMessageId?: string;
+};
+
 const fonnteReplyContext = new AsyncLocalStorage<FonnteReplyContext>();
+const gatewayReplyContext = new AsyncLocalStorage<GatewayReplyContext>();
 
 function resolveFonnteInboxId(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
