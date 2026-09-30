@@ -2231,6 +2231,83 @@ function sanitizeFonnteFreePackageMessage(message: string): string {
 
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<boolean> {
   if (!phone) return false;
+
+  const gatewayConfig = getCstWaGatewayPublicConfig();
+  const useGatewayForMina =
+    useCustomerToken &&
+    gatewayConfig.configured &&
+    process.env.CST_WA_MINA_PROVIDER !== "fonnte";
+
+  if (useGatewayForMina) {
+    if (!allowWhatsAppProviderSend({
+      channel: "mina",
+      recipient: phone,
+      customerTokenConfigured: true,
+    })) return true;
+
+    const chunks = splitFonnteTextMessage(message, 1200);
+    if (chunks.length === 0) return false;
+    const deviceId = getCstWaGatewayMinaDeviceId();
+
+    for (const [chunkIndex, chunk] of chunks.entries()) {
+      trackSentMessage(chunk);
+      const idempotencyKey =
+        "mina:" +
+        createHash("sha256")
+          .update(`${deviceId}:${phone}:${chunkIndex}:${chunk}`)
+          .digest("hex")
+          .slice(0, 48);
+
+      try {
+        const queued = await sendCstWaGatewayDirectMessage({
+          deviceId,
+          to: phone,
+          text: chunk,
+          idempotencyKey,
+        });
+        logger.info(
+          {
+            channel: "mina",
+            provider: "cst_gateway",
+            recipient: phone,
+            deviceId,
+            messageId: queued.messageId,
+            status: queued.status,
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+          "[wa] CST WA Gateway outbound queued",
+        );
+      } catch (err) {
+        logger.error(
+          {
+            channel: "mina",
+            provider: "cst_gateway",
+            recipient: phone,
+            deviceId,
+            error: err instanceof Error ? err.message : String(err),
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+          "[wa] CST WA Gateway outbound failed",
+        );
+        await logAudit({
+          action: "mina_reply_gateway_error",
+          entity: "wa_outbound",
+          after: {
+            recipient: phone,
+            deviceId,
+            error: err instanceof Error ? err.message : String(err),
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+        }).catch(() => {});
+        return false;
+      }
+    }
+    return true;
+  }
+
   const fonnte = await getFonnteConfig();
   if (useCustomerToken && !fonnte.customerDevice) {
     logger.warn("[wa] Device Mina/customer belum dikonfigurasi; pesan customer tidak dikirim");
