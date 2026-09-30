@@ -115,6 +115,7 @@ const router = Router();
 
 type FonnteReplyContext = {
   inboxId?: string;
+  inboundMessageId?: string;
 };
 
 const fonnteReplyContext = new AsyncLocalStorage<FonnteReplyContext>();
@@ -2251,10 +2252,12 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
 
     for (const [chunkIndex, chunk] of chunks.entries()) {
       trackSentMessage(chunk);
+      const inboundMessageId = fonnteReplyContext.getStore()?.inboundMessageId;
+      const deliveryScope = inboundMessageId || randomUUID();
       const idempotencyKey =
         "mina:" +
         createHash("sha256")
-          .update(`${deviceId}:${phone}:${chunkIndex}:${chunk}`)
+          .update(`${deviceId}:${phone}:${deliveryScope}:${chunkIndex}:${chunk}`)
           .digest("hex")
           .slice(0, 48);
 
@@ -5531,7 +5534,13 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     if (!sender) return;
 
     const inboundInboxId = resolveFonnteInboxId(req.body);
-    fonnteReplyContext.enterWith({ inboxId: inboundInboxId });
+    const inboundContextMessageId = String(
+      req.body.id ?? req.body.message_id ?? req.body.msg_id ?? req.body.msgId ?? "",
+    ).trim() || undefined;
+    fonnteReplyContext.enterWith({
+      inboxId: inboundInboxId,
+      inboundMessageId: inboundContextMessageId,
+    });
 
     const phone = cleanPhone(String(sender));
     const msg = String(message).trim();
