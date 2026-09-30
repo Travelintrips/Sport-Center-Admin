@@ -3924,6 +3924,11 @@ components:
           type: ["string", "null"]
         adminWaPhones:
           type: ["string", "null"]
+        adminGroupProvider:
+          type: string
+          enum: [fonnte, cst_gateway]
+        waGatewayAdminGroupId:
+          type: ["string", "null"]
         appUrl:
           type: ["string", "null"]
 
@@ -3970,6 +3975,11 @@ components:
           type: string
         adminWaPhones:
           type: string
+        adminGroupProvider:
+          type: string
+          enum: [fonnte, cst_gateway]
+        waGatewayAdminGroupId:
+          type: ["string", "null"]
         appUrl:
           type: string
 
