@@ -8,10 +8,23 @@ import { getBaseUrl } from "./appUrl";
 import { getOrCreatePaymentProofShortUrl } from "./paymentProofShortLink";
 import { allowWhatsAppProviderSend, getWhatsAppDispatchMode } from "./whatsappSafety";
 import { getFonnteConfig } from "./fonnteConfig";
+import { createHash } from "node:crypto";
+import { sendCstWaGatewayGroupMessage } from "./cstWaGateway";
 
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
 const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
 const ENV_ADMIN_WA_GROUP = process.env.ADMIN_WA_GROUP || "";
+const ENV_ADMIN_GROUP_PROVIDER = process.env.CST_WA_ADMIN_GROUP_PROVIDER?.trim() || "";
+const ENV_GATEWAY_ADMIN_GROUP_ID = process.env.CST_WA_GATEWAY_ADMIN_GROUP_ID?.trim() || "";
+
+type AdminGroupProvider = "fonnte" | "cst_gateway";
+
+function resolveAdminGroupProvider(value: unknown): AdminGroupProvider {
+  const configured = String(value ?? "").trim();
+  if (configured === "cst_gateway") return "cst_gateway";
+  if (configured === "fonnte") return "fonnte";
+  return ENV_ADMIN_GROUP_PROVIDER === "cst_gateway" ? "cst_gateway" : "fonnte";
+}
 
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
@@ -24,6 +37,8 @@ async function getWaConfig(): Promise<{
   customerToken: string;
   customerDevice: string;
   adminPhones: string[];
+  adminGroupProvider: AdminGroupProvider;
+  waGatewayAdminGroupId: string;
 }> {
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
@@ -45,6 +60,8 @@ async function getWaConfig(): Promise<{
       customerToken: fonnte.customerToken,
       customerDevice: fonnte.customerDevice,
       adminPhones,
+      adminGroupProvider: resolveAdminGroupProvider(s?.adminGroupProvider),
+      waGatewayAdminGroupId: String(s?.waGatewayAdminGroupId ?? "").trim() || ENV_GATEWAY_ADMIN_GROUP_ID,
     };
   } catch {
     const adminPhones = ENV_ADMIN_WA_PHONES
@@ -62,6 +79,8 @@ async function getWaConfig(): Promise<{
       customerToken: fonnte.customerToken,
       customerDevice: fonnte.customerDevice,
       adminPhones,
+      adminGroupProvider: resolveAdminGroupProvider(undefined),
+      waGatewayAdminGroupId: ENV_GATEWAY_ADMIN_GROUP_ID,
     };
   }
 }
@@ -164,20 +183,59 @@ async function sendWA(
 }
 
 export async function sendWAToAdmins(message: string): Promise<void> {
-  const { adminPhones } = await getWaConfig();
+  const { adminPhones, adminGroupProvider, waGatewayAdminGroupId } = await getWaConfig();
   const isDev = process.env.NODE_ENV !== "production";
-  // Deduplikasi: normalize nomor lalu kirim sekali per nomor unik
+
   const seen = new Set<string>();
   for (const phone of adminPhones) {
     const clean = cleanPhoneNumber(phone);
     if (!clean || seen.has(clean)) continue;
-    // Di non-production: skip grup WA (format XXXXXXXX@g.us) agar notif dev tidak masuk grup produksi
-    if (isDev && clean.endsWith("@g.us")) {
-      logger.info({ target: clean }, "[WA] DEV — skip kirim ke grup WA (hanya production)");
+    const isGroup = clean.endsWith("@g.us");
+
+    if (adminGroupProvider === "cst_gateway" && isGroup) {
+      logger.info({ target: clean }, "[WA] grup Fonnte dilewati karena CST WA Gateway aktif");
       continue;
     }
+    if (isDev && isGroup) {
+      logger.info({ target: clean }, "[WA] DEV — skip kirim ke grup WA produksi");
+      continue;
+    }
+
     seen.add(clean);
     await sendWA(phone, message);
+  }
+
+  if (adminGroupProvider !== "cst_gateway") return;
+
+  if (isDev) {
+    logger.info("[WA] DEV — skip kirim CST WA Gateway ke grup produksi");
+    return;
+  }
+
+  if (!waGatewayAdminGroupId) {
+    logger.error("[WA] CST WA Gateway aktif tetapi groupId admin belum dikonfigurasi; tidak fallback ke Fonnte");
+    return;
+  }
+
+  const idempotencyKey =
+    "sport-center-admin:" +
+    createHash("sha256").update(message).digest("hex").slice(0, 48);
+
+  try {
+    const queued = await sendCstWaGatewayGroupMessage({
+      groupId: waGatewayAdminGroupId,
+      text: message,
+      idempotencyKey,
+    });
+    logger.info(
+      { messageId: queued.messageId, status: queued.status, groupId: waGatewayAdminGroupId },
+      "[WA] notifikasi grup admin masuk queue CST WA Gateway",
+    );
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), groupId: waGatewayAdminGroupId },
+      "[WA] gagal mengirim notifikasi grup via CST WA Gateway; tidak fallback ke Fonnte",
+    );
   }
 }
 
