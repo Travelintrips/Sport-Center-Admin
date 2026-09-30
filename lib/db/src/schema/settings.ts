@@ -20,6 +20,8 @@ export const settingsTable = scSchema.table("sport_settings", {
   fonnteToken: text("fonnte_token"),
   fonnteCustomerToken: text("fonnte_customer_token"),
   fonnteCustomerDevice: text("fonnte_customer_device"),
+  minaWaProvider: text("mina_wa_provider").notNull().default("fonnte"),
+  waGatewayMinaDeviceId: text("wa_gateway_mina_device_id"),
   customerServiceWhatsapp: text("customer_service_whatsapp"),
   minaWebChatEnabled: boolean("mina_web_chat_enabled").notNull().default(true),
   minaWebChatGreeting: text("mina_web_chat_greeting").notNull().default("Halo! Saya Mina, asisten Sport Center. Ada yang bisa saya bantu?"),
