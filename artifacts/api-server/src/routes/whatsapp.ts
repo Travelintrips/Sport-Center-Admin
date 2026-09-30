@@ -2233,6 +2233,31 @@ function sanitizeFonnteFreePackageMessage(message: string): string {
     .trim();
 }
 
+type MinaWaProvider = "fonnte" | "cst_gateway";
+
+async function getMinaWaTransportConfig(): Promise<{
+  provider: MinaWaProvider;
+  gatewayDeviceId: string;
+}> {
+  try {
+    const [settings] = await db.select({
+      minaWaProvider: settingsTable.minaWaProvider,
+      waGatewayMinaDeviceId: settingsTable.waGatewayMinaDeviceId,
+    }).from(settingsTable).limit(1);
+    return {
+      provider: settings?.minaWaProvider === "cst_gateway" ? "cst_gateway" : "fonnte",
+      gatewayDeviceId:
+        String(settings?.waGatewayMinaDeviceId ?? "").trim() ||
+        String(process.env.CST_WA_GATEWAY_MINA_DEVICE_ID ?? "").trim(),
+    };
+  } catch {
+    return {
+      provider: process.env.CST_WA_MINA_PROVIDER === "cst_gateway" ? "cst_gateway" : "fonnte",
+      gatewayDeviceId: String(process.env.CST_WA_GATEWAY_MINA_DEVICE_ID ?? "").trim(),
+    };
+  }
+}
+
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<boolean> {
   if (!phone) return false;
   const fonnte = await getFonnteConfig();
