@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 export type CstWaGatewayGroup = {
   id: string;
   deviceId: string;
@@ -123,4 +125,69 @@ export async function sendCstWaGatewayGroupMessage(input: {
     throw new Error("CST WA Gateway send response tidak valid");
   }
   return { status, messageId };
+}
+
+
+const CLIENT_WEBHOOK_DERIVATION_LABEL = "cst-wa-gateway:webhook:v1";
+
+function deriveClientWebhookSecret(token: string): string {
+  return crypto
+    .createHmac("sha256", token)
+    .update(CLIENT_WEBHOOK_DERIVATION_LABEL)
+    .digest("hex");
+}
+
+export function verifyCstWaGatewayWebhookSignature(
+  rawBody: Buffer,
+  signature: string | undefined,
+): boolean {
+  const token = gatewayToken();
+  const supplied = String(signature ?? "").trim().toLowerCase();
+  if (!token || !/^[0-9a-f]{64}$/.test(supplied) || rawBody.length === 0) return false;
+
+  const secret = deriveClientWebhookSecret(token);
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const left = Buffer.from(supplied, "hex");
+  const right = Buffer.from(expected, "hex");
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+async function parseSendResult(response: Response): Promise<CstWaGatewaySendResult> {
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  if (!response.ok) {
+    const code = typeof body?.error === "string" ? body.error : `HTTP_${response.status}`;
+    throw new Error(`CST WA Gateway send gagal: ${code}`);
+  }
+
+  const messageId = typeof body?.messageId === "string" ? body.messageId : "";
+  const status = typeof body?.status === "string" ? body.status : "";
+  if (!messageId || !status) {
+    throw new Error("CST WA Gateway send response tidak valid");
+  }
+  return { status, messageId };
+}
+
+export async function sendCstWaGatewayTextMessage(input: {
+  deviceId: string;
+  to: string;
+  text: string;
+  idempotencyKey: string;
+  replyToProviderMessageId?: string;
+}): Promise<CstWaGatewaySendResult> {
+  const response = await gatewayFetch("/v1/messages", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": input.idempotencyKey,
+    },
+    body: JSON.stringify({
+      deviceId: input.deviceId,
+      to: input.to,
+      type: "text",
+      text: input.text,
+      ...(input.replyToProviderMessageId
+        ? { replyToProviderMessageId: input.replyToProviderMessageId }
+        : {}),
+    }),
+  });
+  return parseSendResult(response);
 }
