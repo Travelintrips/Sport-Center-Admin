@@ -5419,6 +5419,86 @@ async function claimDistributedWebhook(
   });
 }
 
+const cstGatewayVerifiedRequests = new WeakSet<Request>();
+
+function unwrapGatewayMessageContent(message: any): Record<string, any> {
+  let content = message?.message;
+  for (let i = 0; i < 4; i += 1) {
+    if (!content || typeof content !== "object") return {};
+    if (content.ephemeralMessage?.message) {
+      content = content.ephemeralMessage.message;
+      continue;
+    }
+    if (content.viewOnceMessage?.message) {
+      content = content.viewOnceMessage.message;
+      continue;
+    }
+    if (content.viewOnceMessageV2?.message) {
+      content = content.viewOnceMessageV2.message;
+      continue;
+    }
+    break;
+  }
+  return content && typeof content === "object" ? content : {};
+}
+
+function normalizeCstGatewayInboundPayload(
+  eventId: string,
+  deviceId: string,
+  payload: unknown,
+): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, any>;
+  const message = root.message;
+  if (!message || typeof message !== "object") return null;
+
+  const sender = String(
+    root.senderPhone ??
+    root.senderPhoneJid ??
+    message.key?.participant ??
+    message.key?.remoteJid ??
+    "",
+  ).replace(/@.*$/, "").replace(/\D/g, "");
+  if (!sender) return null;
+
+  const content = unwrapGatewayMessageContent(message);
+  let text = "";
+  let type = "text";
+
+  if (typeof content.conversation === "string") {
+    text = content.conversation;
+  } else if (typeof content.extendedTextMessage?.text === "string") {
+    text = content.extendedTextMessage.text;
+  } else if (content.imageMessage) {
+    type = "image";
+    text = String(content.imageMessage.caption ?? "");
+  } else if (content.videoMessage) {
+    type = "video";
+    text = String(content.videoMessage.caption ?? "");
+  } else if (content.documentMessage) {
+    type = "document";
+    text = String(content.documentMessage.caption ?? content.documentMessage.fileName ?? "");
+  } else if (content.audioMessage) {
+    type = "audio";
+  } else if (content.stickerMessage) {
+    type = "sticker";
+  } else if (typeof content.buttonsResponseMessage?.selectedDisplayText === "string") {
+    text = content.buttonsResponseMessage.selectedDisplayText;
+  } else if (typeof content.listResponseMessage?.title === "string") {
+    text = content.listResponseMessage.title;
+  }
+
+  return {
+    sender,
+    message: text,
+    name: String(message.pushName ?? root.senderName ?? ""),
+    id: String(message.key?.id ?? eventId),
+    type,
+    device: deviceId,
+    cstGatewayEventId: eventId,
+  };
+}
+
 const handleFonnteWebhook = async (req: Request, res: Response) => {
   // Keep the webhook request open until Mina has finished processing the
   // inbound message. Replit Autoscale can suspend work after an HTTP response
@@ -5430,18 +5510,20 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
   try {
     req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
 
-    const deviceCheck = await validateMinaFonnteWebhookDevice(req.body);
-    if (!deviceCheck.accepted) {
-      req.log?.warn?.(
-        { providedDevice: deviceCheck.providedDevice },
-        "[wa-webhook] inbound device is not the configured Mina device; message ignored",
-      );
-      await logAudit({
-        action: "mina_webhook_device_rejected",
-        entity: "wa_session",
-        after: { providedDevice: deviceCheck.providedDevice },
-      });
-      return;
+    if (!cstGatewayVerifiedRequests.has(req)) {
+      const deviceCheck = await validateMinaFonnteWebhookDevice(req.body);
+      if (!deviceCheck.accepted) {
+        req.log?.warn?.(
+          { providedDevice: deviceCheck.providedDevice },
+          "[wa-webhook] inbound device is not the configured Mina device; message ignored",
+        );
+        await logAudit({
+          action: "mina_webhook_device_rejected",
+          entity: "wa_session",
+          after: { providedDevice: deviceCheck.providedDevice },
+        });
+        return;
+      }
     }
 
     if (isDuplicateWebhook(req.body)) return;
@@ -5809,6 +5891,50 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     }
   }
 };
+
+router.post("/wa/cst-gateway/webhook", async (req: Request, res: Response) => {
+  const eventId = String(req.header("x-cst-wa-event-id") ?? "").trim();
+  if (!eventId) {
+    res.status(401).json({ error: "MISSING_GATEWAY_EVENT_ID" });
+    return;
+  }
+
+  try {
+    const event = await getCstWaGatewayInboundEvent(eventId);
+    const expectedDeviceId = getCstWaGatewayMinaDeviceId();
+
+    if (event.eventType !== "message.received" || event.deviceId !== expectedDeviceId) {
+      await logAudit({
+        action: "mina_gateway_event_ignored",
+        entity: "wa_session",
+        after: {
+          eventId,
+          eventType: event.eventType,
+          deviceId: event.deviceId,
+          expectedDeviceId,
+        },
+      }).catch(() => {});
+      res.status(202).json({ status: "ignored" });
+      return;
+    }
+
+    const normalized = normalizeCstGatewayInboundPayload(eventId, event.deviceId, event.payload);
+    if (!normalized) {
+      res.status(400).json({ error: "INVALID_GATEWAY_PAYLOAD" });
+      return;
+    }
+
+    req.body = normalized;
+    cstGatewayVerifiedRequests.add(req);
+    await handleFonnteWebhook(req, res);
+  } catch (error) {
+    logger.error(
+      { eventId, error: error instanceof Error ? error.message : String(error) },
+      "[wa/cst-gateway/webhook] inbound verification failed",
+    );
+    res.status(401).json({ error: "GATEWAY_EVENT_VERIFICATION_FAILED" });
+  }
+});
 
 router.post(["/wa/fonnte/webhook", "/webhook/fonnte", "/wa/webhook"], handleFonnteWebhook);
 
