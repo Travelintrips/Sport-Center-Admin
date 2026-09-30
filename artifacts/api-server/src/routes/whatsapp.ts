@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "path";
-import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
+import { randomUUID, randomBytes, createHmac, createHash, timingSafeEqual } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { db, auditLogsTable, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
@@ -71,6 +71,12 @@ import {
   isFonnteProviderEcho,
 } from "../lib/waSentTracker";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import {
+  getCstWaGatewayInboundEvent,
+  getCstWaGatewayMinaDeviceId,
+  getCstWaGatewayPublicConfig,
+  sendCstWaGatewayDirectMessage,
+} from "../lib/cstWaGateway";
 import {
   getFonnteConfig,
   selectFonnteToken,
@@ -2225,6 +2231,83 @@ function sanitizeFonnteFreePackageMessage(message: string): string {
 
 async function sendWAMsg(phone: string, message: string, useCustomerToken = false): Promise<boolean> {
   if (!phone) return false;
+
+  const gatewayConfig = getCstWaGatewayPublicConfig();
+  const useGatewayForMina =
+    useCustomerToken &&
+    gatewayConfig.configured &&
+    process.env.CST_WA_MINA_PROVIDER !== "fonnte";
+
+  if (useGatewayForMina) {
+    if (!allowWhatsAppProviderSend({
+      channel: "mina",
+      recipient: phone,
+      customerTokenConfigured: true,
+    })) return true;
+
+    const chunks = splitFonnteTextMessage(message, 1200);
+    if (chunks.length === 0) return false;
+    const deviceId = getCstWaGatewayMinaDeviceId();
+
+    for (const [chunkIndex, chunk] of chunks.entries()) {
+      trackSentMessage(chunk);
+      const idempotencyKey =
+        "mina:" +
+        createHash("sha256")
+          .update(`${deviceId}:${phone}:${chunkIndex}:${chunk}`)
+          .digest("hex")
+          .slice(0, 48);
+
+      try {
+        const queued = await sendCstWaGatewayDirectMessage({
+          deviceId,
+          to: phone,
+          text: chunk,
+          idempotencyKey,
+        });
+        logger.info(
+          {
+            channel: "mina",
+            provider: "cst_gateway",
+            recipient: phone,
+            deviceId,
+            messageId: queued.messageId,
+            status: queued.status,
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+          "[wa] CST WA Gateway outbound queued",
+        );
+      } catch (err) {
+        logger.error(
+          {
+            channel: "mina",
+            provider: "cst_gateway",
+            recipient: phone,
+            deviceId,
+            error: err instanceof Error ? err.message : String(err),
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+          "[wa] CST WA Gateway outbound failed",
+        );
+        await logAudit({
+          action: "mina_reply_gateway_error",
+          entity: "wa_outbound",
+          after: {
+            recipient: phone,
+            deviceId,
+            error: err instanceof Error ? err.message : String(err),
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunks.length,
+          },
+        }).catch(() => {});
+        return false;
+      }
+    }
+    return true;
+  }
+
   const fonnte = await getFonnteConfig();
   if (useCustomerToken && !fonnte.customerDevice) {
     logger.warn("[wa] Device Mina/customer belum dikonfigurasi; pesan customer tidak dikirim");
@@ -5336,6 +5419,86 @@ async function claimDistributedWebhook(
   });
 }
 
+const cstGatewayVerifiedRequests = new WeakSet<Request>();
+
+function unwrapGatewayMessageContent(message: any): Record<string, any> {
+  let content = message?.message;
+  for (let i = 0; i < 4; i += 1) {
+    if (!content || typeof content !== "object") return {};
+    if (content.ephemeralMessage?.message) {
+      content = content.ephemeralMessage.message;
+      continue;
+    }
+    if (content.viewOnceMessage?.message) {
+      content = content.viewOnceMessage.message;
+      continue;
+    }
+    if (content.viewOnceMessageV2?.message) {
+      content = content.viewOnceMessageV2.message;
+      continue;
+    }
+    break;
+  }
+  return content && typeof content === "object" ? content : {};
+}
+
+function normalizeCstGatewayInboundPayload(
+  eventId: string,
+  deviceId: string,
+  payload: unknown,
+): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, any>;
+  const message = root.message;
+  if (!message || typeof message !== "object") return null;
+
+  const sender = String(
+    root.senderPhone ??
+    root.senderPhoneJid ??
+    message.key?.participant ??
+    message.key?.remoteJid ??
+    "",
+  ).replace(/@.*$/, "").replace(/\D/g, "");
+  if (!sender) return null;
+
+  const content = unwrapGatewayMessageContent(message);
+  let text = "";
+  let type = "text";
+
+  if (typeof content.conversation === "string") {
+    text = content.conversation;
+  } else if (typeof content.extendedTextMessage?.text === "string") {
+    text = content.extendedTextMessage.text;
+  } else if (content.imageMessage) {
+    type = "image";
+    text = String(content.imageMessage.caption ?? "");
+  } else if (content.videoMessage) {
+    type = "video";
+    text = String(content.videoMessage.caption ?? "");
+  } else if (content.documentMessage) {
+    type = "document";
+    text = String(content.documentMessage.caption ?? content.documentMessage.fileName ?? "");
+  } else if (content.audioMessage) {
+    type = "audio";
+  } else if (content.stickerMessage) {
+    type = "sticker";
+  } else if (typeof content.buttonsResponseMessage?.selectedDisplayText === "string") {
+    text = content.buttonsResponseMessage.selectedDisplayText;
+  } else if (typeof content.listResponseMessage?.title === "string") {
+    text = content.listResponseMessage.title;
+  }
+
+  return {
+    sender,
+    message: text,
+    name: String(message.pushName ?? root.senderName ?? ""),
+    id: String(message.key?.id ?? eventId),
+    type,
+    device: deviceId,
+    cstGatewayEventId: eventId,
+  };
+}
+
 const handleFonnteWebhook = async (req: Request, res: Response) => {
   // Keep the webhook request open until Mina has finished processing the
   // inbound message. Replit Autoscale can suspend work after an HTTP response
@@ -5347,18 +5510,20 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
   try {
     req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
 
-    const deviceCheck = await validateMinaFonnteWebhookDevice(req.body);
-    if (!deviceCheck.accepted) {
-      req.log?.warn?.(
-        { providedDevice: deviceCheck.providedDevice },
-        "[wa-webhook] inbound device is not the configured Mina device; message ignored",
-      );
-      await logAudit({
-        action: "mina_webhook_device_rejected",
-        entity: "wa_session",
-        after: { providedDevice: deviceCheck.providedDevice },
-      });
-      return;
+    if (!cstGatewayVerifiedRequests.has(req)) {
+      const deviceCheck = await validateMinaFonnteWebhookDevice(req.body);
+      if (!deviceCheck.accepted) {
+        req.log?.warn?.(
+          { providedDevice: deviceCheck.providedDevice },
+          "[wa-webhook] inbound device is not the configured Mina device; message ignored",
+        );
+        await logAudit({
+          action: "mina_webhook_device_rejected",
+          entity: "wa_session",
+          after: { providedDevice: deviceCheck.providedDevice },
+        });
+        return;
+      }
     }
 
     if (isDuplicateWebhook(req.body)) return;
@@ -5726,6 +5891,50 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     }
   }
 };
+
+router.post("/wa/cst-gateway/webhook", async (req: Request, res: Response) => {
+  const eventId = String(req.header("x-cst-wa-event-id") ?? "").trim();
+  if (!eventId) {
+    res.status(401).json({ error: "MISSING_GATEWAY_EVENT_ID" });
+    return;
+  }
+
+  try {
+    const event = await getCstWaGatewayInboundEvent(eventId);
+    const expectedDeviceId = getCstWaGatewayMinaDeviceId();
+
+    if (event.eventType !== "message.received" || event.deviceId !== expectedDeviceId) {
+      await logAudit({
+        action: "mina_gateway_event_ignored",
+        entity: "wa_session",
+        after: {
+          eventId,
+          eventType: event.eventType,
+          deviceId: event.deviceId,
+          expectedDeviceId,
+        },
+      }).catch(() => {});
+      res.status(202).json({ status: "ignored" });
+      return;
+    }
+
+    const normalized = normalizeCstGatewayInboundPayload(eventId, event.deviceId, event.payload);
+    if (!normalized) {
+      res.status(400).json({ error: "INVALID_GATEWAY_PAYLOAD" });
+      return;
+    }
+
+    req.body = normalized;
+    cstGatewayVerifiedRequests.add(req);
+    await handleFonnteWebhook(req, res);
+  } catch (error) {
+    logger.error(
+      { eventId, error: error instanceof Error ? error.message : String(error) },
+      "[wa/cst-gateway/webhook] inbound verification failed",
+    );
+    res.status(401).json({ error: "GATEWAY_EVENT_VERIFICATION_FAILED" });
+  }
+});
 
 router.post(["/wa/fonnte/webhook", "/webhook/fonnte", "/wa/webhook"], handleFonnteWebhook);
 
