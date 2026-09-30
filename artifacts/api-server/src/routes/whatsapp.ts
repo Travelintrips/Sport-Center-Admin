@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "path";
-import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
+import { randomUUID, randomBytes, createHmac, createHash, timingSafeEqual } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { db, auditLogsTable, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
@@ -71,6 +71,12 @@ import {
   isFonnteProviderEcho,
 } from "../lib/waSentTracker";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import {
+  getCstWaGatewayInboundEvent,
+  getCstWaGatewayMinaDeviceId,
+  getCstWaGatewayPublicConfig,
+  sendCstWaGatewayDirectMessage,
+} from "../lib/cstWaGateway";
 import {
   getFonnteConfig,
   selectFonnteToken,
