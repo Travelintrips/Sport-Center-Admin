@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getCstWaGatewayPublicConfig,
   listCstWaGatewayGroups,
@@ -9,7 +8,7 @@ const originalUrl = process.env.CST_WA_GATEWAY_URL;
 const originalToken = process.env.CST_WA_GATEWAY_TOKEN;
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  jest.restoreAllMocks();
   if (originalUrl === undefined) delete process.env.CST_WA_GATEWAY_URL;
   else process.env.CST_WA_GATEWAY_URL = originalUrl;
   if (originalToken === undefined) delete process.env.CST_WA_GATEWAY_TOKEN;
@@ -29,17 +28,19 @@ describe("CST WA Gateway client", () => {
   it("lists group metadata through the sport-center client", async () => {
     process.env.CST_WA_GATEWAY_URL = "https://wa.cstlogistic.co.id";
     process.env.CST_WA_GATEWAY_TOKEN = "secret-token";
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      groups: [{
-        id: "d8eda2ec-e559-45f0-8d3b-4425c7857d15",
-        deviceId: "03",
-        jid: "120363428216180040@g.us",
-        name: "Admin Sport center",
-        subject: "Admin Sport center",
-        participantCount: 8,
-        isActive: true,
-      }],
-    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        groups: [{
+          id: "d8eda2ec-e559-45f0-8d3b-4425c7857d15",
+          deviceId: "03",
+          jid: "120363428216180040@g.us",
+          name: "Admin Sport center",
+          subject: "Admin Sport center",
+          participantCount: 8,
+          isActive: true,
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
 
     const groups = await listCstWaGatewayGroups();
     expect(groups).toHaveLength(1);
@@ -49,11 +50,12 @@ describe("CST WA Gateway client", () => {
   it("sends group messages with groupId and idempotency key", async () => {
     process.env.CST_WA_GATEWAY_URL = "https://wa.cstlogistic.co.id";
     process.env.CST_WA_GATEWAY_TOKEN = "secret-token";
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      status: "queued",
-      messageId: "a9222c2b-6dac-4195-a9fb-83aeb475fa18",
-    }), { status: 202, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        status: "queued",
+        messageId: "a9222c2b-6dac-4195-a9fb-83aeb475fa18",
+      }), { status: 202, headers: { "Content-Type": "application/json" } }),
+    );
 
     const result = await sendCstWaGatewayGroupMessage({
       groupId: "d8eda2ec-e559-45f0-8d3b-4425c7857d15",
