@@ -27,5 +27,7 @@ export interface SettingsUpdate {
   minaWebChatQuickActions?: string;
   fonnteAdminWa?: string;
   adminWaPhones?: string;
+  adminGroupProvider?: 'fonnte' | 'cst_gateway';
+  waGatewayAdminGroupId?: string | null;
   appUrl?: string;
 }
