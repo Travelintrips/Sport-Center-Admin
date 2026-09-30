@@ -3,6 +3,8 @@ import {
   getCstWaGatewayPublicConfig,
   listCstWaGatewayGroups,
   sendCstWaGatewayGroupMessage,
+  sendCstWaGatewayTextMessage,
+  verifyCstWaGatewayWebhookSignature,
 } from "./cstWaGateway";
 
 const originalUrl = process.env.CST_WA_GATEWAY_URL;
@@ -78,4 +80,47 @@ describe("CST WA Gateway client", () => {
       text: "test",
     });
   });
+
+  it("sends Mina direct messages through a stable logical device id", async () => {
+    process.env.CST_WA_GATEWAY_URL = "https://wa.cstlogistic.co.id";
+    process.env.CST_WA_GATEWAY_TOKEN = "test-token";
+    const fetchMock = jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        status: "queued",
+        messageId: "b9222c2b-6dac-4195-a9fb-83aeb475fa18",
+      }), { status: 202, headers: { "Content-Type": "application/json" } }),
+    );
+
+    await sendCstWaGatewayTextMessage({
+      deviceId: "mina-01",
+      to: "6281111111111",
+      text: "Halo dari Mina",
+      idempotencyKey: "mina:test",
+      replyToProviderMessageId: "provider-1",
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toEqual({
+      deviceId: "mina-01",
+      to: "6281111111111",
+      type: "text",
+      text: "Halo dari Mina",
+      replyToProviderMessageId: "provider-1",
+    });
+  });
+
+  it("verifies inbound signatures derived from the existing gateway client token", async () => {
+    const crypto = await import("node:crypto");
+    process.env.CST_WA_GATEWAY_TOKEN = "test-token";
+    const rawBody = Buffer.from(JSON.stringify({ event: "message.received", deviceId: "mina-01" }));
+    const derived = crypto
+      .createHmac("sha256", "test-token")
+      .update("cst-wa-gateway:webhook:v1")
+      .digest("hex");
+    const signature = crypto.createHmac("sha256", derived).update(rawBody).digest("hex");
+
+    expect(verifyCstWaGatewayWebhookSignature(rawBody, signature)).toBe(true);
+    expect(verifyCstWaGatewayWebhookSignature(rawBody, "0".repeat(64))).toBe(false);
+  });
+
 });
