@@ -903,6 +903,9 @@ export interface Settings {
   fonnteAdminWa?: string | null;
   /** @nullable */
   adminWaPhones?: string | null;
+  adminGroupProvider?: 'fonnte' | 'cst_gateway';
+  /** @nullable */
+  waGatewayAdminGroupId?: string | null;
   /** @nullable */
   appUrl?: string | null;
 }
@@ -928,6 +931,8 @@ export interface SettingsUpdate {
   minaWebChatQuickActions?: string;
   fonnteAdminWa?: string;
   adminWaPhones?: string;
+  adminGroupProvider?: 'fonnte' | 'cst_gateway';
+  waGatewayAdminGroupId?: string | null;
   appUrl?: string;
 }
 

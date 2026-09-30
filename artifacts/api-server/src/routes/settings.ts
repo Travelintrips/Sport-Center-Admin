@@ -9,6 +9,7 @@ import { deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { invalidateBaseUrlCache } from "../lib/appUrl";
 import { getFonnteConfig, normalizeFonnteDevice } from "../lib/fonnteConfig";
+import { getCstWaGatewayPublicConfig, listCstWaGatewayGroups } from "../lib/cstWaGateway";
 
 const router = Router();
 
@@ -47,13 +48,34 @@ function publicSettings(settings: Awaited<ReturnType<typeof getOrCreateSettings>
 
 router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
   try {
-    const fonnte = await getFonnteConfig();
+    const [fonnte, settings] = await Promise.all([getFonnteConfig(), getOrCreateSettings()]);
     const adminTokenConfigured = Boolean(fonnte.adminToken);
     const minaTokenConfigured = Boolean(fonnte.customerToken);
+    const gatewayConfig = getCstWaGatewayPublicConfig();
+    let gatewayReachable = false;
+    let gatewayError: string | null = null;
+    let gatewayGroups: Awaited<ReturnType<typeof listCstWaGatewayGroups>> = [];
+
+    if (gatewayConfig.configured) {
+      try {
+        gatewayGroups = await listCstWaGatewayGroups();
+        gatewayReachable = true;
+      } catch (error) {
+        gatewayError = error instanceof Error ? error.message : "Gateway tidak dapat dihubungi";
+        req.log.warn({ err: error }, "CST WA Gateway status check failed");
+      }
+    }
+
+    const selectedGroupId = settings.waGatewayAdminGroupId ?? null;
+    const selectedGroup = selectedGroupId
+      ? gatewayGroups.find((group) => group.id === selectedGroupId) ?? null
+      : null;
+
     res.json({
       admin: {
         tokenConfigured: adminTokenConfigured,
         tokenSource: fonnte.adminTokenSource,
+        groupProvider: settings.adminGroupProvider ?? "fonnte",
       },
       mina: {
         deviceNumber: fonnte.customerDevice || null,
@@ -62,6 +84,16 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
         tokenSource: fonnte.customerTokenSource,
         active: Boolean(fonnte.customerDevice && minaTokenConfigured),
         inboundDeviceValidation: "when_fonnte_payload_includes_device",
+      },
+      gateway: {
+        configured: gatewayConfig.configured,
+        reachable: gatewayReachable,
+        baseUrl: gatewayConfig.baseUrl || null,
+        clientId: "sport-center",
+        selectedGroupId,
+        selectedGroup,
+        groups: gatewayGroups.filter((group) => group.isActive),
+        error: gatewayError,
       },
     });
   } catch (err) {
@@ -88,6 +120,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
       "fonnteToken","fonnteCustomerToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
       "fonnteCustomerDevice","customerServiceWhatsapp",
+      "adminGroupProvider","waGatewayAdminGroupId",
       "minaWebChatEnabled","minaWebChatGreeting","minaWebChatQuickActions",
     ];
     const patch: Record<string, unknown> = {};
@@ -130,6 +163,26 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
             }
             patch[key] = customerServiceWhatsapp;
           }
+        } else if (key === "adminGroupProvider") {
+          const provider = String(req.body[key] ?? "").trim();
+          if (!["fonnte", "cst_gateway"].includes(provider)) {
+            res.status(400).json({
+              error: "Provider grup admin harus fonnte atau cst_gateway.",
+              code: "INVALID_ADMIN_GROUP_PROVIDER",
+            });
+            return;
+          }
+          patch[key] = provider;
+        } else if (key === "waGatewayAdminGroupId") {
+          const groupId = String(req.body[key] ?? "").trim();
+          if (groupId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(groupId)) {
+            res.status(400).json({
+              error: "Group ID CST WA Gateway tidak valid.",
+              code: "INVALID_WA_GATEWAY_GROUP_ID",
+            });
+            return;
+          }
+          patch[key] = groupId || null;
         } else if (key === "minaWebChatEnabled") {
           if (typeof req.body[key] !== "boolean") {
             res.status(400).json({
@@ -167,6 +220,18 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
         }
       }
     }
+    const nextProvider = String(patch.adminGroupProvider ?? settings.adminGroupProvider ?? "fonnte");
+    const nextGatewayGroupId = String(
+      patch.waGatewayAdminGroupId ?? settings.waGatewayAdminGroupId ?? "",
+    ).trim();
+    if (nextProvider === "cst_gateway" && !nextGatewayGroupId) {
+      res.status(400).json({
+        error: "Pilih grup CST WA Gateway sebelum mengaktifkan provider grup admin.",
+        code: "WA_GATEWAY_GROUP_REQUIRED",
+      });
+      return;
+    }
+
     if (Object.keys(patch).length > 0) {
       await db.update(settingsTable).set(patch).where(eq(settingsTable.id, settings.id));
       invalidateBaseUrlCache();

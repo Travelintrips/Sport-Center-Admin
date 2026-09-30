@@ -26,6 +26,8 @@ export const settingsTable = scSchema.table("sport_settings", {
   minaWebChatQuickActions: text("mina_web_chat_quick_actions").notNull().default("Booking Fasilitas\nCek Jadwal\nCek Harga\nGym & Membership"),
   fonnteAdminWa: text("fonnte_admin_wa"),
   adminWaPhones: text("admin_wa_phones"),
+  adminGroupProvider: text("admin_group_provider").notNull().default("fonnte"),
+  waGatewayAdminGroupId: text("wa_gateway_admin_group_id"),
   appUrl: text("app_url"),
   paymentDomain: text("payment_domain"),
   paymentDeadlineHours: text("payment_deadline_hours").default("24"),
