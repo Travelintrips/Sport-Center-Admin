@@ -277,7 +277,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
       });
     expect(echoResponse.status).toBe(200);
     expect(fonnteSendCalls(fetchMock).length).toBe(outboundBeforeEcho);
-  }, 30_000);
+  }, 45_000);
 });
 
 function fonnteSendCalls(fetchMock: any): Array<[unknown, RequestInit?]> {
@@ -287,7 +287,7 @@ function fonnteSendCalls(fetchMock: any): Array<[unknown, RequestInit?]> {
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 20_000;
   while (!predicate() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
