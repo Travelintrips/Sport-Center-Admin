@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 type WhatsAppGatewayGroup = {
@@ -25,16 +25,25 @@ type WhatsAppGatewayGroup = {
 type WhatsAppStatus = {
   admin: {
     tokenConfigured: boolean;
-    tokenSource: "settings" | "environment" | "missing";
+    tokenSource: "settings" | "environment" | "missing" | "gateway";
+    provider: "fonnte" | "cst_gateway";
+    gatewayDeviceId: string;
     groupProvider: "fonnte" | "cst_gateway";
   };
   mina: {
     deviceNumber: string | null;
     deviceSource: "settings" | "environment" | "missing";
     tokenConfigured: boolean;
-    tokenSource: "settings" | "environment" | "missing";
+    tokenSource: "settings" | "environment" | "missing" | "gateway";
+    provider: "fonnte" | "cst_gateway";
+    gatewayDeviceId: string;
     active: boolean;
     inboundDeviceValidation: string;
+  };
+  report: {
+    provider: "fonnte" | "cst_gateway";
+    gatewayDeviceId: string;
+    active: boolean;
   };
   gateway: {
     configured: boolean;
@@ -514,19 +523,14 @@ export default function AdminSettings() {
     paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "",
-    fonnteCustomerToken: "",
-    fonnteCustomerDevice: "",
     customerServiceWhatsapp: "",
     fonnteAdminWa: "",
     adminWaPhones: "",
-    adminGroupProvider: "fonnte" as "fonnte" | "cst_gateway",
+    adminGroupProvider: "cst_gateway" as "fonnte" | "cst_gateway",
     waGatewayAdminGroupId: "",
     appUrl: "",
   });
   const [paymentDomain, setPaymentDomain] = useState("");
-  const [showToken, setShowToken] = useState(false);
-  const [showCustomerToken, setShowCustomerToken] = useState(false);
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
   const [qrisDeleting, setQrisDeleting] = useState(false);
@@ -548,13 +552,10 @@ export default function AdminSettings() {
         paymentDeadlineHours: (settings as any).paymentDeadlineHours ?? "24",
       });
       setWaForm({
-        fonnteToken: (settings as any).fonnteToken ?? "",
-        fonnteCustomerToken: (settings as any).fonnteCustomerToken ?? "",
-        fonnteCustomerDevice: (settings as any).fonnteCustomerDevice ?? "",
         customerServiceWhatsapp: (settings as any).customerServiceWhatsapp ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
-        adminGroupProvider: ((settings as any).adminGroupProvider ?? "fonnte") as "fonnte" | "cst_gateway",
+        adminGroupProvider: "cst_gateway",
         waGatewayAdminGroupId: (settings as any).waGatewayAdminGroupId ?? "",
         appUrl: (settings as any).appUrl ?? "",
       });
@@ -562,12 +563,6 @@ export default function AdminSettings() {
       setQrisPreview((settings as any).qrisImageUrl ?? null);
     }
   }, [settings]);
-
-  useEffect(() => {
-    if (!waForm.fonnteCustomerDevice && waStatus?.mina.deviceNumber) {
-      setWaForm((current) => ({ ...current, fonnteCustomerDevice: waStatus.mina.deviceNumber ?? "" }));
-    }
-  }, [waForm.fonnteCustomerDevice, waStatus?.mina.deviceNumber]);
 
   const updateMutation = useUpdateSettings({
     mutation: {
@@ -589,10 +584,10 @@ export default function AdminSettings() {
 
   const handleWaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const payload: any = { ...waForm };
+    const payload: any = { ...waForm, adminGroupProvider: "cst_gateway" };
     payload.customerServiceWhatsapp = waForm.customerServiceWhatsapp.trim() || null;
     payload.waGatewayAdminGroupId = waForm.waGatewayAdminGroupId.trim() || null;
-    if (waForm.adminGroupProvider === "cst_gateway") {
+    if (payload.adminGroupProvider === "cst_gateway") {
       payload.adminWaPhones = waForm.adminWaPhones
         .split(",")
         .map((value) => value.trim())
@@ -768,114 +763,63 @@ export default function AdminSettings() {
                   Pengaturan Notifikasi WhatsApp
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Customer/Mina dan admin individual tetap dapat memakai Fonnte. Notifikasi grup admin dapat dialihkan ke CST WA Gateway tanpa mengekspos token gateway ke browser.
+                  Sport Center menggunakan CST WA Gateway. Chat customer/Mina dikirim melalui <strong>Mina Ai Sport Center</strong>,
+                  sedangkan notifikasi admin, report, dan grup menggunakan <strong>Sport Center Report</strong>.
                 </p>
               </div>
-              {waStatus?.admin.tokenConfigured ? (
+              {waStatus?.gateway.configured && waStatus?.gateway.reachable ? (
                 <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
-                  <CheckCircle2 size={12} /> Admin siap
+                  <CheckCircle2 size={12} /> Gateway siap
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
-                  <AlertCircle size={12} /> Token admin belum ada
+                  <AlertCircle size={12} /> Gateway belum siap
                 </Badge>
               )}
             </div>
           </CardHeader>
+
           <CardContent className="space-y-4">
-            <div className="rounded-lg border bg-muted/30 p-3 flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium text-sm">Device Mina / customer</span>
-                {waStatus?.mina.active ? (
-                  <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
-                    <CheckCircle2 size={12} /> Device aktif
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
-                    <AlertCircle size={12} />
-                    {!waStatus?.mina.deviceNumber
-                      ? "Device belum dikonfigurasi"
-                      : !waStatus?.mina.tokenConfigured
-                      ? "Token customer belum ada"
-                      : "Belum siap"}
-                  </Badge>
-                )}
-              </div>
-               <p className="text-xs text-muted-foreground">
-                 Nomor aktif: <strong>{waStatus?.mina.deviceNumber ?? "belum dikonfigurasi"}</strong>
-                 {" "}({waStatus?.mina.deviceSource === "settings" ? "Settings DB" : waStatus?.mina.deviceSource === "environment" ? "environment fallback" : "fail-closed"}).
-                 Payload webhook dengan field device yang berbeda akan ditolak.
-                Token tidak pernah dikembalikan oleh endpoint status.
-              </p>
-            </div>
             <div className="grid md:grid-cols-2 gap-4">
-              <div className="md:col-span-2 space-y-2">
-                <Label>Token Fonnte — Device Admin / Notifikasi</Label>
-                <div className="relative">
-                  <Input
-                    type={showToken ? "text" : "password"}
-                    value={waForm.fonnteToken}
-                    onChange={(e) => setWaForm(f => ({ ...f, fonnteToken: e.target.value }))}
-                    placeholder="Token dari dashboard.fonnte.com"
-                    className="pr-10 font-mono text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowToken(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-sm">Mina Ai Sport Center</p>
+                    <p className="text-xs text-muted-foreground">Customer chat, booking, confirmation, reminder, dan reply Mina.</p>
+                  </div>
+                  {waStatus?.mina.active ? (
+                    <Badge className="bg-green-100 text-green-700 border-green-200">Aktif</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50">Belum siap</Badge>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Token nomor WhatsApp admin (<strong>085121073537</strong>). Digunakan untuk mengirim notifikasi ke admin.
-                  Dapatkan token di{" "}
-                  <a href="https://fonnte.com" target="_blank" rel="noreferrer" className="text-primary underline">
-                    fonnte.com
-                  </a>.
+                  Device ID: <strong className="font-mono">{waStatus?.mina.gatewayDeviceId ?? "mina-ai-sport-center"}</strong>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Provider: <strong>CST WA Gateway</strong>. Nomor WhatsApp mengikuti device yang dipair di dashboard gateway.
                 </p>
               </div>
 
-              <div className="md:col-span-2 space-y-2">
-                   <Label>
-                     Token Fonnte — Device Mina/customer
-                     {waStatus?.mina.deviceNumber ? ` (${waStatus.mina.deviceNumber})` : ""}
-                   </Label>
-                <div className="relative">
-                  <Input
-                    type={showCustomerToken ? "text" : "password"}
-                    value={waForm.fonnteCustomerToken}
-                    onChange={(e) => setWaForm(f => ({ ...f, fonnteCustomerToken: e.target.value }))}
-                    placeholder="Token dari dashboard.fonnte.com untuk nomor customer"
-                    className="pr-10 font-mono text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomerToken(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showCustomerToken ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-sm">Sport Center Report</p>
+                    <p className="text-xs text-muted-foreground">Notifikasi admin, report internal, dan pengiriman ke grup admin.</p>
+                  </div>
+                  {waStatus?.report.active ? (
+                    <Badge className="bg-green-100 text-green-700 border-green-200">Aktif</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50">Belum siap</Badge>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                   Token nomor WhatsApp customer/Mina. Digunakan untuk reply Mina dan notifikasi ke customer (booking, konfirmasi, reminder, dll).
-                  Jika kosong, pengiriman customer dihentikan; sistem tidak memakai token admin sebagai fallback.
+                  Device ID: <strong className="font-mono">{waStatus?.report.gatewayDeviceId ?? "sport-center-report"}</strong>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Provider: <strong>CST WA Gateway</strong>. Semua grup yang ditampilkan di bawah berasal dari device ini.
                 </p>
               </div>
-
-               <div className="md:col-span-2 space-y-2">
-                 <Label htmlFor="fonnteCustomerDevice">Nomor Device Mina / customer</Label>
-                 <Input
-                   id="fonnteCustomerDevice"
-                   value={waForm.fonnteCustomerDevice}
-                   onChange={(e) => setWaForm(f => ({ ...f, fonnteCustomerDevice: e.target.value }))}
-                   placeholder="08..., +62..., 628... atau 628...@c.us"
-                   required
-                 />
-                 <p className="text-xs text-muted-foreground">
-                   Disimpan dalam format canonical 628.... Perubahan berlaku langsung setelah disimpan; nomor kosong atau tidak valid ditolak.
-                 </p>
-               </div>
 
               <div className="md:col-span-2 space-y-2">
                 <Label htmlFor="customerServiceWhatsapp">Nomor WA Customer Service / Hubungi Admin</Label>
@@ -887,7 +831,7 @@ export default function AdminSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Nomor manusia yang menerima chat dari tombol <strong>Hubungi Admin via WhatsApp</strong> dan eskalasi Mina.
-                  Harus berbeda dari Device Mina/customer. Jika kosong, tombol kontak admin tidak ditampilkan ke customer.
+                  Nomor ini terpisah dari device Mina.
                 </p>
               </div>
 
@@ -896,10 +840,10 @@ export default function AdminSettings() {
                 <Input
                   value={waForm.fonnteAdminWa}
                   onChange={(e) => setWaForm(f => ({ ...f, fonnteAdminWa: e.target.value }))}
-                  placeholder="628123456789 (tanpa + atau spasi)"
+                  placeholder="628123456789"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Penerima notifikasi internal jika daftar Admin & Grup WA kosong. Bukan nomor tombol Hubungi Admin.
+                  Penerima internal utama. Pesan dikirim melalui device <strong>Sport Center Report</strong>.
                 </p>
               </div>
 
@@ -911,7 +855,8 @@ export default function AdminSettings() {
                   placeholder="6281234,6289876"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Pisahkan dengan koma. Nomor individual tetap dikirim melalui Fonnte. ID grup lama <strong>@g.us</strong> otomatis diabaikan saat CST WA Gateway aktif.
+                  Pisahkan dengan koma. Nomor individu dikirim melalui <strong>Sport Center Report</strong>.
+                  ID grup lama <strong>@g.us</strong> otomatis diabaikan.
                 </p>
               </div>
 
@@ -920,72 +865,52 @@ export default function AdminSettings() {
                   <div>
                     <p className="font-semibold text-sm">Notifikasi Grup Admin</p>
                     <p className="text-xs text-muted-foreground">
-                      Jalur grup dipisahkan dari Fonnte agar tidak terjadi pengiriman ganda.
+                      Grup diambil dari device <strong>Sport Center Report</strong> pada CST WA Gateway.
                     </p>
                   </div>
-                  {waForm.adminGroupProvider === "cst_gateway" ? (
-                    waStatus?.gateway.configured && waStatus?.gateway.reachable ? (
-                      <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
-                        <CheckCircle2 size={12} /> Gateway siap
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
-                        <AlertCircle size={12} /> Gateway belum siap
-                      </Badge>
-                    )
+                  {waStatus?.gateway.configured && waStatus?.gateway.reachable ? (
+                    <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Gateway siap
+                    </Badge>
                   ) : (
-                    <Badge variant="outline">Fonnte legacy</Badge>
+                    <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
+                      <AlertCircle size={12} /> Gateway belum siap
+                    </Badge>
                   )}
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Provider Grup</Label>
-                    <select
-                      value={waForm.adminGroupProvider}
-                      onChange={(e) => setWaForm(f => ({
-                        ...f,
-                        adminGroupProvider: e.target.value as "fonnte" | "cst_gateway",
-                      }))}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                      <option value="fonnte">Fonnte (legacy)</option>
-                      <option value="cst_gateway">CST WA Gateway</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Grup CST WA Gateway</Label>
-                    <select
-                      value={waForm.waGatewayAdminGroupId}
-                      onChange={(e) => setWaForm(f => ({ ...f, waGatewayAdminGroupId: e.target.value }))}
-                      disabled={waForm.adminGroupProvider !== "cst_gateway" || !waStatus?.gateway.reachable}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
-                    >
-                      <option value="">Pilih grup...</option>
-                      {(waStatus?.gateway.groups ?? []).map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name} — Device {group.deviceId} ({group.participantCount} anggota)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="space-y-2">
+                  <Label>Grup CST WA Gateway</Label>
+                  <select
+                    value={waForm.waGatewayAdminGroupId}
+                    onChange={(e) => setWaForm(f => ({ ...f, waGatewayAdminGroupId: e.target.value }))}
+                    disabled={!waStatus?.gateway.reachable}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">Belum memilih grup</option>
+                    {(waStatus?.gateway.groups ?? []).map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name} ({group.participantCount} anggota)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Grup bersifat opsional. Jika belum dipilih, notifikasi admin individu tetap berjalan melalui Sport Center Report.
+                  </p>
                 </div>
 
-                {waForm.adminGroupProvider === "cst_gateway" && (
-                  <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
-                    <p>Gateway: <strong>{waStatus?.gateway.baseUrl ?? "belum dikonfigurasi"}</strong></p>
-                    <p>API Client: <strong>{waStatus?.gateway.clientId ?? "sport-center"}</strong></p>
-                    <p>
-                      Grup aktif: <strong>{waStatus?.gateway.selectedGroup?.name ?? "pilih grup lalu simpan"}</strong>
-                      {waStatus?.gateway.selectedGroup ? ` · Device ${waStatus.gateway.selectedGroup.deviceId}` : ""}
-                    </p>
-                    {waStatus?.gateway.error && (
-                      <p className="text-yellow-700">Status gateway: {waStatus.gateway.error}</p>
-                    )}
-                    <p>Token CST WA Gateway disimpan hanya di environment server dan tidak pernah dikirim ke browser.</p>
-                  </div>
-                )}
+                <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+                  <p>Gateway: <strong>{waStatus?.gateway.baseUrl ?? "belum dikonfigurasi"}</strong></p>
+                  <p>API Client: <strong>{waStatus?.gateway.clientId ?? "sport-center"}</strong></p>
+                  <p>Report Device: <strong>{waStatus?.report.gatewayDeviceId ?? "sport-center-report"}</strong></p>
+                  <p>
+                    Grup aktif: <strong>{waStatus?.gateway.selectedGroup?.name ?? "belum dipilih"}</strong>
+                  </p>
+                  {waStatus?.gateway.error && (
+                    <p className="text-yellow-700">Status gateway: {waStatus.gateway.error}</p>
+                  )}
+                  <p>Token CST WA Gateway tetap server-side dan tidak pernah dikirim ke browser.</p>
+                </div>
               </div>
 
               <div className="md:col-span-2 space-y-2">
@@ -993,7 +918,7 @@ export default function AdminSettings() {
                 <Input
                   value={waForm.appUrl}
                   onChange={(e) => setWaForm(f => ({ ...f, appUrl: e.target.value }))}
-                  placeholder="https://sportcenter.travelintrips.co.id"
+                  placeholder="https://sc.travelintrips.co.id"
                 />
                 <p className="text-xs text-muted-foreground">
                   URL ini digunakan sebagai base link di pesan WA (status booking, upload bukti, dll).
@@ -1010,12 +935,6 @@ export default function AdminSettings() {
                 <li>Booking dibatalkan / expired → customer + admin</li>
                 <li>Reminder H-1 bermain → customer</li>
               </ul>
-              <p className="mt-2">
-                Edit isi pesan di halaman{" "}
-                <a href="/admin/notifications" className="text-primary underline font-medium">
-                  Template Notifikasi
-                </a>.
-              </p>
             </div>
 
             <div className="flex justify-end">
