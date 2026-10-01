@@ -10,6 +10,7 @@ import {
   switchBookingFacility,
   isMinaGreeting,
   isBookingRequest,
+  isAvailabilityInquiry,
 } from "./waBookingFlow";
 
 describe("WhatsApp Mina booking flow regressions", () => {
@@ -40,6 +41,23 @@ describe("WhatsApp Mina booking flow regressions", () => {
     }
     expect(isMinaGreeting("halo,")).toBe(true);
     expect(isMinaGreeting("pagi")).toBe(false);
+  });
+
+  it("recognizes availability checks including cek/check/chek typos", () => {
+    for (const message of [
+      "cek lapangan badminton",
+      "Cek lapangan badminton",
+      "check lapangan badminton",
+      "Check lapangan badminton",
+      "chek lapangan badminton di sini",
+      "Chek lapangan badminton di sini",
+      "cek jadwal badminton",
+      "slot badminton",
+      "lapangan badminton kosong?",
+    ]) {
+      expect(isAvailabilityInquiry(message)).toBe(true);
+    }
+    expect(isAvailabilityInquiry("booking badminton")).toBe(false);
   });
 
   it("recognizes the requested booking commands", () => {
