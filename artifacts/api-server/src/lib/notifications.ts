@@ -9,7 +9,13 @@ import { getOrCreatePaymentProofShortUrl } from "./paymentProofShortLink";
 import { allowWhatsAppProviderSend, getWhatsAppDispatchMode } from "./whatsappSafety";
 import { getFonnteConfig } from "./fonnteConfig";
 import { createHash } from "node:crypto";
-import { sendCstWaGatewayGroupMessage } from "./cstWaGateway";
+import {
+  getCstWaGatewayMinaDeviceId,
+  getCstWaGatewayPublicConfig,
+  getCstWaGatewayReportDeviceId,
+  sendCstWaGatewayDirectMessage,
+  sendCstWaGatewayGroupMessage,
+} from "./cstWaGateway";
 
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
 const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
@@ -20,10 +26,13 @@ const ENV_GATEWAY_ADMIN_GROUP_ID = process.env.CST_WA_GATEWAY_ADMIN_GROUP_ID?.tr
 type AdminGroupProvider = "fonnte" | "cst_gateway";
 
 function resolveAdminGroupProvider(value: unknown): AdminGroupProvider {
+  // CST WA Gateway is now the primary admin/report transport. Fonnte remains
+  // available only as an explicit environment-level emergency rollback.
+  if (ENV_ADMIN_GROUP_PROVIDER === "fonnte") return "fonnte";
+  if (ENV_ADMIN_GROUP_PROVIDER === "cst_gateway") return "cst_gateway";
   const configured = String(value ?? "").trim();
   if (configured === "cst_gateway") return "cst_gateway";
-  if (configured === "fonnte") return "fonnte";
-  return ENV_ADMIN_GROUP_PROVIDER === "cst_gateway" ? "cst_gateway" : "fonnte";
+  return "cst_gateway";
 }
 
 function interpolate(template: string, vars: Record<string, string>): string {
@@ -115,6 +124,77 @@ async function sendWA(
   }
   const dispatchMode = getWhatsAppDispatchMode();
   const config = await getWaConfig();
+  const gatewayConfig = getCstWaGatewayPublicConfig();
+  const channel = useCustomerToken ? "mina" : "admin";
+  const providerOverride = useCustomerToken
+    ? process.env.CST_WA_MINA_PROVIDER
+    : process.env.CST_WA_ADMIN_PROVIDER;
+  const useGateway = gatewayConfig.configured && providerOverride !== "fonnte";
+
+  if (useGateway) {
+    const providerAllowed = allowWhatsAppProviderSend({
+      channel,
+      recipient: cleanPhone,
+      customerTokenConfigured: useCustomerToken ? true : false,
+    });
+    if (!providerAllowed) {
+      logger.info(
+        { target: cleanPhone, event: ctx?.event, mode: dispatchMode, provider: "cst_gateway" },
+        "[WA] gateway dispatch blocked by safety policy",
+      );
+      if (ctx) {
+        logWaSend(
+          cleanPhone,
+          message,
+          "sent",
+          `${dispatchMode} — tidak dikirim ke CST WA Gateway`,
+          ctx,
+        ).catch(() => {});
+      }
+      return;
+    }
+
+    const deviceId = useCustomerToken
+      ? getCstWaGatewayMinaDeviceId()
+      : getCstWaGatewayReportDeviceId();
+    const idempotencyKey =
+      `sport-center-${channel}:` +
+      createHash("sha256")
+        .update(`${deviceId}:${cleanPhone}:${ctx?.bookingId ?? ""}:${ctx?.event ?? ""}:${message}`)
+        .digest("hex")
+        .slice(0, 48);
+
+    trackSentMessage(message);
+    try {
+      const queued = await sendCstWaGatewayDirectMessage({
+        deviceId,
+        to: cleanPhone,
+        text: message,
+        idempotencyKey,
+      });
+      logger.info(
+        {
+          target: cleanPhone,
+          channel,
+          provider: "cst_gateway",
+          deviceId,
+          messageId: queued.messageId,
+          status: queued.status,
+        },
+        "[WA] Pesan berhasil masuk queue CST WA Gateway",
+      );
+      if (ctx) logWaSend(cleanPhone, message, "sent", null, ctx).catch(() => {});
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { error, target: cleanPhone, channel, deviceId },
+        "[WA] CST WA Gateway direct send gagal",
+      );
+      if (ctx) logWaSend(cleanPhone, message, "failed", error, ctx).catch(() => {});
+    }
+    return;
+  }
+
   const token = useCustomerToken ? config.customerToken : config.token;
   if (useCustomerToken && !config.customerDevice) {
     logger.warn("[WA] Device Mina/customer belum dikonfigurasi — pesan customer tidak dikirim");
