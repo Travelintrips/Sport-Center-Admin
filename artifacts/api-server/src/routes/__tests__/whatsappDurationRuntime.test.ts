@@ -127,6 +127,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-booking-regression-1",
       });
     expect(greetingResponse.status).toBe(200);
+    await waitFor(() => fonnteSendCalls(fetchMock).length >= outboundStart + 1);
     const greetingBody = fonnteSendCalls(fetchMock)[outboundStart]?.[1]?.body as FormData;
     expect(String(greetingBody?.get("message"))).toBe(
       "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
@@ -144,6 +145,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-booking-regression-2",
       });
     expect(bookingResponse.status).toBe(200);
+    await waitFor(() => fonnteSendCalls(fetchMock).length >= outboundStart + 2);
     const facilityListBody = fonnteSendCalls(fetchMock)[outboundStart + 1]?.[1]?.body as FormData;
     const facilityListMessage = String(facilityListBody?.get("message") ?? "");
     expect(facilityListMessage).toContain("Fasilitas tersedia:");
