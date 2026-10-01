@@ -23,6 +23,7 @@ jest.unstable_mockModule("../../lib/fonnteConfig.js", () => ({
 }));
 
 const phone = `62899${Date.now().toString().slice(-8)}`;
+const originalMinaProvider = process.env.CST_WA_MINA_PROVIDER;
 
 describe("Mina WhatsApp duration runtime regression", () => {
   let request: any;
@@ -35,6 +36,10 @@ describe("Mina WhatsApp duration runtime regression", () => {
     process.env.APP_ENV = "production";
     process.env.FONNTE_CUSTOMER_DEVICE = "081234567890";
     process.env.FONNTE_CUSTOMER_TOKEN = "test-token";
+    // This suite is specifically a Fonnte webhook/runtime regression test and
+    // asserts Fonnte request bodies. Keep it isolated from a CI/host environment
+    // that may also provide CST WA Gateway credentials.
+    process.env.CST_WA_MINA_PROVIDER = "fonnte";
     process.env.WA_DEV_MINA_TEST_RECIPIENT = phone;
 
     const existingFacilities = await db.select().from(facilitiesTable);
@@ -93,6 +98,8 @@ describe("Mina WhatsApp duration runtime regression", () => {
 
   afterAll(async () => {
     fetchMock?.mockRestore();
+    if (originalMinaProvider === undefined) delete process.env.CST_WA_MINA_PROVIDER;
+    else process.env.CST_WA_MINA_PROVIDER = originalMinaProvider;
     await db.delete(waBookingSessionsTable).where(eq(waBookingSessionsTable.phone, phone));
     if (createdFacility) {
       await db.delete(facilitiesTable).where(eq(facilitiesTable.id, facilityId));
