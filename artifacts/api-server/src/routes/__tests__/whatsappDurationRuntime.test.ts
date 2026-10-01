@@ -176,7 +176,17 @@ describe("Mina WhatsApp duration runtime regression", () => {
         headers: { "content-type": "application/json" },
       }));
     });
-    fetchMock.mockImplementationOnce(() => blockedFonnteResponse);
+    let blockNextFonnteSend = true;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (blockNextFonnteSend && String(url).startsWith("https://api.fonnte.com/send")) {
+        blockNextFonnteSend = false;
+        return blockedFonnteResponse;
+      }
+      return new Response(JSON.stringify({ status: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
 
     let webhookSettled = false;
     const finalWebhook = request
