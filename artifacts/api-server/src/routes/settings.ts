@@ -9,7 +9,12 @@ import { deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { invalidateBaseUrlCache } from "../lib/appUrl";
 import { getFonnteConfig, normalizeFonnteDevice } from "../lib/fonnteConfig";
-import { getCstWaGatewayPublicConfig, listCstWaGatewayGroups } from "../lib/cstWaGateway";
+import {
+  getCstWaGatewayMinaDeviceId,
+  getCstWaGatewayPublicConfig,
+  getCstWaGatewayReportDeviceId,
+  listCstWaGatewayGroups,
+} from "../lib/cstWaGateway";
 
 const router = Router();
 
@@ -66,24 +71,52 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
       }
     }
 
+    const minaGatewayDeviceId = getCstWaGatewayMinaDeviceId();
+    const reportGatewayDeviceId = getCstWaGatewayReportDeviceId();
+    const reportGroups = gatewayGroups.filter(
+      (group) => group.isActive && group.deviceId === reportGatewayDeviceId,
+    );
     const selectedGroupId = settings.waGatewayAdminGroupId ?? null;
     const selectedGroup = selectedGroupId
-      ? gatewayGroups.find((group) => group.id === selectedGroupId) ?? null
+      ? reportGroups.find((group) => group.id === selectedGroupId) ?? null
       : null;
+    const minaProvider =
+      gatewayConfig.configured && process.env.CST_WA_MINA_PROVIDER !== "fonnte"
+        ? "cst_gateway"
+        : "fonnte";
+    const adminProvider =
+      gatewayConfig.configured && process.env.CST_WA_ADMIN_PROVIDER !== "fonnte"
+        ? "cst_gateway"
+        : "fonnte";
 
     res.json({
       admin: {
-        tokenConfigured: adminTokenConfigured,
-        tokenSource: fonnte.adminTokenSource,
-        groupProvider: settings.adminGroupProvider ?? "fonnte",
+        tokenConfigured: adminProvider === "cst_gateway" ? gatewayConfig.configured : adminTokenConfigured,
+        tokenSource: adminProvider === "cst_gateway" ? "gateway" : fonnte.adminTokenSource,
+        provider: adminProvider,
+        gatewayDeviceId: reportGatewayDeviceId,
+        groupProvider: settings.adminGroupProvider ?? "cst_gateway",
       },
       mina: {
         deviceNumber: fonnte.customerDevice || null,
         deviceSource: fonnte.customerDeviceSource,
-        tokenConfigured: minaTokenConfigured,
-        tokenSource: fonnte.customerTokenSource,
-        active: Boolean(fonnte.customerDevice && minaTokenConfigured),
-        inboundDeviceValidation: "when_fonnte_payload_includes_device",
+        tokenConfigured: minaProvider === "cst_gateway" ? gatewayConfig.configured : minaTokenConfigured,
+        tokenSource: minaProvider === "cst_gateway" ? "gateway" : fonnte.customerTokenSource,
+        provider: minaProvider,
+        gatewayDeviceId: minaGatewayDeviceId,
+        active:
+          minaProvider === "cst_gateway"
+            ? Boolean(gatewayConfig.configured && gatewayReachable)
+            : Boolean(fonnte.customerDevice && minaTokenConfigured),
+        inboundDeviceValidation:
+          minaProvider === "cst_gateway"
+            ? "stable_gateway_device_id"
+            : "when_fonnte_payload_includes_device",
+      },
+      report: {
+        provider: adminProvider,
+        gatewayDeviceId: reportGatewayDeviceId,
+        active: Boolean(gatewayConfig.configured && gatewayReachable),
       },
       gateway: {
         configured: gatewayConfig.configured,
@@ -92,7 +125,7 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
         clientId: "sport-center",
         selectedGroupId,
         selectedGroup,
-        groups: gatewayGroups.filter((group) => group.isActive),
+        groups: reportGroups,
         error: gatewayError,
       },
     });
@@ -220,7 +253,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
         }
       }
     }
-    const nextProvider = String(patch.adminGroupProvider ?? settings.adminGroupProvider ?? "fonnte");
+    const nextProvider = String(patch.adminGroupProvider ?? settings.adminGroupProvider ?? "cst_gateway");
     const nextGatewayGroupId = String(
       patch.waGatewayAdminGroupId ?? settings.waGatewayAdminGroupId ?? "",
     ).trim();
