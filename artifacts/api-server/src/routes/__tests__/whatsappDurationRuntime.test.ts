@@ -3,6 +3,10 @@ import { eq } from "drizzle-orm";
 import { db, facilitiesTable, waBookingSessionsTable } from "@workspace/db";
 import { createSession, getActiveSession, todayWIB } from "../../lib/waBookingSession";
 
+jest.unstable_mockModule("../../lib/whatsappSafety.js", () => ({
+  allowWhatsAppProviderSend: jest.fn(() => true),
+}));
+
 jest.unstable_mockModule("../../lib/fonnteConfig.js", () => ({
   getFonnteConfig: jest.fn(async () => ({
     adminToken: "",
