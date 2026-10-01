@@ -20,6 +20,15 @@ export function isMinaGreeting(message: string): boolean {
     /^selamat\s+(?:pagi|siang|sore|malam)$/.test(normalized);
 }
 
+/** Recognize availability/schedule questions, including common Indonesian typos. */
+export function isAvailabilityInquiry(message: string): boolean {
+  const normalized = normalizeTriggerMessage(message);
+  const checkWord = /\b(?:cek|check|chek)\b/.test(normalized);
+  const availabilityWord = /\b(?:slot|jadwal|kosong|tersedia|available|ketersediaan)\b/.test(normalized);
+  const facilityWord = /\b(?:lapangan|court|badminton|tennis|tenis|gym|fitness|billiard|biliar|multiguna|fasilitas)\b/.test(normalized);
+  return availabilityWord || (checkWord && facilityWord);
+}
+
 /** Recognize the explicit booking commands that show the facility menu. */
 export function isBookingRequest(message: string): boolean {
   const normalized = normalizeTriggerMessage(message);
