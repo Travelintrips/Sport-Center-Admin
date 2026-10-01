@@ -253,18 +253,6 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
         }
       }
     }
-    const nextProvider = String(patch.adminGroupProvider ?? settings.adminGroupProvider ?? "cst_gateway");
-    const nextGatewayGroupId = String(
-      patch.waGatewayAdminGroupId ?? settings.waGatewayAdminGroupId ?? "",
-    ).trim();
-    if (nextProvider === "cst_gateway" && !nextGatewayGroupId) {
-      res.status(400).json({
-        error: "Pilih grup CST WA Gateway sebelum mengaktifkan provider grup admin.",
-        code: "WA_GATEWAY_GROUP_REQUIRED",
-      });
-      return;
-    }
-
     if (Object.keys(patch).length > 0) {
       await db.update(settingsTable).set(patch).where(eq(settingsTable.id, settings.id));
       invalidateBaseUrlCache();
