@@ -127,7 +127,11 @@ export async function sendCstWaGatewayGroupMessage(input: {
 
 
 export function getCstWaGatewayMinaDeviceId(): string {
-  return String(process.env.CST_WA_MINA_DEVICE_ID ?? "03").trim() || "03";
+  return String(process.env.CST_WA_MINA_DEVICE_ID ?? "mina-ai-sport-center").trim() || "mina-ai-sport-center";
+}
+
+export function getCstWaGatewayReportDeviceId(): string {
+  return String(process.env.CST_WA_REPORT_DEVICE_ID ?? "sport-center-report").trim() || "sport-center-report";
 }
 
 export async function sendCstWaGatewayDirectMessage(input: {
