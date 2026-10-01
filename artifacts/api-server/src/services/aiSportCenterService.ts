@@ -929,6 +929,40 @@ export function canonicalizeBookingReply(
   return [shortenedProse, canonicalBlock].filter(Boolean).join("\n");
 }
 
+async function findFacilitiesForAvailabilityQuery(
+  query: string,
+): Promise<Array<typeof facilitiesTable.$inferSelect>> {
+  const all = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+  const normalized = query.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+
+  const aliases: Record<string, string[]> = {
+    badminton: ["badminton", "bulutangkis", "shuttle"],
+    tennis: ["tennis", "tenis"],
+    tenis: ["tennis", "tenis"],
+    gym: ["gym", "fitness", "fitnes"],
+    fitness: ["gym", "fitness", "fitnes"],
+    billiard: ["billiard", "biliar", "bilyard"],
+    biliar: ["billiard", "biliar", "bilyard"],
+    basket: ["multiguna", "basket"],
+    basketball: ["multiguna", "basket"],
+    futsal: ["multiguna", "futsal"],
+    voli: ["multiguna", "voli", "volley", "volleyball"],
+    multiguna: ["multiguna"],
+  };
+  const terms = aliases[normalized] ?? [normalized];
+
+  const exact = all.filter((facility) =>
+    facility.name.toLowerCase().replace(/\s+/g, " ").trim() === normalized
+  );
+  if (exact.length > 0) return exact;
+
+  return all.filter((facility) => {
+    const haystack = `${facility.name} ${facility.category}`.toLowerCase();
+    return terms.some((term) => haystack.includes(term));
+  });
+}
+
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
@@ -963,25 +997,55 @@ async function executeTool(
     }
 
     if (name === "get_available_slots") {
-      const facility = await getFacilityByName(String(args.facility_name));
-      if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
-      const slots = await getAvailableSlotsForDay(
-        facility.id,
-        String(args.date),
-        facility.openTime,
-        facility.closeTime
+      const facilities = await findFacilitiesForAvailabilityQuery(String(args.facility_name));
+      if (facilities.length === 0) {
+        return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
+      }
+
+      const date = String(args.date);
+      const availability = await Promise.all(
+        facilities.map(async (facility) => {
+          const slots = await getAvailableSlotsForDay(
+            facility.id,
+            date,
+            facility.openTime,
+            facility.closeTime,
+          );
+          return {
+            facility: facility.name,
+            facility_id: facility.id,
+            date,
+            open_time: facility.openTime,
+            close_time: facility.closeTime,
+            available_slots: slots,
+            total_available: slots.length,
+          };
+        }),
       );
+
+      if (availability.length === 1) {
+        const only = availability[0]!;
+        return JSON.stringify({
+          ...only,
+          message:
+            only.available_slots.length > 0
+              ? `Slot tersedia: ${only.available_slots.join(", ")}`
+              : "Tidak ada slot yang tersedia pada tanggal ini",
+        });
+      }
+
       return JSON.stringify({
-        facility: facility.name,
-        date: args.date,
-        open_time: facility.openTime,
-        close_time: facility.closeTime,
-        available_slots: slots,
-        total_available: slots.length,
-        message:
-          slots.length > 0
-            ? `Slot tersedia: ${slots.join(", ")}`
-            : `Tidak ada slot yang tersedia pada tanggal ini`,
+        query: String(args.facility_name),
+        date,
+        facilities: availability,
+        total_facilities: availability.length,
+        message: availability
+          .map((item) =>
+            item.available_slots.length > 0
+              ? `${item.facility}: ${item.available_slots.join(", ")}`
+              : `${item.facility}: tidak ada slot tersedia`
+          )
+          .join(" | "),
       });
     }
 
