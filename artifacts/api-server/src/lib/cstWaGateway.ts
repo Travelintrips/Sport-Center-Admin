@@ -13,6 +13,18 @@ export type CstWaGatewaySendResult = {
   messageId: string;
 };
 
+export type CstWaGatewayDevice = {
+  deviceId: string;
+  name: string;
+  enabled: boolean;
+  status: string;
+  phoneNumber: string | null;
+  workerId: string | null;
+  lastHeartbeatAt: string | null;
+  lastError: string | null;
+  companyId: string;
+};
+
 function normalizeBaseUrl(value: unknown): string {
   const raw = String(value ?? "").trim().replace(/\/+$/, "");
   if (!raw) return "";
@@ -59,6 +71,40 @@ async function gatewayFetch(path: string, init?: RequestInit): Promise<Response>
       ...(init?.headers ?? {}),
     },
     signal: init?.signal ?? AbortSignal.timeout(15_000),
+  });
+}
+
+export async function listCstWaGatewayDevices(): Promise<CstWaGatewayDevice[]> {
+  const response = await gatewayFetch("/v1/devices");
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  if (!response.ok) {
+    const code = typeof body?.error === "string" ? body.error : `HTTP_${response.status}`;
+    throw new Error(`CST WA Gateway devices gagal: ${code}`);
+  }
+  if (!Array.isArray(body?.devices)) {
+    throw new Error("CST WA Gateway devices response tidak valid");
+  }
+
+  return body.devices.flatMap((value): CstWaGatewayDevice[] => {
+    if (!value || typeof value !== "object") return [];
+    const device = value as Record<string, unknown>;
+    if (
+      typeof device.deviceId !== "string" ||
+      typeof device.name !== "string" ||
+      typeof device.enabled !== "boolean" ||
+      typeof device.status !== "string"
+    ) return [];
+    return [{
+      deviceId: device.deviceId,
+      name: device.name,
+      enabled: device.enabled,
+      status: device.status,
+      phoneNumber: typeof device.phoneNumber === "string" ? device.phoneNumber : null,
+      workerId: typeof device.workerId === "string" ? device.workerId : null,
+      lastHeartbeatAt: typeof device.lastHeartbeatAt === "string" ? device.lastHeartbeatAt : null,
+      lastError: typeof device.lastError === "string" ? device.lastError : null,
+      companyId: typeof device.companyId === "string" ? device.companyId : "",
+    }];
   });
 }
 
