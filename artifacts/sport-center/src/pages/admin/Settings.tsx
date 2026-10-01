@@ -515,6 +515,35 @@ export default function AdminSettings() {
     queryKey: ["admin", "whatsapp-status"],
     queryFn: fetchWhatsAppStatus,
   });
+  const syncGroupsMutation = useMutation({
+    mutationFn: async () => {
+      const token = getToken();
+      const response = await fetch(`${BASE}/api/settings/whatsapp-groups/sync`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.error ?? "Gagal menyinkronkan grup CST WA Gateway");
+      }
+      return body;
+    },
+    onSuccess: async () => {
+      toast({
+        title: "Sinkronisasi grup dimulai",
+        description: "Menunggu Sport Center Report memperbarui daftar grup WhatsApp.",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await queryClient.invalidateQueries({ queryKey: ["admin", "whatsapp-status"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Gagal sinkronisasi grup",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
   const qrisInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
@@ -880,23 +909,46 @@ export default function AdminSettings() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Grup CST WA Gateway</Label>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <Label>Grup CST WA Gateway</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!waStatus?.gateway.reachable || syncGroupsMutation.isPending}
+                      onClick={() => syncGroupsMutation.mutate()}
+                    >
+                      <RefreshCw size={14} className={`mr-2 ${syncGroupsMutation.isPending ? "animate-spin" : ""}`} />
+                      {syncGroupsMutation.isPending ? "Sinkronisasi..." : "Sinkronkan Grup"}
+                    </Button>
+                  </div>
                   <select
                     value={waForm.waGatewayAdminGroupId}
                     onChange={(e) => setWaForm(f => ({ ...f, waGatewayAdminGroupId: e.target.value }))}
                     disabled={!waStatus?.gateway.reachable}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
                   >
-                    <option value="">Belum memilih grup</option>
+                    <option value="">
+                      {(waStatus?.gateway.groups ?? []).length === 0
+                        ? "Belum ada grup tersinkron"
+                        : "Belum memilih grup"}
+                    </option>
                     {(waStatus?.gateway.groups ?? []).map((group) => (
                       <option key={group.id} value={group.id}>
                         {group.name} ({group.participantCount} anggota)
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-muted-foreground">
-                    Grup bersifat opsional. Jika belum dipilih, notifikasi admin individu tetap berjalan melalui Sport Center Report.
-                  </p>
+                  {(waStatus?.gateway.groups ?? []).length === 0 ? (
+                    <p className="text-xs text-amber-700">
+                      Belum ada grup dari device Sport Center Report. Pastikan device online dan tergabung di grup WhatsApp,
+                      lalu klik <strong>Sinkronkan Grup</strong>.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Grup bersifat opsional. Jika belum dipilih, notifikasi admin individu tetap berjalan melalui Sport Center Report.
+                    </p>
+                  )}
                 </div>
 
                 <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
