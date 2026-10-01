@@ -46,6 +46,10 @@ describe("WhatsApp Mina booking flow regressions", () => {
     for (const message of [
       "Booking",
       "booking",
+      "Boking",
+      "boking",
+      "boking kak",
+      "boking ka",
       "mau pesan",
       "mau booking",
       "mau boking",
