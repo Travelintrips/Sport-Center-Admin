@@ -23,7 +23,7 @@ export function isMinaGreeting(message: string): boolean {
 /** Recognize the explicit booking commands that show the facility menu. */
 export function isBookingRequest(message: string): boolean {
   const normalized = normalizeTriggerMessage(message);
-  return /^(?:booking|mau\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?)$/.test(normalized);
+  return /^(?:(?:booking|boking)(?:\s+(?:kak|ka))?|mau\s+(?:pesan|booking|boking)(?:\s+(?:kak|ka))?)$/.test(normalized);
 }
 
 export interface SlotBooking {
