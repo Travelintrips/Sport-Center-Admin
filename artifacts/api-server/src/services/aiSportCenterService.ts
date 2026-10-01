@@ -37,6 +37,7 @@ export interface AiPageContext {
 export interface AiReplyOptions {
   channel?: "whatsapp" | "web";
   pageContext?: AiPageContext;
+  suppressBookingHandoff?: boolean;
 }
 
 interface FacilityInfo {
@@ -465,8 +466,11 @@ export function detectIntent(msg: string): AiIntent {
   // Promo / discount
   if (/\b(promo|diskon|voucher|kode promo|potongan|cashback|promo apa|ada diskon|ada promo|kupon|coupon|hemat|gratis|promo hari ini|diskon berapa)\b/.test(lower)) return "promo_inquiry";
 
-  // Availability check — "mana yang kosong", "masih ada slot", "jam berapa kosong"
-  if (/\b(slot|kosong|tersedia|available|ada slot|jam berapa bisa|kapan bisa|masih ada|masih bisa|ada yang kosong|sudah penuh|penuh gak|penuh ga|cek slot|cek ketersediaan|lihat slot|pilih jam|jam mana|hari mana)\b/.test(lower)) return "availability_check";
+  // Availability check — accept cek/check/chek and natural slot/schedule wording.
+  if (
+    /\b(slot|jadwal|kosong|tersedia|available|ketersediaan|ada slot|jam berapa bisa|kapan bisa|masih ada|masih bisa|ada yang kosong|sudah penuh|penuh gak|penuh ga|cek slot|check slot|chek slot|cek ketersediaan|check ketersediaan|chek ketersediaan|lihat slot|pilih jam|jam mana|hari mana)\b/.test(lower) ||
+    /\b(?:cek|check|chek)\b.*\b(?:lapangan|court|badminton|tennis|tenis|gym|fitness|billiard|biliar|multiguna|fasilitas)\b/.test(lower)
+  ) return "availability_check";
 
   // Payment info
   if (/\b(cara bayar|rekening|no rek|transfer ke|bank apa|qris|cara pembayaran|nomor rekening|rek berapa|transfer kemana|bayar lewat|metode bayar|bayar pakai|kirim bukti|upload bukti|bukti transfer|bukti bayar)\b/.test(lower)) return "payment_info";
@@ -776,6 +780,10 @@ Jika slot TIDAK tersedia → tawarkan cari jadwal alternatif via tool [find_next
 ✅ Jika ditanya sesuatu yang tidak ada datanya → jawab: "Info tersebut belum tersedia di sistem kami. Silakan tanya langsung ke admin ya 🙏"
 ✅ Untuk aksi admin → "Tindakan ini hanya bisa dilakukan admin. Hubungi: ${adminContact}"
 ✅ Untuk mulai booking → arahkan customer ketik: *booking [fasilitas] [tanggal] jam [waktu] [durasi] jam*
+✅ Pertanyaan availability seperti "cek/check/chek lapangan badminton" adalah PENGECEKAN JADWAL, bukan perintah booking.
+✅ Jika fasilitas sudah diketahui tetapi tanggal belum diketahui, jawab singkat: "Baik, untuk kapan."
+✅ Selama customer masih bertanya/mengecek slot, lanjutkan percakapan availability dan gunakan tool untuk verifikasi jadwal.
+✅ Jangan pindahkan customer ke flow booking hanya karena mereka bilang "mau main", "ingin main", atau memilih jam. Pindah ke booking hanya jika mereka secara eksplisit meminta booking/pesan/reservasi, atau menjawab setuju setelah Mina menawarkan untuk membuat booking.
 
 Bahasa: Indonesia santai + profesional. Gunakan emoji secukupnya (jangan berlebihan).
 Panjang jawaban: maksimal ${maxLen} karakter. Ringkas, padat, langsung ke inti.`;
@@ -1192,7 +1200,11 @@ export async function generateAiReply(
     return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
   }
 
-  if (intent === "booking_intent" && options.channel !== "web") {
+  if (
+    intent === "booking_intent" &&
+    options.channel !== "web" &&
+    !options.suppressBookingHandoff
+  ) {
     return { reply: "", intent, shouldHandoffToBookingFlow: true, fallbackToAdmin: false };
   }
 
