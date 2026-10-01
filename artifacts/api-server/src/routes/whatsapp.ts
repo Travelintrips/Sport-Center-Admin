@@ -110,6 +110,7 @@ import {
   isAlternativeTimeRequest,
   isMinaGreeting,
   isBookingRequest,
+  isAvailabilityInquiry,
 } from "../lib/waBookingFlow";
 
 const router = Router();
@@ -3509,6 +3510,37 @@ async function presentBookingSession(
   await sendReply(reply);
 }
 
+function availabilityConversationActive(
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+): boolean {
+  return history.slice(-8).some((turn) =>
+    /\b(?:cek|check|chek)\b.*\b(?:lapangan|court|badminton|tennis|tenis|gym|fitness|billiard|biliar|multiguna|fasilitas)\b/i.test(turn.content) ||
+    /\b(?:slot|jadwal|ketersediaan|kosong|tersedia)\b/i.test(turn.content) ||
+    /ba(i|í)k,?\s*untuk kapan/i.test(turn.content)
+  );
+}
+
+function isExplicitBookingCommitment(message: string): boolean {
+  return /\b(?:booking|boking|book|pesan|reservasi|sewa)\b/i.test(message);
+}
+
+async function beginAvailabilityInquiry(
+  phone: string,
+  msg: string,
+  useCustomerToken = false,
+): Promise<void> {
+  clearHistory(phone);
+  appendTurn(phone, "user", msg);
+  const reply = "Baik, untuk kapan.";
+  appendTurn(phone, "assistant", reply);
+  await sendWAMsg(phone, reply, useCustomerToken);
+  await logAudit({
+    action: "mina_availability_inquiry_started",
+    entity: "wa_ai",
+    after: { phone, message: msg },
+  }).catch(() => {});
+}
+
 async function startGreetingSession(
   phone: string,
   msg: string,
@@ -5614,6 +5646,19 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // 3. Active session — continue conversation (always takes priority)
     const session = activeSession;
     if (session) {
+      // Availability questions are informational, not booking commands.
+      // Exit any stale/implicit booking session so Mina can keep a broad
+      // schedule conversation until the customer explicitly asks to book.
+      if (isAvailabilityInquiry(msg)) {
+        await updateSession(session.id, { status: "expired" });
+        const parsedAvailability = parseIntent(msg);
+        if (!parsedAvailability.bookingDate) {
+          await beginAvailabilityInquiry(phone, msg, true);
+          return;
+        }
+        clearHistory(phone);
+      }
+
       // A greeting after a pause means the customer is starting over, not
       // answering the previous booking field. Close the stale flow and create
       // a fresh one so Mina does not send a confusing validation error.
@@ -5703,6 +5748,13 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
       return;
     }
 
+    // Availability checks stay conversational and do not start a booking
+    // session until the customer explicitly requests booking.
+    if (isAvailabilityInquiry(msg) && !parseIntent(msg).bookingDate) {
+      await beginAvailabilityInquiry(phone, msg, true);
+      return;
+    }
+
     // Mina's first greeting starts a fresh persisted conversation. A greeting
     // received while a session is active is handled above as a restart.
     if (isMinaGreeting(msg)) {
@@ -5756,11 +5808,20 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     //    everything else→ answered by AI grounded in DB
     const aiEnabled = process.env.AI_SPORTCENTER_ENABLED !== "false" && !!process.env.OPENAI_API_KEY;
     if (aiEnabled) {
+      const history = getHistory(phone);
+      const inAvailabilityConversation = availabilityConversationActive(history);
+      const explicitBookingRequest = isExplicitBookingCommitment(msg);
       const intent = detectIntent(msg);
       await logAiIntentDetected(phone, msg, intent);
 
-      // booking_intent: go straight to structured booking session
-      if (intent === "booking_intent") {
+      // Availability exploration may include phrases like "mau main besok".
+      // Do not convert that into a booking until the customer explicitly asks
+      // to book/pesan/reservasi/sewa.
+      if (
+        intent === "booking_intent" &&
+        (!inAvailabilityConversation || explicitBookingRequest)
+      ) {
+        clearHistory(phone);
         await startBookingSession(phone, msg, String(name), true);
         return;
       }
@@ -5781,11 +5842,13 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
         return;
       }
 
-      const history = getHistory(phone);
       appendTurn(phone, "user", msg);
       let aiResult;
       try {
-        aiResult = await generateAiReply(phone, msg, history, { channel: "whatsapp" });
+        aiResult = await generateAiReply(phone, msg, history, {
+          channel: "whatsapp",
+          suppressBookingHandoff: inAvailabilityConversation && !explicitBookingRequest,
+        });
       } catch (aiErr) {
         logger.error(
           {
