@@ -14,6 +14,7 @@ import {
   getCstWaGatewayPublicConfig,
   getCstWaGatewayReportDeviceId,
   listCstWaGatewayGroups,
+  syncCstWaGatewayGroups,
 } from "../lib/cstWaGateway";
 
 const router = Router();
@@ -57,25 +58,23 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
     const adminTokenConfigured = Boolean(fonnte.adminToken);
     const minaTokenConfigured = Boolean(fonnte.customerToken);
     const gatewayConfig = getCstWaGatewayPublicConfig();
+    const minaGatewayDeviceId = getCstWaGatewayMinaDeviceId();
+    const reportGatewayDeviceId = getCstWaGatewayReportDeviceId();
     let gatewayReachable = false;
     let gatewayError: string | null = null;
     let gatewayGroups: Awaited<ReturnType<typeof listCstWaGatewayGroups>> = [];
 
     if (gatewayConfig.configured) {
       try {
-        gatewayGroups = await listCstWaGatewayGroups();
+        gatewayGroups = await listCstWaGatewayGroups(reportGatewayDeviceId);
         gatewayReachable = true;
       } catch (error) {
         gatewayError = error instanceof Error ? error.message : "Gateway tidak dapat dihubungi";
-        req.log.warn({ err: error }, "CST WA Gateway status check failed");
+        req.log.warn({ err: error, reportGatewayDeviceId }, "CST WA Gateway status check failed");
       }
     }
 
-    const minaGatewayDeviceId = getCstWaGatewayMinaDeviceId();
-    const reportGatewayDeviceId = getCstWaGatewayReportDeviceId();
-    const reportGroups = gatewayGroups.filter(
-      (group) => group.isActive && group.deviceId === reportGatewayDeviceId,
-    );
+    const reportGroups = gatewayGroups.filter((group) => group.isActive);
     const selectedGroupId = settings.waGatewayAdminGroupId ?? null;
     const selectedGroup = selectedGroupId
       ? reportGroups.find((group) => group.id === selectedGroupId) ?? null
@@ -132,6 +131,28 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Get WhatsApp status error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/settings/whatsapp-groups/sync", adminMiddleware, async (req, res) => {
+  try {
+    const gatewayConfig = getCstWaGatewayPublicConfig();
+    if (!gatewayConfig.configured) {
+      res.status(503).json({ error: "CST WA Gateway belum dikonfigurasi" });
+      return;
+    }
+    const reportGatewayDeviceId = getCstWaGatewayReportDeviceId();
+    const result = await syncCstWaGatewayGroups(reportGatewayDeviceId);
+    res.status(202).json({
+      ...result,
+      deviceId: reportGatewayDeviceId,
+      message: "Sinkronisasi grup Sport Center Report sedang diproses.",
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync WhatsApp groups error");
+    res.status(502).json({
+      error: err instanceof Error ? err.message : "Gagal menyinkronkan grup CST WA Gateway",
+    });
   }
 });
 
