@@ -74,6 +74,7 @@ import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import {
   getCstWaGatewayInboundEvent,
   getCstWaGatewayMinaDeviceId,
+  getCstWaGatewayReportDeviceId,
   getCstWaGatewayPublicConfig,
   sendCstWaGatewayDirectMessage,
 } from "../lib/cstWaGateway";
@@ -2234,28 +2235,33 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
   if (!phone) return false;
 
   const gatewayConfig = getCstWaGatewayPublicConfig();
-  const useGatewayForMina =
-    useCustomerToken &&
-    gatewayConfig.configured &&
-    process.env.CST_WA_MINA_PROVIDER !== "fonnte";
+  const channel = useCustomerToken ? "mina" : "admin";
+  const providerOverride = useCustomerToken
+    ? process.env.CST_WA_MINA_PROVIDER
+    : process.env.CST_WA_ADMIN_PROVIDER;
+  const useGateway = gatewayConfig.configured && providerOverride !== "fonnte";
 
-  if (useGatewayForMina) {
+  if (useGateway) {
     if (!allowWhatsAppProviderSend({
-      channel: "mina",
+      channel,
       recipient: phone,
-      customerTokenConfigured: true,
+      customerTokenConfigured: useCustomerToken ? true : false,
     })) return true;
 
     const chunks = splitFonnteTextMessage(message, 1200);
     if (chunks.length === 0) return false;
-    const deviceId = getCstWaGatewayMinaDeviceId();
+    const deviceId = useCustomerToken
+      ? getCstWaGatewayMinaDeviceId()
+      : getCstWaGatewayReportDeviceId();
 
     for (const [chunkIndex, chunk] of chunks.entries()) {
       trackSentMessage(chunk);
-      const inboundMessageId = fonnteReplyContext.getStore()?.inboundMessageId;
+      const inboundMessageId = useCustomerToken
+        ? fonnteReplyContext.getStore()?.inboundMessageId
+        : undefined;
       const deliveryScope = inboundMessageId || randomUUID();
       const idempotencyKey =
-        "mina:" +
+        `${channel}:` +
         createHash("sha256")
           .update(`${deviceId}:${phone}:${deliveryScope}:${chunkIndex}:${chunk}`)
           .digest("hex")
@@ -2270,7 +2276,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
         });
         logger.info(
           {
-            channel: "mina",
+            channel,
             provider: "cst_gateway",
             recipient: phone,
             deviceId,
@@ -2284,7 +2290,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       } catch (err) {
         logger.error(
           {
-            channel: "mina",
+            channel,
             provider: "cst_gateway",
             recipient: phone,
             deviceId,
@@ -2295,7 +2301,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           "[wa] CST WA Gateway outbound failed",
         );
         await logAudit({
-          action: "mina_reply_gateway_error",
+          action: useCustomerToken ? "mina_reply_gateway_error" : "admin_notification_gateway_error",
           entity: "wa_outbound",
           after: {
             recipient: phone,
