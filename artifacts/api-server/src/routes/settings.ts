@@ -13,6 +13,7 @@ import {
   getCstWaGatewayMinaDeviceId,
   getCstWaGatewayPublicConfig,
   getCstWaGatewayReportDeviceId,
+  listCstWaGatewayDevices,
   listCstWaGatewayGroups,
   syncCstWaGatewayGroups,
 } from "../lib/cstWaGateway";
@@ -62,18 +63,31 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
     const reportGatewayDeviceId = getCstWaGatewayReportDeviceId();
     let gatewayReachable = false;
     let gatewayError: string | null = null;
+    let gatewayGroupError: string | null = null;
     let gatewayGroups: Awaited<ReturnType<typeof listCstWaGatewayGroups>> = [];
+    let gatewayDevices: Awaited<ReturnType<typeof listCstWaGatewayDevices>> = [];
 
     if (gatewayConfig.configured) {
       try {
-        gatewayGroups = await listCstWaGatewayGroups(reportGatewayDeviceId);
+        gatewayDevices = await listCstWaGatewayDevices();
         gatewayReachable = true;
       } catch (error) {
         gatewayError = error instanceof Error ? error.message : "Gateway tidak dapat dihubungi";
-        req.log.warn({ err: error, reportGatewayDeviceId }, "CST WA Gateway status check failed");
+        req.log.warn({ err: error }, "CST WA Gateway device status check failed");
+      }
+
+      try {
+        gatewayGroups = await listCstWaGatewayGroups(reportGatewayDeviceId);
+      } catch (error) {
+        gatewayGroupError = error instanceof Error ? error.message : "Daftar grup tidak dapat dibaca";
+        req.log.warn({ err: error, reportGatewayDeviceId }, "CST WA Gateway group status check failed");
       }
     }
 
+    const minaGatewayDevice =
+      gatewayDevices.find((device) => device.deviceId === minaGatewayDeviceId) ?? null;
+    const reportGatewayDevice =
+      gatewayDevices.find((device) => device.deviceId === reportGatewayDeviceId) ?? null;
     const reportGroups = gatewayGroups.filter((group) => group.isActive);
     const selectedGroupId = settings.waGatewayAdminGroupId ?? null;
     const selectedGroup = selectedGroupId
@@ -105,8 +119,12 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
         gatewayDeviceId: minaGatewayDeviceId,
         active:
           minaProvider === "cst_gateway"
-            ? Boolean(gatewayConfig.configured && gatewayReachable)
+            ? Boolean(gatewayConfig.configured && gatewayReachable && minaGatewayDevice?.enabled && minaGatewayDevice.status === "ONLINE")
             : Boolean(fonnte.customerDevice && minaTokenConfigured),
+        gatewayStatus: minaGatewayDevice?.status ?? null,
+        gatewayPhoneNumber: minaGatewayDevice?.phoneNumber ?? null,
+        gatewayLastHeartbeatAt: minaGatewayDevice?.lastHeartbeatAt ?? null,
+        gatewayLastError: minaGatewayDevice?.lastError ?? null,
         inboundDeviceValidation:
           minaProvider === "cst_gateway"
             ? "stable_gateway_device_id"
@@ -115,7 +133,11 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
       report: {
         provider: adminProvider,
         gatewayDeviceId: reportGatewayDeviceId,
-        active: Boolean(gatewayConfig.configured && gatewayReachable),
+        active: Boolean(gatewayConfig.configured && gatewayReachable && reportGatewayDevice?.enabled && reportGatewayDevice.status === "ONLINE"),
+        gatewayStatus: reportGatewayDevice?.status ?? null,
+        gatewayPhoneNumber: reportGatewayDevice?.phoneNumber ?? null,
+        gatewayLastHeartbeatAt: reportGatewayDevice?.lastHeartbeatAt ?? null,
+        gatewayLastError: reportGatewayDevice?.lastError ?? null,
       },
       gateway: {
         configured: gatewayConfig.configured,
@@ -125,7 +147,9 @@ router.get("/settings/whatsapp-status", adminMiddleware, async (req, res) => {
         selectedGroupId,
         selectedGroup,
         groups: reportGroups,
+        devices: gatewayDevices,
         error: gatewayError,
+        groupError: gatewayGroupError,
       },
     });
   } catch (err) {
