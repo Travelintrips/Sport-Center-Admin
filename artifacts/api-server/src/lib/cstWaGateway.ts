@@ -62,8 +62,9 @@ async function gatewayFetch(path: string, init?: RequestInit): Promise<Response>
   });
 }
 
-export async function listCstWaGatewayGroups(): Promise<CstWaGatewayGroup[]> {
-  const response = await gatewayFetch("/v1/groups");
+export async function listCstWaGatewayGroups(deviceId?: string): Promise<CstWaGatewayGroup[]> {
+  const query = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : "";
+  const response = await gatewayFetch(`/v1/groups${query}`);
   if (!response.ok) {
     throw new Error(`CST WA Gateway groups gagal: HTTP ${response.status}`);
   }
@@ -92,6 +93,22 @@ export async function listCstWaGatewayGroups(): Promise<CstWaGatewayGroup[]> {
       isActive: group.isActive !== false,
     }];
   });
+}
+
+export async function syncCstWaGatewayGroups(deviceId: string): Promise<{ status: string; jobs: string[] }> {
+  const response = await gatewayFetch("/v1/groups/sync", {
+    method: "POST",
+    body: JSON.stringify({ deviceId }),
+  });
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  if (!response.ok) {
+    const code = typeof body?.error === "string" ? body.error : `HTTP_${response.status}`;
+    throw new Error(`CST WA Gateway group sync gagal: ${code}`);
+  }
+  return {
+    status: typeof body?.status === "string" ? body.status : "sync_queued",
+    jobs: Array.isArray(body?.jobs) ? body!.jobs.map(String) : [],
+  };
 }
 
 export async function sendCstWaGatewayGroupMessage(input: {
