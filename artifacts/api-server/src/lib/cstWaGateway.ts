@@ -103,6 +103,17 @@ export async function syncCstWaGatewayGroups(deviceId: string): Promise<{ status
   const body = await response.json().catch(() => null) as Record<string, unknown> | null;
   if (!response.ok) {
     const code = typeof body?.error === "string" ? body.error : `HTTP_${response.status}`;
+    if (code === "ENABLED_DEVICE_NOT_FOUND") {
+      throw new Error(
+        `Device ${deviceId} belum tersedia untuk company milik API Client sport-center. ` +
+        "Buka CST WA Gateway → Device, samakan Company device dengan Company API Client sport-center, lalu coba sinkronkan lagi.",
+      );
+    }
+    if (code === "FORBIDDEN" && body?.requiredScope === "groups:write") {
+      throw new Error(
+        "API Client sport-center belum memiliki permission groups:write. Aktifkan Manage groups di CST WA Gateway → API Clients.",
+      );
+    }
     throw new Error(`CST WA Gateway group sync gagal: ${code}`);
   }
   return {
