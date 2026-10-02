@@ -49,6 +49,13 @@ const ENV_KEYS = [
   "ADMIN_WA_PHONES",
   "WATI_API_TOKEN",
   "WATI_BASE_URL",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_SECURE",
+  "SMTP_USER",
+  "SMTP_FROM",
+  "SMTP_PASS",
+  "SMTP_PASSWORD",
 ];
 
 // These values are explicitly global/shared in the existing application.
@@ -88,6 +95,12 @@ const FIELD_ALIASES: Record<string, string[]> = {
   ],
   supabase_storage_bucket: ["supabase_storage_bucket", "SUPABASE_STORAGE_BUCKET"],
   session_secret: ["session_secret", "SESSION_SECRET"],
+  smtp_host: ["smtp_host", "SMTP_HOST"],
+  smtp_port: ["smtp_port", "SMTP_PORT"],
+  smtp_secure: ["smtp_secure", "SMTP_SECURE"],
+  smtp_user: ["smtp_user", "SMTP_USER"],
+  smtp_from: ["smtp_from", "SMTP_FROM"],
+  smtp_pass: ["smtp_pass", "smtp_password", "SMTP_PASS", "SMTP_PASSWORD"],
   fonnte_token: ["fonnte_token", "FONNTE_TOKEN"],
   fonnte_customer_token: ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
   fonnte_customer_device: ["fonnte_customer_device", "FONNTE_CUSTOMER_DEVICE"],
@@ -236,6 +249,11 @@ const SHARED_FIELDS = new Set([
   "WATI_BASE_URL",
   "SMTP_FROM",
   "SMTP_PASS",
+  "SMTP_PASSWORD",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_SECURE",
+  "SMTP_USER",
 ]);
 
 const PROD_FIELDS = new Set([
@@ -268,6 +286,8 @@ function flatPayloadSection(payload: JsonObject, env: "dev" | "prod"): JsonObjec
       section[key] = value;
     } else if (SHARED_FIELDS.has(key)) {
       // Explicitly classified shared values are safe in either section.
+      // An explicit DEV value must win regardless of JSON property order.
+      if (env === "dev" && Object.hasOwn(payload, `${key}_DEV`)) continue;
       section[key] = value;
     }
   }
@@ -313,6 +333,12 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
     ["supabase_service_role_key", `SUPABASE_SERVICE_ROLE_KEY${suffix}`],
     ["supabase_storage_bucket", `SUPABASE_STORAGE_BUCKET${suffix}`],
     ["session_secret", "SESSION_SECRET"],
+    ["smtp_host", "SMTP_HOST"],
+    ["smtp_port", "SMTP_PORT"],
+    ["smtp_secure", "SMTP_SECURE"],
+    ["smtp_user", "SMTP_USER"],
+    ["smtp_from", "SMTP_FROM"],
+    ["smtp_pass", "SMTP_PASS"],
     ["fonnte_token", "FONNTE_TOKEN"],
     ["fonnte_customer_token", "FONNTE_CUSTOMER_TOKEN"],
     ["fonnte_customer_inbound_devices", "FONNTE_CUSTOMER_INBOUND_DEVICES"],

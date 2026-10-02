@@ -1,12 +1,15 @@
 import { Router } from "express";
 import { db, usersTable } from "@workspace/db";
-import { eq, or } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import { createToken, authMiddleware, hashPassword, isValidPasswordHash, verifyPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
 import { logger } from "../lib/logger";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { getFonnteConfig } from "../lib/fonnteConfig";
+import { getBaseUrl } from "../lib/appUrl";
+import { createPasswordResetLimiter, createPasswordResetToken, isValidResetPassword, matchesPasswordResetUser, verifyPasswordResetToken } from "../lib/passwordReset";
+import { getPasswordResetEmailConfig, sendPasswordResetEmail } from "../lib/passwordResetEmail";
 
 const router = Router();
 
@@ -14,7 +17,24 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 const otpStore = new Map<string, { otp: string; expires: number; name?: string }>();
-const resetOtpStore = new Map<string, { otp: string; expires: number; email: string }>();
+const resetOtpStore = new Map<string, { otpHash: string; expires: number; token: string; attempts: number }>();
+const resetRequestLimiter = createPasswordResetLimiter(3, 30);
+const resetConfirmLimiter = createPasswordResetLimiter(10, 30);
+const RESET_ACCEPTED_MESSAGE = "Jika akun terdaftar, instruksi reset kata sandi akan dikirim. Periksa juga folder spam.";
+const RESET_INVALID_MESSAGE = "Tautan atau kode reset tidak valid atau sudah kedaluwarsa. Minta reset baru.";
+
+function normalizeResetEmail(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isValidResetEmail(email: string): boolean {
+  return email.length <= 320 && /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email);
+}
+
+function resetOtpHash(email: string, otp: string): string {
+  return crypto.createHmac("sha256", process.env.SESSION_SECRET!)
+    .update(JSON.stringify(["wa-password-reset", email, otp])).digest("hex");
+}
 
 function cleanPhone(raw: string): string {
   return raw.replace(/^0/, "62").replace(/\D/g, "");
@@ -227,95 +247,121 @@ router.post("/auth/verify-otp", async (req, res) => {
   }
 });
 
-router.post("/auth/forgot-password", async (req, res) => {
+router.post("/auth/forgot-password", resetRequestLimiter, async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) {
-      res.status(400).json({ error: "Email wajib diisi" });
+    const email = normalizeResetEmail(req.body?.email);
+    const channel = req.body?.channel ?? "whatsapp";
+    if (!isValidResetEmail(email) || !["email", "whatsapp"].includes(channel)) {
+      res.status(400).json({ error: "Masukkan email dan metode pengiriman yang valid." });
       return;
     }
-
+    // Reject missing transport settings uniformly, including unknown accounts.
+    if (channel === "email") {
+      try {
+        getPasswordResetEmailConfig();
+      } catch {
+        res.status(503).json({ error: "Layanan email belum tersedia. Gunakan WhatsApp atau hubungi pengelola." });
+        return;
+      }
+    }
     const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
-    if (!user) {
-      res.status(404).json({ error: "Email tidak terdaftar" });
+    if (!user || (user.accountStatus && user.accountStatus !== "active")) {
+      res.status(202).json({ success: true, channel, message: RESET_ACCEPTED_MESSAGE });
       return;
     }
+
+    const resetToken = createPasswordResetToken(user);
+    if (channel === "email") {
+      const baseUrl = new URL(await getBaseUrl());
+      if (baseUrl.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && baseUrl.protocol === "http:")) {
+        throw new Error("Password reset application URL is invalid");
+      }
+      const resetUrl = new URL("/reset-password", baseUrl);
+      if (req.body?.source === "admin") resetUrl.searchParams.set("source", "admin");
+      // Fragments are not sent to the server, access logs, or Referer headers.
+      resetUrl.hash = `token=${encodeURIComponent(resetToken)}`;
+      try {
+        await sendPasswordResetEmail(user.email!, resetUrl.toString());
+      } catch {
+        // Never log a reset link, SMTP credential, or provider response body.
+        req.log.error({ userId: user.id, channel }, "Password reset email delivery failed");
+      }
+      res.status(202).json({ success: true, channel, message: RESET_ACCEPTED_MESSAGE });
+      return;
+    }
+
     if (!user.phone) {
-      res.status(422).json({ error: "Akun ini tidak memiliki nomor WhatsApp. Gunakan login Google atau hubungi admin." });
+      res.status(202).json({ success: true, channel, message: RESET_ACCEPTED_MESSAGE });
       return;
     }
-
     const cleaned = cleanPhone(user.phone);
-    const otp = generateOtp();
-    const expires = Date.now() + 5 * 60 * 1000;
-    resetOtpStore.set(cleaned, { otp, expires, email });
-
     const fonnte = await getFonnteConfig();
-    if (
-      fonnte.customerToken &&
-      fonnte.customerDevice &&
-      allowWhatsAppProviderSend({
+    if (!fonnte.customerToken || !fonnte.customerDevice || !allowWhatsAppProviderSend({
         channel: "mina",
         recipient: cleaned,
         customerTokenConfigured: true,
-      })
-    ) {
-      try {
-        await fetch("https://api.fonnte.com/send", {
-          method: "POST",
-          headers: { Authorization: fonnte.customerToken, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            target: cleaned,
-            message: `Kode reset password Sport Center Anda: *${otp}*\n\nBerlaku 5 menit. Jangan bagikan ke siapapun.`,
-          }),
-        });
-      } catch {
-        // swallow
-      }
-    } else {
-      logger.debug(`[DEV] Reset OTP for ${cleaned}: ${otp}`);
+      })) {
+      res.status(503).json({ error: "Layanan WhatsApp belum tersedia. Gunakan email atau hubungi pengelola." });
+      return;
     }
-
-    const maskedPhone = user.phone.replace(/(\d{3})\d+(\d{3})/, "$1****$2");
-    res.json({ success: true, maskedPhone });
-  } catch (err) {
-    req.log.error({ err }, "Forgot password error");
-    res.status(500).json({ error: "Internal server error" });
+    const otp = String(crypto.randomInt(100000, 1000000));
+    resetOtpStore.delete(email);
+    const provider = await fetch("https://api.fonnte.com/send", {
+      method: "POST",
+      headers: { Authorization: fonnte.customerToken, "Content-Type": "application/json" },
+      body: JSON.stringify({ target: cleaned, message: `Kode reset password Sport Center Anda: *${otp}*\n\nBerlaku 5 menit. Jangan bagikan ke siapapun.` }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const result = await provider.json().catch(() => null) as { status?: boolean | string } | null;
+    if (!provider.ok || (result?.status !== true && result?.status !== "true")) {
+      res.status(503).json({ error: "Kode WhatsApp belum dapat dikirim. Gunakan email atau coba lagi nanti." });
+      return;
+    }
+    const now = Date.now();
+    for (const [key, record] of resetOtpStore) if (record.expires <= now) resetOtpStore.delete(key);
+    resetOtpStore.set(email, { otpHash: resetOtpHash(email, otp), token: resetToken, attempts: 0, expires: now + 5 * 60 * 1000 });
+    res.status(202).json({ success: true, channel, message: RESET_ACCEPTED_MESSAGE });
+  } catch {
+    req.log.error({ route: "forgot-password" }, "Forgot password request failed");
+    res.status(503).json({ error: "Layanan reset belum tersedia. Coba lagi nanti." });
   }
 });
 
-router.post("/auth/reset-password", async (req, res) => {
+router.post("/auth/reset-password", resetConfirmLimiter, async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword) {
-      res.status(400).json({ error: "Email, OTP, dan password baru wajib diisi" });
+    const { token, newPassword } = req.body ?? {};
+    if (!isValidResetPassword(newPassword)) {
+      res.status(400).json({ error: "Kata sandi minimal 8 karakter dan maksimal 72 byte." });
       return;
     }
-    if (newPassword.length < 6) {
-      res.status(400).json({ error: "Password baru minimal 6 karakter" });
+    let resetToken = token;
+    if (token === undefined) {
+      const email = normalizeResetEmail(req.body?.email);
+      const otp = typeof req.body?.otp === "string" ? req.body.otp.trim() : "";
+      const record = resetOtpStore.get(email);
+      if (!isValidResetEmail(email) || !/^\d{6}$/.test(otp) || !record || record.expires <= Date.now() || record.attempts >= 5) {
+        if (record && record.expires <= Date.now()) resetOtpStore.delete(email);
+        res.status(400).json({ error: RESET_INVALID_MESSAGE });
+        return;
+      }
+      record.attempts += 1;
+      if (!crypto.timingSafeEqual(Buffer.from(record.otpHash, "hex"), Buffer.from(resetOtpHash(email, otp), "hex"))) {
+        if (record.attempts >= 5) resetOtpStore.delete(email);
+        res.status(400).json({ error: RESET_INVALID_MESSAGE });
+        return;
+      }
+      resetToken = record.token;
+      // Claim this OTP synchronously before any asynchronous password work.
+      resetOtpStore.delete(email);
+    }
+    const payload = verifyPasswordResetToken(resetToken);
+    if (!payload) {
+      res.status(400).json({ error: RESET_INVALID_MESSAGE });
       return;
     }
-
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
-    if (!user || !user.phone) {
-      res.status(404).json({ error: "Akun tidak ditemukan" });
-      return;
-    }
-
-    const cleaned = cleanPhone(user.phone);
-    const record = resetOtpStore.get(cleaned);
-
-    if (!record || record.email !== email) {
-      res.status(400).json({ error: "OTP tidak ditemukan. Minta OTP baru." });
-      return;
-    }
-    if (Date.now() > record.expires) {
-      resetOtpStore.delete(cleaned);
-      res.status(400).json({ error: "OTP sudah kadaluarsa. Minta OTP baru." });
-      return;
-    }
-    if (record.otp !== String(otp)) {
-      res.status(400).json({ error: "OTP salah" });
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.subject)).limit(1);
+    if (!user || !matchesPasswordResetUser(payload, user) || (user.accountStatus && user.accountStatus !== "active")) {
+      res.status(400).json({ error: RESET_INVALID_MESSAGE });
       return;
     }
 
@@ -326,11 +372,22 @@ router.post("/auth/reset-password", async (req, res) => {
 
     const [updatedUser] = await db
       .update(usersTable)
-      .set({ passwordHash })
-      .where(eq(usersTable.id, user.id))
+      .set({ passwordHash, updatedAt: new Date() })
+      // A compare-and-swap makes every link single-use, including two
+      // simultaneous requests on different Hostinger instances.
+      .where(and(
+        eq(usersTable.id, user.id),
+        eq(usersTable.email, payload.email),
+        user.passwordHash === null ? isNull(usersTable.passwordHash) : eq(usersTable.passwordHash, user.passwordHash),
+        user.accountStatus === null ? isNull(usersTable.accountStatus) : eq(usersTable.accountStatus, user.accountStatus),
+      ))
       .returning({ id: usersTable.id, passwordHash: usersTable.passwordHash });
 
-    if (!updatedUser || updatedUser.id !== user.id || !isValidPasswordHash(updatedUser.passwordHash)) {
+    if (!updatedUser) {
+      res.status(400).json({ error: RESET_INVALID_MESSAGE });
+      return;
+    }
+    if (updatedUser.id !== user.id || !isValidPasswordHash(updatedUser.passwordHash)) {
       throw new Error("Password hash update was not persisted");
     }
 
@@ -339,12 +396,10 @@ router.post("/auth/reset-password", async (req, res) => {
       throw new Error("Persisted password hash did not verify");
     }
 
-    resetOtpStore.delete(cleaned);
-
     res.json({ success: true, message: "Password berhasil diubah. Silakan login dengan password baru." });
-  } catch (err) {
-    req.log.error({ err }, "Reset password error");
-    res.status(500).json({ error: "Internal server error" });
+  } catch {
+    req.log.error({ route: "reset-password" }, "Reset password failed");
+    res.status(503).json({ error: "Kata sandi belum dapat diubah. Minta reset baru atau coba lagi nanti." });
   }
 });
 
