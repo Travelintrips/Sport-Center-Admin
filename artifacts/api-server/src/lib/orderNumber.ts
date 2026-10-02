@@ -13,7 +13,9 @@ const BOOKING_ORDER_SEQUENCE = "sport_center.booking_order_no_seq";
 export async function generateBookingOrderNumber(): Promise<string> {
   const value = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(42003)`);
-    await tx.execute(sql.raw(`CREATE SEQUENCE IF NOT EXISTS ${BOOKING_ORDER_SEQUENCE}`));
+    // The booking sequence is provisioned by the database migration. Production
+    // runs with a DML-only application role, so runtime requests must not attempt
+    // schema DDL here (CREATE SEQUENCE requires CREATE on sport_center).
     await tx.execute(sql.raw(`
       SELECT setval(
         '${BOOKING_ORDER_SEQUENCE}',
