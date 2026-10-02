@@ -11,6 +11,38 @@ if (!Number.isFinite(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+let startupFailureCode: string | null = null;
+
+function classifyStartupFailure(error: unknown): string {
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate?.code === "string" ? candidate.code : "";
+  const message =
+    typeof candidate?.message === "string"
+      ? candidate.message
+      : String(error ?? "");
+
+  if (
+    code === "28P01" ||
+    /password authentication failed|authentication failed for user/i.test(message)
+  ) {
+    return "DATABASE_AUTH_FAILED";
+  }
+
+  if (
+    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|connection terminated|server closed the connection|circuit breaker/i.test(
+      message,
+    )
+  ) {
+    return "DATABASE_UNAVAILABLE";
+  }
+
+  if (/SECRET_BOOTSTRAP_FAILED/i.test(message)) {
+    return "SECRET_BOOTSTRAP_FAILED";
+  }
+
+  return "STARTUP_INITIALIZATION_FAILED";
+}
+
 let requestHandler: RequestHandler = (req, res) => {
   const pathname = (req.url ?? "/").split("?")[0] ?? "/";
   const isHealthProbe =
@@ -18,24 +50,46 @@ let requestHandler: RequestHandler = (req, res) => {
     pathname === "/healthz" ||
     pathname === "/api/health" ||
     pathname === "/api/healthz";
+  const isReadinessProbe =
+    pathname === "/readiness" ||
+    pathname === "/api/readiness";
 
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 
   if (isHealthProbe) {
     res.statusCode = 200;
-    res.end(JSON.stringify({
-      status: "starting",
-      service: "sport-center",
-    }));
+    res.end(
+      JSON.stringify({
+        status: startupFailureCode ? "degraded" : "starting",
+        service: "sport-center",
+      }),
+    );
     return;
   }
 
-  res.setHeader("Retry-After", "2");
+  if (isReadinessProbe) {
+    res.setHeader("Retry-After", startupFailureCode ? "30" : "2");
+    res.statusCode = 503;
+    res.end(
+      JSON.stringify({
+        status: startupFailureCode ? "error" : "starting",
+        service: "sport-center",
+        code: startupFailureCode ?? "STARTUP_INITIALIZATION_PENDING",
+      }),
+    );
+    return;
+  }
+
+  res.setHeader("Retry-After", startupFailureCode ? "30" : "2");
   res.statusCode = 503;
-  res.end(JSON.stringify({
-    error: "Server sedang menyiapkan runtime. Coba lagi sebentar.",
-    code: "STARTUP_INITIALIZATION_PENDING",
-  }));
+  res.end(
+    JSON.stringify({
+      error: startupFailureCode
+        ? "Server belum siap karena inisialisasi runtime gagal."
+        : "Server sedang menyiapkan runtime. Coba lagi sebentar.",
+      code: startupFailureCode ?? "STARTUP_INITIALIZATION_PENDING",
+    }),
+  );
 };
 
 const server = createServer((req, res) => requestHandler(req, res));
@@ -53,7 +107,7 @@ async function initializeAfterListen(): Promise<void> {
 
   if (result.fatal.length > 0) {
     console.error("[secretLoader] Shared secret bootstrap failed:", result.fatal);
-    process.exit(1);
+    throw new Error("SECRET_BOOTSTRAP_FAILED");
   }
 
   if (result.loaded.length > 0) {
@@ -70,18 +124,23 @@ async function initializeAfterListen(): Promise<void> {
   // initialize from stale or arbitrary runtime values.
   const runtime = await import("./index");
 
-  // Express can now serve liveness/readiness. Its startup readiness middleware
-  // keeps all business traffic fail-closed until initializeRuntime() succeeds.
-  requestHandler = runtime.app as unknown as RequestHandler;
-
+  // Keep the bootstrap handler active until required runtime initialization
+  // has actually succeeded. If the database credential is invalid, the process
+  // stays alive in a fail-closed degraded state instead of crash-looping and
+  // repeatedly tripping Supavisor's authentication circuit breaker.
   await runtime.initializeRuntime();
+
+  requestHandler = runtime.app as unknown as RequestHandler;
   console.info("[bootstrap] Runtime initialization complete");
 }
 
 server.listen(port, host, () => {
   console.info(`[bootstrap] Listening on ${host}:${port}; initializing runtime`);
   void initializeAfterListen().catch((error) => {
-    console.error("[bootstrap] Runtime initialization failed", error);
-    process.exit(1);
+    startupFailureCode = classifyStartupFailure(error);
+    console.error(
+      "[bootstrap] Runtime initialization failed; keeping process alive in fail-closed mode",
+      { code: startupFailureCode },
+    );
   });
 });
