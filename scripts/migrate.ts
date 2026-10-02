@@ -147,7 +147,31 @@ BEGIN
       ADD CONSTRAINT facility_company_mappings_company_id_fkey
       FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE RESTRICT;
   END IF;
-END $$;
+END $;
+
+-- The production application role resolves facility ownership through the
+-- canonical company master. public.companies has RLS enabled, so table grants
+-- alone are not enough: without this narrowly-scoped SELECT policy the backend
+-- sees zero companies and rejects manual payment uploads as missing company
+-- ownership.
+DO $
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sport_center_app')
+     AND NOT EXISTS (
+       SELECT 1
+         FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'companies'
+          AND policyname = 'sport_center_app_read_active_companies'
+     )
+  THEN
+    CREATE POLICY sport_center_app_read_active_companies
+      ON public.companies
+      FOR SELECT
+      TO sport_center_app
+      USING (is_active = true);
+  END IF;
+END $;
 
 CREATE INDEX IF NOT EXISTS facility_company_mappings_lookup_idx
   ON sport_center.facility_company_mappings (facility_id, effective_from, effective_until)
