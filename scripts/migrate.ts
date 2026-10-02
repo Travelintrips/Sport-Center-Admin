@@ -154,7 +154,7 @@ END $;
 -- alone are not enough: without this narrowly-scoped SELECT policy the backend
 -- sees zero companies and rejects manual payment uploads as missing company
 -- ownership.
-DO $
+DO $company_policy$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sport_center_app')
      AND NOT EXISTS (
@@ -171,8 +171,8 @@ BEGIN
       TO sport_center_app
       USING (is_active = true);
   END IF;
-END $;
-
+END
+$company_policy$;
 CREATE INDEX IF NOT EXISTS facility_company_mappings_lookup_idx
   ON sport_center.facility_company_mappings (facility_id, effective_from, effective_until)
   WHERE is_active = true;
