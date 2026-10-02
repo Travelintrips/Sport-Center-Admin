@@ -174,6 +174,32 @@ function normalizeDatabaseUrlForRuntime(
   );
 }
 
+
+function buildProductionAppUrlFromAuditCredential(
+  applicationUrl: string,
+  auditUrl: string,
+): string {
+  const app = new URL(applicationUrl);
+  const audit = new URL(auditUrl);
+  if (!audit.password) {
+    throw new Error("Production audit URL does not contain a database credential");
+  }
+
+  const currentUser = decodeURIComponent(app.username);
+  const projectRef = currentUser.includes(".")
+    ? currentUser.slice(currentUser.indexOf(".") + 1)
+    : "";
+
+  if (!projectRef) {
+    throw new Error("Could not derive Supabase project ref from production pooler URL");
+  }
+
+  app.username = `sport_center_app.${projectRef}`;
+  app.password = audit.password;
+  app.port = "5432";
+  return app.toString();
+}
+
 function parseBootstrap(raw: string): BootstrapConfig {
   const parsed = JSON.parse(raw) as JsonObject;
   const projectId =
@@ -432,7 +458,31 @@ export async function loadSecretsFromGSM(): Promise<LoadResult> {
       result.fatal.push(`${env.toUpperCase()} configuration validation failed: ${missing.join(", ")}`);
       return result;
     }
-    result.loaded = setEnvironmentConfig(section, env);
+
+    let effectiveSection = section;
+    if (env === "prod") {
+      try {
+        const auditUrl = await accessSecretValue(
+          projectId as string,
+          "SUPABASE_PROD_AUDIT_DATABASE_URL",
+          bootstrap.credentials,
+        );
+        const currentUrl = findField(section, "database_url");
+        if (!currentUrl) throw new Error("Production database URL is missing");
+        effectiveSection = {
+          ...section,
+          database_url: buildProductionAppUrlFromAuditCredential(currentUrl, auditUrl.trim()),
+        };
+        result.loaded.push("SUPABASE_DATABASE_URL_CREDENTIAL_BRIDGE");
+      } catch (error) {
+        result.failed.push(`Production app credential bridge unavailable: ${safeError(error)}`);
+      }
+    }
+
+    result.loaded = [
+      ...result.loaded,
+      ...setEnvironmentConfig(effectiveSection, env),
+    ];
     if (!result.loaded.includes(`SUPABASE_DATABASE_URL${env === "dev" ? "_DEV" : ""}`)) {
       result.fatal.push("database_url could not be loaded");
     }
