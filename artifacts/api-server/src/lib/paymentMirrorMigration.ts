@@ -86,9 +86,11 @@ export function startPaymentMirrorMigration(): Promise<void> {
             }
           | undefined;
 
+        // Production schema provisioning is external. Runtime startup verifies
+        // the financial safety contract but does not replace database functions.
+        // This keeps the application role DML-only and avoids requiring owner
+        // privileges on production functions during every process restart.
         void compatibilityRow;
-        await tx.execute(sql.raw(paymentMetadataResolverMigration));
-        await tx.execute(sql.raw(manualProviderMirrorMigration));
 
         return tx.execute(sql.raw(`
         SELECT
