@@ -322,14 +322,21 @@ export default function BookingDetail() {
         clearFile();
       },
       onError: (error: any) => {
-        const isRecurringConflict = error?.status === 409 || /HTTP 409\b/.test(String(error?.message ?? ""));
+        const apiData = error?.data && typeof error.data === "object"
+          ? error.data as { error?: string; code?: string }
+          : null;
+        const apiMessage = apiData?.error || error?.message || t("Terjadi kesalahan", "An error occurred");
+        const isRecurringConflict =
+          error?.status === 409 &&
+          (apiData?.code === "RECURRING_PAYMENT_EXISTS" ||
+            /recurring|rangkaian/i.test(String(apiMessage)));
         toast({
           title: isRecurringConflict
             ? "Payment recurring sudah ada"
             : t("Gagal mengirim", "Failed to submit"),
           description: isRecurringConflict
             ? "Rangkaian recurring ini sudah memiliki payment."
-            : error?.message || t("Terjadi kesalahan", "An error occurred"),
+            : apiMessage,
           variant: "destructive",
         });
         setUploadProgress("idle");
@@ -492,9 +499,15 @@ export default function BookingDetail() {
           ocrScan,
           notes: notes || undefined,
           paymentType: detectedType as any,
-          recurring_series_id: paymentSelection.recurringSeriesId,
-          group_id: paymentSelection.groupId,
-          member_id: paymentSelection.memberId,
+          ...(paymentSelection.recurringSeriesId
+            ? { recurring_series_id: paymentSelection.recurringSeriesId }
+            : {}),
+          ...(paymentSelection.groupId
+            ? { group_id: paymentSelection.groupId }
+            : {}),
+          ...(paymentSelection.memberId
+            ? { member_id: paymentSelection.memberId }
+            : {}),
         },
       });
     } catch (err: any) {
@@ -1309,7 +1322,14 @@ export default function BookingDetail() {
                     )}
 
                     <UploadProofForm
-                       recurringFields={<RecurringPaymentFields selection={paymentSelection} />}
+                      recurringFields={
+                        paymentSelection.recurringSeriesId ||
+                        paymentSelection.groupId ||
+                        paymentSelection.memberId ||
+                        paymentSelection.sessions.length > 1
+                          ? <RecurringPaymentFields selection={paymentSelection} />
+                          : undefined
+                      }
                       selectedFile={selectedFile}
                       previewUrl={previewUrl}
                       isDragging={isDragging}
@@ -1356,7 +1376,14 @@ export default function BookingDetail() {
                     </div>
 
                     <UploadProofForm
-                       recurringFields={<RecurringPaymentFields selection={paymentSelection} />}
+                      recurringFields={
+                        paymentSelection.recurringSeriesId ||
+                        paymentSelection.groupId ||
+                        paymentSelection.memberId ||
+                        paymentSelection.sessions.length > 1
+                          ? <RecurringPaymentFields selection={paymentSelection} />
+                          : undefined
+                      }
                       selectedFile={selectedFile}
                       previewUrl={previewUrl}
                       isDragging={isDragging}
