@@ -56,6 +56,7 @@ const Terms = lazy(() => import("@/pages/Terms"));
 const Privacy = lazy(() => import("@/pages/Privacy"));
 const Contact = lazy(() => import("@/pages/Contact"));
 const Login = lazy(() => import("@/pages/Login"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Register = lazy(() => import("@/pages/Register"));
 const MyBookings = lazy(() => import("@/pages/MyBookings"));
 const MyProfile = lazy(() => import("@/pages/MyProfile"));
@@ -194,6 +195,7 @@ function Router() {
     <Switch>
       {/* Admin Auth */}
       <Route path="/admin/login" component={AdminLogin} />
+      <Route path="/reset-password" component={ResetPassword} />
 
       {/* All admin sub-routes */}
       <Route path="/admin/dashboard" component={AdminRouter} />

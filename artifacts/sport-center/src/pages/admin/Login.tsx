@@ -16,11 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Lock } from "lucide-react";
+import { ForgotPasswordDialog } from "@/components/ForgotPasswordDialog";
 
 export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -119,15 +121,9 @@ export default function AdminLogin() {
                 className="h-12"
               />
             </div>
-
-            {/**  <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground flex flex-col gap-1 border border-border">
-              
-              <span className="font-semibold text-foreground">
-                Kredensial Demo:
-              </span>
-              <span>Email: admin@sportcenter.com</span>
-              <span>Kata sandi: admin123</span>
-            </div> */}
+            <Button type="button" variant="link" className="px-0" disabled={isPending} onClick={() => setForgotOpen(true)}>
+              Lupa kata sandi?
+            </Button>
           </CardContent>
           <CardFooter className="pb-8">
             <Button
@@ -140,6 +136,7 @@ export default function AdminLogin() {
           </CardFooter>
         </form>
       </Card>
+      <ForgotPasswordDialog open={forgotOpen} initialEmail={email} source="admin" onClose={() => setForgotOpen(false)} />
     </div>
   );
 }
