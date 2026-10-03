@@ -643,13 +643,13 @@ export default function Facilities() {
   }
 
   const [facilities, setFacilities] = useState<Facility[] | null>(null);
-  const [facilitiesLoadError, setFacilitiesLoadError] = useState<string | null>(null);
+  const [facilitiesLoadError, setFacilitiesLoadError] = useState(false);
   const [facilitiesReloadKey, setFacilitiesReloadKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setFacilities(null);
-    setFacilitiesLoadError(null);
+    setFacilitiesLoadError(false);
 
     fetch("/api/facilities?activeOnly=true", {
       method: "GET",
@@ -671,16 +671,13 @@ export default function Facilities() {
         if (controller.signal.aborted) return;
         console.error("[Facilities] Failed to load public facilities:", err);
         setFacilities([]);
-        setFacilitiesLoadError(t(
-          "Fasilitas gagal dimuat. Silakan coba lagi.",
-          "Facilities failed to load. Please try again.",
-        ));
+        setFacilitiesLoadError(true);
       });
 
     return () => controller.abort();
-  }, [facilitiesReloadKey, t]);
+  }, [facilitiesReloadKey]);
 
-  const isLoading = facilities === null && facilitiesLoadError === null;
+  const isLoading = facilities === null && !facilitiesLoadError;
 
   const categories = useMemo(() => {
     if (!facilities) return ["all"];
@@ -759,7 +756,7 @@ export default function Facilities() {
             <h3 className="text-xl font-black text-secondary dark:text-white mb-2">
               {t("Fasilitas belum dapat ditampilkan", "Facilities are temporarily unavailable")}
             </h3>
-            <p className="text-muted-foreground font-medium mb-5">{facilitiesLoadError}</p>
+            <p className="text-muted-foreground font-medium mb-5">{t("Fasilitas gagal dimuat. Silakan coba lagi.", "Facilities failed to load. Please try again.")}</p>
             <Button
               type="button"
               className="rounded-full font-bold h-11 px-6"
