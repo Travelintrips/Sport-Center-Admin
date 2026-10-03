@@ -1,7 +1,7 @@
 import SEOHead from "@/components/SEOHead";
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { Link } from "wouter";
-import { useListFacilities, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
+import { useSubmitMembershipPaymentProof, useGetSettings, type Facility } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -642,7 +642,42 @@ export default function Facilities() {
     setMembershipOpen(true);
   }
 
-  const { data: facilities, isLoading } = useListFacilities({ activeOnly: true });
+  const [facilities, setFacilities] = useState<Facility[] | null>(null);
+  const [facilitiesLoadError, setFacilitiesLoadError] = useState(false);
+  const [facilitiesReloadKey, setFacilitiesReloadKey] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setFacilities(null);
+    setFacilitiesLoadError(false);
+
+    fetch("/api/facilities?activeOnly=true", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (!Array.isArray(data)) {
+          throw new Error("Invalid facilities response");
+        }
+        setFacilities(data as Facility[]);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.error("[Facilities] Failed to load public facilities:", err);
+        setFacilities([]);
+        setFacilitiesLoadError(true);
+      });
+
+    return () => controller.abort();
+  }, [facilitiesReloadKey]);
+
+  const isLoading = facilities === null && !facilitiesLoadError;
 
   const categories = useMemo(() => {
     if (!facilities) return ["all"];
@@ -716,7 +751,21 @@ export default function Facilities() {
         </div>
 
         {/* Results */}
-        {isLoading ? (
+        {facilitiesLoadError ? (
+          <div className="rounded-3xl border border-destructive/20 bg-white dark:bg-slate-900 p-8 text-center shadow-sm">
+            <h3 className="text-xl font-black text-secondary dark:text-white mb-2">
+              {t("Fasilitas belum dapat ditampilkan", "Facilities are temporarily unavailable")}
+            </h3>
+            <p className="text-muted-foreground font-medium mb-5">{t("Fasilitas gagal dimuat. Silakan coba lagi.", "Facilities failed to load. Please try again.")}</p>
+            <Button
+              type="button"
+              className="rounded-full font-bold h-11 px-6"
+              onClick={() => setFacilitiesReloadKey((value) => value + 1)}
+            >
+              {t("Coba Lagi", "Try Again")}
+            </Button>
+          </div>
+        ) : isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {[1, 2, 3, 4, 5, 6].map(i => (
               <div key={i} className="bg-white dark:bg-slate-900 rounded-3xl p-4 border border-border/50">
