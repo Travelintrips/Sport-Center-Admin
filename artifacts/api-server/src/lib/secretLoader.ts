@@ -169,22 +169,19 @@ function findField(section: JsonObject, field: string): string | undefined {
 }
 
 /**
- * Hostinger production keeps a long-lived node-postgres Pool. In this
- * environment the Supabase shared transaction-pooler endpoint on port 6543
- * has been observed refusing outbound connections, while the same Supavisor
- * host exposes session mode on port 5432. Keep the secret as source-of-truth
- * and normalize only the transport port at runtime; credentials, host,
- * project reference, database name and query parameters remain unchanged.
+ * Keep the database URL transport selected in Secret Manager.
+ *
+ * Production must not rewrite Supabase transaction-pooler port 6543 to
+ * session mode on 5432. Session mode has a small per-project client cap and
+ * can refuse startup during rolling deploys or when multiple services share
+ * the same project. The transaction pooler is the intended endpoint for the
+ * application's long-lived node-postgres Pool.
  */
 function normalizeDatabaseUrlForRuntime(
   value: string,
-  env: "dev" | "prod",
+  _env: "dev" | "prod",
 ): string {
-  if (env !== "prod") return value;
-  return value.replace(
-    /(\.pooler\.supabase\.com):6543(?=\/|\?|$)/i,
-    "$1:5432",
-  );
+  return value;
 }
 
 
