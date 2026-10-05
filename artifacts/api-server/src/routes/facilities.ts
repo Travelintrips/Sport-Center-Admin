@@ -35,6 +35,14 @@ function parseFacilityImageUpload(req: any, res: any, next: any) {
 
 const router = Router();
 
+const PUBLIC_FACILITIES_CACHE_TTL_MS = 60_000;
+let facilitiesListCache: { expiresAt: number; rows: any[] } | null = null;
+
+function invalidateFacilitiesListCache(): void {
+  facilitiesListCache = null;
+}
+
+
 async function getFacilityWithImages(id: number) {
   const [facility] = await db
     .select()
@@ -52,24 +60,32 @@ async function getFacilityWithImages(id: number) {
 router.get("/facilities", async (req, res) => {
   try {
     const { activeOnly, category } = req.query;
-    let facilities = await db.select().from(facilitiesTable);
-    if (activeOnly === "true") facilities = facilities.filter((f) => f.isActive);
-    if (category) facilities = facilities.filter((f) => f.category === category);
+    const now = Date.now();
 
-    const facilityIds = facilities.map((f) => f.id);
-    const images =
-      facilityIds.length > 0
-        ? await db
-            .select()
-            .from(facilityImagesTable)
-            .where(inArray(facilityImagesTable.facilityId, facilityIds))
-        : [];
+    if (!facilitiesListCache || facilitiesListCache.expiresAt <= now) {
+      // Facilities and images are independent reads. Run them concurrently so
+      // a cold Supabase connection pays one round-trip window instead of two.
+      const [facilities, images] = await Promise.all([
+        db.select().from(facilitiesTable),
+        db.select().from(facilityImagesTable),
+      ]);
+      facilitiesListCache = {
+        expiresAt: now + PUBLIC_FACILITIES_CACHE_TTL_MS,
+        rows: facilities.map((facility) => ({
+          ...facility,
+          pricePerHour: Number(facility.pricePerHour),
+          images: images.filter((image) => image.facilityId === facility.id),
+        })),
+      };
+    }
 
-    const result = facilities.map((f) => ({
-      ...f,
-      pricePerHour: Number(f.pricePerHour),
-      images: images.filter((img) => img.facilityId === f.id),
-    }));
+    let result = facilitiesListCache.rows;
+    if (activeOnly === "true") result = result.filter((facility) => facility.isActive);
+    if (category) result = result.filter((facility) => facility.category === category);
+
+    // Public facility data changes infrequently; let browser/CDN reuse it
+    // briefly while the server-side cache protects Supabase from bursts.
+    res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "List facilities error");
@@ -93,6 +109,7 @@ router.post("/facilities", adminMiddleware, async (req, res) => {
         }))
       );
     }
+    invalidateFacilitiesListCache();
     const result = await getFacilityWithImages(facility.id);
     res.status(201).json(result);
   } catch (err) {
@@ -146,6 +163,7 @@ router.patch("/facilities/:id", adminMiddleware, async (req, res) => {
         );
       }
     }
+    invalidateFacilitiesListCache();
     const result = await getFacilityWithImages(id);
     if (!result) {
       res.status(404).json({ error: "Not found" });
@@ -167,6 +185,7 @@ router.delete("/facilities/:id", adminMiddleware, async (req, res) => {
       .where(eq(facilityImagesTable.facilityId, id));
     await Promise.all(images.map((img) => deleteFromStorage(img.url)));
     await db.delete(facilitiesTable).where(eq(facilitiesTable.id, id));
+    invalidateFacilitiesListCache();
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Delete facility error");
@@ -207,6 +226,7 @@ router.post(
         .values({ facilityId: id, url: publicUrl, isPrimary })
         .returning();
 
+      invalidateFacilitiesListCache();
       res.status(201).json(image);
     } catch (err) {
       req.log.error({ err }, "Upload facility image error");
@@ -248,6 +268,7 @@ router.delete(
           }
         }
       }
+      invalidateFacilitiesListCache();
       res.status(204).send();
     } catch (err) {
       req.log.error({ err }, "Delete facility image error");
@@ -271,6 +292,7 @@ router.patch(
         .update(facilityImagesTable)
         .set({ isPrimary: true })
         .where(eq(facilityImagesTable.id, imageId));
+      invalidateFacilitiesListCache();
       res.json({ success: true });
     } catch (err) {
       req.log.error({ err }, "Set primary image error");
