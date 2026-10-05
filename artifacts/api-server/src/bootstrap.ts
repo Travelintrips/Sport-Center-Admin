@@ -29,7 +29,7 @@ function classifyStartupFailure(error: unknown): string {
   }
 
   if (
-    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|connection terminated|server closed the connection|circuit breaker/i.test(
+    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|connection terminated|server closed the connection|circuit breaker|EMAXCONNSESSION|max clients reached/i.test(
       message,
     )
   ) {
