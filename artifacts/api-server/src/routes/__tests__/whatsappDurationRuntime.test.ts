@@ -3,14 +3,14 @@ import { eq } from "drizzle-orm";
 import { db, facilitiesTable, waBookingSessionsTable } from "@workspace/db";
 import { createSession, getActiveSession, todayWIB } from "../../lib/waBookingSession";
 
-jest.unstable_mockModule("../../lib/whatsappSafety.js", () => ({
+jest.unstable_mockModule("../../lib/whatsappSafety", () => ({
   DEV_MINA_TEST_RECIPIENT_ENV: "WA_DEV_MINA_TEST_RECIPIENT",
   getWhatsAppDispatchMode: jest.fn(() => "production"),
   isMinaDevTestRecipient: jest.fn(() => true),
   allowWhatsAppProviderSend: jest.fn(() => true),
 }));
 
-jest.unstable_mockModule("../../lib/fonnteConfig.js", () => ({
+jest.unstable_mockModule("../../lib/fonnteConfig", () => ({
   getFonnteConfig: jest.fn(async () => ({
     adminToken: "",
     adminTokenSource: "missing",
