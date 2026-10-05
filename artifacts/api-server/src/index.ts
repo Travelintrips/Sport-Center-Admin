@@ -1309,8 +1309,15 @@ export async function initializeRuntime(): Promise<void> {
     await withTransientDbRetry(() => startPaymentMirrorMigration(), 3);
     logger.info("Payment mirror migration verified");
   } catch (err) {
-    logger.error({ err }, "Payment mirror migration FAILED; refusing business traffic");
-    throw err;
+    // Do not take down unrelated Sport Center functions (admin login,
+    // facilities, schedule browsing, and booking creation) when the accounting
+    // payment-mirror safety gate is temporarily unavailable. Payment
+    // confirmation routes already call assertPaymentMirrorMigrationReady() and
+    // therefore remain fail-closed until this verification succeeds.
+    logger.error(
+      { err },
+      "Payment mirror migration unavailable; continuing in payment-confirmation degraded mode",
+    );
   }
 
   if (process.env.NODE_ENV !== "production") {
