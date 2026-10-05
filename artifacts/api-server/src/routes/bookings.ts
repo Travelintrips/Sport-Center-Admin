@@ -942,6 +942,25 @@ router.post("/bookings", async (req, res) => {
   let slotLockKey: { fId: number; dInt: number } | null = null;
   try {
     const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+
+    const normalizedCustomerName = String(customerName ?? "").trim();
+    const normalizedFacilityId = Number(facilityId);
+    const normalizedBookingDate = String(bookingDate ?? "").trim();
+    const normalizedCustomerPhone = String(req.body.customerPhone ?? "").trim();
+
+    if (
+      !normalizedCustomerName ||
+      !normalizedCustomerPhone ||
+      !Number.isInteger(normalizedFacilityId) ||
+      normalizedFacilityId <= 0 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(normalizedBookingDate)
+    ) {
+      res.status(400).json({
+        error: "Data booking belum lengkap. Nama, nomor WhatsApp, fasilitas, dan tanggal wajib diisi.",
+      });
+      return;
+    }
+
     let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
     try {
       additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
@@ -949,7 +968,7 @@ router.post("/bookings", async (req, res) => {
       res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
       return;
     }
-    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
+    const customerPhone: string = normalizePhone(normalizedCustomerPhone);
     const bookingSource: string = req.body.source || "";
     const rawBookingType = req.body.bookingType;
     const bookingType: "regular" | "event" = rawBookingType === "event" ? "event" : "regular";
@@ -1069,7 +1088,7 @@ router.post("/bookings", async (req, res) => {
     }).from(settingsTable).limit(1);
     const deadlineHours = Math.max(1, parseInt(appSettings?.paymentDeadlineHours ?? "24") || 24);
 
-    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, normalizedFacilityId)).limit(1);
     if (!facility) {
       res.status(404).json({ error: "Facility not found" });
       return;
