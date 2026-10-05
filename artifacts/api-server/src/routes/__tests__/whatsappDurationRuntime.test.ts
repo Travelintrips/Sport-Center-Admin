@@ -122,7 +122,6 @@ describe("Mina WhatsApp duration runtime regression", () => {
         sender: phone,
         message: "Selamat pagi",
         name: "Mina regression",
-        device: "081234567890",
         inboxid: "8998",
         id: "mina-greeting-booking-regression-1",
       });
@@ -140,7 +139,6 @@ describe("Mina WhatsApp duration runtime regression", () => {
         sender: phone,
         message: "Booking",
         name: "Mina regression",
-        device: "081234567890",
         inboxid: "8999",
         id: "mina-greeting-booking-regression-2",
       });
@@ -170,8 +168,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
           sender: phone,
           message,
           name: "Mina regression",
-          device: "081234567890",
-          inboxid: `900${index}`,
+            inboxid: `900${index}`,
           id: `mina-duration-regression-${index}`,
         });
       expect(response.status).toBe(200);
@@ -204,7 +201,6 @@ describe("Mina WhatsApp duration runtime regression", () => {
         sender: phone,
         message: "2 jam",
         name: "Mina regression",
-        device: "081234567890",
         inboxid: "9004",
         id: "mina-duration-regression-4",
       })
@@ -280,7 +276,6 @@ describe("Mina WhatsApp duration runtime regression", () => {
         sender: phone,
         message: "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?\n\n> Sent via fonnte.com",
         name: "Mina",
-        device: "081234567890",
         inboxid: "9005",
         id: "mina-greeting-echo-regression",
       });
