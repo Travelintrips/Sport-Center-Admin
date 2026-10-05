@@ -134,13 +134,43 @@ async function initializeAfterListen(): Promise<void> {
   console.info("[bootstrap] Runtime initialization complete");
 }
 
+let initializationInFlight = false;
+let initializationRetryTimer: NodeJS.Timeout | null = null;
+let initializationAttempt = 0;
+
+async function initializeWithRecovery(): Promise<void> {
+  if (initializationInFlight) return;
+  initializationInFlight = true;
+  initializationAttempt += 1;
+
+  try {
+    await initializeAfterListen();
+    startupFailureCode = null;
+    initializationAttempt = 0;
+    if (initializationRetryTimer) {
+      clearTimeout(initializationRetryTimer);
+      initializationRetryTimer = null;
+    }
+  } catch (error) {
+    startupFailureCode = classifyStartupFailure(error);
+    const delayMs = Math.min(60_000, 10_000 * Math.max(1, initializationAttempt));
+    console.error(
+      "[bootstrap] Runtime initialization failed; scheduling controlled retry",
+      { code: startupFailureCode, retryInMs: delayMs, attempt: initializationAttempt },
+    );
+    if (!initializationRetryTimer) {
+      initializationRetryTimer = setTimeout(() => {
+        initializationRetryTimer = null;
+        void initializeWithRecovery();
+      }, delayMs);
+      initializationRetryTimer.unref();
+    }
+  } finally {
+    initializationInFlight = false;
+  }
+}
+
 server.listen(port, host, () => {
   console.info(`[bootstrap] Listening on ${host}:${port}; initializing runtime`);
-  void initializeAfterListen().catch((error) => {
-    startupFailureCode = classifyStartupFailure(error);
-    console.error(
-      "[bootstrap] Runtime initialization failed; keeping process alive in fail-closed mode",
-      { code: startupFailureCode },
-    );
-  });
+  void initializeWithRecovery();
 });

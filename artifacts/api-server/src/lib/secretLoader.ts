@@ -65,6 +65,28 @@ const SHARED_RUNTIME_ENV_KEYS = new Set([
   "WA_DEV_MINA_TEST_RECIPIENT",
 ]);
 
+// Hostinger can retain legacy PostgreSQL variables from older deployments.
+// Some libraries auto-discover DATABASE_URL/PG* even when Sport Center itself
+// uses SUPABASE_DATABASE_URL. A stale postgres credential from the same
+// outbound IP can trip Supavisor's project/IP authentication circuit breaker
+// and block the valid sport_center_app connection too. Remove those generic
+// fallbacks before application modules are imported.
+const LEGACY_DATABASE_ENV_KEYS = [
+  "DATABASE_URL",
+  "POSTGRES_URL",
+  "POSTGRES_PRISMA_URL",
+  "POSTGRES_URL_NON_POOLING",
+  "PGHOST",
+  "PGPORT",
+  "PGUSER",
+  "PGPASSWORD",
+  "PGDATABASE",
+] as const;
+
+function clearLegacyDatabaseEnvironment(): void {
+  for (const key of LEGACY_DATABASE_ENV_KEYS) delete process.env[key];
+}
+
 // Paylabs credentials can be supplied as direct Replit Secrets. Unlike the
 // database URLs, do not clear them when the shared GCP payload contains only
 // database configuration; setEnvironmentConfig() below still overwrites them
@@ -332,6 +354,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
   for (const key of ENV_KEYS) {
     if (!SHARED_RUNTIME_ENV_KEYS.has(key)) delete process.env[key];
   }
+  clearLegacyDatabaseEnvironment();
 
   const suffix = env === "dev" ? "_DEV" : "";
   const loaded: string[] = [];
