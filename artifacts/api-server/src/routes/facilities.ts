@@ -35,7 +35,6 @@ function parseFacilityImageUpload(req: any, res: any, next: any) {
 
 const router = Router();
 
-type FacilityListItem = Awaited<ReturnType<typeof getFacilityWithImages>> extends infer _T ? any : never;
 const PUBLIC_FACILITIES_CACHE_TTL_MS = 60_000;
 let facilitiesListCache: { expiresAt: number; rows: any[] } | null = null;
 
