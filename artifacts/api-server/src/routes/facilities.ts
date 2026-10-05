@@ -63,12 +63,17 @@ router.get("/facilities", async (req, res) => {
     const now = Date.now();
 
     if (!facilitiesListCache || facilitiesListCache.expiresAt <= now) {
-      // Facilities and images are independent reads. Run them concurrently so
-      // a cold Supabase connection pays one round-trip window instead of two.
-      const [facilities, images] = await Promise.all([
-        db.select().from(facilitiesTable),
-        db.select().from(facilityImagesTable),
-      ]);
+      // Keep the two reads sequential. The production Supabase app role uses a
+      // deliberately small pool and parallel cold queries can compete for the
+      // same transaction-pooler capacity during deploy/recovery.
+      const facilities = await db.select().from(facilitiesTable);
+      const facilityIds = facilities.map((facility) => facility.id);
+      const images = facilityIds.length > 0
+        ? await db
+            .select()
+            .from(facilityImagesTable)
+            .where(inArray(facilityImagesTable.facilityId, facilityIds))
+        : [];
       facilitiesListCache = {
         expiresAt: now + PUBLIC_FACILITIES_CACHE_TTL_MS,
         rows: facilities.map((facility) => ({
