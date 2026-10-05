@@ -5,6 +5,10 @@ import { adminMiddleware } from "../lib/auth";
 
 const router = Router();
 
+const PUBLIC_CALENDAR_CACHE_TTL_MS = 20_000;
+const publicCalendarCache = new Map<string, { expiresAt: number; payload: unknown }>();
+
+
 const STATUS_COLORS: Record<string, string> = {
   pending_payment: "#FBBF24",
   waiting_confirmation: "#F97316",
@@ -22,6 +26,17 @@ const STATUS_COLORS: Record<string, string> = {
 router.get("/public/calendar", async (req, res) => {
   try {
     const { startDate, endDate, facilityId } = req.query;
+    const cacheKey = JSON.stringify({
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+      facilityId: facilityId ?? null,
+    });
+    const cached = publicCalendarCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.setHeader("Cache-Control", "public, max-age=10, stale-while-revalidate=20");
+      res.json(cached.payload);
+      return;
+    }
 
     const facilityIdNumber = facilityId ? Number(facilityId) : null;
     const startDateValue = startDate ? String(startDate) : null;
@@ -111,7 +126,13 @@ router.get("/public/calendar", async (req, res) => {
       })),
     ];
 
-    res.json({ events, facilities });
+    const payload = { events, facilities };
+    publicCalendarCache.set(cacheKey, {
+      expiresAt: Date.now() + PUBLIC_CALENDAR_CACHE_TTL_MS,
+      payload,
+    });
+    res.setHeader("Cache-Control", "public, max-age=10, stale-while-revalidate=20");
+    res.json(payload);
   } catch (err) {
     req.log.error({ err }, "Public calendar error");
     res.status(500).json({ error: "Internal server error" });
