@@ -64,9 +64,9 @@ const useSsl = /supabase\.(co|com|in)/.test(connectionString);
 const configuredPoolMax = Number(process.env.DB_POOL_MAX);
 const poolMax =
   Number.isFinite(configuredPoolMax) && configuredPoolMax > 0
-    ? Math.max(1, Math.min(5, Math.floor(configuredPoolMax)))
+    ? Math.max(1, Math.min(isProd ? 1 : 5, Math.floor(configuredPoolMax)))
     : isProd
-      ? 2
+      ? 1
       : 5;
 
 export const pool = new Pool({
@@ -76,11 +76,17 @@ export const pool = new Pool({
   // satu Hostinger process memakai default pg-pool=10 dan menghabiskan limit
   // Supavisor session pool saat rolling deploy.
   max: poolMax,
-  idleTimeoutMillis: isProd ? 5_000 : 30_000,
+  // Keep one authenticated production connection warm. Supavisor's auth
+  // circuit breaker is triggered by other stale Hostinger postgres clients;
+  // repeatedly closing our valid app connection after five seconds forces a
+  // fresh authentication and makes login/booking intermittently fail even
+  // though the existing connection was healthy.
+  idleTimeoutMillis: isProd ? 10 * 60_000 : 30_000,
   connectionTimeoutMillis: 8_000,
   query_timeout: 20_000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10_000,
+  allowExitOnIdle: false,
   application_name: "sport-center-admin",
 });
 
