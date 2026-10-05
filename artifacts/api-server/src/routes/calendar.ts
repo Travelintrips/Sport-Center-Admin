@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, blockedSchedulesTable, maintenanceSchedulesTable, paymentsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, lte, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
 const router = Router();
@@ -23,23 +23,51 @@ router.get("/public/calendar", async (req, res) => {
   try {
     const { startDate, endDate, facilityId } = req.query;
 
-    let bookings = await db.select().from(bookingsTable);
-    const PUBLIC_STATUSES = ["confirmed", "completed"];
-    bookings = bookings.filter((b) => PUBLIC_STATUSES.includes(b.status));
-    if (startDate) bookings = bookings.filter((b) => b.bookingDate >= (startDate as string));
-    if (endDate) bookings = bookings.filter((b) => b.bookingDate <= (endDate as string));
-    if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
+    const facilityIdNumber = facilityId ? Number(facilityId) : null;
+    const startDateValue = startDate ? String(startDate) : null;
+    const endDateValue = endDate ? String(endDate) : null;
 
-    let blocked = await db.select().from(blockedSchedulesTable);
-    if (startDate) blocked = blocked.filter((b) => b.date >= (startDate as string));
-    if (endDate) blocked = blocked.filter((b) => b.date <= (endDate as string));
-    if (facilityId) blocked = blocked.filter((b) => b.facilityId === Number(facilityId));
+    const bookings = await db
+      .select({
+        id: bookingsTable.id,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        status: bookingsTable.status,
+        facilityId: bookingsTable.facilityId,
+      })
+      .from(bookingsTable)
+      .where(and(
+        or(eq(bookingsTable.status, "confirmed"), eq(bookingsTable.status, "completed")),
+        startDateValue ? gte(bookingsTable.bookingDate, startDateValue) : undefined,
+        endDateValue ? lte(bookingsTable.bookingDate, endDateValue) : undefined,
+        facilityIdNumber ? eq(bookingsTable.facilityId, facilityIdNumber) : undefined,
+      ));
+
+    const blocked = await db
+      .select({
+        id: blockedSchedulesTable.id,
+        date: blockedSchedulesTable.date,
+        startTime: blockedSchedulesTable.startTime,
+        endTime: blockedSchedulesTable.endTime,
+        facilityId: blockedSchedulesTable.facilityId,
+      })
+      .from(blockedSchedulesTable)
+      .where(and(
+        startDateValue ? gte(blockedSchedulesTable.date, startDateValue) : undefined,
+        endDateValue ? lte(blockedSchedulesTable.date, endDateValue) : undefined,
+        facilityIdNumber ? eq(blockedSchedulesTable.facilityId, facilityIdNumber) : undefined,
+      ));
 
     let maintenance: any[] = [];
     try {
-      const allMaintenance = await db.select().from(maintenanceSchedulesTable);
-      maintenance = allMaintenance.filter((m) => m.isActive);
-      if (facilityId) maintenance = maintenance.filter((m) => m.facilityId === Number(facilityId));
+      maintenance = await db
+        .select()
+        .from(maintenanceSchedulesTable)
+        .where(and(
+          eq(maintenanceSchedulesTable.isActive, true),
+          facilityIdNumber ? eq(maintenanceSchedulesTable.facilityId, facilityIdNumber) : undefined,
+        ));
     } catch { maintenance = []; }
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable);
