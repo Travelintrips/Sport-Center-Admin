@@ -18,7 +18,7 @@ export function isTransientDbError(error: unknown): boolean {
 
   return (
     TRANSIENT_DB_CODES.has(code) ||
-    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|connection terminated|server closed the connection/i.test(message)
+    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|connection terminated|server closed the connection|ECIRCUITBREAKER|EMAXCONNSESSION|max clients reached|checkout failed/i.test(message)
   );
 }
 

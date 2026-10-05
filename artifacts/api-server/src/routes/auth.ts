@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, usersTable, bookingsTable, facilitiesTable } from "@workspace/db";
 import { eq, isNotNull, ilike, or } from "drizzle-orm";
 import { createToken, hashPassword, verifyPassword, authMiddleware } from "../lib/auth";
+import { withTransientDbRetry } from "../lib/dbRetry";
 
 async function generateCustomerCode(): Promise<string> {
   const rows = await db.select({ customerCode: usersTable.customerCode }).from(usersTable).where(isNotNull(usersTable.customerCode));
@@ -26,7 +27,10 @@ router.post("/auth/login", async (req, res) => {
       res.status(400).json({ error: "Email and password required" });
       return;
     }
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    const [user] = await withTransientDbRetry(
+      () => db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1),
+      3,
+    );
     if (!user || !user.passwordHash) {
       res.status(401).json({ error: "Invalid credentials" });
       return;
@@ -132,7 +136,10 @@ router.post("/auth/admin-login", async (req, res) => {
       res.status(400).json({ error: "Email dan password wajib diisi" });
       return;
     }
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    const [user] = await withTransientDbRetry(
+      () => db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1),
+      3,
+    );
     if (!user || !user.passwordHash) {
       res.status(401).json({ error: "Email atau password salah" });
       return;
