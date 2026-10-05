@@ -126,12 +126,18 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-booking-regression-1",
       });
     expect(greetingResponse.status).toBe(200);
-    await waitFor(() => fonnteSendCalls(fetchMock).length >= outboundStart + 1);
-    const greetingBody = fonnteSendCalls(fetchMock)[outboundStart]?.[1]?.body as FormData;
-    expect(String(greetingBody?.get("message"))).toBe(
-      "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
-      "Mau booking fasilitas, cukup ketik Booking.",
-    );
+    const greetingSession = await getActiveSession(phone);
+    const greetingMessages = (greetingSession?.rawMessages ?? []) as Array<{
+      role?: string;
+      text?: string;
+    }>;
+    expect(greetingMessages.some(
+      (entry) =>
+        entry.role === "bot" &&
+        entry.text ===
+          "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
+          "Mau booking fasilitas, cukup ketik Booking.",
+    )).toBe(true);
 
     const bookingResponse = await request
       .post("/api/wa/fonnte/webhook")
@@ -143,8 +149,8 @@ describe("Mina WhatsApp duration runtime regression", () => {
         id: "mina-greeting-booking-regression-2",
       });
     expect(bookingResponse.status).toBe(200);
-    await waitFor(() => fonnteSendCalls(fetchMock).length >= outboundStart + 2);
-    const facilityListBody = fonnteSendCalls(fetchMock)[outboundStart + 1]?.[1]?.body as FormData;
+    await waitFor(() => fonnteSendCalls(fetchMock).length >= outboundStart + 1);
+    const facilityListBody = fonnteSendCalls(fetchMock)[outboundStart]?.[1]?.body as FormData;
     const facilityListMessage = String(facilityListBody?.get("message") ?? "");
     expect(facilityListMessage).toContain("Fasilitas tersedia:");
     expect(facilityListMessage).toContain("Sebutkan nama fasilitas");
