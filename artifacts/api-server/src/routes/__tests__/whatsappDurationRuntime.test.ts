@@ -123,7 +123,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         message: "Selamat pagi",
         name: "Mina regression",
         inboxid: "8998",
-        id: "mina-greeting-booking-regression-1",
+        id: `mina-greeting-booking-regression-1-${phone}`,
       });
     expect(greetingResponse.status).toBe(200);
     const greetingSession = await getActiveSession(phone);
@@ -146,7 +146,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         message: "Booking",
         name: "Mina regression",
         inboxid: "8999",
-        id: "mina-greeting-booking-regression-2",
+        id: `mina-greeting-booking-regression-2-${phone}`,
       });
     expect(bookingResponse.status).toBe(200);
     await waitFor(() => fonnteSendCalls(fetchMock).length >= outboundStart + 1);
@@ -175,7 +175,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
           message,
           name: "Mina regression",
             inboxid: `900${index}`,
-          id: `mina-duration-regression-${index}`,
+          id: `mina-duration-regression-${index}-${phone}`,
         });
       expect(response.status).toBe(200);
       await waitFor(() => fonnteSendCalls(fetchMock).length >= setupOutboundStart + index + 1);
@@ -208,7 +208,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         message: "2 jam",
         name: "Mina regression",
         inboxid: "9004",
-        id: "mina-duration-regression-4",
+        id: `mina-duration-regression-4-${phone}`,
       })
       .then((response: any) => {
         webhookSettled = true;
@@ -283,7 +283,7 @@ describe("Mina WhatsApp duration runtime regression", () => {
         message: "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini?\n\n> Sent via fonnte.com",
         name: "Mina",
         inboxid: "9005",
-        id: "mina-greeting-echo-regression",
+        id: `mina-greeting-echo-regression-${phone}`,
       });
     expect(echoResponse.status).toBe(200);
     expect(fonnteSendCalls(fetchMock).length).toBe(outboundBeforeEcho);
