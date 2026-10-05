@@ -206,7 +206,10 @@ function buildProductionAppUrlFromAuditCredential(
 
   app.username = `sport_center_app.${projectRef}`;
   app.password = audit.password;
-  app.port = "5432";
+  // Preserve the transport selected by the application URL. In production
+  // this is expected to remain the Supabase transaction pooler (typically
+  // port 6543); forcing session mode (5432) can exhaust the small session
+  // client pool shared by multiple services during rolling deploys.
   return app.toString();
 }
 
