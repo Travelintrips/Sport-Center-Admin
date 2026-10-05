@@ -179,9 +179,18 @@ function findField(section: JsonObject, field: string): string | undefined {
  */
 function normalizeDatabaseUrlForRuntime(
   value: string,
-  _env: "dev" | "prod",
+  env: "dev" | "prod",
 ): string {
-  return value;
+  if (env !== "prod") return value;
+
+  // Production must use the Supabase transaction pooler. Session mode on
+  // port 5432 is capped to a small number of concurrent clients and is also
+  // where the current auth circuit-breaker is being tripped by stale clients.
+  // Keep the same host/user/password/database and only switch pooler mode.
+  return value.replace(
+    /(\.pooler\.supabase\.com):5432(?=\/|\?|$)/i,
+    "$1:6543",
+  );
 }
 
 
@@ -206,10 +215,10 @@ function buildProductionAppUrlFromAuditCredential(
 
   app.username = `sport_center_app.${projectRef}`;
   app.password = audit.password;
-  // Preserve the transport selected by the application URL. In production
-  // this is expected to remain the Supabase transaction pooler (typically
-  // port 6543); forcing session mode (5432) can exhaust the small session
-  // client pool shared by multiple services during rolling deploys.
+  // Force the production application role onto the transaction pooler.
+  // Using 5432 here selects session mode and can exhaust Supavisor's
+  // per-project session client pool during rolling deploys.
+  app.port = "6543";
   return app.toString();
 }
 
