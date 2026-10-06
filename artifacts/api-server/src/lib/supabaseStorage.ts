@@ -1,7 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
 import { compressImage, isCompressibleImage, replaceExtension } from "./imageCompression";
-import { isReplitStorageAvailable } from "./replitStorage";
 
 // ─── Dev/Prod Storage Isolation ────────────────────────────────────────────
 // Development: SUPABASE_SERVICE_ROLE_KEY_DEV (isolated dev Supabase project)
@@ -33,11 +32,6 @@ if (IS_DEV) {
     SERVICE_KEY = devKey;
     const ref = getProjectRef(devKey) ?? "unknown";
     storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY_DEV (dev — isolated, ref=${ref})`;
-  } else if (isReplitStorageAvailable()) {
-    // Replit Object Storage is the primary development adapter. Do not force
-    // a Supabase service-role key when the isolated Replit bucket is present.
-    SERVICE_KEY = "";
-    storageProjectSource = "Replit Object Storage (dev — primary)";
   } else if (allowDevOnProdStorage) {
     const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
     SERVICE_KEY = prodKey;
