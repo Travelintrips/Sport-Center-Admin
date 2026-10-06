@@ -373,20 +373,28 @@ async function getBookingWithPayment(id: number) {
 
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
+    const startedAt = Date.now();
     const { status, date, facilityId, customerId, customerPhone } = req.query;
-    let bookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
-    if (status) bookings = bookings.filter((b) => b.status === status);
-    if (date) bookings = bookings.filter((b) => b.bookingDate === date);
-    if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
-    if (customerId) bookings = bookings.filter((b) => b.customerId === Number(customerId));
-    if (customerPhone) bookings = bookings.filter((b) => b.customerPhone === String(customerPhone));
+    const conditions = [];
+
+    if (status) conditions.push(eq(bookingsTable.status, String(status) as any));
+    if (date) conditions.push(eq(bookingsTable.bookingDate, String(date)));
+    if (facilityId) conditions.push(eq(bookingsTable.facilityId, Number(facilityId)));
+    if (customerId) conditions.push(eq(bookingsTable.customerId, Number(customerId)));
+    if (customerPhone) conditions.push(eq(bookingsTable.customerPhone, String(customerPhone)));
+
+    const bookings = conditions.length > 0
+      ? await db
+          .select()
+          .from(bookingsTable)
+          .where(and(...conditions))
+          .orderBy(desc(bookingsTable.createdAt))
+      : await db
+          .select()
+          .from(bookingsTable)
+          .orderBy(desc(bookingsTable.createdAt));
 
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId))];
-    const facilities = facilityIds.length > 0
-      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category })
-          .from(facilitiesTable)
-      : [];
-
     const bookingIds = bookings.map((b) => b.id);
     const directCompanyInvoiceIds = [
       ...new Set(
@@ -395,21 +403,31 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .filter((id): id is number => id != null),
       ),
     ];
-    // Legacy company bookings may have the invoice relation only in
-    // company_invoice_items. Use that relation as a fallback for the admin
-    // booking list so paid invoice metadata is still visible.
-    const companyInvoiceItems = bookingIds.length > 0
-      ? await db.select({
-          bookingId: companyInvoiceItemsTable.bookingId,
-          invoiceId: companyInvoiceItemsTable.invoiceId,
-          totalAmount: companyInvoiceItemsTable.totalAmount,
-        }).from(companyInvoiceItemsTable)
-          .where(inArray(companyInvoiceItemsTable.bookingId, bookingIds))
-          .catch((err) => {
-            req.log.warn({ err }, "Company invoice item lookup skipped for booking list");
-            return [];
-          })
-      : [];
+    // These two lookups are independent and used by every row, so avoid
+    // paying two sequential database round trips on the critical load path.
+    const [facilities, companyInvoiceItems] = await Promise.all([
+      facilityIds.length > 0
+        ? db
+            .select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category })
+            .from(facilitiesTable)
+            .where(inArray(facilitiesTable.id, facilityIds))
+        : Promise.resolve([]),
+      bookingIds.length > 0
+        ? db
+            .select({
+              bookingId: companyInvoiceItemsTable.bookingId,
+              invoiceId: companyInvoiceItemsTable.invoiceId,
+              totalAmount: companyInvoiceItemsTable.totalAmount,
+            })
+            .from(companyInvoiceItemsTable)
+            .where(inArray(companyInvoiceItemsTable.bookingId, bookingIds))
+            .catch((err) => {
+              req.log.warn({ err }, "Company invoice item lookup skipped for booking list");
+              return [];
+            })
+        : Promise.resolve([]),
+    ]);
+    const facilityById = new Map(facilities.map((facility) => [facility.id, facility]));
     const invoiceIdByBookingId = new Map<number, number>();
     const invoiceItemByBookingId = new Map<number, (typeof companyInvoiceItems)[number]>();
     for (const item of companyInvoiceItems) {
@@ -452,19 +470,44 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .filter((groupRef): groupRef is string => Boolean(groupRef)),
       ),
     ];
-    const groupChargeRows = groupRefs.length > 0
-      ? await db
-        .select({
-          groupRef: bookingsTable.groupRef,
-          additionalCharges: bookingsTable.additionalCharges,
-        })
-        .from(bookingsTable)
-        .where(inArray(bookingsTable.groupRef, groupRefs))
-        .catch((err) => {
-          req.log.warn({ err }, "Group charge lookup skipped for booking list");
-          return [];
-        })
-      : [];
+    const groupChargeRowsPromise = groupRefs.length > 0
+      ? db
+          .select({
+            groupRef: bookingsTable.groupRef,
+            additionalCharges: bookingsTable.additionalCharges,
+          })
+          .from(bookingsTable)
+          .where(inArray(bookingsTable.groupRef, groupRefs))
+          .catch((err) => {
+            req.log.warn({ err }, "Group charge lookup skipped for booking list");
+            return [];
+          })
+      : Promise.resolve([] as Array<{
+          groupRef: string | null;
+          additionalCharges: typeof bookingsTable.$inferSelect.additionalCharges;
+        }>);
+    const groupsPromise = groupRefs.length > 0
+      ? db
+          .select()
+          .from(bookingGroupsTable)
+          .where(inArray(bookingGroupsTable.groupRef, groupRefs))
+          .catch((err) => {
+            req.log.warn({ err }, "Booking group tax lookup skipped for booking list");
+            return [];
+          })
+      : Promise.resolve([] as (typeof bookingGroupsTable.$inferSelect)[]);
+    const allPaymentsPromise = bookingIds.length > 0
+      ? db
+          .select()
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, bookingIds))
+      : Promise.resolve([] as (typeof paymentsTable.$inferSelect)[]);
+
+    const [groupChargeRows, groups, allPayments] = await Promise.all([
+      groupChargeRowsPromise,
+      groupsPromise,
+      allPaymentsPromise,
+    ]);
     const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
     for (const row of groupChargeRows) {
       if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
@@ -480,16 +523,16 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       groupNetTotalPayment: number;
     }>();
     if (groupRefs.length > 0) {
-      const groups = await db
-        .select()
-        .from(bookingGroupsTable)
-        .where(inArray(bookingGroupsTable.groupRef, groupRefs))
-        .catch((err) => {
-          req.log.warn({ err }, "Booking group tax lookup skipped for booking list");
-          return [];
-        });
+      const bookingsByGroupRef = new Map<string, typeof bookings>();
+      for (const booking of bookings) {
+        if (!booking.groupRef) continue;
+        const current = bookingsByGroupRef.get(booking.groupRef) ?? [];
+        current.push(booking);
+        bookingsByGroupRef.set(booking.groupRef, current);
+      }
+
       for (const group of groups) {
-        const groupBookings = bookings.filter((booking) => booking.groupRef === group.groupRef);
+        const groupBookings = bookingsByGroupRef.get(group.groupRef) ?? [];
         const companyBooking = groupBookings.find((booking) => booking.companyCustomerId != null);
         const groupGross = Math.max(0, Math.round(Number(group.totalPayment) || 0));
         const storedGroupPpn = Math.max(0, Number(group.ppnAmount ?? 0));
@@ -537,7 +580,6 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         });
       }
     }
-    const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
     const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
     let reconciledPaymentIds = new Set<number>();
     if (paymentIds.length > 0) {
@@ -686,7 +728,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     }
 
     const result = bookings.map((b) => {
-      const facility = facilities.find((f) => f.id === b.facilityId);
+      const facility = facilityById.get(b.facilityId);
       // Keep the list projection consistent with the detail drawer: if a
       // booking has more than one historical payment row, the newest active
       // payment is canonical for "Tgl Bayar".
@@ -870,6 +912,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       };
     });
 
+    res.setHeader(
+      "Server-Timing",
+      `bookings;dur=${Date.now() - startedAt};desc="bookings endpoint total"`,
+    );
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "List bookings error");
