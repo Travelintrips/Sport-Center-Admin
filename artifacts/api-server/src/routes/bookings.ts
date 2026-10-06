@@ -482,7 +482,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             req.log.warn({ err }, "Group charge lookup skipped for booking list");
             return [];
           })
-      : Promise.resolve([]);
+      : Promise.resolve([] as Array<{
+          groupRef: string | null;
+          additionalCharges: typeof bookingsTable.$inferSelect.additionalCharges;
+        }>);
     const groupsPromise = groupRefs.length > 0
       ? db
           .select()
@@ -492,13 +495,13 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             req.log.warn({ err }, "Booking group tax lookup skipped for booking list");
             return [];
           })
-      : Promise.resolve([]);
+      : Promise.resolve([] as (typeof bookingGroupsTable.$inferSelect)[]);
     const allPaymentsPromise = bookingIds.length > 0
       ? db
           .select()
           .from(paymentsTable)
           .where(inArray(paymentsTable.bookingId, bookingIds))
-      : Promise.resolve([]);
+      : Promise.resolve([] as (typeof paymentsTable.$inferSelect)[]);
 
     const [groupChargeRows, groups, allPayments] = await Promise.all([
       groupChargeRowsPromise,
