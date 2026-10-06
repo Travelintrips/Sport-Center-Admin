@@ -47,7 +47,11 @@ jobs:
             fi
           done
 
-          if git grep -n -E 'REPL_ID|REPLIT_DEV_DOMAIN|replitStorage|replit_integrations' --             ':(exclude)pnpm-lock.yaml'             ':(exclude)attached_assets/**'             ':(exclude)*.md'; then
+          if git grep -n -E 'REPL_ID|REPLIT_DEV_DOMAIN|replitStorage|replit_integrations' -- \
+            ':(exclude)pnpm-lock.yaml' \
+            ':(exclude)attached_assets/**' \
+            ':(exclude).github/workflows/sport-center-ci.yml' \
+            ':(exclude)*.md'; then
             echo "::error::Replit runtime coupling detected"
             exit 1
           fi
