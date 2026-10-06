@@ -374,11 +374,35 @@ async function getBookingWithPayment(id: number) {
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
     const startedAt = Date.now();
-    const { status, date, facilityId, customerId, customerPhone } = req.query;
+    const {
+      status,
+      date,
+      facilityId,
+      customerId,
+      customerPhone,
+      page,
+      pageSize,
+      search,
+      settlement,
+      dateFrom,
+      dateTo,
+    } = req.query;
+    const paginationRequested = page != null || pageSize != null;
     const conditions = [];
 
-    if (status) conditions.push(eq(bookingsTable.status, String(status) as any));
+    // Preserve the legacy exact-status API contract for existing consumers.
+    // The paginated admin screen applies its compound status semantics after
+    // enrichment so "Selesai" can still include confirmed + completed, etc.
+    if (status && !paginationRequested) {
+      conditions.push(eq(bookingsTable.status, String(status) as any));
+    }
     if (date) conditions.push(eq(bookingsTable.bookingDate, String(date)));
+    if (paginationRequested && dateFrom) {
+      conditions.push(gte(bookingsTable.bookingDate, String(dateFrom)));
+    }
+    if (paginationRequested && dateTo) {
+      conditions.push(sql`${bookingsTable.bookingDate} <= ${String(dateTo)}`);
+    }
     if (facilityId) conditions.push(eq(bookingsTable.facilityId, Number(facilityId)));
     if (customerId) conditions.push(eq(bookingsTable.customerId, Number(customerId)));
     if (customerPhone) conditions.push(eq(bookingsTable.customerPhone, String(customerPhone)));
@@ -912,11 +936,135 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       };
     });
 
+    let responseRows = result;
+
+    if (paginationRequested) {
+      const normalizedSearch = String(search ?? "").trim().toLowerCase();
+      const normalizedStatus = String(status ?? "all");
+      const normalizedSettlement = String(settlement ?? "all");
+
+      const filteredResult = result.filter((booking: any) => {
+        const isMembershipCheckIn =
+          booking.source === "gym_membership" ||
+          (booking.membershipId != null && booking.membershipPaymentId == null);
+        if (isMembershipCheckIn) return false;
+
+        if (normalizedStatus !== "all") {
+          const statusMatches =
+            normalizedStatus === "completed"
+              ? booking.status === "completed" || booking.status === "confirmed"
+              : normalizedStatus === "waiting_confirmation"
+                ? booking.status === "waiting_confirmation" || booking.status === "paid"
+                : normalizedStatus === "cancelled"
+                  ? booking.status === "cancelled" || booking.status === "refunded"
+                  : booking.status === normalizedStatus;
+          if (!statusMatches) return false;
+        }
+
+        const paymentRows = [
+          booking.payment,
+          ...(Array.isArray(booking.payments) ? booking.payments : []),
+        ].filter(Boolean);
+        const hasPaymentFlag = (flag: string) =>
+          paymentRows.some((payment: any) => payment?.[flag] === true);
+        const isSettled = hasPaymentFlag("isSettled");
+        const isBankReconciled = hasPaymentFlag("isBankReconciled");
+        const isOutsideReconciliation = hasPaymentFlag(
+          "isSettledOutsideBankReconciliation",
+        );
+
+        if (normalizedSettlement === "bank_reconciled" && !isBankReconciled) return false;
+        if (
+          normalizedSettlement === "outside_bank_reconciliation" &&
+          !isOutsideReconciliation
+        ) return false;
+        if (normalizedSettlement === "not_settled" && isSettled) return false;
+
+        if (dateFrom && booking.bookingDate < String(dateFrom)) return false;
+        if (dateTo && booking.bookingDate > String(dateTo)) return false;
+
+        if (normalizedSearch) {
+          const haystacks = [
+            booking.customerName,
+            booking.companyName,
+            booking.orderNumber,
+            booking.facilityName,
+            booking.customerPhone,
+          ];
+          if (!haystacks.some((value) =>
+            String(value ?? "").toLowerCase().includes(normalizedSearch)
+          )) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+
+      const representatives: typeof filteredResult = [];
+      const seenDisplayKeys = new Set<string>();
+      for (const booking of filteredResult) {
+        const displayKey =
+          booking.payerType === "company" && booking.companyInvoiceId != null
+            ? `company-invoice:${booking.companyInvoiceId}`
+            : booking.groupRef
+              ? `group:${booking.groupRef}`
+              : null;
+        if (displayKey) {
+          if (seenDisplayKeys.has(displayKey)) continue;
+          seenDisplayKeys.add(displayKey);
+        }
+        representatives.push(booking);
+      }
+
+      const requestedPageSize = Number(pageSize ?? 25);
+      const safePageSize = [10, 25, 50].includes(requestedPageSize)
+        ? requestedPageSize
+        : 25;
+      const totalRows = representatives.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / safePageSize));
+      const requestedPage = Math.max(1, Number(page ?? 1) || 1);
+      const safePage = Math.min(requestedPage, totalPages);
+      const start = (safePage - 1) * safePageSize;
+      const pageRepresentatives = representatives.slice(start, start + safePageSize);
+
+      const selectedSingletonIds = new Set<number>();
+      const selectedDisplayKeys = new Set<string>();
+      for (const booking of pageRepresentatives) {
+        const displayKey =
+          booking.payerType === "company" && booking.companyInvoiceId != null
+            ? `company-invoice:${booking.companyInvoiceId}`
+            : booking.groupRef
+              ? `group:${booking.groupRef}`
+              : null;
+        if (displayKey) selectedDisplayKeys.add(displayKey);
+        else selectedSingletonIds.add(booking.id);
+      }
+
+      responseRows = filteredResult.filter((booking: any) => {
+        const displayKey =
+          booking.payerType === "company" && booking.companyInvoiceId != null
+            ? `company-invoice:${booking.companyInvoiceId}`
+            : booking.groupRef
+              ? `group:${booking.groupRef}`
+              : null;
+        return displayKey
+          ? selectedDisplayKeys.has(displayKey)
+          : selectedSingletonIds.has(booking.id);
+      });
+
+      res.setHeader("X-Total-Count", String(totalRows));
+      res.setHeader("X-Total-Bookings", String(filteredResult.length));
+      res.setHeader("X-Page", String(safePage));
+      res.setHeader("X-Page-Size", String(safePageSize));
+      res.setHeader("X-Total-Pages", String(totalPages));
+    }
+
     res.setHeader(
       "Server-Timing",
       `bookings;dur=${Date.now() - startedAt};desc="bookings endpoint total"`,
     );
-    res.json(result);
+    res.json(responseRows);
   } catch (err) {
     req.log.error({ err }, "List bookings error");
     res.status(500).json({ error: "Internal server error" });
