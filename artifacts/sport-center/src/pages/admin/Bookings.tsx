@@ -3080,6 +3080,7 @@ export default function AdminBookings() {
     refetch: refetchBookings,
   } = useListBookings(undefined, {
     query: {
+      queryKey: getListBookingsQueryKey(),
       staleTime: 30_000,
       refetchOnWindowFocus: false,
       retry: 1,
