@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import logoUrl from "@assets/logosc_1780088803724.png";
 import { 
@@ -43,6 +43,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { removeToken, getToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 const NAV_GROUPS = [
   {
@@ -107,6 +108,10 @@ interface HealthSummary {
   connections: { key: string; name: string; status: string; message: string }[];
 }
 
+interface PendingApprovalSummary {
+  total: number;
+}
+
 async function fetchHealthSummary(): Promise<HealthSummary> {
   const res = await fetch("/api/admin/system/connections/health", {
     headers: { Authorization: `Bearer ${getToken()}` },
@@ -115,9 +120,21 @@ async function fetchHealthSummary(): Promise<HealthSummary> {
   return res.json();
 }
 
+async function fetchPendingApprovals(): Promise<PendingApprovalSummary> {
+  const res = await fetch(
+    "/api/admin/wa-bookings?status=waiting_admin_approval&page=1&limit=1",
+    { headers: { Authorization: `Bearer ${getToken()}` } },
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return { total: Number(data?.total ?? 0) };
+}
+
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { toast } = useToast();
+  const previousApprovalCount = useRef<number | null>(null);
   
   const queryClient = useQueryClient();
 
@@ -137,6 +154,49 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+
+  const { data: pendingApprovalData } = useQuery<PendingApprovalSummary>({
+    queryKey: ["pending-admin-approvals"],
+    queryFn: fetchPendingApprovals,
+    enabled: !!user,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const pendingApprovalCount = pendingApprovalData?.total ?? 0;
+
+  useEffect(() => {
+    if (!user || pendingApprovalData == null) return;
+
+    const previous = previousApprovalCount.current;
+    if (previous !== null && pendingApprovalCount > previous) {
+      const added = pendingApprovalCount - previous;
+      toast({
+        title: `🔔 ${added} approval booking baru`,
+        description: `Total ${pendingApprovalCount} booking menunggu persetujuan admin.`,
+        duration: 10_000,
+      });
+
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification("Sport Center — Approval Baru", {
+          body: `${pendingApprovalCount} booking menunggu persetujuan admin.`,
+        });
+      }
+    }
+    previousApprovalCount.current = pendingApprovalCount;
+  }, [pendingApprovalCount, pendingApprovalData, toast, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const baseTitle = "Sport Center Admin";
+    document.title = pendingApprovalCount > 0
+      ? `(${pendingApprovalCount}) 🔔 ${baseTitle}`
+      : baseTitle;
+    return () => {
+      document.title = baseTitle;
+    };
+  }, [pendingApprovalCount, user]);
 
   const connectionErrors = (healthData?.summary.error ?? 0) + (healthData?.summary.changed ?? 0);
   const connectionWarnings = healthData?.summary.warning ?? 0;
@@ -220,9 +280,21 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     const isActive = location === item.href || (location === "/admin" && item.href === "/admin/dashboard");
                     const Icon = item.icon;
                     const isDataConn = item.href === "/admin/data-connections";
-                    const showBadge = isDataConn && (connectionErrors > 0 || connectionWarnings > 0);
-                    const badgeColor = isDataConn && connectionErrors > 0 ? "bg-red-500" : "bg-amber-500";
-                    const badgeCount = isDataConn ? (connectionErrors || connectionWarnings) : 0;
+                    const isApprovalNav =
+                      item.href === "/admin/wa-bookings" || item.href === "/admin/bookings";
+                    const showConnectionBadge = isDataConn && (connectionErrors > 0 || connectionWarnings > 0);
+                    const showApprovalBadge = isApprovalNav && pendingApprovalCount > 0;
+                    const showBadge = showConnectionBadge || showApprovalBadge;
+                    const badgeColor = showApprovalBadge
+                      ? "bg-red-500"
+                      : isDataConn && connectionErrors > 0
+                        ? "bg-red-500"
+                        : "bg-amber-500";
+                    const badgeCount = showApprovalBadge
+                      ? pendingApprovalCount
+                      : isDataConn
+                        ? (connectionErrors || connectionWarnings)
+                        : 0;
                     return (
                       <Link
                         key={item.href}
@@ -285,6 +357,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 h-[100dvh] overflow-y-auto bg-background">
+        {pendingApprovalCount > 0 && (
+          <Link href="/admin/wa-bookings">
+            <div className="flex items-center gap-3 px-4 py-3 bg-red-600 text-white text-sm font-semibold cursor-pointer hover:bg-red-700 transition-colors shadow-sm">
+              <Bell size={17} className="shrink-0 animate-pulse" />
+              <span>
+                <span className="font-black">{pendingApprovalCount} booking menunggu persetujuan admin</span>
+                {" — jangan sampai terlewat."}
+              </span>
+              <span className="ml-auto shrink-0 underline font-bold">Buka Approval →</span>
+            </div>
+          </Link>
+        )}
         {connectionErrors > 0 && (
           <Link href="/admin/data-connections">
             <div className="flex items-center gap-3 px-4 py-2.5 bg-red-600 text-white text-xs font-medium cursor-pointer hover:bg-red-700 transition-colors">
