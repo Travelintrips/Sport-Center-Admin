@@ -395,13 +395,6 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .orderBy(desc(bookingsTable.createdAt));
 
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId))];
-    const facilities = facilityIds.length > 0
-      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category })
-          .from(facilitiesTable)
-          .where(inArray(facilitiesTable.id, facilityIds))
-      : [];
-    const facilityById = new Map(facilities.map((facility) => [facility.id, facility]));
-
     const bookingIds = bookings.map((b) => b.id);
     const directCompanyInvoiceIds = [
       ...new Set(
@@ -410,21 +403,31 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .filter((id): id is number => id != null),
       ),
     ];
-    // Legacy company bookings may have the invoice relation only in
-    // company_invoice_items. Use that relation as a fallback for the admin
-    // booking list so paid invoice metadata is still visible.
-    const companyInvoiceItems = bookingIds.length > 0
-      ? await db.select({
-          bookingId: companyInvoiceItemsTable.bookingId,
-          invoiceId: companyInvoiceItemsTable.invoiceId,
-          totalAmount: companyInvoiceItemsTable.totalAmount,
-        }).from(companyInvoiceItemsTable)
-          .where(inArray(companyInvoiceItemsTable.bookingId, bookingIds))
-          .catch((err) => {
-            req.log.warn({ err }, "Company invoice item lookup skipped for booking list");
-            return [];
-          })
-      : [];
+    // These two lookups are independent and used by every row, so avoid
+    // paying two sequential database round trips on the critical load path.
+    const [facilities, companyInvoiceItems] = await Promise.all([
+      facilityIds.length > 0
+        ? db
+            .select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category })
+            .from(facilitiesTable)
+            .where(inArray(facilitiesTable.id, facilityIds))
+        : Promise.resolve([]),
+      bookingIds.length > 0
+        ? db
+            .select({
+              bookingId: companyInvoiceItemsTable.bookingId,
+              invoiceId: companyInvoiceItemsTable.invoiceId,
+              totalAmount: companyInvoiceItemsTable.totalAmount,
+            })
+            .from(companyInvoiceItemsTable)
+            .where(inArray(companyInvoiceItemsTable.bookingId, bookingIds))
+            .catch((err) => {
+              req.log.warn({ err }, "Company invoice item lookup skipped for booking list");
+              return [];
+            })
+        : Promise.resolve([]),
+    ]);
+    const facilityById = new Map(facilities.map((facility) => [facility.id, facility]));
     const invoiceIdByBookingId = new Map<number, number>();
     const invoiceItemByBookingId = new Map<number, (typeof companyInvoiceItems)[number]>();
     for (const item of companyInvoiceItems) {
@@ -467,19 +470,41 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .filter((groupRef): groupRef is string => Boolean(groupRef)),
       ),
     ];
-    const groupChargeRows = groupRefs.length > 0
-      ? await db
-        .select({
-          groupRef: bookingsTable.groupRef,
-          additionalCharges: bookingsTable.additionalCharges,
-        })
-        .from(bookingsTable)
-        .where(inArray(bookingsTable.groupRef, groupRefs))
-        .catch((err) => {
-          req.log.warn({ err }, "Group charge lookup skipped for booking list");
-          return [];
-        })
-      : [];
+    const groupChargeRowsPromise = groupRefs.length > 0
+      ? db
+          .select({
+            groupRef: bookingsTable.groupRef,
+            additionalCharges: bookingsTable.additionalCharges,
+          })
+          .from(bookingsTable)
+          .where(inArray(bookingsTable.groupRef, groupRefs))
+          .catch((err) => {
+            req.log.warn({ err }, "Group charge lookup skipped for booking list");
+            return [];
+          })
+      : Promise.resolve([]);
+    const groupsPromise = groupRefs.length > 0
+      ? db
+          .select()
+          .from(bookingGroupsTable)
+          .where(inArray(bookingGroupsTable.groupRef, groupRefs))
+          .catch((err) => {
+            req.log.warn({ err }, "Booking group tax lookup skipped for booking list");
+            return [];
+          })
+      : Promise.resolve([]);
+    const allPaymentsPromise = bookingIds.length > 0
+      ? db
+          .select()
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, bookingIds))
+      : Promise.resolve([]);
+
+    const [groupChargeRows, groups, allPayments] = await Promise.all([
+      groupChargeRowsPromise,
+      groupsPromise,
+      allPaymentsPromise,
+    ]);
     const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
     for (const row of groupChargeRows) {
       if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
@@ -495,14 +520,6 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       groupNetTotalPayment: number;
     }>();
     if (groupRefs.length > 0) {
-      const groups = await db
-        .select()
-        .from(bookingGroupsTable)
-        .where(inArray(bookingGroupsTable.groupRef, groupRefs))
-        .catch((err) => {
-          req.log.warn({ err }, "Booking group tax lookup skipped for booking list");
-          return [];
-        });
       const bookingsByGroupRef = new Map<string, typeof bookings>();
       for (const booking of bookings) {
         if (!booking.groupRef) continue;
@@ -560,12 +577,6 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         });
       }
     }
-    const allPayments = bookingIds.length > 0
-      ? await db
-          .select()
-          .from(paymentsTable)
-          .where(inArray(paymentsTable.bookingId, bookingIds))
-      : [];
     const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
     let reconciledPaymentIds = new Set<number>();
     if (paymentIds.length > 0) {
