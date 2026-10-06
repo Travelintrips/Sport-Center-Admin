@@ -49,7 +49,7 @@ async function main() {
   const fmt = (n: number) => new Intl.NumberFormat("id-ID").format(n);
 
   // Ambil URL PDF publik dari server lokal
-  const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  const appUrl = process.env.DEV_APP_URL || process.env.APP_URL || "http://localhost:5000";
   const publicPdfLink = `${appUrl}/api/public/invoices/${booking.order_number}/pdf`;
 
   const message =
