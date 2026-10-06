@@ -3216,6 +3216,24 @@ export default function AdminBookings() {
   const totalRows = bookingPage?.totalRows ?? 0;
   const totalBookings = bookingPage?.totalBookings ?? 0;
   const totalPages = bookingPage?.totalPages ?? 1;
+  const paginationItems = useMemo<Array<number | "ellipsis">>(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const items: Array<number | "ellipsis"> = [1];
+    const windowStart = Math.max(2, Math.min(page - 2, totalPages - 4));
+    const windowEnd = Math.min(totalPages - 1, windowStart + 4);
+
+    if (windowStart > 2) items.push("ellipsis");
+    for (let current = windowStart; current <= windowEnd; current += 1) {
+      items.push(current);
+    }
+    if (windowEnd < totalPages - 1) items.push("ellipsis");
+    items.push(totalPages);
+
+    return items;
+  }, [page, totalPages]);
   const bookingErrorMessage =
     (bookingsError as any)?.message ?? "Gagal mengambil data booking dari server.";
 
@@ -5257,7 +5275,7 @@ export default function AdminBookings() {
               {Math.min((page - 1) * pageSize + 1, totalRows)}–
               {Math.min(page * pageSize, totalRows)} dari {totalRows} baris
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
@@ -5270,6 +5288,39 @@ export default function AdminBookings() {
               >
                 Sebelumnya
               </Button>
+
+              <div className="flex items-center gap-1" aria-label="Navigasi halaman booking">
+                {paginationItems.map((item, index) =>
+                  item === "ellipsis" ? (
+                    <span
+                      key={`ellipsis-${index}`}
+                      className="flex h-8 min-w-6 items-center justify-center px-1 text-xs text-slate-400"
+                      aria-hidden="true"
+                    >
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-current={item === page ? "page" : undefined}
+                      onClick={() => {
+                        if (item === page) return;
+                        setSelectedIds(new Set());
+                        setPage(item);
+                      }}
+                      className={`h-8 min-w-8 rounded-md border px-2 text-xs font-semibold transition-colors ${
+                        item === page
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ),
+                )}
+              </div>
+
               <Button
                 variant="outline"
                 size="sm"
