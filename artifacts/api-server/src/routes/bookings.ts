@@ -943,6 +943,38 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const normalizedStatus = String(status ?? "all");
       const normalizedSettlement = String(settlement ?? "all");
 
+      const isVisibleBooking = (booking: any) =>
+        booking.source !== "gym_membership" &&
+        !(booking.membershipId != null && booking.membershipPaymentId == null);
+      const summaryEligible = result.filter(isVisibleBooking);
+      const verificationKeys = new Set(
+        summaryEligible
+          .filter((booking: any) =>
+            booking.status === "waiting_confirmation" || booking.status === "paid"
+          )
+          .map((booking: any) =>
+            booking.groupRef ? `group:${booking.groupRef}` : `booking:${booking.id}`
+          ),
+      );
+      res.setHeader("X-Stats-Total", String(summaryEligible.length));
+      res.setHeader("X-Stats-Verification", String(verificationKeys.size));
+      res.setHeader(
+        "X-Stats-Completed",
+        String(
+          summaryEligible.filter((booking: any) =>
+            booking.status === "completed" || booking.status === "confirmed"
+          ).length,
+        ),
+      );
+      res.setHeader(
+        "X-Stats-Cancelled",
+        String(
+          summaryEligible.filter((booking: any) =>
+            booking.status === "cancelled" || booking.status === "refunded"
+          ).length,
+        ),
+      );
+
       const filteredResult = result.filter((booking: any) => {
         const isMembershipCheckIn =
           booking.source === "gym_membership" ||
@@ -1000,6 +1032,48 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
 
         return true;
       });
+
+      const revenueAmount = (booking: any) =>
+        booking.grandTotal != null
+          ? Number(booking.grandTotal)
+          : Number(booking.totalPrice);
+      const revenueLunas = filteredResult.filter((booking: any) =>
+        booking.payerType === "company"
+          ? booking.billingStatus === "paid"
+          : booking.status === "confirmed" || booking.status === "completed"
+      );
+      const revenueCompanyOutstanding = filteredResult.filter((booking: any) =>
+        booking.payerType === "company" &&
+        (booking.status === "confirmed" || booking.status === "completed") &&
+        booking.billingStatus !== "paid"
+      );
+      const revenueWaiting = filteredResult.filter((booking: any) =>
+        booking.status === "waiting_confirmation" || booking.status === "paid"
+      );
+      const revenuePending = filteredResult.filter((booking: any) =>
+        booking.status === "pending_payment"
+      );
+      const sumRevenue = (rows: any[]) =>
+        rows.reduce((total, booking) => total + revenueAmount(booking), 0);
+      const lunasAmount = sumRevenue(revenueLunas);
+      const companyOutstandingAmount = sumRevenue(revenueCompanyOutstanding);
+      const waitingAmount = sumRevenue(revenueWaiting);
+      const pendingAmount = sumRevenue(revenuePending);
+      res.setHeader(
+        "X-Revenue-Total",
+        String(lunasAmount + companyOutstandingAmount + waitingAmount + pendingAmount),
+      );
+      res.setHeader("X-Revenue-Lunas", String(lunasAmount));
+      res.setHeader("X-Revenue-Company-Outstanding", String(companyOutstandingAmount));
+      res.setHeader("X-Revenue-Waiting", String(waitingAmount));
+      res.setHeader("X-Revenue-Pending", String(pendingAmount));
+      res.setHeader("X-Revenue-Lunas-Count", String(revenueLunas.length));
+      res.setHeader(
+        "X-Revenue-Company-Outstanding-Count",
+        String(revenueCompanyOutstanding.length),
+      );
+      res.setHeader("X-Revenue-Waiting-Count", String(revenueWaiting.length));
+      res.setHeader("X-Revenue-Pending-Count", String(revenuePending.length));
 
       const representatives: typeof filteredResult = [];
       const seenDisplayKeys = new Set<string>();
