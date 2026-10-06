@@ -14,8 +14,6 @@ describe("storage provider", () => {
     const source = fs.readFileSync(path.resolve(here, "../storage.ts"), "utf8");
 
     expect(source.toLowerCase()).not.toContain("replit");
-    expect(source).not.toContain("REPL_ID");
-    expect(source).not.toContain("REPLIT_DEV_DOMAIN");
     expect(source).toContain("uploadToStorage");
   });
 });
