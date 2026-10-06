@@ -3078,7 +3078,13 @@ export default function AdminBookings() {
     isLoading,
     error: bookingsError,
     refetch: refetchBookings,
-  } = useListBookings();
+  } = useListBookings(undefined, {
+    query: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  });
   const bookings = rawBookings ?? [];
   const bookingErrorMessage =
     (bookingsError as any)?.message ?? "Gagal mengambil data booking dari server.";
