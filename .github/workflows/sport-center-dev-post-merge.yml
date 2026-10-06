@@ -1,0 +1,49 @@
+name: Sport Center DEV Post-Merge
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: sport-center-dev-post-merge
+  cancel-in-progress: false
+
+jobs:
+  migrate-dev:
+    name: Rebuild native modules and migrate DEV
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild sharp
+        run: pnpm --filter @workspace/api-server rebuild sharp
+
+      - name: Require DEV database secret
+        run: |
+          if [ -z "$SUPABASE_DATABASE_URL_DEV" ]; then
+            echo "::error::SUPABASE_DATABASE_URL_DEV is not configured in GitHub Actions"
+            exit 1
+          fi
+
+      - name: Apply idempotent DEV migrations
+        run: pnpm --filter scripts migrate:dev

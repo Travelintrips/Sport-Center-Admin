@@ -27,6 +27,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Guard against Replit runtime reintroduction
+        run: |
+          forbidden=(
+            ".replit"
+            ".replitignore"
+            ".replit_integration_files"
+            ".agents"
+            "replit.md"
+            "artifacts/api-server/.replit-artifact"
+            "artifacts/mockup-sandbox/.replit-artifact"
+            "artifacts/sport-center/.replit-artifact"
+          )
+
+          for path in "${forbidden[@]}"; do
+            if [ -e "$path" ]; then
+              echo "::error::Forbidden Replit runtime artifact is tracked: $path"
+              exit 1
+            fi
+          done
+
+          if git grep -n -E 'REPL_ID|REPLIT_DEV_DOMAIN|replitStorage|replit_integrations' -- \
+            ':(exclude)pnpm-lock.yaml' \
+            ':(exclude)attached_assets/**' \
+            ':(exclude).github/workflows/sport-center-ci.yml' \
+            ':(exclude)*.md'; then
+            echo "::error::Replit runtime coupling detected"
+            exit 1
+          fi
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
