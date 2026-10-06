@@ -9,10 +9,6 @@ export const DEFAULT_PRODUCTION_APP_URL = "https://sc.travelintrips.co.id";
 
 function envFallback(): string {
   const isProd = process.env.NODE_ENV === "production";
-  if (!isProd && process.env.REPLIT_DEV_DOMAIN) {
-    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  }
-
   const explicit = (process.env.APP_URL ?? "").replace(/\/$/, "");
   if (explicit) return explicit;
 
@@ -35,11 +31,7 @@ export async function getBaseUrl(): Promise<string> {
   const isProd = process.env.NODE_ENV === "production";
 
   if (!isProd) {
-    // Di dev: selalu gunakan REPLIT_DEV_DOMAIN sehingga link WA/email bisa diakses
-    // (domain prod belum tentu live, apalagi selama testing)
-    _cachedUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : (process.env.APP_URL ?? "").replace(/\/$/, "");
+    _cachedUrl = (process.env.DEV_APP_URL ?? process.env.APP_URL ?? "http://localhost:5000").replace(/\/$/, "");
     _cacheExpiry = now + CACHE_TTL_MS;
     return _cachedUrl!;
   }
@@ -65,10 +57,7 @@ export async function getBaseUrl(): Promise<string> {
  * Priority:
  *  1. Env var PAYLABS_CALLBACK_BASE_URL — explicit override untuk semua mode
  *  2. DB settings.paymentDomain atau settings.appUrl — dikonfigurasi via admin panel
- *  3. Dev mode  → REPLIT_DEV_DOMAIN (frontend Vite yang mem-proxy /api → localhost:8080)
- *     PENTING: APP_URL di dev mode TIDAK digunakan karena kemungkinan menunjuk ke URL
- *     produksi (GAE/Cloud Run) sehingga Paylabs akan mengirim callback ke prod, bukan
- *     ke dev server ini.
+ *  3. Dev mode  → DEV_APP_URL, otherwise empty unless explicitly configured
  *  4. Prod mode → APP_URL override → canonical Sport Center domain as fail-safe
  */
 export async function getPaymentCallbackUrl(): Promise<string> {
@@ -86,12 +75,9 @@ export async function getPaymentCallbackUrl(): Promise<string> {
   const isProd = process.env.NODE_ENV === "production";
 
   if (!isProd) {
-    // 2. Dev: SELALU gunakan REPLIT_DEV_DOMAIN — domain Vite (port 5000) yang
-    //    mem-proxy /api/* → localhost:8080. DB paymentDomain dan APP_URL TIDAK dipakai
-    //    di dev, karena keduanya kemungkinan menunjuk ke URL produksi.
-    _cachedPaymentUrl = process.env.REPLIT_DEV_DOMAIN
-      ? normalizePaymentCallbackBase(`https://${process.env.REPLIT_DEV_DOMAIN}`)
-      : "";
+    // Dev callbacks must use an explicitly reachable DEV URL. Never reuse
+    // the production domain implicitly.
+    _cachedPaymentUrl = normalizePaymentCallbackBase(process.env.DEV_APP_URL ?? "");
     _paymentCacheExpiry = now + CACHE_TTL_MS;
     return _cachedPaymentUrl;
   }
