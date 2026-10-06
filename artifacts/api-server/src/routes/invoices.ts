@@ -345,9 +345,7 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
     const overridePhone = (req.body?.overridePhone as string | undefined)?.trim() || undefined;
     const rawPhone = overridePhone || invoiceData.customerPhone;
     const phone = rawPhone.replace(/^\+/, "").replace(/^0/, "62");
-    const appUrl =
-      process.env.APP_URL ??
-      `https://${process.env.REPLIT_DEV_DOMAIN ?? "localhost:5000"}`;
+    const appUrl = (process.env.APP_URL ?? process.env.DEV_APP_URL ?? "http://localhost:5000").replace(/\/$/, "");
 
     // Gunakan link PDF grup jika ada groupRef, atau link booking tunggal
     const pdfLink = isGroup
