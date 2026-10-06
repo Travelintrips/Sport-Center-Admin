@@ -1115,7 +1115,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         else selectedSingletonIds.add(booking.id);
       }
 
-      responseRows = filteredResult.filter((booking: any) => {
+      // Return all sibling sessions for selected grouped obligations so the
+      // detail/group dialogs retain their full context. The frontend still
+      // applies the active filters to decide which representative is visible.
+      responseRows = result.filter((booking: any) => {
         const displayKey =
           booking.payerType === "company" && booking.companyInvoiceId != null
             ? `company-invoice:${booking.companyInvoiceId}`
