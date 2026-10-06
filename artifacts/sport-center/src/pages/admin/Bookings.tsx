@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  useListBookings,
   useUpdateBooking,
   useUpdatePayment,
   useUpdatePaymentMetadata,
@@ -1004,10 +1003,17 @@ async function printKwitansi(booking: any, settings?: any) {
 
 function SummaryStats({
   bookings,
+  counts,
   activeFilter,
   onStatClick,
 }: {
   bookings: any[];
+  counts?: {
+    total: number;
+    verification: number;
+    completed: number;
+    cancelled: number;
+  };
   activeFilter: string;
   onStatClick: (filter: string) => void;
 }) {
@@ -1019,7 +1025,7 @@ function SummaryStats({
   const stats = [
     {
       label: "Total Booking",
-      value: bookings.length,
+      value: counts?.total ?? bookings.length,
       filter: "all",
       icon: CalendarCheck,
       color: "text-blue-600 dark:text-blue-400",
@@ -1030,7 +1036,7 @@ function SummaryStats({
     },
     {
       label: "Perlu Verifikasi",
-      value: verificationKeys.size,
+      value: counts?.verification ?? verificationKeys.size,
       filter: "waiting_confirmation",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
@@ -1041,7 +1047,9 @@ function SummaryStats({
     },
     {
       label: "Selesai",
-      value: bookings.filter((b) => b.status === "completed" || b.status === "confirmed").length,
+      value:
+        counts?.completed ??
+        bookings.filter((b) => b.status === "completed" || b.status === "confirmed").length,
       filter: "completed",
       icon: CheckCircle2,
       color: "text-emerald-600 dark:text-emerald-400",
@@ -1052,7 +1060,9 @@ function SummaryStats({
     },
     {
       label: "Dibatalkan / Dikembalikan",
-      value: bookings.filter((b) => b.status === "cancelled" || b.status === "refunded").length,
+      value:
+        counts?.cancelled ??
+        bookings.filter((b) => b.status === "cancelled" || b.status === "refunded").length,
       filter: "cancelled",
       icon: Ban,
       color: "text-red-600 dark:text-red-400",
@@ -3046,6 +3056,32 @@ function MergeGroupDialog({
 
 /* ─── Main Component ────────────────────────────────────────────── */
 
+type BookingPageData = {
+  items: any[];
+  totalRows: number;
+  totalBookings: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  summary: {
+    total: number;
+    verification: number;
+    completed: number;
+    cancelled: number;
+  };
+  revenue: {
+    total: number;
+    lunas: number;
+    companyBelumInvoice: number;
+    menunggu: number;
+    belumBayar: number;
+    lunasCount: number;
+    companyBelumInvoiceCount: number;
+    menungguCount: number;
+    belumBayarCount: number;
+  };
+};
+
 export default function AdminBookings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -3053,8 +3089,11 @@ export default function AdminBookings() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [settlementFilter, setSettlementFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<10 | 25 | 50>(25);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedGroupRef, setSelectedGroupRef] = useState<string | null>(null);
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
@@ -3073,20 +3112,110 @@ export default function AdminBookings() {
   const [reconciliationLockedPayments, setReconciliationLockedPayments] = useState<Record<number, string>>({});
   const [paymentDateChangedIds, setPaymentDateChangedIds] = useState<Set<number>>(new Set());
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds(new Set());
+  }, [statusFilter, settlementFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
+
+  const bookingQueryKey = useMemo(
+    () => [
+      ...getListBookingsQueryKey(),
+      "paged",
+      page,
+      pageSize,
+      statusFilter,
+      settlementFilter,
+      debouncedSearch,
+      dateFrom,
+      dateTo,
+    ],
+    [
+      page,
+      pageSize,
+      statusFilter,
+      settlementFilter,
+      debouncedSearch,
+      dateFrom,
+      dateTo,
+    ],
+  );
+
   const {
-    data: rawBookings,
+    data: bookingPage,
     isLoading,
     error: bookingsError,
     refetch: refetchBookings,
-  } = useListBookings(undefined, {
-    query: {
-      queryKey: getListBookingsQueryKey(),
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-      retry: 1,
+  } = useQuery<BookingPageData>({
+    queryKey: bookingQueryKey,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        status: statusFilter,
+        settlement: settlementFilter,
+      });
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+
+      const response = await fetch(`/api/bookings?${params.toString()}`, {
+        signal,
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error ?? `HTTP ${response.status}`);
+      }
+      const items = await response.json();
+      const numberHeader = (name: string, fallback = 0) => {
+        const value = Number(response.headers.get(name));
+        return Number.isFinite(value) ? value : fallback;
+      };
+
+      return {
+        items: Array.isArray(items) ? items : [],
+        totalRows: numberHeader("X-Total-Count"),
+        totalBookings: numberHeader("X-Total-Bookings"),
+        page: numberHeader("X-Page", page),
+        pageSize: numberHeader("X-Page-Size", pageSize),
+        totalPages: Math.max(1, numberHeader("X-Total-Pages", 1)),
+        summary: {
+          total: numberHeader("X-Stats-Total"),
+          verification: numberHeader("X-Stats-Verification"),
+          completed: numberHeader("X-Stats-Completed"),
+          cancelled: numberHeader("X-Stats-Cancelled"),
+        },
+        revenue: {
+          total: numberHeader("X-Revenue-Total"),
+          lunas: numberHeader("X-Revenue-Lunas"),
+          companyBelumInvoice: numberHeader("X-Revenue-Company-Outstanding"),
+          menunggu: numberHeader("X-Revenue-Waiting"),
+          belumBayar: numberHeader("X-Revenue-Pending"),
+          lunasCount: numberHeader("X-Revenue-Lunas-Count"),
+          companyBelumInvoiceCount: numberHeader("X-Revenue-Company-Outstanding-Count"),
+          menungguCount: numberHeader("X-Revenue-Waiting-Count"),
+          belumBayarCount: numberHeader("X-Revenue-Pending-Count"),
+        },
+      };
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
   });
-  const bookings = rawBookings ?? [];
+
+  useEffect(() => {
+    if (bookingPage && bookingPage.page !== page) setPage(bookingPage.page);
+  }, [bookingPage, page]);
+
+  const bookings = bookingPage?.items ?? [];
+  const totalRows = bookingPage?.totalRows ?? 0;
+  const totalBookings = bookingPage?.totalBookings ?? 0;
+  const totalPages = bookingPage?.totalPages ?? 1;
   const bookingErrorMessage =
     (bookingsError as any)?.message ?? "Gagal mengambil data booking dari server.";
 
@@ -3361,7 +3490,7 @@ export default function AdminBookings() {
       await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
       const refreshed = await refetchBookings();
       setSelectedBooking((current: any) =>
-        (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current?.id) ?? current,
+        (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === current?.id) ?? current,
       );
       toast({
         title: "Booking perusahaan berhasil disinkronkan",
@@ -3404,7 +3533,7 @@ export default function AdminBookings() {
       setSelectedBooking((current: any) => {
         if (!current) return current;
         return (
-          (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current.id) ??
+          (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === current.id) ??
           current
         );
       });
@@ -3566,7 +3695,7 @@ export default function AdminBookings() {
       await queryClient.invalidateQueries({ queryKey: ["bank-reconciliation"] });
       const refreshed = await refetchBookings();
       setSelectedBooking((current: any) =>
-        (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current?.id) ?? current,
+        (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === current?.id) ?? current,
       );
       toast({
         title: "Rekonsiliasi berhasil disinkronkan",
@@ -3898,14 +4027,13 @@ export default function AdminBookings() {
     membershipPaymentMutation.isPending ||
     updatePaymentMetadataMutation.isPending ||
     deletingId !== null;
-  const pendingVerification = useMemo(() => {
-    const keys = new Set(
+  const pendingVerification =
+    bookingPage?.summary.verification ??
+    new Set(
       bookings
         .filter((b: any) => b.status === "waiting_confirmation" || b.status === "paid")
         .map((b: any) => b.groupRef ? `group:${b.groupRef}` : `booking:${b.id}`),
-    );
-    return keys.size;
-  }, [bookings]);
+    ).size;
 
   const mergeSelectedBookings = useMemo(
     () => filtered.filter((b: any) => selectedIds.has(b.id)),
@@ -3931,17 +4059,15 @@ export default function AdminBookings() {
   }, [mergeSelectedBookings]);
 
   const revenueStats = useMemo(() => {
+    if (bookingPage?.revenue) return bookingPage.revenue;
+
     const getAmount = (b: any) =>
       b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
-    // Konsisten dengan dashboard: lunas = uang sudah diterima
-    // - Pribadi: status confirmed/completed
-    // - Perusahaan: billingStatus = paid (invoice sudah lunas)
     const lunasBookings = filtered.filter((b: any) =>
       b.payerType === "company"
         ? b.billingStatus === "paid"
         : b.status === "confirmed" || b.status === "completed"
     );
-    // Perusahaan: sudah confirmed/completed tapi invoice belum lunas
     const companyBelumInvoiceBookings = filtered.filter((b: any) =>
       b.payerType === "company" &&
       (b.status === "confirmed" || b.status === "completed") &&
@@ -3954,7 +4080,10 @@ export default function AdminBookings() {
       b.status === "pending_payment"
     );
     const totalLunas = lunasBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
-    const totalCompanyBelumInvoice = companyBelumInvoiceBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
+    const totalCompanyBelumInvoice = companyBelumInvoiceBookings.reduce(
+      (s: number, b: any) => s + getAmount(b),
+      0,
+    );
     const totalMenunggu = menungguBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
     const totalBelumBayar = belumBayarBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
     return {
@@ -3968,7 +4097,7 @@ export default function AdminBookings() {
       menungguCount: menungguBookings.length,
       belumBayarCount: belumBayarBookings.length,
     };
-  }, [filtered]);
+  }, [bookingPage?.revenue, filtered]);
 
   return (
     <div className="space-y-5 pb-10">
@@ -4106,6 +4235,7 @@ export default function AdminBookings() {
       {!isLoading && !bookingsError && (
         <SummaryStats
           bookings={bookings}
+          counts={bookingPage?.summary}
           activeFilter={statusFilter}
           onStatClick={(filter) => {
             setStatusFilter(filter);
@@ -4153,7 +4283,7 @@ export default function AdminBookings() {
               </div>
               <div>
                 <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
-                  Total Revenue ({filtered.length} booking)
+                  Total Revenue ({totalBookings} booking)
                 </div>
                 <div className="text-2xl font-black text-emerald-800 dark:text-emerald-300">
                   {formatCurrency(revenueStats.total)}
@@ -4409,13 +4539,26 @@ export default function AdminBookings() {
               </button>
             )}
           </div>
-           <span className="text-xs text-slate-400 ml-auto shrink-0">
-             {bookingsError
-               ? "Data tidak tersedia"
-               : displayRows.length === filtered.length
-                 ? `${filtered.length} booking`
-                 : `${displayRows.length} baris · ${filtered.length} booking`}
-          </span>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <span className="text-xs text-slate-400">
+              {bookingsError
+                ? "Data tidak tersedia"
+                : `${totalRows} baris · ${totalBookings} booking`}
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => setPageSize(Number(value) as 10 | 25 | 50)}
+            >
+              <SelectTrigger className="h-8 w-28 text-xs rounded-lg border-slate-200 dark:border-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10" className="text-xs">10 / halaman</SelectItem>
+                <SelectItem value="25" className="text-xs">25 / halaman</SelectItem>
+                <SelectItem value="50" className="text-xs">50 / halaman</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
            <div className="w-full flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-400 lg:w-auto lg:ml-2">
              <span className="inline-flex items-center gap-1">
                <span className="h-2 w-2 rounded-full bg-yellow-400 ring-1 ring-yellow-600/30" />
@@ -5102,6 +5245,44 @@ export default function AdminBookings() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!isLoading && !bookingsError && totalRows > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800 lg:px-5">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Halaman <span className="font-semibold">{page}</span> dari{" "}
+              <span className="font-semibold">{totalPages}</span>
+              {" · "}
+              {Math.min((page - 1) * pageSize + 1, totalRows)}–
+              {Math.min(page * pageSize, totalRows)} dari {totalRows} baris
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={page <= 1}
+                onClick={() => {
+                  setSelectedIds(new Set());
+                  setPage((current) => Math.max(1, current - 1));
+                }}
+              >
+                Sebelumnya
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={page >= totalPages}
+                onClick={() => {
+                  setSelectedIds(new Set());
+                  setPage((current) => Math.min(totalPages, current + 1));
+                }}
+              >
+                Berikutnya
+              </Button>
+            </div>
           </div>
         )}
       </motion.div>
