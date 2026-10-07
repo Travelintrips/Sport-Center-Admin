@@ -47,3 +47,9 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Runtime/customer uploads — never commit payment proofs or uploaded documents
+/uploads/
+/artifacts/api-server/uploads/
+/attached_assets/proof-*
+/attached_assets/wa-proof-*
