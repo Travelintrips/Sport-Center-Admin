@@ -558,7 +558,23 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       for (const group of groups) {
         const groupBookings = bookingsByGroupRef.get(group.groupRef) ?? [];
         const companyBooking = groupBookings.find((booking) => booking.companyCustomerId != null);
-        const groupGross = Math.max(0, Math.round(Number(group.totalPayment) || 0));
+        // Keep the admin list aligned with the booking detail resolver.
+        // Legacy booking_groups.total_payment / dpp snapshots can be stale after
+        // reschedules, price corrections, discounts, or tax migrations. The
+        // canonical gross is the explicit override when present, otherwise the
+        // current sum of the group's booking rows.
+        const groupGross = Math.max(
+          0,
+          Math.round(
+            group.totalPaymentOverride != null
+              ? Number(group.totalPaymentOverride)
+              : groupBookings.reduce(
+                  (sum, booking) =>
+                    sum + Number(booking.totalPrice ?? booking.grandTotal ?? 0),
+                  0,
+                ),
+          ),
+        );
         const storedGroupPpn = Math.max(0, Number(group.ppnAmount ?? 0));
         const groupHasPpn =
           storedGroupPpn > 0 ||
@@ -568,12 +584,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
               Number(booking.ppnAmount ?? 0) > 0 ||
               booking.ppnTreatment === "inclusive",
           );
-        const groupDpp = Math.max(
-          0,
-          Math.round(
-            Number(group.dpp ?? (groupHasPpn ? groupGross / 1.11 : groupGross)),
-          ),
-        );
+        // Derive DPP from the canonical aggregate gross instead of trusting the
+        // legacy group-level DPP snapshot, matching getBookingWithPayment().
+        const groupDpp = groupHasPpn ? Math.round(groupGross / 1.11) : groupGross;
         const storedGroupPph = Math.max(0, Number(group.pphAmount ?? 0));
         const bookingPphRate = Math.max(
           0,
