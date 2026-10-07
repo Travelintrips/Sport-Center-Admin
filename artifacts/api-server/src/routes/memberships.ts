@@ -1,4 +1,7 @@
 import { Router, type Response } from "express";
+import multer from "multer";
+import path from "node:path";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   db,
   gymMembershipsTable,
@@ -23,10 +26,171 @@ import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
+import { uploadFile, BUCKETS } from "../lib/storage";
 
 const router = Router();
 
 const PRICE_PER_MONTH = 300000;
+
+const MEMBERSHIP_PROOF_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
+
+const membershipProofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, file.mimetype.startsWith("image/")),
+});
+
+class MembershipProofError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+function membershipProofSecret(): string {
+  const secret = String(process.env.SESSION_SECRET ?? "").trim();
+  if (!secret) throw new Error("SESSION_SECRET is required for membership proof uploads");
+  return secret;
+}
+
+function createMembershipProofToken(membershipId: number, paymentId: number): string {
+  const expiresAt = Date.now() + MEMBERSHIP_PROOF_TOKEN_TTL_MS;
+  const payload = `${membershipId}:${paymentId}:${expiresAt}`;
+  const signature = createHmac("sha256", membershipProofSecret()).update(payload).digest("hex");
+  return Buffer.from(JSON.stringify({ m: membershipId, p: paymentId, e: expiresAt, s: signature }))
+    .toString("base64url");
+}
+
+function verifyMembershipProofToken(
+  token: string,
+  membershipId: number,
+): { paymentId: number } | null {
+  try {
+    const decoded = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as {
+      m?: unknown;
+      p?: unknown;
+      e?: unknown;
+      s?: unknown;
+    };
+    const tokenMembershipId = Number(decoded.m);
+    const paymentId = Number(decoded.p);
+    const expiresAt = Number(decoded.e);
+    const signature = String(decoded.s ?? "");
+    if (
+      !Number.isInteger(tokenMembershipId) ||
+      tokenMembershipId !== membershipId ||
+      !Number.isInteger(paymentId) ||
+      paymentId <= 0 ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt < Date.now() ||
+      !/^[a-f0-9]{64}$/i.test(signature)
+    ) return null;
+
+    const payload = `${tokenMembershipId}:${paymentId}:${expiresAt}`;
+    const expected = createHmac("sha256", membershipProofSecret()).update(payload).digest("hex");
+    const actualBuffer = Buffer.from(signature, "hex");
+    const expectedBuffer = Buffer.from(expected, "hex");
+    if (
+      actualBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(actualBuffer, expectedBuffer)
+    ) return null;
+
+    return { paymentId };
+  } catch {
+    return null;
+  }
+}
+
+async function applyMembershipPaymentProof(
+  id: number,
+  paymentId: number,
+  paymentMethod: string,
+  paymentProofUrl: string,
+  reqLog?: { error: (obj: unknown, msg?: string) => void },
+) {
+  if (!["qris", "transfer"].includes(paymentMethod)) {
+    throw new MembershipProofError(400, "Metode pembayaran tidak valid");
+  }
+  if (!paymentProofUrl) {
+    throw new MembershipProofError(400, "Bukti pembayaran wajib diisi");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(gymMembershipsTable)
+    .where(eq(gymMembershipsTable.id, id))
+    .limit(1);
+  if (!existing) throw new MembershipProofError(404, "Membership tidak ditemukan");
+  if (existing.status !== "pending_payment") {
+    throw new MembershipProofError(409, "Membership tidak lagi menunggu pembayaran");
+  }
+
+  const [pendingPayment] = await db
+    .select()
+    .from(membershipPaymentsTable)
+    .where(
+      and(
+        eq(membershipPaymentsTable.id, paymentId),
+        eq(membershipPaymentsTable.membershipId, id),
+        eq(membershipPaymentsTable.status, "pending_payment"),
+      ),
+    )
+    .limit(1);
+  if (!pendingPayment) {
+    throw new MembershipProofError(409, "Sesi pembayaran membership sudah tidak aktif");
+  }
+
+  const submittedAt = new Date();
+  await db.transaction(async (tx) => {
+    await tx.update(gymMembershipsTable)
+      .set({ paymentMethod, paymentProofUrl, status: "waiting_confirmation" })
+      .where(eq(gymMembershipsTable.id, id));
+
+    await tx.update(membershipPaymentsTable)
+      .set({
+        paymentMethod,
+        paymentProofUrl,
+        status: "waiting_confirmation",
+        submittedAt,
+        updatedAt: submittedAt,
+      })
+      .where(eq(membershipPaymentsTable.id, paymentId));
+  });
+
+  const [membership] = await db
+    .select()
+    .from(gymMembershipsTable)
+    .where(eq(gymMembershipsTable.id, id))
+    .limit(1);
+  if (!membership) throw new MembershipProofError(404, "Membership tidak ditemukan");
+
+  const paymentBooking = await ensureMembershipPaymentBooking(membership, {
+    ...pendingPayment,
+    paymentMethod,
+    paymentProofUrl,
+    status: "waiting_confirmation",
+    submittedAt,
+    updatedAt: submittedAt,
+  });
+  syncMembershipToBizportal(membership).catch(() => {});
+  syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+    reqLog?.error({ err }, "[membership] Gagal sync booking payment proof ke Bizportal"),
+  );
+  await syncToPublic(membership);
+
+  const appUrl = await getBaseUrl();
+  notifyMembershipPaymentProofUploaded({
+    membershipId: membership.id,
+    customerName: membership.name,
+    startDate: membership.startDate,
+    endDate: membership.endDate,
+    totalPrice: Number(membership.totalPrice).toLocaleString("id-ID"),
+    reviewUrl: appUrl ? `${appUrl}/admin/memberships` : undefined,
+  }).catch((err) =>
+    reqLog?.error({ err }, "[WA] notifyMembershipPaymentProofUploaded error"),
+  );
+
+  return membership;
+}
 
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update">;
 
@@ -685,6 +849,42 @@ router.post("/memberships", async (req, res) => {
 
     const conflict = existingAll.find((m) => BLOCK_STATUSES.includes(m.status));
     if (conflict) {
+      const sameRegistrant =
+        String(conflict.email ?? "").trim().toLowerCase() === emailNorm.toLowerCase() &&
+        String(conflict.name ?? "").trim().toLowerCase() === nameNorm.toLowerCase();
+
+      if (conflict.status === "pending_payment" && sameRegistrant) {
+        const [pendingPayment] = await db
+          .select()
+          .from(membershipPaymentsTable)
+          .where(
+            and(
+              eq(membershipPaymentsTable.membershipId, conflict.id),
+              eq(membershipPaymentsTable.status, "pending_payment"),
+            ),
+          )
+          .orderBy(desc(membershipPaymentsTable.id))
+          .limit(1);
+
+        if (pendingPayment) {
+          res.status(409).json({
+            error: "Pendaftaran sebelumnya masih menunggu pembayaran. Lanjutkan pembayaran yang sama.",
+            conflictStatus: conflict.status,
+            conflictId: conflict.id,
+            resumePayment: {
+              id: conflict.id,
+              name: conflict.name,
+              endDate: conflict.endDate,
+              totalPrice: Number(conflict.totalPrice),
+              months: conflict.months,
+              startDate: conflict.startDate,
+              paymentProofToken: createMembershipProofToken(conflict.id, pendingPayment.id),
+            },
+          });
+          return;
+        }
+      }
+
       res.status(409).json({
         error: "Nomor HP ini sudah terdaftar sebagai member aktif atau sedang menunggu konfirmasi. Gunakan fitur Perpanjang untuk memperpanjang membership Anda.",
         conflictStatus: conflict.status,
@@ -753,7 +953,7 @@ router.post("/memberships", async (req, res) => {
       req.log.error({ err }, "[membership] Gagal sync booking pembayaran ke Bizportal")
     );
     await syncToPublic(membership);
-    res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice) });
+    res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice), paymentProofToken: createMembershipProofToken(membership.id, payment.id) });
   } catch (err) {
     req.log.error({ err }, "Create membership error");
     res.status(500).json({ error: "Internal server error" });
@@ -816,98 +1016,102 @@ router.post("/memberships/:id/renew", async (req, res) => {
       req.log.error({ err }, "[membership] Gagal sync booking renewal ke Bizportal")
     );
     await syncToPublic(updated!);
-    res.json({ ...updated, totalPrice: Number(updated!.totalPrice) });
+    res.json({ ...updated, totalPrice: Number(updated!.totalPrice), paymentProofToken: createMembershipProofToken(updated!.id, payment!.id) });
   } catch (err) {
     req.log.error({ err }, "Renew membership error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+router.post(
+  "/memberships/:id/payment-proof-upload",
+  membershipProofUpload.single("proof"),
+  async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id));
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ error: "ID membership tidak valid" });
+        return;
+      }
+
+      const paymentProofToken = String(req.body?.paymentProofToken ?? "");
+      const tokenPayload = verifyMembershipProofToken(paymentProofToken, id);
+      if (!tokenPayload) {
+        res.status(401).json({ error: "Sesi upload bukti tidak valid atau sudah kedaluwarsa" });
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ error: "Foto bukti pembayaran wajib dipilih" });
+        return;
+      }
+
+      const paymentMethod = String(req.body?.paymentMethod ?? "");
+      const extByMime: Record<string, string> = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/heic": ".heic",
+        "image/heif": ".heif",
+      };
+      const safeExt =
+        extByMime[req.file.mimetype.toLowerCase()] ||
+        path.extname(req.file.originalname).toLowerCase() ||
+        ".jpg";
+      const objectName =
+        `membership-${id}-payment-${tokenPayload.paymentId}-${randomUUID()}${safeExt}`;
+      const paymentProofUrl = await uploadFile(
+        BUCKETS.proof,
+        objectName,
+        req.file.buffer,
+        req.file.mimetype,
+      );
+
+      const membership = await applyMembershipPaymentProof(
+        id,
+        tokenPayload.paymentId,
+        paymentMethod,
+        paymentProofUrl,
+        req.log,
+      );
+      res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
+    } catch (err) {
+      if (err instanceof MembershipProofError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      req.log.error({ err }, "Submit membership payment proof upload error");
+      res.status(500).json({ error: "Upload bukti pembayaran gagal" });
+    }
+  },
+);
+
+// Compatibility JSON endpoint: still supported for API clients, but no longer
+// accepts an unauthenticated arbitrary proof URL.
 router.post("/memberships/:id/payment-proof", async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const { paymentMethod, paymentProofUrl } = req.body;
-
-    if (!paymentMethod || !paymentProofUrl) {
-      res.status(400).json({ error: "paymentMethod and paymentProofUrl are required" });
+    const paymentMethod = String(req.body?.paymentMethod ?? "");
+    const paymentProofUrl = String(req.body?.paymentProofUrl ?? "");
+    const paymentProofToken = String(req.body?.paymentProofToken ?? "");
+    const tokenPayload = verifyMembershipProofToken(paymentProofToken, id);
+    if (!tokenPayload) {
+      res.status(401).json({ error: "Sesi upload bukti tidak valid atau sudah kedaluwarsa" });
       return;
     }
 
-    const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
-    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-    if (existing.status !== "pending_payment") {
-      res.status(400).json({ error: "Membership is not in pending_payment status" });
-      return;
-    }
-
-    let [pendingPayment] = await db
-      .select()
-      .from(membershipPaymentsTable)
-      .where(
-        and(
-          eq(membershipPaymentsTable.membershipId, id),
-          eq(membershipPaymentsTable.status, "pending_payment"),
-        ),
-      )
-      .orderBy(desc(membershipPaymentsTable.id))
-      .limit(1);
-
-    if (!pendingPayment) {
-      [pendingPayment] = await db
-        .insert(membershipPaymentsTable)
-        .values({
-          membershipId: existing.id,
-          periodStart: existing.startDate,
-          periodEnd: existing.endDate,
-          months: existing.months,
-          amount: existing.totalPrice,
-          status: "pending_payment",
-        })
-        .returning();
-    }
-
-    await db.update(gymMembershipsTable)
-      .set({ paymentMethod, paymentProofUrl, status: "waiting_confirmation" })
-      .where(eq(gymMembershipsTable.id, id));
-
-    await db
-      .update(membershipPaymentsTable)
-      .set({
-        paymentMethod,
-        paymentProofUrl,
-        status: "waiting_confirmation",
-        submittedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(membershipPaymentsTable.id, pendingPayment.id));
-
-    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
-    const paymentBooking = await ensureMembershipPaymentBooking(membership!, {
-      ...pendingPayment,
+    const membership = await applyMembershipPaymentProof(
+      id,
+      tokenPayload.paymentId,
       paymentMethod,
       paymentProofUrl,
-      status: "waiting_confirmation",
-      submittedAt: new Date(),
-      updatedAt: new Date(),
-    });
-    syncMembershipToBizportal(membership).catch(() => {});
-    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
-      req.log.error({ err }, "[membership] Gagal sync booking payment proof ke Bizportal")
+      req.log,
     );
-    await syncToPublic(membership!);
-
-    const appUrl = await getBaseUrl();
-    notifyMembershipPaymentProofUploaded({
-      membershipId: membership!.id,
-      customerName: membership!.name,
-      startDate: membership!.startDate,
-      endDate: membership!.endDate,
-      totalPrice: Number(membership!.totalPrice).toLocaleString("id-ID"),
-      reviewUrl: appUrl ? `${appUrl}/admin/memberships` : undefined,
-    }).catch((err) => req.log.error({ err }, "[WA] notifyMembershipPaymentProofUploaded error"));
-
-    res.json({ ...membership, totalPrice: Number(membership!.totalPrice) });
+    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
+    if (err instanceof MembershipProofError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
     req.log.error({ err }, "Submit payment proof error");
     res.status(500).json({ error: "Internal server error" });
   }
