@@ -1,6 +1,6 @@
 import SEOHead from "@/components/SEOHead";
 import { useState, useRef } from "react";
-import { useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
+import { useGetSettings } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -53,6 +53,7 @@ interface CreatedMembership {
   totalPrice: number;
   months: number;
   startDate: string;
+  paymentProofToken: string;
 }
 
 interface LookupResult {
@@ -65,15 +66,6 @@ interface LookupResult {
   endDate: string;
   months: number;
   totalPrice: number;
-}
-
-async function uploadProofFile(file: File): Promise<string> {
-  const formData = new FormData();
-  formData.append("file", file);
-  const res = await fetch("/api/storage/upload-proof", { method: "POST", body: formData });
-  if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Upload gagal"); }
-  const { url } = await res.json();
-  return url;
 }
 
 function getRenewalStartDate(result: LookupResult): string {
@@ -127,14 +119,7 @@ export default function Membership() {
 
   const [registerLoading, setRegisterLoading] = useState(false);
 
-  const proofMutation = useSubmitMembershipPaymentProof({
-    mutation: {
-      onSuccess: () => setStep("success"),
-      onError: () => {
-        toast({ title: t("Gagal mengirim bukti", "Failed to submit proof"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
-      },
-    },
-  });
+
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
   async function handleSubmitForm(e: React.FormEvent) {
@@ -152,6 +137,18 @@ export default function Membership() {
       });
       const data = await res.json();
       if (res.status === 409) {
+        if (data.resumePayment?.paymentProofToken) {
+          setCreated(data.resumePayment);
+          setStep("payment");
+          toast({
+            title: t("Lanjutkan pembayaran", "Continue payment"),
+            description: t(
+              "Pendaftaran sebelumnya masih menunggu pembayaran. Silakan lanjutkan dari tahap pembayaran.",
+              "Your previous registration is still awaiting payment. Continue from the payment step.",
+            ),
+          });
+          return;
+        }
         toast({
           title: t("Sudah terdaftar", "Already registered"),
           description: t(
@@ -166,7 +163,7 @@ export default function Membership() {
         toast({ title: t("Gagal mendaftar", "Registration failed"), description: data.error || t("Terjadi kesalahan.", "An error occurred."), variant: "destructive" });
         return;
       }
-      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate });
+      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate, paymentProofToken: data.paymentProofToken });
       setStep("payment");
     } catch {
       toast({ title: t("Gagal terhubung", "Connection failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
@@ -215,7 +212,7 @@ export default function Membership() {
         return;
       }
       const data = await res.json();
-      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate });
+      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate, paymentProofToken: data.paymentProofToken });
       setStep("payment");
     } catch {
       toast({ title: t("Gagal terhubung", "Connection failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
@@ -245,12 +242,37 @@ export default function Membership() {
       return;
     }
     if (!paymentMethod || !created) return;
+    if (!created.paymentProofToken) {
+      toast({
+        title: t("Sesi pembayaran kedaluwarsa", "Payment session expired"),
+        description: t("Silakan mulai ulang pendaftaran membership.", "Please restart the membership registration."),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsUploading(true);
-      const proofUrl = await uploadProofFile(proofFile);
-      proofMutation.mutate({ id: created.id, data: { paymentMethod, paymentProofUrl: proofUrl } });
+      const formData = new FormData();
+      formData.append("proof", proofFile);
+      formData.append("paymentMethod", paymentMethod);
+      formData.append("paymentProofToken", created.paymentProofToken);
+
+      const res = await fetch(`/api/memberships/${created.id}/payment-proof-upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || t("Upload gagal", "Upload failed"));
+      }
+      setStep("success");
     } catch (err: any) {
-      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
+      toast({
+        title: t("Upload gagal", "Upload failed"),
+        description: err?.message || t("Silakan coba lagi.", "Please try again."),
+        variant: "destructive",
+      });
     } finally {
       setIsUploading(false);
     }
@@ -392,16 +414,16 @@ export default function Membership() {
                 variant="outline"
                 className="flex-1"
                 onClick={() => setStep("payment")}
-                disabled={isUploading || proofMutation.isPending}
+                disabled={isUploading}
               >
                 {t("Kembali", "Back")}
               </Button>
               <Button
                 className="flex-1"
                 onClick={handleSubmitProof}
-                disabled={!proofFile || isUploading || proofMutation.isPending}
+                disabled={!proofFile || isUploading}
               >
-                {isUploading || proofMutation.isPending ? (
+                {isUploading ? (
                   <><Loader2 size={16} className="mr-2 animate-spin" />{t("Mengirim...", "Sending...")}</>
                 ) : (
                   <><Upload size={16} className="mr-2" />{t("Kirim Bukti", "Submit Proof")}</>
