@@ -3,6 +3,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import multer from "multer";
 import { uploadFile, BUCKETS } from "../lib/storage";
+import { adminMiddleware } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -30,7 +31,7 @@ export async function uploadProofWithFallback(
   return await uploadFile(BUCKETS.proof, objectName, buffer, mimetype);
 }
 
-router.post("/storage/upload-proof", uploadProof.single("file"), async (req: Request, res: Response) => {
+router.post("/storage/upload-proof", adminMiddleware, uploadProof.single("file"), async (req: Request, res: Response) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
     const url = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
