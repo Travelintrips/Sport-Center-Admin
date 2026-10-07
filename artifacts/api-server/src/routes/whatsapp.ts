@@ -2102,8 +2102,12 @@ router.post("/wa/review/:token", async (req, res) => {
       );
 
       res.json({ success: true, message: "Pembayaran dikonfirmasi. Customer diberitahu." });
+      return;
+    }
 
-      await consumeWaToken(req.params.token);
+    // action === "reject" — keep this path isolated from approve so an
+    // approve request can never fall through and reject the same payment.
+    await consumeWaToken(req.params.token);
 
       await db.update(paymentsTable).set({ status: "rejected" })
         .where(eq(paymentsTable.bookingId, booking.id));
@@ -2135,8 +2139,8 @@ router.post("/wa/review/:token", async (req, res) => {
         userName: "admin (WhatsApp Review)",
       });
 
-      res.json({ success: true, message: "Pembayaran ditolak. Customer diminta upload ulang." });
-    }
+    res.json({ success: true, message: "Pembayaran ditolak. Customer diminta upload ulang." });
+    return;
   } catch (err) {
     const errorCode = err instanceof Error ? err.message : String(err);
     logger.error({ errorCode, token: req.params.token }, "[wa/review] action gagal");
