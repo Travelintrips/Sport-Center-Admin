@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+      SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
+      SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
 
     steps:
@@ -44,6 +46,9 @@ jobs:
             echo "::error::SUPABASE_DATABASE_URL_DEV is not configured in GitHub Actions"
             exit 1
           fi
+
+      - name: Require verifiable DEV database isolation
+        run: node scripts/verify-dev-supabase-isolation.mjs
 
       - name: Apply idempotent DEV migrations
         run: pnpm --filter scripts migrate:dev
