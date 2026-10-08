@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
-      SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
-      SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+      SUPABASE_URL_DEV: https://xssrfshdrtdfupgqwfdw.supabase.co
+      SUPABASE_URL_PROD: https://nzdweipzckfszczzqtuw.supabase.co
       SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
 
     steps:
