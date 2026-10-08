@@ -3,7 +3,7 @@ name: Sport Center DEV Post-Merge
 on:
   push:
     branches:
-      - main
+      - develop
 
 concurrency:
   group: sport-center-dev-post-merge
