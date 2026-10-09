@@ -28,6 +28,7 @@ interface InvoiceData {
   dppNilaiLain: number;
   ppnRate: number;
   ppnAmount: number;
+  bookingType?: string;
   grandTotal: number;
   centerName: string;
   bankName: string;
@@ -299,17 +300,17 @@ export default function InvoiceView() {
                 <div>
                   <div className="text-xs text-gray-400 mb-2">Rincian Harga</div>
                   <div className="space-y-1.5 text-xs">
-                    <div className="flex justify-between text-gray-600">
+                    {invoiceData.bookingType !== "regular" && <div className="flex justify-between text-gray-600">
                       <span>DPP</span>
                       <span className="font-mono">{rp(invoiceData.dpp)}</span>
-                    </div>
-                    {invoiceData.dppNilaiLain > 0 && (
+                    </div>}
+                    {invoiceData.bookingType !== "regular" && invoiceData.dppNilaiLain > 0 && (
                       <div className="flex justify-between text-gray-400">
                         <span className="italic">DPP Nilai Lain</span>
                         <span className="font-mono">{rp(invoiceData.dppNilaiLain)}</span>
                       </div>
                     )}
-                    {invoiceData.ppnRate > 0 && (
+                    {invoiceData.bookingType !== "regular" && invoiceData.ppnRate > 0 && (
                       <div className="flex justify-between text-amber-700">
                         <span>PPN {invoiceData.ppnRate}%</span>
                         <span className="font-mono">{rp(invoiceData.ppnAmount)}</span>

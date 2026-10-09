@@ -617,7 +617,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <th>Tanggal</th>
         <th style="text-align:center;">Jam</th>
         <th style="text-align:center;">Durasi</th>
-        <th style="text-align:right;">Harga (Inc. PPN)</th>
+        <th style="text-align:right;">${data.bookingType === "regular" ? "Harga" : "Harga (Inc. PPN)"}</th>
       </tr>
     </thead>
     <tbody>
@@ -630,7 +630,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   ═══════════════════════════════════════════════════════════════ -->
   <div class="sc-total-wrap">
     <table class="sc-total-table">
-      ${data.ppnAmount > 0 ? `
+      ${data.bookingType !== "regular" && data.ppnAmount > 0 ? `
       <tr class="subtotal">
         <td>DPP</td>
         <td style="text-align:right;">Rp ${rp(data.dpp)}</td>
@@ -658,13 +658,13 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       </tr>` : ""}
     </table>
   </div>
-  ${data.dppNilaiLain > 0 ? `
+  ${data.bookingType !== "regular" && data.dppNilaiLain > 0 ? `
   <div style="text-align:right;margin-top:-14px;margin-bottom:16px;">
     <span style="font-size:10px;color:#9ca3af;font-style:italic;">
       Perhitungan pajak menggunakan DPP Nilai Lain sesuai konfigurasi sistem.
     </span>
   </div>` : ""}
-  ${data.ppnCollectedByCustomer ? `
+  ${data.bookingType !== "regular" && data.ppnCollectedByCustomer ? `
   <div style="text-align:right;margin-top:-10px;margin-bottom:16px;">
     <span style="font-size:10px;color:#b45309;font-style:italic;">
       PPN dipungut dan disetorkan oleh customer; tidak termasuk kas yang diterima Sport Center.
