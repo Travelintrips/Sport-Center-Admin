@@ -171,6 +171,7 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     promoCode: booking.promoCode ?? null,
     discountAmount: Number(booking.discountAmount ?? 0),
     bookingType: booking.bookingType ?? "regular",
+    isCompanyBooking: booking.companyCustomerId != null,
 
     centerName: settings?.centerName || "Sport Center Soekarno-Hatta",
     centerAddress: settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
