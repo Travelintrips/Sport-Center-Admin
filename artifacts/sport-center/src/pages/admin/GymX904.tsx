@@ -137,7 +137,7 @@ export default function GymX904() {
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Absensi Gym X904</h1>
-        <p className="text-sm text-muted-foreground mt-1">Pantau check-in Gym Sport Center dan status komunikasi mesin X904. Status perangkat ditentukan dari bukti koneksi, bukan keberhasilan tes server.</p>
+        <p className="text-sm text-muted-foreground mt-1">Pantau check-in Gym Sport Center dan status komunikasi mesin X904. Koneksi mesin X904 belum aktif sebagai integrasi absensi; status perangkat ditentukan dari bukti koneksi, bukan keberhasilan tes server.</p>
       </div>
       <nav aria-label="Menu Gym X904" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
         {tabs.map(({ id, label, icon: Icon }) => (
