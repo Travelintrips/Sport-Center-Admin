@@ -10,13 +10,14 @@ import { adminMiddleware } from "../lib/auth";
  */
 const router=Router();
 type Contact={kind:string;receivedAt:string;method:string;contentType:string;bytes:number};
+const startedAt = new Date().toISOString();
 let lastContact:Contact|null=null;
 const enabled=()=>process.env.GYM_X904_ADMS_PROBE_ENABLED==="true" &&
  process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true";
 const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
- res.json({enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact});
+ res.json({enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,startedAt,ephemeral:true,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
 router.all(/^\/iclock\/(?:cdata|getrequest)$/, (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
