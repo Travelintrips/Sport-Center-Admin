@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { createHmac, randomBytes } from "node:crypto";
 import { classifyX904AdmsRequest } from "../lib/x904AdmsProtocol";
 import { adminMiddleware } from "../lib/auth";
 
@@ -14,6 +15,9 @@ const startedAt = new Date().toISOString();
 // Release fingerprint for verifying Hostinger actually loaded this backend build.
 const releaseFingerprint = "x904-release-proof-20261012-v1";
 let lastContact:Contact|null=null;
+const sourceSalt=randomBytes(32);
+type ContactTrace=Contact & {sourceTag:string};
+const recentContacts:ContactTrace[]=[];
 let lastAttlogShape:{receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}|null=null;
 const enabled=()=>process.env.GYM_X904_ADMS_PROBE_ENABLED==="true" &&
  process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true";
@@ -21,7 +25,7 @@ const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
 export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: true });
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
- res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,lastAttlogShape,startedAt,ephemeral:true,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
+ res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
 router.all(/^\/iclock\/(?:cdata|getrequest)$/, (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
@@ -35,6 +39,11 @@ router.all(/^\/iclock\/(?:cdata|getrequest)$/, (req:Request,res:Response) => {
  const bytes=Number(req.headers["content-length"]||0);
  lastContact={kind:classification.kind,receivedAt:new Date().toISOString(),method:req.method,
   contentType:String(req.headers["content-type"]||"").slice(0,80),bytes:Number.isSafeInteger(bytes)&&bytes>=0?bytes:-1};
+ // Ephemeral correlation only: does not expose or persist the source IP or user agent.
+ // Shared NAT/proxies or crafted headers can make tags collide; not authentication.
+ const sourceTag=createHmac("sha256",sourceSalt).update(req.ip||"unknown").update("\\0").update(String(req.headers["user-agent"]||"")).digest("hex").slice(0,10);
+ recentContacts.unshift({...lastContact,sourceTag});
+ if(recentContacts.length>40)recentContacts.length=40;
  if(classification.kind==="handshake"){
   // Candidate ZK Push 2.x response, to be confirmed against physical X904.
   // No log cursor, status changes, clock writes, enrollment or door commands.
