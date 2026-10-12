@@ -29,3 +29,6 @@ Device firmware menu confirms ADMS/HTTPS mode but protocol and proprietary recor
 3. UI and accessibility test on desktop and mobile, protected routes.
 4. Independent SC regression tests for bookings, payments, corporate invoices, and public /gym.
 5. DEV integration and rollback test with gym feature flag; only then production approval.
+
+## Login decision (2026-10-12)
+Gym management must reuse the existing Sport Center Admin login, including the existing `admin@sportcenter.com` account and its existing password. Do not request an additional Gym password, create a parallel credential store for SC users, or copy/hardcode the SC password. The existing frontend uses `sport_center_token` and `useGetMe`; all Gym routes must be protected by existing SC authenticated AdminLayout AND backend gym-specific RBAC, with short-lived server-to-server scoped delegation for calls to the independent Gym backend. Authentication is not permission: least-privilege authorization and tenant isolation are mandatory. Keep integration off in production until tests pass.
