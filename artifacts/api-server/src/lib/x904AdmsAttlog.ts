@@ -12,7 +12,13 @@ export function parseX904Attlog(raw:string):X904RawAttendance[] {
   const [pin,deviceTime,statusRaw,verifyRaw]=columns;
   if(!/^[A-Za-z0-9_-]{1,50}$/.test(pin)|| !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(deviceTime)|| !/^\d{1,3}$/.test(statusRaw)|| !/^\d{1,3}$/.test(verifyRaw))throw Error("ATTLOG invalid field");
   const status=Number(statusRaw),verify=Number(verifyRaw);
-  if(status>255||verify>255||!Number.isFinite(Date.parse(deviceTime.replace(" ","T")+"+07:00")))throw Error("ATTLOG invalid values");
+  const [datePart,timePart]=deviceTime.split(" ");
+  const [y,m,d]=datePart.split("-").map(Number);
+  const [hh,mm,ss]=timePart.split(":").map(Number);
+  const exactDate=new Date(Date.UTC(y,m-1,d,hh,mm,ss));
+  if(status>255||verify>255||y<2000||y>2100||m<1||m>12||d<1||hh>23||mm>59||ss>59||
+     exactDate.getUTCFullYear()!==y||exactDate.getUTCMonth()!==m-1||
+     exactDate.getUTCDate()!==d)throw Error("ATTLOG invalid values");
   return {pin,deviceTime,status,verify};
  });
 }
