@@ -105,6 +105,9 @@ jobs:
             --trace-deprecation \
             -e "require('google-auth-library'); console.log('google auth loaded')"
 
+      - name: Verify Gym X904 admin contract
+        run: node scripts/verify-gym-x904-admin-contract.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
