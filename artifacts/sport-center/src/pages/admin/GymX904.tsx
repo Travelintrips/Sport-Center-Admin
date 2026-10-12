@@ -5,6 +5,8 @@ import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
+interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; }
+
 interface Checkin {
   id: number;
   membershipId: number;
@@ -30,6 +32,19 @@ export default function GymX904() {
   const [date, setDate] = useState(localDate);
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
+  const { data: integration, isError: integrationError } = useQuery<IntegrationStatus>({
+    queryKey: ["gym-x904-integration"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch(`${API}/admin/gym-x904/integration`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Status integrasi tidak dapat dibaca");
+      return response.json();
+    },
+    refetchInterval: 30000,
+  });
   const { data: memberships, isLoading: membersLoading, isError: membersError } = useListMemberships({});
   const { data, isLoading, isError, isFetching, error, refetch } = useQuery<Checkin[]>({
     queryKey: ["gym-checkins", date],
@@ -77,13 +92,13 @@ export default function GymX904() {
         <p className="text-sm text-muted-foreground mt-1">Pantau check-in Gym dari data Sport Center yang sudah berjalan. Koneksi mesin X904 belum aktif.</p>
       </div>
       <div className="rounded-xl border bg-card p-5 space-y-3">
-        <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">Integrasi perangkat belum aktif</span></div>
+        <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : "Integrasi perangkat belum aktif"}</span></div>
         <p className="text-sm text-muted-foreground">Status online/offline perangkat tidak dapat ditentukan sebelum protokol ADMS dan layanan Gym terisolasi diuji. Data di bawah adalah check-in SC, bukan hasil pembacaan mesin X904.</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Member Gym aktif (SC)</p><p className="text-2xl font-bold mt-1">{membersLoading ? "Memuat..." : membersError ? "Tidak tersedia" : activeMembers ?? "—"}</p></section>
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Check-in SC pada tanggal dipilih</p><p className="text-2xl font-bold mt-1">{isLoading ? "Memuat..." : isError ? "Tidak tersedia" : rows.length}</p></section>
-        <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">Belum dikonfigurasi</p><p className="text-xs text-muted-foreground">Tidak mengasumsikan online atau offline</p></section>
+        <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">{integrationError ? "Status tidak tersedia" : integration?.hardware === "unverified" ? "Belum terverifikasi" : "Belum dikonfigurasi"}</p><p className="text-xs text-muted-foreground">Tidak mengasumsikan online atau offline</p></section>
       </div>
       <section className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
