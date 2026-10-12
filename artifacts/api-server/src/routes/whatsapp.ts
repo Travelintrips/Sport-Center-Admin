@@ -119,6 +119,7 @@ const router = Router();
 type FonnteReplyContext = {
   inboxId?: string;
   inboundMessageId?: string;
+  replyDestination?: string;
 };
 
 const fonnteReplyContext = new AsyncLocalStorage<FonnteReplyContext>();
@@ -2245,9 +2246,14 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
   const useGateway = gatewayConfig.configured && providerOverride !== "fonnte";
 
   if (useGateway) {
+    const replyDestination = useCustomerToken
+      ? fonnteReplyContext.getStore()?.replyDestination
+      : undefined;
+    const recipient = replyDestination?.endsWith("@g.us") ? replyDestination : phone;
+
     if (!allowWhatsAppProviderSend({
       channel,
-      recipient: phone,
+      recipient,
       customerTokenConfigured: useCustomerToken ? true : false,
     })) return true;
 
@@ -2266,14 +2272,14 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
       const idempotencyKey =
         `${channel}:` +
         createHash("sha256")
-          .update(`${deviceId}:${phone}:${deliveryScope}:${chunkIndex}:${chunk}`)
+          .update(`${deviceId}:${recipient}:${deliveryScope}:${chunkIndex}:${chunk}`)
           .digest("hex")
           .slice(0, 48);
 
       try {
         const queued = await sendCstWaGatewayDirectMessage({
           deviceId,
-          to: phone,
+          to: recipient,
           text: chunk,
           idempotencyKey,
         });
@@ -2281,7 +2287,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           {
             channel,
             provider: "cst_gateway",
-            recipient: phone,
+            recipient,
             deviceId,
             messageId: queued.messageId,
             status: queued.status,
@@ -2295,7 +2301,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           {
             channel,
             provider: "cst_gateway",
-            recipient: phone,
+            recipient,
             deviceId,
             error: err instanceof Error ? err.message : String(err),
             chunkIndex: chunkIndex + 1,
@@ -2307,7 +2313,7 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           action: useCustomerToken ? "mina_reply_gateway_error" : "admin_notification_gateway_error",
           entity: "wa_outbound",
           after: {
-            recipient: phone,
+            recipient,
             deviceId,
             error: err instanceof Error ? err.message : String(err),
             chunkIndex: chunkIndex + 1,
@@ -5527,6 +5533,8 @@ function normalizeCstGatewayInboundPayload(
     text = content.listResponseMessage.title;
   }
 
+  const remoteJid = String(message.key?.remoteJid ?? "").trim();
+
   return {
     sender,
     message: text,
@@ -5534,6 +5542,7 @@ function normalizeCstGatewayInboundPayload(
     id: String(message.key?.id ?? eventId),
     type,
     device: deviceId,
+    ...(remoteJid.endsWith("@g.us") ? { replyDestination: remoteJid } : {}),
     cstGatewayEventId: eventId,
   };
 }
@@ -5573,9 +5582,13 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     const inboundContextMessageId = String(
       req.body.id ?? req.body.message_id ?? req.body.msg_id ?? req.body.msgId ?? "",
     ).trim() || undefined;
+    const inboundReplyDestination = String(req.body.replyDestination ?? "").trim();
     fonnteReplyContext.enterWith({
       inboxId: inboundInboxId,
       inboundMessageId: inboundContextMessageId,
+      ...(inboundReplyDestination.endsWith("@g.us")
+        ? { replyDestination: inboundReplyDestination }
+        : {}),
     });
 
     const phone = cleanPhone(String(sender));
