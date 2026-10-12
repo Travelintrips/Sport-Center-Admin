@@ -90,6 +90,12 @@ app.get("/api", (_req, res) => {
 
 // Same existing SC backend and HTTPS host; disabled by default and never ACKs device data.
 app.use(x904AdmsGate);
+// Never respond with the Sport Center SPA to device ADMS requests.
+// An HTTP 200 HTML page could be mistaken for a successful device handshake.
+app.use("/iclock", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.type("text/plain").status(404).send("NOT FOUND\n");
+});
 app.use("/api", router);
 
 if (process.env.NODE_ENV === "production") {
