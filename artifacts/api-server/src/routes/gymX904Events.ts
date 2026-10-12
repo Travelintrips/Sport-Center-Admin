@@ -26,7 +26,7 @@ router.post("/internal/gym-x904/events", async (req, res) => {
   if (!equal(token, expected) || !equal(serial, process.env.GYM_X904_DEVICE_SERIAL || "")) {
     return res.status(403).json({error:"Unauthorized device gateway"});
   }
-  if (!Array.isArray(req.body?.events) || req.body.events.length > 100) {
+  if (!Array.isArray(req.body?.events) || req.body.events.length === 0 || req.body.events.length > 100) {
     return res.status(400).json({error:"Invalid event batch"});
   }
   const events = req.body.events as unknown[];
@@ -45,15 +45,17 @@ router.post("/internal/gym-x904/events", async (req, res) => {
     parsed.push({id,pin,occurred,status:Number(status),verify:Number(verify)});
   }
   try {
-    // This separate table is provisioned explicitly, never during SC startup.
-    // No modification to membership, accounting, booking or door control.
-    for (const event of parsed) {
-      await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events
-        (event_id, device_serial, user_pin, device_time, attendance_status, verification_type)
-        VALUES (${event.id}, ${serial}, ${event.pin}, ${event.occurred}, ${event.status}, ${event.verify})
-        ON CONFLICT (event_id) DO NOTHING`);
-    }
-    return res.json({ok:true,accepted:parsed.length});
+    // Single atomic statement: a failed batch cannot be partially acknowledged.
+    // Do not modify membership, payments, booking, or door control tables.
+    const payload = JSON.stringify(parsed);
+    const result = await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events
+      (event_id, device_serial, user_pin, device_time, attendance_status, verification_type)
+      SELECT e.id, ${serial}, e.pin, e.occurred, e.status, e.verify
+      FROM jsonb_to_recordset(${payload}::jsonb)
+        AS e(id text, pin text, occurred text, status integer, verify integer)
+      ON CONFLICT (event_id) DO NOTHING
+      RETURNING event_id`);
+    return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,duplicates:parsed.length-result.rows.length});
   } catch {
     return res.status(503).json({error:"X904 event storage unavailable"});
   }
