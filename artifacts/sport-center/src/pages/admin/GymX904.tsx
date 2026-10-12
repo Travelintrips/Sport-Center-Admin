@@ -149,13 +149,13 @@ export default function GymX904() {
         ))}
       </nav>
       {(tab === "dashboard" || tab === "device") && <div className="rounded-xl border bg-card p-5 space-y-3">
-        <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : admsDiagnostic?.enabled ? "Receiver ADMS aktif — mesin belum terverifikasi" : "Receiver ADMS belum terverifikasi"}</span></div>
+        <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : admsDiagnostic?.enabled ? "Server ADMS siap menerima koneksi" : "Server ADMS belum siap"}</span></div>
         <p className="text-sm text-muted-foreground">Receiver dapat merespons permintaan ADMS tanpa membuktikan mesin fisik online. Pemeriksaan komunikasi tersedia pada tab Monitoring X904; check-in SC tidak dianggap sebagai absensi mesin.</p>
       </div>}
       {(tab === "dashboard" || tab === "device") && <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Member Gym aktif (SC)</p><p className="text-2xl font-bold mt-1">{membersLoading ? "Memuat..." : membersError ? "Tidak tersedia" : activeMembers ?? "—"}</p></section>
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Check-in SC pada tanggal dipilih</p><p className="text-2xl font-bold mt-1">{isLoading ? "Memuat..." : isError ? "Tidak tersedia" : rows.length}</p></section>
-        <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">{integrationError ? "Status tidak tersedia" : integration?.hardware === "unverified" ? "Belum terverifikasi" : "Belum dikonfigurasi"}</p><p className="text-xs text-muted-foreground">Tidak mengasumsikan online atau offline</p></section>
+        <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">{integrationError ? "Status tidak tersedia" : integration?.hardware === "unverified" ? "Belum terverifikasi" : "Status mesin belum diketahui"}</p><p className="text-xs text-muted-foreground">{admsDiagnostic?.enabled ? "Server ADMS siap; belum ada bukti autentikasi dan komunikasi mesin fisik." : "Server ADMS belum siap atau belum terbaca."}</p></section>
       </div>}
       {(tab === "dashboard" || tab === "members") && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
