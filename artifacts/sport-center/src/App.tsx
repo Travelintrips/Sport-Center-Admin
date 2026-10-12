@@ -73,6 +73,7 @@ const AdminCustomers = lazy(() => import("@/pages/admin/Customers"));
 const AdminPromos = lazy(() => import("@/pages/admin/Promos"));
 const AdminSettings = lazy(() => import("@/pages/admin/Settings"));
 const AdminMemberships = lazy(() => import("@/pages/admin/Memberships"));
+const AdminGymX904 = lazy(() => import("@/pages/admin/GymX904"));
 const AdminApMembers = lazy(() => import("@/pages/admin/ApMembers"));
 const AdminAuditLog = lazy(() => import("@/pages/admin/AuditLog"));
 const AdminPricingRules = lazy(() => import("@/pages/admin/PricingRules"));
@@ -151,6 +152,7 @@ function AdminRouter() {
     if (location === "/admin/customers") return <AdminCustomers />;
     if (location === "/admin/promos") return <AdminPromos />;
     if (location === "/admin/memberships") return <AdminMemberships />;
+    if (location === "/admin/gym-x904") return <AdminGymX904 />;
     if (location === "/admin/ap-members") return <AdminApMembers />;
     if (location === "/admin/settings") return <AdminSettings />;
     if (location === "/admin/audit-log") return <AdminAuditLog />;
@@ -205,6 +207,7 @@ function Router() {
       <Route path="/admin/customers" component={AdminRouter} />
       <Route path="/admin/promos" component={AdminRouter} />
       <Route path="/admin/memberships" component={AdminRouter} />
+      <Route path="/admin/gym-x904" component={AdminRouter} />
       <Route path="/admin/ap-members" component={AdminRouter} />
       <Route path="/admin/settings" component={AdminRouter} />
       <Route path="/admin/audit-log" component={AdminRouter} />
