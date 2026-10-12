@@ -7,6 +7,7 @@ import { getToken } from "@/lib/auth";
 
 interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; }
 
+interface AdmsDiagnostic { enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
 type GymTab = "dashboard" | "device" | "users" | "rules" | "events" | "members" | "mapping" | "access" | "audit";
@@ -49,6 +50,21 @@ export default function GymX904() {
       return response.json();
     },
     refetchInterval: 30000,
+  });
+  const { data: admsDiagnostic, isError: admsDiagnosticError } = useQuery<AdmsDiagnostic>({
+    queryKey: ["gym-x904-adms-diagnostic"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch("/api/admin/gym-x904/adms-diagnostic", {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Diagnostik ADMS tidak dapat dibaca");
+      return response.json();
+    },
+    enabled: tab === "device" || tab === "audit" || tab === "dashboard",
+    refetchInterval: 10000,
+    retry: 1,
   });
   const { data: memberships, isLoading: membersLoading, isError: membersError } = useListMemberships({});
   const { data, isLoading, isError, isFetching, error, refetch } = useQuery<Checkin[]>({
@@ -180,6 +196,12 @@ export default function GymX904() {
         {membersError ? <p role="alert">Data member tidak tersedia.</p> : membersLoading ? <p>Memuat member...</p> : <p className="text-sm">Member aktif: <strong>{activeMembers ?? "—"}</strong>. <Link href="/admin/memberships" className="text-primary underline">Buka pengelolaan Member Gym</Link></p>}
       </section>}
       {tab === "device" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Diagnostik koneksi</h2><p className="text-sm">Penerima event: {integration?.receiver ?? "Belum diketahui"}</p><p className="text-sm">Perangkat: {integration?.hardware ?? "Belum diketahui"}</p><p className="text-sm text-muted-foreground">{integration?.note ?? "Belum ada bukti koneksi dari mesin."}</p></section>}
+      {(tab === "device" || tab === "audit") && <section className="rounded-xl border bg-card p-5 space-y-2">
+        <h2 className="font-semibold">Komunikasi ADMS dari server</h2>
+        <p className="text-sm">Receiver diagnostik: {admsDiagnosticError ? "Tidak dapat dibaca" : admsDiagnostic?.enabled ? "Aktif (uji terbatas)" : "Belum aktif"}</p>
+        <p className="text-sm">Permintaan terakhir yang tercatat di proses server: {admsDiagnostic?.lastContact ? `${admsDiagnostic.lastContact.kind} — ${admsDiagnostic.lastContact.receivedAt}` : "Belum tercatat"}</p>
+        <p className="text-xs text-muted-foreground">Catatan bersifat sementara per proses server. Permintaan pengujian juga dapat tercatat; data ini bukan bukti mesin fisik online. Tidak ada data biometrik yang ditampilkan.</p>
+      </section>}
       {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />User terdaftar di mesin X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Sumber wajib: daftar pengguna yang dibaca langsung dari X904 melalui konektor lokal terautentikasi. Tidak berasal dari daftar Member Gym SC.</p></div>
