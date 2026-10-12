@@ -44,8 +44,8 @@ router.all(/^\/iclock\/(?:cdata|getrequest)$/, (req:Request,res:Response) => {
   const body=typeof req.body==="string" ? req.body : "";
   const bodyBytes=Buffer.byteLength(body,"utf8");
   if(bodyBytes>0 && bodyBytes<=32768) {
-   const rows=body.split(/\\r?\\n/).filter(line=>line.trim().length>0);
-   const columnCounts=[...new Set(rows.slice(0,100).map(line=>line.split("\\t").length))].sort((a,b)=>a-b);
+   const rows=body.split(/\r?\n/).filter(line=>line.trim().length>0);
+   const columnCounts=[...new Set(rows.slice(0,100).map(line=>line.split("\t").length))].sort((a,b)=>a-b);
    lastAttlogShape={receivedAt:new Date().toISOString(),rows:rows.length,columnCounts,
      bodyBytes,parseable:rows.length<=100};
   } else {
