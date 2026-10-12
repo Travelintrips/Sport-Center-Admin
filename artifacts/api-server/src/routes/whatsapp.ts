@@ -92,6 +92,7 @@ import {
   validatePaymentProofScan,
 } from "../lib/paymentProofOcr";
 import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
+import { verifyCstGatewayWebhookSignature } from "../lib/cstGatewayWebhookSignature";
 import {
   GYM_WALK_IN_DURATION_HOURS,
   GYM_WALK_IN_DURATION_MINUTES,
@@ -696,8 +697,7 @@ router.post("/wa/webhook-legacy", async (req, res) => {
         const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
         const list = facilities.map((f: typeof facilities[number], i: number) =>
           `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
-        ).join("\n");
-        const reply =
+        ).join("\n");        const reply =
           `🏟️ *Fasilitas Sport Center*\n\n${list}\n\n` +
           `Sebutkan fasilitas yang ingin kamu booking, contoh:\n` +
           `_"mau booking lapangan basket"_\n_"booking futsal"_`;
@@ -1396,8 +1396,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const bookingId = tokenRow.bookingId;
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, bookingId)).limit(1);
-    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
-    if (!["pending_payment", "expired"].includes(booking.status)) {
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }    if (!["pending_payment", "expired"].includes(booking.status)) {
       if (booking.status === "confirmed" && tokenRow.usedAt) {
         const [confirmedPayment] = await db.select().from(paymentsTable)
           .where(and(
@@ -2096,8 +2095,7 @@ router.post("/wa/review/:token", async (req, res) => {
         facilityId: booking.facilityId,
         journalDate: _today,
         paymentMethod: _paymentMethod,
-        paymentId: payment.id,
-      }).catch((err) =>
+        paymentId: payment.id,      }).catch((err) =>
         logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
 
@@ -2796,8 +2794,7 @@ async function handleAdminCommand(adminPhone: string, msg: string): Promise<bool
           ON CONFLICT (phone) DO UPDATE
             SET is_active = true, reason = EXCLUDED.reason, blocked_by = EXCLUDED.blocked_by, updated_at = NOW()`
     );
-    await logAudit({ action: "phone_blocked_by_admin", entity: "wa_session", after: { targetPhone, reason, adminPhone } });
-    await sendWAMsg(adminPhone, `🚫 Nomor *${targetPhone}* berhasil diblokir.\nAlasan: _${reason}_`);
+    await logAudit({ action: "phone_blocked_by_admin", entity: "wa_session", after: { targetPhone, reason, adminPhone } });    await sendWAMsg(adminPhone, `🚫 Nomor *${targetPhone}* berhasil diblokir.\nAlasan: _${reason}_`);
     return true;
   }
 
@@ -3496,8 +3493,7 @@ async function presentBookingSession(
   );
   const taxCalc = await resolveCustomerTax(priceCalc.finalPrice, {
     customerId: current.customerId,
-    bookingDate: current.bookingDate!,
-  });
+    bookingDate: current.bookingDate!,  });
   const reply = formatSessionSummary({
     facilityName: facility!.name,
     bookingDate: current.bookingDate!,
@@ -4196,8 +4192,7 @@ async function continueSession(
             bookingDate: session.bookingDate!,
             durationMinutes: session.durationMinutes ?? 60,
             sameFacilitySlots: slots,
-            alternativeOptions: alternativeSlotOptions,
-          })
+            alternativeOptions: alternativeSlotOptions,          })
           : fac && slots.length > 0
             ? `Coba salah satu jam berikut: ${slots.slice(0, 3).join(", ")}.\n` +
               `Atau ketik jam lain yang kamu inginkan.`
@@ -4896,8 +4891,7 @@ function buildAlternativeTimeSelectionReply(params: {
     );
   }
   sections.push(
-    ...params.alternativeOptions.map(({ facility, slots }) =>
-      `🏸 *${facility.name}*\n${slots.join("  | ")}`,
+    ...params.alternativeOptions.map(({ facility, slots }) =>      `🏸 *${facility.name}*\n${slots.join("  | ")}`,
     ),
   );
   return [
@@ -5596,8 +5590,7 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     const activeSession = await getActiveSession(phone);
 
     // Dedup berdasarkan konten (cegah Fonnte retry tanpa message_id)
-    if (isDuplicateByContent(phone, msg, activeSession)) return;
-    const inboundMessageId = req.body.id ?? req.body.message_id ?? req.body.msg_id ?? req.body.msgId;
+    if (isDuplicateByContent(phone, msg, activeSession)) return;    const inboundMessageId = req.body.id ?? req.body.message_id ?? req.body.msg_id ?? req.body.msgId;
     const claimed = await claimDistributedWebhook(
       phone,
       msg,
@@ -5981,8 +5974,32 @@ router.post("/wa/cst-gateway/webhook", async (req: Request, res: Response) => {
     return;
   }
 
+  const signingKeyId = String(req.header("x-cst-wa-key-id") ?? "").trim();
+  const asymmetricSignature = String(req.header("x-cst-wa-signature-ed25519") ?? "").trim();
+  const hasDedicatedSignature = Boolean(signingKeyId || asymmetricSignature);
+  const dedicatedSignatureValid = hasDedicatedSignature
+    ? verifyCstGatewayWebhookSignature({
+        body: req.body,
+        keyId: signingKeyId,
+        signatureB64: asymmetricSignature,
+      })
+    : false;
+  if (hasDedicatedSignature && !dedicatedSignatureValid) {
+    res.status(401).json({ error: "INVALID_GATEWAY_WEBHOOK_SIGNATURE" });
+    return;
+  }
+
   try {
-    const event = await getCstWaGatewayInboundEvent(eventId);
+    const event = dedicatedSignatureValid
+      ? {
+          deliveryId: eventId,
+          eventType: String(req.body?.event ?? ""),
+          companyId: String(req.body?.companyKey ?? ""),
+          deviceId: String(req.body?.deviceId ?? ""),
+          payload: req.body,
+          createdAt: String(req.body?.receivedAt ?? new Date().toISOString()),
+        }
+      : await getCstWaGatewayInboundEvent(eventId);
     const expectedDeviceId = getCstWaGatewayMinaDeviceId();
 
     if (event.eventType !== "message.received" || event.deviceId !== expectedDeviceId) {
