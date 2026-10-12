@@ -11,9 +11,13 @@ assert.match(app, /return <AdminLayout><AdminErrorBoundary>\{content\}<\/AdminEr
 assert.match(nav, /href: "\/admin\/memberships", label: "Member Gym"/);
 assert.match(nav, /href: "\/admin\/gym-x904", label: "Absensi Gym X904"/);
 assert.match(nav, /useGetMe\(/);
-assert.match(page, /integrasi ADMS belum diaktifkan/i);
+assert.match(page, /Koneksi mesin X904 belum aktif/i);
 assert.match(page, /href="\/admin\/memberships"/);
-assert.doesNotMatch(page, /fetch\(|localStorage|GYM_DEVICE_API_KEY|solutioncloud\.co\.id/i);
+assert.match(page, /\/memberships\/checkins\?date=/);
+assert.match(page, /getToken\(/);
+assert.match(page, /response\.ok/);
+assert.match(page, /Check-in SC \(bukan X904\)/);
+assert.doesNotMatch(page, /localStorage|GYM_DEVICE_API_KEY|solutioncloud\.co\.id/i);
 assert.match(app, /<Route path="\/admin\/memberships" component=\{AdminRouter\}/);
 assert.match(app, /<Route path="\/gym"/);
 console.log("PASS Gym X904 route, existing SC auth layout, membership and public Gym route preserved");
