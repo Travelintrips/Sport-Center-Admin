@@ -65,6 +65,13 @@ app.use((req, res, next) => {
     req.path === "/api/readiness";
   if (!isStartupReady() && !isHealthProbe) {
     res.setHeader("Retry-After", "2");
+    // ADMS devices expect plain-text protocol responses, never JSON or SPA HTML.
+    // Do not ACK requests while startup is incomplete: the device must retry.
+    if (req.path.startsWith("/iclock/")) {
+      res.setHeader("Cache-Control", "no-store");
+      res.type("text/plain").status(503).send("SERVER NOT READY\n");
+      return;
+    }
     res.status(503).json({
       error: "Server sedang menyiapkan runtime. Coba lagi sebentar.",
       code: "STARTUP_INITIALIZATION_PENDING",
