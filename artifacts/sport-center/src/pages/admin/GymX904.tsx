@@ -9,7 +9,7 @@ interface IntegrationStatus { receiver: string; hardware: string; synchronizing:
 
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
-type GymTab = "dashboard" | "device" | "events" | "members" | "mapping" | "access" | "audit";
+type GymTab = "dashboard" | "device" | "users" | "rules" | "events" | "members" | "mapping" | "access" | "audit";
 
 interface Checkin {
   id: number;
@@ -87,6 +87,8 @@ export default function GymX904() {
   const tabs: { id: GymTab; label: string; icon: typeof Activity }[] = [
     { id: "dashboard", label: "Dashboard Gym", icon: LayoutDashboard },
     { id: "device", label: "Monitoring X904", icon: Cpu },
+    { id: "users", label: "User Mesin X904", icon: Users },
+    { id: "rules", label: "Rule Akses Mesin", icon: ShieldCheck },
     { id: "events", label: "Riwayat Akses Mesin", icon: Fingerprint },
     { id: "members", label: "Member Gym", icon: Users },
     { id: "mapping", label: "Sinkronisasi Member", icon: Link2 },
@@ -178,6 +180,28 @@ export default function GymX904() {
         {membersError ? <p role="alert">Data member tidak tersedia.</p> : membersLoading ? <p>Memuat member...</p> : <p className="text-sm">Member aktif: <strong>{activeMembers ?? "—"}</strong>. <Link href="/admin/memberships" className="text-primary underline">Buka pengelolaan Member Gym</Link></p>}
       </section>}
       {tab === "device" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Diagnostik koneksi</h2><p className="text-sm">Penerima event: {integration?.receiver ?? "Belum diketahui"}</p><p className="text-sm">Perangkat: {integration?.hardware ?? "Belum diketahui"}</p><p className="text-sm text-muted-foreground">{integration?.note ?? "Belum ada bukti koneksi dari mesin."}</p></section>}
+      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
+        <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />User terdaftar di mesin X904</h2>
+        <p className="text-sm text-muted-foreground mt-1">Sumber wajib: daftar pengguna yang dibaca langsung dari X904 melalui konektor lokal terautentikasi. Tidak berasal dari daftar Member Gym SC.</p></div>
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Data user mesin belum tersedia: koneksi dan pembacaan daftar pengguna X904 belum terverifikasi. Tidak ada data contoh atau member SC yang ditampilkan sebagai user mesin.
+        </div>
+        <div className="overflow-x-auto"><table className="min-w-[720px] w-full text-sm text-left">
+          <thead className="border-b"><tr><th className="p-3">PIN / User ID Mesin</th><th className="p-3">Nama pada mesin</th><th className="p-3">Nomor kartu</th><th className="p-3">Status</th><th className="p-3">Member SC terkait</th></tr></thead>
+          <tbody><tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Menunggu data asli dari mesin X904</td></tr></tbody>
+        </table></div>
+      </section>}
+      {tab === "rules" && <section className="rounded-xl border bg-card p-5 space-y-4">
+        <div><h2 className="font-semibold flex items-center gap-2"><ShieldCheck size={18} />Rule akses yang tersimpan di mesin</h2>
+        <p className="text-sm text-muted-foreground mt-1">Grup akses, jadwal akses, dan izin pintu hanya boleh ditampilkan setelah dibaca langsung dari perangkat. Pembacaan bersifat read-only.</p></div>
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Aturan mesin belum dapat dibaca. Rule lokal X904 yang sedang berlaku tidak diubah oleh halaman ini.
+        </div>
+        <div className="overflow-x-auto"><table className="min-w-[660px] w-full text-sm text-left">
+          <thead className="border-b"><tr><th className="p-3">User / Grup mesin</th><th className="p-3">Zona waktu / jadwal</th><th className="p-3">Akses pintu</th><th className="p-3">Sumber verifikasi</th></tr></thead>
+          <tbody><tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Menunggu pembacaan rule X904</td></tr></tbody>
+        </table></div>
+      </section>}
       {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Belum ada pemetaan identitas mesin yang terverifikasi. Menu disiapkan; pencocokan tidak boleh dibuat secara otomatis hanya berdasarkan nama atau telepon.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
       {tab === "access" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Hak akses pintu Gym</h2><p className="text-sm text-muted-foreground">Kontrol pintu dan pendaftaran kartu masih dikelola pada mesin X904. Belum ada perintah membuka pintu atau mengubah hak akses dari portal ini sampai koneksi dan protokol diverifikasi.</p></section>}
       {tab === "audit" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Audit sumber data</h2><p className="text-sm">Riwayat SC: {isError ? "Tidak tersedia" : isLoading ? "Memuat..." : `${rows.length} check-in (SC manual)`}</p><p className="text-sm">Log mesin: {deviceError ? "Gagal dibaca" : !deviceData?.enabled ? "Pembacaan belum aktif" : `${deviceRows.length} event X904 pada tanggal terpilih`}</p><p className="text-sm">Koneksi mesin: {integration?.hardware === "unverified" ? "Belum terverifikasi" : integration?.hardware ?? "Status tidak diketahui"}</p><p className="text-xs text-muted-foreground">Kedua sumber tidak digabungkan tanpa pemetaan identitas terverifikasi.</p></section>}
