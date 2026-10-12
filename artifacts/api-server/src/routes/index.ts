@@ -65,6 +65,7 @@ import paylabsPaymentRouter from "./paylabsPayment";
 import paymentSettlementConfigsRouter from "./paymentSettlementConfigs";
 import corporateSubscriptionsRouter from "./corporateSubscriptions";
 import minaWebRouter from "./minaWeb";
+import gymX904IntegrationRouter from "./gymX904Integration";
 
 const router: IRouter = Router();
 
@@ -133,5 +134,6 @@ router.use(paylabsPaymentRouter);
 router.use(paymentSettlementConfigsRouter);
 router.use(corporateSubscriptionsRouter);
 router.use(minaWebRouter);
+router.use(gymX904IntegrationRouter);
 
 export default router;
