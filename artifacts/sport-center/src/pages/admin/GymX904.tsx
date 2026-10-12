@@ -7,7 +7,7 @@ import { getToken } from "@/lib/auth";
 
 interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; }
 
-interface AdmsDiagnostic { enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
+interface AdmsDiagnostic { releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
 type GymTab = "dashboard" | "device" | "users" | "rules" | "events" | "members" | "mapping" | "access" | "audit";
@@ -198,6 +198,7 @@ export default function GymX904() {
       {tab === "device" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Diagnostik koneksi</h2><p className="text-sm">Penerima event: {integration?.receiver ?? "Belum diketahui"}</p><p className="text-sm">Perangkat: {integration?.hardware ?? "Belum diketahui"}</p><p className="text-sm text-muted-foreground">{integration?.note ?? "Belum ada bukti koneksi dari mesin."}</p></section>}
       {(tab === "device" || tab === "audit") && <section className="rounded-xl border bg-card p-5 space-y-2">
         <h2 className="font-semibold">Komunikasi ADMS dari server</h2>
+        <p className="text-xs text-muted-foreground">Versi backend yang merespons: {admsDiagnostic?.releaseFingerprint ?? "Versi lama / belum tersedia"}</p>
         <p className="text-sm">Receiver diagnostik: {admsDiagnosticError ? "Tidak dapat dibaca" : admsDiagnostic?.enabled ? "Aktif (uji terbatas)" : "Belum aktif"}</p>
         <p className="text-sm">Permintaan terakhir yang tercatat di proses server: {admsDiagnostic?.lastContact ? `${admsDiagnostic.lastContact.kind} — ${admsDiagnostic.lastContact.receivedAt}` : "Belum tercatat"}</p>
         <p className="text-sm">Struktur kiriman ATTLOG terakhir: {admsDiagnostic?.lastAttlogShape ? `${admsDiagnostic.lastAttlogShape.rows} baris, jumlah kolom ${admsDiagnostic.lastAttlogShape.columnCounts.join(", ") || "tidak diketahui"} (tanpa identitas)` : "Belum ada kiriman ATTLOG yang dapat diperiksa"}</p>
