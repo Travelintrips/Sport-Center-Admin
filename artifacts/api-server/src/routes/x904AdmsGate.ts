@@ -47,7 +47,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)$/, parseText({ type: () => true, lim
  if(classification.kind==="handshake"){
   // Candidate ZK Push 2.x response, to be confirmed against physical X904.
   // No log cursor, status changes, clock writes, enrollment or door commands.
-  return res.status(200).send("GET OPTION FROM: "+allowed+"\nErrorDelay=60\nDelay=30\nTransInterval=1\nRealtime=1\n");
+  return res.status(200).send("GET OPTION FROM: "+allowed+"\nErrorDelay=60\nDelay=30\nTransInterval=1\nTransFlag=TransData AttLog\nRealtime=1\n");
  }
  if(classification.kind==="poll")return res.status(200).send("OK\n");
  // Inspect only the schema shape of a live ATTLOG upload. Never store its PINs,
