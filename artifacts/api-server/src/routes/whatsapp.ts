@@ -76,7 +76,9 @@ import {
   getCstWaGatewayMinaDeviceId,
   getCstWaGatewayReportDeviceId,
   getCstWaGatewayPublicConfig,
+  listCstWaGatewayGroups,
   sendCstWaGatewayDirectMessage,
+  sendCstWaGatewayGroupMessage,
 } from "../lib/cstWaGateway";
 import {
   getFonnteConfig,
@@ -2249,7 +2251,8 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
     const replyDestination = useCustomerToken
       ? fonnteReplyContext.getStore()?.replyDestination
       : undefined;
-    const recipient = replyDestination?.endsWith("@g.us") ? replyDestination : phone;
+    const groupReplyJid = replyDestination?.endsWith("@g.us") ? replyDestination : undefined;
+    const recipient = groupReplyJid ?? phone;
 
     if (!allowWhatsAppProviderSend({
       channel,
@@ -2262,6 +2265,26 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
     const deviceId = useCustomerToken
       ? getCstWaGatewayMinaDeviceId()
       : getCstWaGatewayReportDeviceId();
+    let replyGroupId: string | null = null;
+    if (groupReplyJid) {
+      const groups = await listCstWaGatewayGroups(deviceId);
+      const matchingGroup = groups.find(
+        (group) => group.isActive && group.jid === groupReplyJid && group.deviceId === deviceId,
+      );
+      if (!matchingGroup) {
+        logger.error(
+          { channel, deviceId, groupJid: groupReplyJid },
+          "[wa] CST WA Gateway group reply target not found for Mina device",
+        );
+        await logAudit({
+          action: "mina_reply_group_not_found",
+          entity: "wa_outbound",
+          after: { deviceId, groupJid: groupReplyJid },
+        }).catch(() => {});
+        return false;
+      }
+      replyGroupId = matchingGroup.id;
+    }
 
     for (const [chunkIndex, chunk] of chunks.entries()) {
       trackSentMessage(chunk);
@@ -2277,12 +2300,18 @@ async function sendWAMsg(phone: string, message: string, useCustomerToken = fals
           .slice(0, 48);
 
       try {
-        const queued = await sendCstWaGatewayDirectMessage({
-          deviceId,
-          to: recipient,
-          text: chunk,
-          idempotencyKey,
-        });
+        const queued = replyGroupId
+          ? await sendCstWaGatewayGroupMessage({
+              groupId: replyGroupId,
+              text: chunk,
+              idempotencyKey,
+            })
+          : await sendCstWaGatewayDirectMessage({
+              deviceId,
+              to: recipient,
+              text: chunk,
+              idempotencyKey,
+            });
         logger.info(
           {
             channel,
@@ -5592,7 +5621,14 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     });
 
     const phone = cleanPhone(String(sender));
-    const msg = String(message).trim();
+    const rawMsg = String(message).trim();
+    const isGroupConversation = inboundReplyDestination.endsWith("@g.us");
+    const strippedGroupCommand = isGroupConversation
+      ? rawMsg.replace(/^@mina(?:\s+|$)/i, "").trim()
+      : rawMsg;
+    const msg = isGroupConversation && /^@mina(?:\s+|$)/i.test(rawMsg)
+      ? (strippedGroupCommand || "halo")
+      : rawMsg;
     if (!msg || !phone) return;
 
     // Read the active step before deduplication. The same customer text can be
