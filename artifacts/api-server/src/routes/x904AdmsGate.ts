@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, text as parseText, type Request, type Response } from "express";
 import { createHmac, randomBytes } from "node:crypto";
 import { classifyX904AdmsRequest } from "../lib/x904AdmsProtocol";
 import { adminMiddleware } from "../lib/auth";
@@ -27,7 +27,7 @@ router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
  res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
-router.all(/^\/iclock\/(?:cdata|getrequest)$/, (req:Request,res:Response) => {
+router.all(/^\/iclock\/(?:cdata|getrequest)$/, parseText({ type: () => true, limit: "32kb" }), (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
  res.setHeader("Content-Type","text/plain; charset=utf-8");
  if(!enabled())return res.status(404).send("NOT FOUND\n");
@@ -59,7 +59,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)$/, (req:Request,res:Response) => {
    const rows=body.split(/\r?\n/).filter(line=>line.trim().length>0);
    const columnCounts=[...new Set(rows.slice(0,100).map(line=>line.split("\t").length))].sort((a,b)=>a-b);
    lastAttlogShape={receivedAt:new Date().toISOString(),rows:rows.length,columnCounts,
-     bodyBytes,parseable:rows.length<=100};
+     bodyBytes,parseable:rows.length>0 && rows.every(line=>line.split("\t").length>=2)};
   } else {
    lastAttlogShape={receivedAt:new Date().toISOString(),rows:0,columnCounts:[],
      bodyBytes,parseable:false};
