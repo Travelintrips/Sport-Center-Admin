@@ -112,6 +112,8 @@ app.use("/iclock", (req, res, next) => {
   });
   next();
 });
+// Native X904 uploads use plain text, not JSON; bound request size.
+app.use("/iclock", express.text({ type: "text/plain", limit: "32kb" }));
 // Device endpoints on the existing SC origin; never serve the SPA as an ADMS ACK.
 app.use(x904AdmsGate);
 app.use("/iclock", (_req, res) => {
