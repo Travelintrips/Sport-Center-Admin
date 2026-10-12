@@ -88,6 +88,23 @@ app.get("/api", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Log iClock transport metadata only. Never log query strings, serial numbers,
+// request bodies, credentials, biometric templates, or attendance records.
+app.use("/iclock", (req, res, next) => {
+  const startedAt = Date.now();
+  const endpoint = req.path === "/cdata" ? "cdata" :
+    req.path === "/getrequest" ? "getrequest" : "unknown";
+  res.on("finish", () => {
+    logger.info({
+      x904: true,
+      endpoint,
+      method: req.method,
+      status: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    }, "[X904 ADMS] request finished");
+  });
+  next();
+});
 // Device endpoints on the existing SC origin; never serve the SPA as an ADMS ACK.
 app.use(x904AdmsGate);
 app.use("/iclock", (_req, res) => {
