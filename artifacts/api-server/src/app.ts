@@ -4,6 +4,7 @@ import * as _pinoHttpModule from "pino-http";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pinoHttp: any = (_pinoHttpModule as any).default ?? _pinoHttpModule;
 import router from "./routes";
+import x904AdmsGate from "./routes/x904AdmsGate";
 import healthRouter from "./routes/health";
 import paymentProofShortLinkRouter from "./routes/paymentProofShortLink";
 import { logger } from "./lib/logger";
@@ -87,6 +88,8 @@ app.get("/api", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Same existing SC backend and HTTPS host; disabled by default and never ACKs device data.
+app.use(x904AdmsGate);
 app.use("/api", router);
 
 if (process.env.NODE_ENV === "production") {
