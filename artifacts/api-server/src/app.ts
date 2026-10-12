@@ -109,7 +109,7 @@ app.use("/iclock", (req, res, next) => {
 app.use(x904AdmsGate);
 app.use("/iclock", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  res.type("text/plain").status(404).send("NOT FOUND\\n");
+  res.type("text/plain").status(404).send("NOT FOUND\n");
 });
 app.use("/api", router);
 
