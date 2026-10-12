@@ -94,7 +94,7 @@ app.use(x904AdmsGate);
 // An HTTP 200 HTML page could be mistaken for a successful device handshake.
 app.use("/iclock", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  res.type("text/plain").status(404).send("NOT FOUND\\n");
+  res.type("text/plain").status(404).send("NOT FOUND\n");
 });
 app.use("/api", router);
 
