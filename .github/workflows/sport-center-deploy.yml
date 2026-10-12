@@ -15,6 +15,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout exact production candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Enforce DEV E2E, CI and commit ancestry
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          DEV_CI_WORKFLOW: Sport Center CI
+          DEV_E2E_APPROVED_SHA: ${{ vars.DEV_E2E_APPROVED_SHA }}
+          DEV_PUBLIC_HEALTH_URL: ${{ vars.DEV_PUBLIC_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test "${{ github.ref }}" = "refs/heads/main"
+          node scripts/verify-dev-first-promotion.mjs
+
       - name: Deployment started
         run: |
           echo "Sport Center deployment workflow started"
