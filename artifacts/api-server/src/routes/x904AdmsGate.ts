@@ -18,6 +18,7 @@ let lastAttlogShape:{receivedAt:string;rows:number;columnCounts:number[];bodyByt
 const enabled=()=>process.env.GYM_X904_ADMS_PROBE_ENABLED==="true" &&
  process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true";
 const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
+export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: true });
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
  res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,lastAttlogShape,startedAt,ephemeral:true,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
