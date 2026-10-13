@@ -214,11 +214,11 @@ export default function GymX904() {
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />User terdaftar di mesin X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Sumber wajib: daftar pengguna yang dibaca langsung dari X904 melalui konektor lokal terautentikasi. Tidak berasal dari daftar Member Gym SC.</p></div>
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Data user mesin belum tersedia: koneksi dan pembacaan daftar pengguna X904 belum terverifikasi. Tidak ada data contoh atau member SC yang ditampilkan sebagai user mesin.
+          Data pengguna X904 belum tersinkron ke Sport Center. Pengujian baca langsung pada komputer lokal tidak otomatis mengirim data ke server. Halaman ini tidak menampilkan data contoh atau member SC sebagai user mesin.
         </div>
         <div className="overflow-x-auto"><table className="min-w-[720px] w-full text-sm text-left">
           <thead className="border-b"><tr><th className="p-3">PIN / User ID Mesin</th><th className="p-3">Nama pada mesin</th><th className="p-3">Nomor kartu</th><th className="p-3">Status</th><th className="p-3">Member SC terkait</th></tr></thead>
-          <tbody><tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Menunggu data asli dari mesin X904</td></tr></tbody>
+          <tbody><tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Menunggu sinkronisasi data X904 ke Sport Center</td></tr></tbody>
         </table></div>
       </section>}
       {tab === "rules" && <section className="rounded-xl border bg-card p-5 space-y-4">
