@@ -213,9 +213,9 @@ export default function GymX904() {
         <p className="text-sm">Struktur kiriman ATTLOG terakhir: {admsDiagnostic?.lastAttlogShape ? `${admsDiagnostic.lastAttlogShape.rows} baris, jumlah kolom ${admsDiagnostic.lastAttlogShape.columnCounts.join(", ") || "tidak diketahui"} (tanpa identitas)` : "Belum ada kiriman ATTLOG yang dapat diperiksa"}</p>
         <p className="text-xs text-muted-foreground">Catatan bersifat sementara per proses server. Permintaan pengujian juga dapat tercatat; data ini bukan bukti mesin fisik online. Tidak ada data biometrik yang ditampilkan.</p>
       </section>}
-      {(tab === "users" || tab === "rules" || tab === "mapping" || tab === "access") && <section aria-label="Status integrasi data X904" className="rounded-xl border bg-card p-4 space-y-2">
+      {(tab === "users" || tab === "rules" || tab === "mapping" || tab === "access" || tab === "audit" || tab === "device") && <section aria-label="Status integrasi data X904" className="rounded-xl border bg-card p-4 space-y-2">
         <h2 className="font-semibold">Status sumber data mesin</h2>
-        <p className="text-sm">Collector lokal: <strong>Belum ada bukti sinkronisasi otomatis</strong></p>
+        <p className="text-sm">Integrasi langsung ADMS: <strong>Menunggu bukti impor log terautentikasi dan tersimpan</strong></p>
         <p className="text-sm">Impor ADMS terautentikasi terakhir: <strong>{integration?.trustedAdmsIngestAt ? new Date(integration.trustedAdmsIngestAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"}) + " WIB" : "Belum ada bukti impor terautentikasi pada proses server ini"}</strong></p>
         <p className="text-sm">Log tersimpan di database X904: <strong>{integration?.storedEventCount == null ? "Belum dapat diperiksa" : integration.storedEventCount.toLocaleString("id-ID") + " event"}</strong></p>
         <p className="text-sm">Terakhir diterima database: <strong>{integration?.lastStoredEventAt ? new Date(integration.lastStoredEventAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"}) + " WIB" : "Belum ada bukti tersimpan"}</strong></p>
