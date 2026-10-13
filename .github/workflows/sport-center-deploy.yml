@@ -1,4 +1,4 @@
-name: Sport Center Deploy
+﻿name: Sport Center Hostinger Release Verification
 
 on:
   workflow_dispatch:
@@ -7,15 +7,34 @@ on:
       - main
 
 jobs:
-  deploy:
-    name: Deploy Sport Center
+  verify:
+    name: Verify Hostinger Production Release
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Deployment started
+      - name: Verify production health and X904 OPTIONS handler
+        shell: bash
         run: |
-          echo "Sport Center deployment workflow started"
-          echo "Hostinger deployment handled separately"
+          set -euo pipefail
+          base="https://sc.travelintrips.co.id"
+          health=$(curl --fail --silent --show-error --location --max-time 20 -o /dev/null -w '%{http_code}' "$base/api/health")
+          echo "Production API health: $health"
+          response=$(curl --silent --show-error --max-time 20 -X OPTIONS -o /dev/null -w '%{http_code}' "$base/iclock/cdata")
+          echo "Production ADMS OPTIONS (no device identity): $response"
+          # The fixed native ADMS route rejects unauthenticated requests; the
+          # old global Express CORS layer short-circuits with HTTP 204.
+          if [[ "$response" == "204" ]]; then
+            echo "::error::Hostinger still uses the old generic CORS handler (204). GitHub merge is not production deployment."
+            exit 1
+          fi
+          if [[ "$response" != "404" ]]; then
+            echo "::error::Unexpected unauthenticated ADMS response ($response); cannot prove safe release."
+            exit 1
+          fi
+          echo "PASS: Production no longer short-circuits ADMS OPTIONS with CORS."
+      - name: Explain deployment boundary
+        if: always()
+        run: |
+          echo "This workflow VERIFY ONLY; it does not deploy to Hostinger."
+          echo "A real Hostinger application deployment must occur separately."
