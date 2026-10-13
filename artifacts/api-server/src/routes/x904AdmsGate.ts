@@ -62,7 +62,7 @@ const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
 export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: true, lastTrustedIngestAt });
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
- res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,trustedIngestRecent:trustedIngestRecent(),lastTrustedIngestAt,lastTrustedIngestRows,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
+ res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,trustedIngestRecent:trustedIngestRecent(),lastTrustedIngestAt,lastTrustedIngestRows,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4,trialEnabled:process.env.GYM_X904_ADMS_TRIAL_INGEST_ENABLED==="true"},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
 router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () => true, limit: "32kb" }), async (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
@@ -110,13 +110,16 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
  // ingress that verifies the physical device may inject this header.
  if (classification.kind === "attendance" &&
      process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED === "true") {
+   // Explicit short-lived commissioning only; never evidence of device identity.
+   const trialUntil = Date.parse(process.env.GYM_X904_ADMS_TRIAL_UNTIL ?? "");
+   const trialMode = process.env.GYM_X904_ADMS_TRIAL_INGEST_ENABLED === "true" && Number.isFinite(trialUntil) && Date.now() < trialUntil && trialUntil-Date.now() <= 24*60*60*1000;
    const secret = process.env.GYM_X904_ADMS_TRUSTED_INGRESS_KEY ?? "";
    const provided = req.headers["x-gym-trusted-ingress-key"];
    const authenticated = secret.length >= 32 && typeof provided === "string" &&
      Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
      createHmac("sha256", secret).update(provided).digest("hex") ===
      createHmac("sha256", secret).update(secret).digest("hex");
-   if (!authenticated) return res.status(403).send("UNTRUSTED DEVICE\n");
+   if (!authenticated && !trialMode) return res.status(403).send("UNTRUSTED DEVICE\n");
    const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
    if (!parsed) return res.status(400).send("INVALID ATTLOG\n");
    const records = parsed.map(event => ({
@@ -131,8 +134,10 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
        FROM jsonb_to_recordset(${payload}::jsonb)
        AS e(id text,pin text,occurred text,status integer,verify integer)
        ON CONFLICT (event_id) DO NOTHING`);
-     lastTrustedIngestAt=new Date().toISOString();
-     lastTrustedIngestRows=parsed.length;
+     if(authenticated) {
+       lastTrustedIngestAt=new Date().toISOString();
+       lastTrustedIngestRows=parsed.length;
+     }
      return res.status(200).send("OK: " + parsed.length + "\n");
    } catch {
      return res.status(503).send("ATTLOG STORAGE UNAVAILABLE\n");
