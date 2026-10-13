@@ -107,6 +107,9 @@ async function initializeAfterListen(): Promise<void> {
 
   if (result.fatal.length > 0) {
     console.error("[secretLoader] Shared secret bootstrap failed:", result.fatal);
+    // Error categories are fixed allowlisted codes; no GCP exception text or secret material.
+    const accessCategories = result.failed.filter((entry) => /^Secret Manager access failed: GCP_[A-Z_]+$/.test(entry));
+    if (accessCategories.length) console.error("[secretLoader] GCP access diagnosis:", accessCategories);
     throw new Error("SECRET_BOOTSTRAP_FAILED");
   }
 
