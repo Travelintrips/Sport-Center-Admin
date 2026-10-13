@@ -101,10 +101,17 @@ app.use("/iclock", (req, res, next) => {
   const startedAt = Date.now();
   const endpoint = req.path === "/cdata" ? "cdata" :
     req.path === "/getrequest" ? "getrequest" : "unknown";
+  // Coarse ADMS operation classification; never log raw URL, serial, body or PIN.
+  const parsed = new URL(req.originalUrl, "https://localhost");
+  const table = (parsed.searchParams.get("table") ?? parsed.searchParams.get("Table") ?? "").toUpperCase();
+  const options = parsed.searchParams.has("options") || parsed.searchParams.has("Options");
+  const postTable = req.method !== "POST" ? "not-post" : table === "ATTLOG" ? "ATTLOG" : table === "OPERLOG" ? "OPERLOG" : table === "USERINFO" ? "USERINFO" : table ? "other" : "missing";
   res.on("finish", () => {
     logger.info({
       x904: true,
       endpoint,
+      postTable,
+      optionsPresent: options,
       method: req.method,
       status: res.statusCode,
       durationMs: Date.now() - startedAt,
