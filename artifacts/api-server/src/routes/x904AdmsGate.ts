@@ -1,6 +1,7 @@
 import { Router, text as parseText, type Request, type Response } from "express";
 import { createHmac, randomBytes } from "node:crypto";
 import { classifyX904AdmsRequest } from "../lib/x904AdmsProtocol";
+import { parseX904Attlog } from "../lib/x904AttlogParser";
 import { adminMiddleware } from "../lib/auth";
 
 /**
@@ -94,7 +95,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
    const rows=body.split(/\r?\n/).filter(line=>line.trim().length>0);
    const columnCounts=[...new Set(rows.slice(0,100).map(line=>line.split("\t").length))].sort((a,b)=>a-b);
    lastAttlogShape={receivedAt:new Date().toISOString(),rows:rows.length,columnCounts,
-     bodyBytes,parseable:rows.length>0 && rows.every(line=>line.split("\t").length>=2)};
+     bodyBytes,parseable:parseX904Attlog(body)!==null};
   } else {
    lastAttlogShape={receivedAt:new Date().toISOString(),rows:0,columnCounts:[],
      bodyBytes,parseable:false};
