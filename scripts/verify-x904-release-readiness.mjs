@@ -13,6 +13,6 @@ assert.ok(route.includes('events.length > 100'));
 assert.match(migration, /PRIMARY KEY/);
 assert.match(migration, /REVOKE ALL/);
 assert.match(migration, /verified backup/i);
-assert.match(deploy, /Hostinger deployment handled separately/);
+assert.match(deploy, /This workflow VERIFY ONLY/);
 console.log("PASS X904 code safety contracts");
 console.log("RELEASE BLOCKED until production backup, env and end-to-end authentication are independently verified");
