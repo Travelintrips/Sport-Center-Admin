@@ -4,7 +4,7 @@
  * Expected values must be confirmed from a live device handshake before activation.
  */
 export type X904AdmsClassification =
-  | { kind: "handshake" | "poll" | "attendance"; serial: string }
+  | { kind: "handshake" | "poll" | "attendance" | "device_options"; serial: string }
   | { kind: "reject"; reason: string };
 
 export function classifyX904AdmsRequest(method: string, requestUrl: string): X904AdmsClassification {
@@ -22,6 +22,8 @@ export function classifyX904AdmsRequest(method: string, requestUrl: string): X90
     return { kind: "handshake", serial };
   if (method === "GET" && route === "/iclock/getrequest")
     return { kind: "poll", serial };
+  if (method === "POST" && route === "/iclock/cdata" && table?.toUpperCase() === "OPTIONS")
+    return { kind: "device_options", serial };
   if (method === "POST" && route === "/iclock/cdata" && table?.toUpperCase() === "ATTLOG")
     return { kind: "attendance", serial };
   return { kind: "reject", reason: "unsupported" };
