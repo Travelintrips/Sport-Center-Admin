@@ -1,0 +1,18 @@
+import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+const read = (file) => readFileSync(new URL("../" + file, import.meta.url), "utf8");
+const route = read("artifacts/api-server/src/routes/gymX904Events.ts");
+const migration = read("docs/sql/gym-x904-raw-events.sql");
+const deploy = read(".github/workflows/sport-center-deploy.yml");
+assert.match(route, /GYM_X904_EVENT_INGEST_ENABLED/);
+assert.match(route, /GYM_X904_EVENT_INGEST_KEY/);
+assert.match(route, /GYM_X904_DEVICE_SERIAL/);
+assert.match(route, /timingSafeEqual/);
+assert.ok(route.includes('ON CONFLICT (event_id) DO NOTHING'));
+assert.ok(route.includes('events.length > 100'));
+assert.match(migration, /PRIMARY KEY/);
+assert.match(migration, /REVOKE ALL/);
+assert.match(migration, /verified backup/i);
+assert.match(deploy, /Hostinger deployment handled separately/);
+console.log("PASS X904 code safety contracts");
+console.log("RELEASE BLOCKED until production backup, env and end-to-end authentication are independently verified");
