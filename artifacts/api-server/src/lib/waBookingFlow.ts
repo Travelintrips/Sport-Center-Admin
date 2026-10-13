@@ -20,6 +20,15 @@ export function isMinaGreeting(message: string): boolean {
     /^selamat\s+(?:pagi|siang|sore|malam)$/.test(normalized);
 }
 
+/** Recognize general questions that should leave a stale booking flow and return to Mina's normal assistant. */
+export function isGeneralConversationInquiry(message: string): boolean {
+  const normalized = normalizeTriggerMessage(message);
+  if (!normalized) return false;
+
+  return /^(?:halo|hallo|hi|hai)?\s*(?:,?\s*)?(?:saya\s+)?(?:ingin|mau|pengen|hendak)?\s*(?:bertanya|tanya|nanya)(?:\s+(?:dulu|sebentar))?(?:\s+(?:tentang|soal|mengenai))?(?:\s+sport\s+center)?(?:\s+.*)?$/.test(normalized) ||
+    /^(?:ada\s+)?(?:yang\s+)?(?:ingin|mau|pengen)?\s*(?:saya\s+)?(?:tanyakan|tanya|nanya)(?:\s+.*)?$/.test(normalized);
+}
+
 /** Recognize availability/schedule questions, including common Indonesian typos. */
 export function isAvailabilityInquiry(message: string): boolean {
   const normalized = normalizeTriggerMessage(message);

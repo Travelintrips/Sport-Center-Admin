@@ -9,6 +9,7 @@ import {
   isAlternativeTimeRequest,
   switchBookingFacility,
   isMinaGreeting,
+  isGeneralConversationInquiry,
   isBookingRequest,
   isAvailabilityInquiry,
 } from "./waBookingFlow";
@@ -41,6 +42,19 @@ describe("WhatsApp Mina booking flow regressions", () => {
     }
     expect(isMinaGreeting("halo,")).toBe(true);
     expect(isMinaGreeting("pagi")).toBe(false);
+  });
+
+  it("recognizes general questions that should leave a stale booking flow", () => {
+    for (const message of [
+      "Halo, saya ingin bertanya tentang Sport Center",
+      "Saya mau tanya dulu",
+      "Ada yang mau saya tanyakan",
+      "saya pengen nanya soal sport center",
+    ]) {
+      expect(isGeneralConversationInquiry(message)).toBe(true);
+    }
+    expect(isGeneralConversationInquiry("booking badminton")).toBe(false);
+    expect(isGeneralConversationInquiry("jam 8 malam")).toBe(false);
   });
 
   it("recognizes availability checks including cek/check/chek typos", () => {

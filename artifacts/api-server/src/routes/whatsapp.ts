@@ -112,6 +112,7 @@ import {
   parseAlternativeBookingChoice,
   isAlternativeTimeRequest,
   isMinaGreeting,
+  isGeneralConversationInquiry,
   isBookingRequest,
   isAvailabilityInquiry,
 } from "../lib/waBookingFlow";
@@ -5692,6 +5693,19 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // 3. Active session — continue conversation (always takes priority)
     const session = activeSession;
     if (session) {
+      const leaveBookingForGeneralConversation = isGeneralConversationInquiry(msg);
+      if (leaveBookingForGeneralConversation) {
+        await updateSession(session.id, { status: "expired" });
+        clearHistory(phone);
+        await logAudit({
+          action: "booking_session_left_for_general_inquiry",
+          entity: "wa_booking_session",
+          entityId: session.id,
+          after: { reason: "general_inquiry", message: msg, previousStep: session.currentStep },
+        }).catch(() => {});
+      }
+
+      if (!leaveBookingForGeneralConversation) {
       // Availability questions are informational, not booking commands.
       // Exit any stale/implicit booking session so Mina can keep a broad
       // schedule conversation until the customer explicitly asks to book.
@@ -5775,6 +5789,7 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
         ).catch(() => {});
       }
       return;
+      }
     }
 
     // A bare confirmation without an active booking session should never fall
