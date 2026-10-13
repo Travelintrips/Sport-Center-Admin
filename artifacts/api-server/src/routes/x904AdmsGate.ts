@@ -21,6 +21,15 @@ const refusedRequests:{unsupported:number;unknownSerial:number}={unsupported:0,u
 const rejectedReasons:Record<"invalid_url"|"serial_invalid"|"unsupported",number>={invalid_url:0,serial_invalid:0,unsupported:0};
 // Fixed metadata buckets only; no URL, query, IP, serial, or body retained.
 const rejectedOperations:Record<string,number>=Object.create(null);
+const rejectedTables:Record<string,number>=Object.create(null);
+const rejectedTableBucket=(method:string,requestUrl:string)=>{
+ if(method!=="POST")return "non-post";
+ try {
+  const u=new URL(requestUrl,"https://localhost");
+  const t=(u.searchParams.get("table")??u.searchParams.get("Table")??"").toUpperCase();
+  return ["ATTLOG","OPERLOG","USERINFO"].includes(t)?t:t?"other-table":"missing-table";
+ } catch {return "invalid-url";}
+};
 const rejectedBucket=(method:string,url:string)=>{
  const verb=method==="GET"||method==="POST"?method:"OTHER";
  let path="other";
@@ -37,14 +46,14 @@ const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
 export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: true });
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
- res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
+ res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
 router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () => true, limit: "32kb" }), (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
  res.setHeader("Content-Type","text/plain; charset=utf-8");
  if(!enabled())return res.status(404).send("NOT FOUND\n");
  const classification=classifyX904AdmsRequest(req.method,req.originalUrl);
- if(classification.kind==="reject"){const bucket=rejectedBucket(req.method,req.originalUrl);rejectedOperations[bucket]=(rejectedOperations[bucket]??0)+1;refusedRequests.unsupported++;rejectedReasons[classification.reason as keyof typeof rejectedReasons] = (rejectedReasons[classification.reason as keyof typeof rejectedReasons] ?? 0)+1;return res.status(404).send("NOT FOUND\n");}
+ if(classification.kind==="reject"){const tableBucket=rejectedTableBucket(req.method,req.originalUrl);rejectedTables[tableBucket]=(rejectedTables[tableBucket]??0)+1;const bucket=rejectedBucket(req.method,req.originalUrl);rejectedOperations[bucket]=(rejectedOperations[bucket]??0)+1;refusedRequests.unsupported++;rejectedReasons[classification.reason as keyof typeof rejectedReasons] = (rejectedReasons[classification.reason as keyof typeof rejectedReasons] ?? 0)+1;return res.status(404).send("NOT FOUND\n");}
  const allowed=deviceSerial();
  if(allowed.length<4||classification.serial!==allowed){refusedRequests.unknownSerial++;return res.status(403).send("UNKNOWN DEVICE\n");}
  // Metadata only. Never record query, body, PIN, fingerprint, face or card data.
