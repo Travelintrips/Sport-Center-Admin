@@ -5,7 +5,7 @@ import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck, Users, Link2, DoorOpen, ScrollText, LayoutDashboard, Cpu } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
-interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; }
+interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; }
 
 interface AdmsDiagnostic { refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
@@ -217,6 +217,8 @@ export default function GymX904() {
         <h2 className="font-semibold">Status sumber data mesin</h2>
         <p className="text-sm">Collector lokal: <strong>Belum ada bukti sinkronisasi otomatis</strong></p>
         <p className="text-sm">Impor ADMS terautentikasi terakhir: <strong>{integration?.trustedAdmsIngestAt ? new Date(integration.trustedAdmsIngestAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"}) + " WIB" : "Belum ada bukti impor terautentikasi pada proses server ini"}</strong></p>
+        <p className="text-sm">Log tersimpan di database X904: <strong>{integration?.storedEventCount == null ? "Belum dapat diperiksa" : integration.storedEventCount.toLocaleString("id-ID") + " event"}</strong></p>
+        <p className="text-sm">Terakhir diterima database: <strong>{integration?.lastStoredEventAt ? new Date(integration.lastStoredEventAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"}) + " WIB" : "Belum ada bukti tersimpan"}</strong></p>
         <p className="text-sm">Database log mesin: <strong>{integrationError || integration?.eventStorageReady === undefined ? "Tidak dapat diperiksa" : integration.eventStorageReady ? "Tabel tersedia" : "Tabel belum tersedia"}</strong></p>
         <p className="text-sm">Penerima event server: <strong>{integrationError ? "Tidak dapat diperiksa" : integration?.eventIngestConfigured ? "Dikonfigurasi (belum membuktikan mesin online)" : "Belum dikonfigurasi"}</strong></p>
         <p className="text-sm">Pembacaan log API: <strong>{integrationError ? "Tidak dapat diperiksa" : integration?.eventReadEnabled ? "Diaktifkan" : "Belum diaktifkan"}</strong></p>
