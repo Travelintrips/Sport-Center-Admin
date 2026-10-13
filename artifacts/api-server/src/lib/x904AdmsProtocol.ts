@@ -13,11 +13,16 @@ export function classifyX904AdmsRequest(method: string, requestUrl: string): X90
   catch { return { kind: "reject", reason: "invalid_url" }; }
   const serial = url.searchParams.get("SN") ?? "";
   if (!/^[A-Za-z0-9_-]{4,64}$/.test(serial)) return { kind: "reject", reason: "serial_invalid" };
-  if (method === "GET" && url.pathname === "/iclock/cdata" && url.searchParams.get("options") === "all")
+  // Some Push firmware appends .aspx, and query keys may have different casing.
+  // Only accept known, read-only diagnostic operations. Never authorize by serial alone.
+  const route = url.pathname.toLowerCase().replace(/\.aspx$/, "");
+  const options = url.searchParams.get("options") ?? url.searchParams.get("Options");
+  const table = url.searchParams.get("table") ?? url.searchParams.get("Table");
+  if (method === "GET" && route === "/iclock/cdata" && options === "all")
     return { kind: "handshake", serial };
-  if (method === "GET" && url.pathname === "/iclock/getrequest")
+  if (method === "GET" && route === "/iclock/getrequest")
     return { kind: "poll", serial };
-  if (method === "POST" && url.pathname === "/iclock/cdata" && url.searchParams.get("table") === "ATTLOG")
+  if (method === "POST" && route === "/iclock/cdata" && table?.toUpperCase() === "ATTLOG")
     return { kind: "attendance", serial };
   return { kind: "reject", reason: "unsupported" };
 }
