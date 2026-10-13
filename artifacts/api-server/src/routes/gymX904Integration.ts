@@ -65,10 +65,11 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
       (process.env.GYM_X904_EVENT_INGEST_KEY || "").length >= 32 &&
       (process.env.GYM_X904_DEVICE_SERIAL || "").length >= 3,
     connectorHeartbeatEnabled: heartbeatEnabled(),
+    trustedAdmsIngestAt: receiverState.lastTrustedIngestAt,
     eventReadEnabled: process.env.GYM_X904_LOG_READ_ENABLED === "true",
     doorControl: "device-local",
     connectionTestedAt: recent && lastConnectorProof ? new Date(lastConnectorProof.at).toISOString() : null,
-    lastDeviceEventAt: null,
+    lastDeviceEventAt: receiverState.lastTrustedIngestAt,
     note: recent && lastConnectorProof
       ? `Konektor tepercaya melaporkan pembacaan X904: ${lastConnectorProof.users} pengguna dan ${lastConnectorProof.logs} log. Ini bukan bukti sinkronisasi data ke database.`
       : receiverState.ready
