@@ -16,7 +16,7 @@ const startedAt = new Date().toISOString();
 const releaseFingerprint = "x904-release-proof-20261012-v1";
 let lastContact:Contact|null=null;
 const sourceSalt=randomBytes(32);
-type ContactTrace=Contact & {sourceTag:string};
+type ContactTrace=Contact & {sourceTag:string; clientHint:string; sourceTagIsAuthentication:false};
 const recentContacts:ContactTrace[]=[];
 let lastAttlogShape:{receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}|null=null;
 const enabled=()=>process.env.GYM_X904_ADMS_PROBE_ENABLED==="true" &&
@@ -42,7 +42,11 @@ router.all(/^\/iclock\/(?:cdata|getrequest)$/, parseText({ type: () => true, lim
  // Ephemeral correlation only: does not expose or persist the source IP or user agent.
  // Shared NAT/proxies or crafted headers can make tags collide; not authentication.
  const sourceTag=createHmac("sha256",sourceSalt).update(req.ip||"unknown").update("\\0").update(String(req.headers["user-agent"]||"")).digest("hex").slice(0,10);
- recentContacts.unshift({...lastContact,sourceTag});
+ // Coarse, untrusted client hint helps operators spot scripted heartbeats during Wi-Fi OFF tests.
+ // Do not expose the original User-Agent or treat this label as device authentication.
+ const agent=String(req.headers["user-agent"]||"").toLowerCase();
+ const clientHint=/curl|wget|python-requests|postman|axios|node-fetch|undici/.test(agent) ? "automation-like" : /mozilla|chrome|safari|firefox/.test(agent) ? "browser-like" : agent ? "unknown-client" : "no-user-agent";
+ recentContacts.unshift({...lastContact,sourceTag,clientHint,sourceTagIsAuthentication:false});
  if(recentContacts.length>40)recentContacts.length=40;
  if(classification.kind==="handshake"){
   // Candidate ZK Push 2.x response, to be confirmed against physical X904.
