@@ -105,7 +105,8 @@ app.use("/iclock", (req, res, next) => {
   const parsed = new URL(req.originalUrl, "https://localhost");
   const table = (parsed.searchParams.get("table") ?? parsed.searchParams.get("Table") ?? "").toUpperCase();
   const options = parsed.searchParams.has("options") || parsed.searchParams.has("Options");
-  const postTable = req.method !== "POST" ? "not-post" : table === "ATTLOG" ? "ATTLOG" : table === "OPERLOG" ? "OPERLOG" : table === "USERINFO" ? "USERINFO" : table ? "other" : "missing";
+  const knownTables = ["ATTLOG","OPERLOG","USERINFO","ATTPHOTO","RTLOG","TRANSACTION","BIODATA","FP","FACE","USERPIC","ERRORLOG","ATTEVENT","DEVICELOG"];
+  const postTable = req.method !== "POST" ? "not-post" : knownTables.includes(table) ? table : table ? "other" : "missing";
   res.on("finish", () => {
     logger.info({
       x904: true,
