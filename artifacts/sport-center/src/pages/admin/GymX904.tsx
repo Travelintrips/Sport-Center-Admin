@@ -5,7 +5,7 @@ import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck, Users, Link2, DoorOpen, ScrollText, LayoutDashboard, Cpu } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
-interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; }
+interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; }
 
 interface AdmsDiagnostic { refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
@@ -210,7 +210,14 @@ export default function GymX904() {
         <p className="text-sm">Struktur kiriman ATTLOG terakhir: {admsDiagnostic?.lastAttlogShape ? `${admsDiagnostic.lastAttlogShape.rows} baris, jumlah kolom ${admsDiagnostic.lastAttlogShape.columnCounts.join(", ") || "tidak diketahui"} (tanpa identitas)` : "Belum ada kiriman ATTLOG yang dapat diperiksa"}</p>
         <p className="text-xs text-muted-foreground">Catatan bersifat sementara per proses server. Permintaan pengujian juga dapat tercatat; data ini bukan bukti mesin fisik online. Tidak ada data biometrik yang ditampilkan.</p>
       </section>}
-      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
+      {(tab === "users" || tab === "rules" || tab === "mapping" || tab === "access") && <section aria-label="Status integrasi data X904" className="rounded-xl border bg-card p-4 space-y-2">
+        <h2 className="font-semibold">Status sumber data mesin</h2>
+        <p className="text-sm">Collector lokal: <strong>Belum ada bukti sinkronisasi otomatis</strong></p>
+        <p className="text-sm">Penerima event server: <strong>{integrationError ? "Tidak dapat diperiksa" : integration?.eventIngestConfigured ? "Dikonfigurasi (belum membuktikan mesin online)" : "Belum dikonfigurasi"}</strong></p>
+        <p className="text-sm">Pembacaan log API: <strong>{integrationError ? "Tidak dapat diperiksa" : integration?.eventReadEnabled ? "Diaktifkan" : "Belum diaktifkan"}</strong></p>
+        <p className="text-sm text-muted-foreground">Menu ini tidak menampilkan data contoh sebagai data mesin. Data pengguna, kartu, dan aturan hanya dapat tampil setelah pembacaan read-only, validasi identitas perangkat, dan sinkronisasi yang berhasil.</p>
+        <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["gym-x904-integration"] })} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted"><RefreshCw size={14} /> Periksa status lagi</button>
+      </section>}      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />User terdaftar di mesin X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Sumber wajib: daftar pengguna yang dibaca langsung dari X904 melalui konektor lokal terautentikasi. Tidak berasal dari daftar Member Gym SC.</p></div>
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
