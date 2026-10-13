@@ -91,6 +91,9 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
   return res.status(200).send("GET OPTION FROM: "+allowed+"\nErrorDelay=60\nDelay=30\nTransInterval=1\nTransFlag=TransData AttLog\nRealtime=1\n");
  }
  if(classification.kind==="poll")return res.status(200).send("OK\n");
+ // OPTIONS is the device configuration announcement, not an attendance log.
+ // Acknowledge transport only; never treat this as a biometric verification.
+ if(classification.kind==="device_options")return res.status(200).send("OK\n");
  // Inspect only the schema shape of a live ATTLOG upload. Never store its PINs,
  // names, timestamps, cards, or biometrics; never log or return the raw payload.
  if(classification.kind==="attendance") {
