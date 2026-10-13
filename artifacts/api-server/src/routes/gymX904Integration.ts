@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { adminMiddleware } from "../lib/auth";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { getX904ReceiverState } from "./x904AdmsGate";
 
 /**
@@ -8,10 +10,18 @@ import { getX904ReceiverState } from "./x904AdmsGate";
  * The physical door and enrolments remain exclusively under local X904 control.
  */
 const router = Router();
-router.get("/admin/gym-x904/integration", adminMiddleware, (_req, res) => {
+router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const receiverState = getX904ReceiverState();
+  let eventStorageReady = false;
+  try {
+    const check = await db.execute(sql`SELECT to_regclass('sport_center.gym_x904_raw_events') IS NOT NULL AS ready`);
+    eventStorageReady = check.rows[0]?.ready === true;
+  } catch {
+    // A DB failure must never be reported as ready.
+  }
   res.json({
+    eventStorageReady,
     device: "Solution X904",
     attendanceSource: "sport-center-manual",
     legacyGymService: "retired",
