@@ -1,5 +1,7 @@
 import { Router, text as parseText, type Request, type Response } from "express";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { classifyX904AdmsRequest } from "../lib/x904AdmsProtocol";
 import { parseX904Attlog } from "../lib/x904AttlogParser";
 import { adminMiddleware } from "../lib/auth";
@@ -59,7 +61,7 @@ router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
  res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
-router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () => true, limit: "32kb" }), (req:Request,res:Response) => {
+router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () => true, limit: "32kb" }), async (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
  res.setHeader("Content-Type","text/plain; charset=utf-8");
  if(!enabled())return res.status(404).send("NOT FOUND\n");
@@ -101,8 +103,37 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      bodyBytes,parseable:false};
   }
  }
- // ATTLOG upload must NOT be acknowledged before identity verification,
- // durable storage, deduplication and schema validation are in place.
+ // Fail closed: an ADMS serial is not device authentication. Only a trusted
+ // ingress that verifies the physical device may inject this header.
+ if (classification.kind === "attendance" &&
+     process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED === "true") {
+   const secret = process.env.GYM_X904_ADMS_TRUSTED_INGRESS_KEY ?? "";
+   const provided = req.headers["x-gym-trusted-ingress-key"];
+   const authenticated = secret.length >= 32 && typeof provided === "string" &&
+     Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
+     createHmac("sha256", secret).update(provided).digest("hex") ===
+     createHmac("sha256", secret).update(secret).digest("hex");
+   if (!authenticated) return res.status(403).send("UNTRUSTED DEVICE\n");
+   const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
+   if (!parsed) return res.status(400).send("INVALID ATTLOG\n");
+   const records = parsed.map(event => ({
+     id: createHash("sha256").update(JSON.stringify([allowed,event.pin,event.occurred,event.status,event.verify])).digest("hex"),
+     pin: event.pin, occurred: event.occurred, status: event.status, verify: event.verify
+   }));
+   try {
+     const payload = JSON.stringify(records);
+     await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events
+       (event_id,device_serial,user_pin,device_time,attendance_status,verification_type)
+       SELECT e.id, ${allowed}, e.pin, e.occurred, e.status, e.verify
+       FROM jsonb_to_recordset(${payload}::jsonb)
+       AS e(id text,pin text,occurred text,status integer,verify integer)
+       ON CONFLICT (event_id) DO NOTHING`);
+     return res.status(200).send("OK: " + parsed.length + "\n");
+   } catch {
+     return res.status(503).send("ATTLOG STORAGE UNAVAILABLE\n");
+   }
+ }
+ // No success ACK until identity and durable storage have been verified.
  return res.status(503).send("ATTLOG NOT IMPORTED\n");
 });
 export default router;
