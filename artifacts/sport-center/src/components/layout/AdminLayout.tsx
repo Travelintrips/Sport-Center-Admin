@@ -44,6 +44,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { removeToken, getToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import AiAsistenWidget from "@/components/admin/AiAsistenWidget";
 import { useToast } from "@/hooks/use-toast";
 
 const NAV_GROUPS = [
@@ -413,6 +414,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
       </main>
       
+      {user && <AiAsistenWidget />}
+
       {/* Mobile Backdrop */}
       {isMobileOpen && (
         <div 
