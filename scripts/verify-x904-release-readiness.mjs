@@ -1,4 +1,4 @@
-﻿import { strict as assert } from "node:assert";
+import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 const read = (file) => readFileSync(new URL("../" + file, import.meta.url), "utf8");
 const route = read("artifacts/api-server/src/routes/gymX904Events.ts");
@@ -16,4 +16,3 @@ assert.match(migration, /verified backup/i);
 assert.match(deploy, /This workflow VERIFY ONLY/);
 console.log("PASS X904 code safety contracts");
 console.log("RELEASE BLOCKED until production backup, env and end-to-end authentication are independently verified");
-
