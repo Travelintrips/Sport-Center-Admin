@@ -149,8 +149,11 @@ export default function GymX904() {
         ))}
       </nav>
       {(tab === "dashboard" || tab === "device") && <div className="rounded-xl border bg-card p-5 space-y-3">
-        <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : admsDiagnostic?.enabled ? "Server ADMS siap menerima koneksi" : "Server ADMS belum siap"}</span></div>
-        <p className="text-sm text-muted-foreground">Receiver dapat merespons permintaan ADMS tanpa membuktikan mesin fisik online. Pemeriksaan komunikasi tersedia pada tab Monitoring X904; check-in SC tidak dianggap sebagai absensi mesin.</p>
+        <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : admsDiagnostic?.enabled ? "Receiver diagnostik aktif — mesin belum terverifikasi" : "Server ADMS belum siap"}</span></div>
+        <p className="text-sm text-muted-foreground">Receiver diagnostik dapat menerima handshake, tetapi tidak membuktikan X904 fisik online. Data check-in SC tidak dianggap sebagai absensi mesin.</p>
+        <div className="text-sm" role="status">
+          <strong>Kontak ADMS terakhir:</strong> {admsDiagnosticError ? "Diagnostik tidak dapat dibaca" : admsDiagnostic?.lastContact ? `${admsDiagnostic.lastContact.kind} pada ${new Date(admsDiagnostic.lastContact.receivedAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB — sumber belum terautentikasi` : "Belum ada kontak yang terdeteksi pada proses server ini"}
+        </div>
       </div>}
       {(tab === "dashboard" || tab === "device") && <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Member Gym aktif (SC)</p><p className="text-2xl font-bold mt-1">{membersLoading ? "Memuat..." : membersError ? "Tidak tersedia" : activeMembers ?? "—"}</p></section>
