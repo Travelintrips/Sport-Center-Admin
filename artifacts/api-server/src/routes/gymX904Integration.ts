@@ -18,6 +18,8 @@ router.get("/admin/gym-x904/integration", adminMiddleware, (_req, res) => {
     receiver: receiverState.ready ? "diagnostic-ready" : "not-connected",
     hardware: "unverified",
     synchronizing: false,
+    eventIngestConfigured: process.env.GYM_X904_EVENT_INGEST_ENABLED === "true" && (process.env.GYM_X904_EVENT_INGEST_KEY || "").length >= 32 && (process.env.GYM_X904_DEVICE_SERIAL || "").length >= 3,
+    eventReadEnabled: process.env.GYM_X904_LOG_READ_ENABLED === "true",
     doorControl: "device-local",
     connectionTestedAt: null,
     lastDeviceEventAt: null,
