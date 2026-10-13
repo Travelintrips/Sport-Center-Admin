@@ -39,7 +39,12 @@ app.use(
     },
   }),
 );
-app.use(cors());
+// Native iClock traffic is not a browser CORS preflight. Let the ADMS route
+// handle OPTIONS rather than short-circuiting it with a generic 204.
+app.use((req, res, next) => {
+  if (/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i.test(req.path)) return next();
+  return cors()(req, res, next);
+});
 // Capture raw body buffer before JSON parsing — needed for Paylabs webhook signature verification.
 // express.json() re-serialises req.body which may differ from the original bytes (whitespace, key
 // order). Storing the raw buffer lets verifyPaylabsSignature work on the exact bytes Paylabs signed.
