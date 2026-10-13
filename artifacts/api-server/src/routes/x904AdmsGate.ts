@@ -18,6 +18,9 @@ const startedAt = new Date().toISOString();
 // Release fingerprint for verifying Hostinger actually loaded this backend build.
 const releaseFingerprint = "x904-release-proof-20261012-v1";
 let lastContact:Contact|null=null;
+let lastTrustedIngestAt:string|null=null;
+let lastTrustedIngestRows=0;
+const trustedIngestRecent=()=>lastTrustedIngestAt!==null && Date.now()-Date.parse(lastTrustedIngestAt)<90000;
 // Counters disclose neither serials nor request bodies; reset on process restart.
 const refusedRequests:{unsupported:number;unknownSerial:number}={unsupported:0,unknownSerial:0};
 // Fixed reason buckets only: never preserve URLs, serials, query values, or request bodies.
@@ -56,10 +59,10 @@ let lastAttlogShape:{receivedAt:string;rows:number;columnCounts:number[];bodyByt
 const enabled=()=>process.env.GYM_X904_ADMS_PROBE_ENABLED==="true" &&
  process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true";
 const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
-export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: true });
+export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: !trustedIngestRecent(), lastTrustedIngestAt });
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
- res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
+ res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:trustedIngestRecent(),ingesting:trustedIngestRecent(),lastTrustedIngestAt,lastTrustedIngestRows,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
 router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () => true, limit: "32kb" }), async (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
@@ -128,6 +131,8 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
        FROM jsonb_to_recordset(${payload}::jsonb)
        AS e(id text,pin text,occurred text,status integer,verify integer)
        ON CONFLICT (event_id) DO NOTHING`);
+     lastTrustedIngestAt=new Date().toISOString();
+     lastTrustedIngestRows=parsed.length;
      return res.status(200).send("OK: " + parsed.length + "\n");
    } catch {
      return res.status(503).send("ATTLOG STORAGE UNAVAILABLE\n");
