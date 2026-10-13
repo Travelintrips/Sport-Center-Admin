@@ -46,15 +46,24 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   res.setHeader("Cache-Control", "no-store");
   const receiverState = getX904ReceiverState();
   let eventStorageReady = false;
+  let storedEventCount: number | null = null;
+  let lastStoredEventAt: string | null = null;
   try {
     const check = await db.execute(sql`SELECT to_regclass('sport_center.gym_x904_raw_events') IS NOT NULL AS ready`);
     eventStorageReady = check.rows[0]?.ready === true;
+    if (eventStorageReady && (process.env.GYM_X904_DEVICE_SERIAL ?? "").length >= 4) {
+      const summary = await db.execute(sql`SELECT count(*)::int AS total, max(received_at)::text AS latest FROM sport_center.gym_x904_raw_events WHERE device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}`);
+      storedEventCount = Number(summary.rows[0]?.total ?? 0);
+      lastStoredEventAt = summary.rows[0]?.latest ? String(summary.rows[0]?.latest) : null;
+    }
   } catch { /* Fail closed on DB errors. */ }
   const recent = heartbeatEnabled() && lastConnectorProof !== null &&
     Date.now() - lastConnectorProof.at < HEARTBEAT_TTL_MS &&
     lastConnectorProof.serial === process.env.GYM_X904_DEVICE_SERIAL;
   res.json({
     eventStorageReady,
+    storedEventCount,
+    lastStoredEventAt,
     device: "Solution X904",
     attendanceSource: "sport-center-manual",
     legacyGymService: "retired",
