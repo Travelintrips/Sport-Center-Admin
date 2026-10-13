@@ -436,6 +436,19 @@ function safeError(err: unknown): string {
     .replace(/(private[_ -]?key|access[_ -]?token|password|secret[_ -]?payload|postgres(?:ql)?:\/\/)[^ ]*/gi, "$1=[redacted]");
 }
 
+// Only emit fixed diagnostic categories; never include exception messages, URLs or credentials.
+function secretAccessFailureCategory(err: unknown): string {
+  const error = err as {code?:unknown;status?:unknown};
+  const code = String(error?.code ?? error?.status ?? "");
+  if (code === "401" || code === "UNAUTHENTICATED") return "GCP_AUTH_UNAUTHENTICATED";
+  if (code === "403" || code === "PERMISSION_DENIED") return "GCP_ACCESS_DENIED";
+  if (code === "404" || code === "NOT_FOUND") return "GCP_SECRET_NOT_FOUND";
+  if (code === "429" || code === "RESOURCE_EXHAUSTED") return "GCP_RATE_LIMITED";
+  if (/^(500|502|503|504)$/.test(code)) return "GCP_SERVICE_UNAVAILABLE";
+  if (/^(ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|ECONNREFUSED)$/.test(code)) return "GCP_NETWORK_FAILURE";
+  return "GCP_SECRET_ACCESS_UNKNOWN";
+}
+
 async function accessSharedSecret(
   projectId: string,
   secretId: string,
@@ -545,7 +558,7 @@ export async function loadSecretsFromGSM(): Promise<LoadResult> {
       result.fatal.push("database_url could not be loaded");
     }
   } catch (err) {
-    result.failed.push(`Secret Manager access failed: ${safeError(err)}`);
+    result.failed.push(`Secret Manager access failed: ${secretAccessFailureCategory(err)}`);
     result.fatal.push("Shared GCP secret access failed");
   }
   return result;
