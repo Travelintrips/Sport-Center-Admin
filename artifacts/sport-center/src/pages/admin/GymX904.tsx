@@ -224,6 +224,7 @@ export default function GymX904() {
       </div>}
       {(tab === "dashboard" || tab === "device") && <section className="rounded-xl border bg-card p-4 space-y-2">
         <h2 className="font-semibold">Sinkronisasi LAN via ALMANO (baca saja)</h2>
+        {lanStatus?.lastCompleteAt && <p className="text-sm" role="status">{Number.isFinite(Date.parse(lanStatus.lastCompleteAt)) && Date.now() - Date.parse(lanStatus.lastCompleteAt) < 10 * 60 * 1000 && Date.now() >= Date.parse(lanStatus.lastCompleteAt) ? "Snapshot LAN terbaru (kurang dari 10 menit). Ini bukan bukti X904 online." : "Snapshot LAN lama: sinkronisasi otomatis belum terbukti aktif. Periksa konektor sebelum mengandalkan data terbaru."}</p>}
         {lanStatusError ? <p role="status">Backend konektor LAN belum tersedia atau belum dikonfigurasi.</p> :
           lanStatus?.synchronized ? <>
             <p className="text-sm">Snapshot berhasil disimpan: <strong>{lanStatus.users} pengguna dan {lanStatus.logs} log</strong> (dari {lanStatus.deviceLogs ?? "?"} log di perangkat).</p>
