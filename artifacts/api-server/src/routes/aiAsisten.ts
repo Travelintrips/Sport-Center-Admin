@@ -99,12 +99,13 @@ router.get("/admin/ai-asisten/group-tax-audit/:paymentId", adminMiddleware, asyn
     res.json({
       payment:{id:payment.id,amount:Number(payment.amount),status:payment.status,proofExists:!!payment.proofUrl,confirmedAt:payment.confirmedAt},
       groupRef:anchor.groupRef,
-      bookings:group.map(b=>({id:b.id,reference:b.orderNumber,price:Number(b.totalPrice),invoicePdfExists:!!b.invoicePdfUrl,paidAt:b.paidAt,groupRef:b.groupRef})),
+      bookings:group.map(b=>({id:b.id,reference:b.orderNumber,price:Number(b.totalPrice),payerType:b.payerType,ppnTreatment:b.ppnTreatment,ppnAmount:b.ppnAmount===null?null:Number(b.ppnAmount),ppnCollectedByCustomer:b.ppnCollectedByCustomer,invoicePdfExists:!!b.invoicePdfUrl,paidAt:b.paidAt,groupRef:b.groupRef})),
       groupPayments:groupPayments.map(p=>({id:p.id,bookingId:p.bookingId,amount:Number(p.amount),status:p.status,paymentType:p.paymentType,proofExists:!!p.proofUrl,confirmedAt:p.confirmedAt,ocrAvailable:!!(p.ocrData || p.ocrRaw || p.ocrAmount || p.ocrName),ocrAmount:p.ocrAmount===null?null:Number(p.ocrAmount),ocrAmountMatchesRecorded:p.ocrAmount===null?null:Math.abs(Number(p.ocrAmount)-Number(p.amount))<0.01,ocrDateAvailable:!!p.ocrDate})),
       confirmedGroupPaymentTotal:confirmedAmount,
       groupBookingTotal:group.reduce((sum,b)=>sum+Number(b.totalPrice),0),
       paymentTax,bookingTax,paymentTotals:total(paymentTax),bookingTotals:total(bookingTax),
       overlapCandidate:paymentTax.length>0 && bookingTax.length>0,
+      personalWithBookingPpn: group.filter(b=>b.payerType==="personal" && bookingTax.some(t=>t.referenceId===b.id && Number(t.ppn)>0)).map(b=>b.orderNumber),
       allocationVerified:false,
       allocationStatus: groupPayments.length === 1 && group.length > 1
         ? "one-payment-multiple-bookings-no-per-session-allocation"
