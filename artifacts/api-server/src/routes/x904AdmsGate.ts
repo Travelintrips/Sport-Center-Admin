@@ -25,6 +25,11 @@ let rejectedUntrustedAttendance=0;
 let rejectedUnparseableAttendance=0;
 let attendanceStorageFailures=0;
 const trustedIngestRecent=()=>lastTrustedIngestAt!==null && Date.now()-Date.parse(lastTrustedIngestAt)<90000;
+// Structured, privacy-safe operational logs survive process restarts in Hostinger log collection.
+// Never log attendance payloads, PINs, names, serials, source IPs, or credentials.
+const auditAdms=(outcome:string,details:Record<string,string|number|boolean>={})=>{
+  console.info(JSON.stringify({event:"x904_adms_ingress",outcome,...details}));
+};
 // Counters disclose neither serials nor request bodies; reset on process restart.
 const refusedRequests:{unsupported:number;unknownSerial:number}={unsupported:0,unknownSerial:0};
 // Fixed reason buckets only: never preserve URLs, serials, query values, or request bodies.
@@ -126,9 +131,9 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
      createHmac("sha256", secret).update(provided).digest("hex") ===
      createHmac("sha256", secret).update(secret).digest("hex");
-   if (!authenticated && !trialMode) { rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); return res.status(403).send("UNTRUSTED DEVICE\n"); }
+   if (!authenticated && !trialMode) { auditAdms("rejected_untrusted",{kind:"attendance"}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); return res.status(403).send("UNTRUSTED DEVICE\n"); }
    const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
-   if (!parsed) { rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); return res.status(400).send("INVALID ATTLOG\n"); }
+   if (!parsed) { auditAdms("rejected_invalid_attlog",{kind:"attendance"}); rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); return res.status(400).send("INVALID ATTLOG\n"); }
    const records = parsed.map(event => ({
      id: createHash("sha256").update(JSON.stringify([allowed,event.pin,event.occurred,event.status,event.verify])).digest("hex"),
      pin: event.pin, occurred: event.occurred, status: event.status, verify: event.verify
@@ -141,17 +146,19 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
        FROM jsonb_to_recordset(${payload}::jsonb)
        AS e(id text,pin text,occurred text,status integer,verify integer)
        ON CONFLICT (event_id) DO NOTHING`);
+     auditAdms("stored",{kind:"attendance",rowCount:parsed.length,authenticated});
      if(authenticated) {
        lastTrustedIngestAt=new Date().toISOString();
        lastTrustedIngestRows=parsed.length;
      }
      return res.status(200).send("OK: " + parsed.length + "\n");
    } catch {
-     attendanceStorageFailures++; lastRejectedAttendanceAt=new Date().toISOString();
+     auditAdms("storage_failed",{kind:"attendance"}); attendanceStorageFailures++; lastRejectedAttendanceAt=new Date().toISOString();
      return res.status(503).send("ATTLOG STORAGE UNAVAILABLE\n");
    }
  }
  // No success ACK until identity and durable storage have been verified.
+ if(classification.kind==="attendance") auditAdms("not_imported",{kind:"attendance",ingestEnabled:process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED==="true"});
  return res.status(503).send("ATTLOG NOT IMPORTED\n");
 });
 export default router;
