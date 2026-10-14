@@ -16,7 +16,7 @@ const router=Router();
 type Contact={kind:string;receivedAt:string;method:string;contentType:string;bytes:number};
 const startedAt = new Date().toISOString();
 // Release fingerprint for verifying Hostinger actually loaded this backend build.
-const releaseFingerprint = "x904-release-proof-20261012-v1";
+const releaseFingerprint = "x904-adms-ingress-observability-20261015-v2";
 let lastContact:Contact|null=null;
 let lastTrustedIngestAt:string|null=null;
 let lastTrustedIngestRows=0;
@@ -78,9 +78,10 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
  res.setHeader("Content-Type","text/plain; charset=utf-8");
  if(!enabled())return res.status(404).send("NOT FOUND\n");
  const classification=classifyX904AdmsRequest(req.method,req.originalUrl);
+ auditAdms("request_classified",{kind:classification.kind,method:req.method==="POST"?"POST":req.method==="GET"?"GET":"OTHER"});
  if(classification.kind==="reject"){if(req.method==="POST"){const shape=payloadShape(req.body);rejectedPostShapes[shape]=(rejectedPostShapes[shape]??0)+1;}const tableBucket=rejectedTableBucket(req.method,req.originalUrl);rejectedTables[tableBucket]=(rejectedTables[tableBucket]??0)+1;const bucket=rejectedBucket(req.method,req.originalUrl);rejectedOperations[bucket]=(rejectedOperations[bucket]??0)+1;refusedRequests.unsupported++;rejectedReasons[classification.reason as keyof typeof rejectedReasons] = (rejectedReasons[classification.reason as keyof typeof rejectedReasons] ?? 0)+1;return res.status(404).send("NOT FOUND\n");}
  const allowed=deviceSerial();
- if(allowed.length<4||classification.serial!==allowed){refusedRequests.unknownSerial++;return res.status(403).send("UNKNOWN DEVICE\n");}
+ if(allowed.length<4||classification.serial!==allowed){auditAdms("rejected_serial",{kind:classification.kind});refusedRequests.unknownSerial++;return res.status(403).send("UNKNOWN DEVICE\n");}
  // Metadata only. Never record query, body, PIN, fingerprint, face or card data.
  const bytes=Number(req.headers["content-length"]||0);
  lastContact={kind:classification.kind,receivedAt:new Date().toISOString(),method:req.method,
@@ -95,14 +96,15 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
  recentContacts.unshift({...lastContact,sourceTag,clientHint,sourceTagIsAuthentication:false});
  if(recentContacts.length>40)recentContacts.length=40;
  if(classification.kind==="handshake"){
+  auditAdms("configuration_sent",{kind:"handshake"});
   // Candidate ZK Push 2.x response, to be confirmed against physical X904.
   // No log cursor, status changes, clock writes, enrollment or door commands.
   return res.status(200).send("GET OPTION FROM: "+allowed+"\nATTLOGStamp=None\nOPERLOGStamp=9999\nErrorDelay=60\nDelay=30\nTransTimes=00:00;14:05\nTransInterval=1\nTransFlag=TransData AttLog\nRealtime=1\nEncrypt=None\n");
  }
- if(classification.kind==="poll")return res.status(200).send("OK\n");
+ if(classification.kind==="poll"){auditAdms("poll_ack",{kind:"poll"});return res.status(200).send("OK\n");}
  // OPTIONS is the device configuration announcement, not an attendance log.
  // Acknowledge transport only; never treat this as a biometric verification.
- if(classification.kind==="device_options")return res.status(200).send("OK\n");
+ if(classification.kind==="device_options"){auditAdms("device_options_ack",{kind:"device_options"});return res.status(200).send("OK\n");}
  // Inspect only the schema shape of a live ATTLOG upload. Never store its PINs,
  // names, timestamps, cards, or biometrics; never log or return the raw payload.
  if(classification.kind==="attendance") {
