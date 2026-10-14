@@ -163,7 +163,7 @@ export default function AiAsistenWidget() {
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
-      const localAudit = /SCPAY-SC-\\d+|SC-\\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const localAudit = /SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
       const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
