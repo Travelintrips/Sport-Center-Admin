@@ -70,7 +70,8 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
-    const requestedReference = question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
+    const paymentMention = question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
+    const requestedReference = paymentMention ? `SCPAY-SC-${paymentMention}` : question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
     if (requestedReference) {
       const response = await fetch(`${BASE}/admin/ai-asisten/tax-trace/${encodeURIComponent(requestedReference)}`, {
         headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin"
@@ -163,7 +164,7 @@ export default function AiAsistenWidget() {
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
-      const localAudit = /SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const localAudit = /(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
       const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
