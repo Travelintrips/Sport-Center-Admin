@@ -6,6 +6,11 @@ import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldC
 import { getToken } from "@/lib/auth";
 
 interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; }
+interface LanStatus { synchronized: boolean; users: number; logs: number; deviceLogs?: number; lastCompleteAt?: string; }
+interface LanUser { user_pin: string; display_name: string; device_uid: number; device_role: number; last_seen_at: string; }
+interface LanUsersResult { source: string; users: LanUser[]; }
+interface LanLog { event_id: string; user_pin: string; device_time: string; received_at: string; }
+interface LanLogsResult { source: string; events: LanLog[]; }
 
 interface AdmsDiagnostic { lastRejectedAttendanceAt?: string | null; rejectedUntrustedAttendance?: number; rejectedUnparseableAttendance?: number; attendanceStorageFailures?: number; refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
@@ -116,6 +121,50 @@ export default function GymX904() {
     refetchInterval: 30000,
     retry: 1,
   });
+  const { data: lanStatus, isError: lanStatusError } = useQuery<LanStatus>({
+    queryKey: ["gym-x904-lan-status"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch(`${API}/admin/gym-x904/lan-status`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Status konektor LAN tidak tersedia");
+      return response.json();
+    },
+    refetchInterval: 30000,
+    retry: 1,
+  });
+  const { data: lanUsers, isError: lanUsersError, isLoading: lanUsersLoading } = useQuery<LanUsersResult>({
+    queryKey: ["gym-x904-lan-users"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch(`${API}/admin/gym-x904/lan-users`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Daftar user mesin LAN tidak tersedia");
+      return response.json();
+    },
+    enabled: tab === "users" || tab === "mapping" || tab === "audit",
+    refetchInterval: 30000,
+    retry: 1,
+  });
+  const { data: lanLogs, isError: lanLogsError, isLoading: lanLogsLoading } = useQuery<LanLogsResult>({
+    queryKey: ["gym-x904-lan-logs", date],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch(`${API}/admin/gym-x904/lan-logs?date=${encodeURIComponent(date)}`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Riwayat mesin LAN tidak tersedia");
+      return response.json();
+    },
+    enabled: tab === "events" || tab === "audit",
+    refetchInterval: 30000,
+    retry: 1,
+  });
   const observedRows = Array.isArray(observedPins?.users) ? observedPins.users : [];
   const deviceRows = deviceData?.enabled && Array.isArray(deviceData.events) ? deviceData.events : [];
   const tabs: { id: GymTab; label: string; icon: typeof Activity }[] = [
@@ -173,6 +222,14 @@ export default function GymX904() {
           <strong>Kontak ADMS terakhir:</strong> {admsDiagnosticError ? "Diagnostik tidak dapat dibaca" : admsDiagnostic?.lastContact ? `${admsDiagnostic.lastContact.kind} pada ${new Date(admsDiagnostic.lastContact.receivedAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB — sumber belum terautentikasi` : "Belum ada kontak yang terdeteksi pada proses server ini"}
         </div>
       </div>}
+      {(tab === "dashboard" || tab === "device") && <section className="rounded-xl border bg-card p-4 space-y-2">
+        <h2 className="font-semibold">Sinkronisasi LAN via ALMANO (baca saja)</h2>
+        {lanStatusError ? <p role="status">Backend konektor LAN belum tersedia atau belum dikonfigurasi.</p> :
+          lanStatus?.synchronized ? <>
+            <p className="text-sm">Snapshot berhasil disimpan: <strong>{lanStatus.users} pengguna dan {lanStatus.logs} log</strong> (dari {lanStatus.deviceLogs ?? "?"} log di perangkat).</p>
+            <p className="text-xs text-muted-foreground">Sinkronisasi terakhir: {lanStatus.lastCompleteAt ? new Date(lanStatus.lastCompleteAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"}) + " WIB" : "Belum diketahui"}. Data tersimpan tidak membuktikan perangkat masih online saat ini.</p>
+          </> : <p className="text-sm text-muted-foreground">Belum ada snapshot LAN terautentikasi yang selesai disimpan di database.</p>}
+      </section>}
       {(tab === "dashboard" || tab === "device") && <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Member Gym aktif (SC)</p><p className="text-2xl font-bold mt-1">{membersLoading ? "Memuat..." : membersError ? "Tidak tersedia" : activeMembers ?? "—"}</p></section>
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Check-in SC pada tanggal dipilih</p><p className="text-2xl font-bold mt-1">{isLoading ? "Memuat..." : isError ? "Tidak tersedia" : rows.length}</p></section>
@@ -200,6 +257,17 @@ export default function GymX904() {
             {isLoading && <p className="py-8 text-center text-sm text-muted-foreground">Memuat data absensi...</p>}
           </div>
         )}
+      </section>}
+      {tab === "events" && <section className="rounded-xl border bg-card p-5 space-y-3">
+        <h2 className="font-semibold">Log mesin dari ALMANO (baca saja)</h2>
+        <p className="text-xs text-muted-foreground">Waktu lokal mesin; jenis verifikasi tidak tersedia melalui pembacaan TCP. Tidak otomatis dihitung sebagai check-in member Sport Center.</p>
+        {lanLogsError ? <p role="alert" className="text-sm">Log LAN belum tersedia atau backend belum aktif.</p> :
+          lanLogsLoading ? <p className="text-sm">Memuat catatan LAN...</p> :
+          <div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead><tr className="border-b"><th className="p-2">Waktu mesin</th><th className="p-2">PIN</th><th className="p-2">Diterima database</th></tr></thead>
+          <tbody>{(lanLogs?.events ?? []).map((e) => <tr key={e.event_id} className="border-b">
+            <td className="p-2">{e.device_time}</td><td className="p-2">{e.user_pin}</td>
+            <td className="p-2">{new Date(e.received_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
+          </tr>)}</tbody></table>{(lanLogs?.events ?? []).length === 0 && <p className="p-3 text-sm">Belum ada log LAN yang tersimpan pada tanggal ini.</p>}</div>}
       </section>}
       {tab === "events" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -247,6 +315,19 @@ export default function GymX904() {
         <p className="text-sm text-muted-foreground">Menu ini tidak menampilkan data contoh sebagai data mesin. Data pengguna, kartu, dan aturan hanya dapat tampil setelah pembacaan read-only, validasi identitas perangkat, dan sinkronisasi yang berhasil.</p>
         <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["gym-x904-integration"] })} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted"><RefreshCw size={14} /> Periksa status lagi</button>
       </section>}      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
+        <h2 className="font-semibold">User yang terdaftar langsung pada Solution X904 (LAN)</h2>
+        <p className="text-xs text-muted-foreground">Hanya snapshot terautentikasi yang selesai disimpan. Status aktivasi akun dan template biometrik tidak dibaca. PIN mesin belum otomatis dipetakan ke member Gym.</p>
+        {lanUsersError ? <p role="alert" className="text-sm">Daftar LAN belum tersedia atau backend belum aktif.</p> :
+          lanUsersLoading ? <p className="text-sm">Memuat pengguna dari snapshot LAN...</p> :
+          <div className="overflow-x-auto"><table className="w-full text-sm text-left">
+            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th></tr></thead>
+            <tbody>{(lanUsers?.users ?? []).map((u) => <tr key={u.user_pin} className="border-b">
+              <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
+            </tr>)}</tbody>
+          </table>{(lanUsers?.users ?? []).length === 0 && <p className="p-3 text-sm">Belum ada roster terverifikasi tersimpan.</p>}</div>}
+      </section>}
+      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />PIN yang tercatat pada log ADMS X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Data nyata dari log yang sudah tersimpan di database, bukan daftar lengkap user terdaftar, bukan bukti identitas mesin. Nama, kartu, dan status enrollment memerlukan pembacaan master user dari perangkat.</p></div>
         {observedError ? <p role="alert" className="text-sm">Data log X904 belum dapat dibaca dari database PROD.</p> :
