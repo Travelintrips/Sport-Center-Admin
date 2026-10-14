@@ -138,12 +138,19 @@ export default function AiAsistenWidget() {
       if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
       const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
       if (!traceResponse.ok) throw new Error(`Audit pajak grup gagal (HTTP ${traceResponse.status})`);
-      const g: { payment:{id:number;amount:number;status:string};groupRef:string|null;bookings:Array<{id:number;reference:string;price:number}>;paymentTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;bookingTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;paymentTotals:{dpp:number;ppn:number};bookingTotals:{dpp:number;ppn:number};overlapCandidate:boolean;note:string } = await traceResponse.json();
+      const g: { payment:{id:number;amount:number;status:string};groupRef:string|null;bookings:Array<{id:number;reference:string;price:number;invoicePdfExists:boolean;paidAt:string|null}>;paymentTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;bookingTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;paymentTotals:{dpp:number;ppn:number};bookingTotals:{dpp:number;ppn:number};overlapCandidate:boolean;note:string; groupPayments:Array<{id:number;bookingId:number;amount:number;status:string;paymentType:string;proofExists:boolean}>;confirmedGroupPaymentTotal:number;groupBookingTotal:number;allocationVerified:boolean;evidenceLimitations:string[] } = await traceResponse.json();
       const rows = (arr:typeof g.paymentTax) => arr.map(t=>`#${t.id} ${t.referenceNumber} ${t.date} | DPP ${money(t.dpp)} | PPN ${money(t.ppn)}`);
       return [
         `Audit potensi duplikasi pajak pembayaran #${g.payment.id} — ${selected}`,
         `Pembayaran ${money(g.payment.amount)} | groupRef ${g.groupRef ?? "tidak tersedia"}`,
         `Booking terkait: ${g.bookings.map(b=>b.reference).join(", ")}`,
+        ...g.bookings.map(b=>`${b.reference} | Nilai ${money(b.price)} | Invoice PDF ${b.invoicePdfExists ? "tersimpan (belum diperiksa)" : "belum tercatat"}`),
+        `Pembayaran terkait grup (${g.groupPayments.length}):`,
+        ...g.groupPayments.map(p=>`#${p.id} → booking ID #${p.bookingId} | ${money(p.amount)} | ${p.status} | bukti ${p.proofExists ? "ada (belum dibaca)" : "belum tercatat"}`),
+        `Total pembayaran confirmed yang terhubung ke grup: ${money(g.confirmedGroupPaymentTotal)}`,
+        `Total harga booking grup: ${money(g.groupBookingTotal)} | Selisih: ${money(g.confirmedGroupPaymentTotal-g.groupBookingTotal)}`,
+        "Perhatian: satu pembayaran gabungan dapat tercatat pada satu booking. Selisih nol bukan bukti alokasi per sesi atau verifikasi bukti.",
+
         `Catatan pajak pembayaran (${g.paymentTax.length}):`, ...rows(g.paymentTax),
         `Subtotal pembayaran: DPP ${money(g.paymentTotals.dpp)} | PPN ${money(g.paymentTotals.ppn)}`,
         `Catatan pajak booking (${g.bookingTax.length}):`, ...rows(g.bookingTax),
