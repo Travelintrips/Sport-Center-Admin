@@ -1,0 +1,35 @@
+name: AI Asisten Independent Validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/api-server/src/routes/aiAsisten.ts"
+      - "artifacts/api-server/src/routes/index.ts"
+      - "artifacts/sport-center/src/components/admin/AiAsistenWidget.tsx"
+      - ".github/workflows/ai-asisten-validation.yml"
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Typecheck backend and frontend (no database)
+        run: pnpm run typecheck
+      - name: Verify chat proxy is admin-only and connector secret is server-side
+        run: |
+          node -e 'const fs=require("fs"); const s=fs.readFileSync("artifacts/api-server/src/routes/aiAsisten.ts","utf8");const u=fs.readFileSync("artifacts/sport-center/src/components/admin/AiAsistenWidget.tsx","utf8");if(!s.includes("adminMiddleware")||!s.includes("AI_CORE_CHAT_CONNECTOR_KEY")||!s.includes("mode: \"ask\"")||!u.includes("/admin/ai-asisten/chat")||u.includes("AI_CORE_CHAT_CONNECTOR_KEY"))process.exit(1)'
+      - name: Production route requires authentication
+        run: |
+          code=$(curl --silent --show-error --location --output /tmp/ai-asisten-anon.json --write-out '%{http_code}' --max-time 20 --header 'Content-Type: application/json' --data '{"message":"ping"}' https://sc.travelintrips.co.id/api/admin/ai-asisten/chat)
+          if [ "$code" != "401" ]; then echo "::error::Expected 401 for anonymous chatbot, got $code"; exit 1; fi
+          echo "Anonymous request denied (HTTP 401)"
