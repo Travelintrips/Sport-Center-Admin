@@ -70,6 +70,44 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
+    const deepAnalysis = /(?:kelompokkan|pengelompokan|analisis|analisa|hitung total|subtotal|total ppn dari|kemungkinan kesalahan klasifikasi|salah klasifikasi|prioritas|perlu diverifikasi)/i.test(question) && /(?:personal|perorangan|pribadi|transaksi itu|44 transaksi|ppn)/i.test(question);
+    if (deepAnalysis) {
+      const rows = result.personalWithTax;
+      const totalPpn = rows.reduce((sum, row) => sum + Number(row.taxAmount ?? 0), 0);
+      const totalDpp = rows.reduce((sum, row) => sum + Number(row.dpp ?? 0), 0);
+      const groups = new Map<number, { count: number; total: number; references: string[] }>();
+      for (const row of rows) {
+        const amount = Number(row.taxAmount ?? 0);
+        const entry = groups.get(amount) ?? { count: 0, total: 0, references: [] };
+        entry.count += 1; entry.total += amount;
+        if (row.referenceNumber) entry.references.push(row.referenceNumber);
+        groups.set(amount, entry);
+      }
+      const breakdown = [...groups.entries()].sort((a, b) => b[0] - a[0]).map(([amount, group]) =>
+        `PPN ${money(amount)}: ${group.count} transaksi, subtotal ${money(group.total)}`
+      );
+      const priority = [...rows].sort((a,b) => Number(b.taxAmount ?? 0) - Number(a.taxAmount ?? 0)).slice(0,10).map((row,i) =>
+        `${i+1}. ${row.referenceNumber || `ID ${row.id ?? "-"}`} | ${row.customerName || "Customer tidak tercatat"} | ${row.transactionDate || "tanggal kosong"} | PPN ${money(Number(row.taxAmount ?? 0))} | Verifikasi identitas pembayar, tipe booking, invoice, dan bukti pembayaran`
+      );
+      const totalOverallPpn = Number(body.summary?.totalTaxAmount ?? 0);
+      const proportion = totalOverallPpn > 0 ? `${(totalPpn / totalOverallPpn * 100).toFixed(1)}%` : "tidak dapat dihitung";
+      return [
+        `Analisis transaksi personal dengan PPN — ${selected}`,
+        `Sumber: Sport Center Tax Report. Data aktif: ${rows.length} transaksi.`,
+        `Total DPP kandidat personal: ${money(totalDpp)}`,
+        `Total PPN kandidat personal: ${money(totalPpn)} (${proportion} dari PPN seluruh transaksi).`,
+        `PPN seluruh transaksi: ${money(totalOverallPpn)}.`,
+        "",
+        "Kelompok nominal PPN:",
+        ...(breakdown.length ? breakdown : ["Tidak ada transaksi personal dengan PPN."]),
+        "",
+        "Prioritas verifikasi (10 PPN terbesar):",
+        ...(priority.length ? priority : ["Tidak ada kandidat."]),
+        "",
+        "Potensi salah klasifikasi: status payer personal belum membuktikan transaksi harus dikoreksi; nama customer atau nominal tidak cukup untuk menyimpulkan corporate. Cocokkan booking, pembayar sebenarnya, invoice, dan bukti pembayaran. Transaksi dengan PPN besar diprioritaskan untuk pemeriksaan, bukan otomatis dianggap salah.",
+        "Status: BELUM SIAP dinyatakan siap lapor sebelum transaksi kandidat dan data pajak lain direkonsiliasi. Tidak ada data yang diubah."
+      ].join("\n");
+    }
     const detail = /(?:rincian|detail|daftar|urutkan|kelompokkan|44 transaksi|transaksi itu|tampilkan.{0,70}(?:transaksi personal|transaksi yang|booking|kandidat))/i.test(question) && !/(?:total transaksi|total ppn|total dpp|jumlah temuan|status kesiapan|tampilkan total)/i.test(question);
     const personalOnly = /personal|perorangan|pribadi|44 transaksi|transaksi itu/i.test(question);
     if (!detail) return result.text + (result.personalWithTax.length ? "\n\nStatus: BELUM SIAP dinyatakan siap lapor — verifikasi transaksi personal dengan PPN serta rekonsiliasi pajak di luar Sport Center diperlukan." : "\n\nStatus: Perlu verifikasi silang sebelum pelaporan; audit ini belum mencakup pajak masukan dan PPh.");
