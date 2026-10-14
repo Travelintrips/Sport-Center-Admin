@@ -88,7 +88,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
  if(classification.kind==="handshake"){
   // Candidate ZK Push 2.x response, to be confirmed against physical X904.
   // No log cursor, status changes, clock writes, enrollment or door commands.
-  return res.status(200).send("GET OPTION FROM: "+allowed+"\nErrorDelay=60\nDelay=30\nTransInterval=1\nTransFlag=TransData AttLog\nRealtime=1\n");
+  return res.status(200).send("GET OPTION FROM: "+allowed+"\nATTLOGStamp=None\nOPERLOGStamp=9999\nErrorDelay=60\nDelay=30\nTransTimes=00:00;14:05\nTransInterval=1\nTransFlag=TransData AttLog\nRealtime=1\nEncrypt=None\n");
  }
  if(classification.kind==="poll")return res.status(200).send("OK\n");
  // OPTIONS is the device configuration announcement, not an attendance log.
