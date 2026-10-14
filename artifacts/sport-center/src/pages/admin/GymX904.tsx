@@ -10,6 +10,8 @@ interface IntegrationStatus { receiver: string; hardware: string; synchronizing:
 interface AdmsDiagnostic { refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
+interface ObservedPin { user_pin: string; event_count: number; last_device_time: string | null; last_received_at: string | null; }
+interface ObservedPinResult { source: string; users: ObservedPin[]; }
 type GymTab = "dashboard" | "device" | "users" | "rules" | "events" | "members" | "mapping" | "access" | "audit";
 
 interface Checkin {
@@ -99,6 +101,22 @@ export default function GymX904() {
     refetchInterval: 30000,
     retry: 1,
   });
+  const { data: observedPins, isLoading: observedLoading, isError: observedError } = useQuery<ObservedPinResult>({
+    queryKey: ["gym-x904-observed-pins"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch(`${API}/admin/gym-x904/observed-pins`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Data PIN pada log X904 belum dapat dibaca");
+      return response.json();
+    },
+    enabled: tab === "users" || tab === "mapping" || tab === "audit",
+    refetchInterval: 30000,
+    retry: 1,
+  });
+  const observedRows = Array.isArray(observedPins?.users) ? observedPins.users : [];
   const deviceRows = deviceData?.enabled && Array.isArray(deviceData.events) ? deviceData.events : [];
   const tabs: { id: GymTab; label: string; icon: typeof Activity }[] = [
     { id: "dashboard", label: "Dashboard Gym", icon: LayoutDashboard },
@@ -225,15 +243,15 @@ export default function GymX904() {
         <p className="text-sm text-muted-foreground">Menu ini tidak menampilkan data contoh sebagai data mesin. Data pengguna, kartu, dan aturan hanya dapat tampil setelah pembacaan read-only, validasi identitas perangkat, dan sinkronisasi yang berhasil.</p>
         <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["gym-x904-integration"] })} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted"><RefreshCw size={14} /> Periksa status lagi</button>
       </section>}      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
-        <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />User terdaftar di mesin X904</h2>
-        <p className="text-sm text-muted-foreground mt-1">Sumber wajib: daftar pengguna yang dibaca langsung dari X904 melalui konektor lokal terautentikasi. Tidak berasal dari daftar Member Gym SC.</p></div>
-        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Data pengguna X904 belum tersinkron ke Sport Center. Pengujian baca langsung pada komputer lokal tidak otomatis mengirim data ke server. Halaman ini tidak menampilkan data contoh atau member SC sebagai user mesin.
-        </div>
+        <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />PIN yang tercatat pada log ADMS X904</h2>
+        <p className="text-sm text-muted-foreground mt-1">Data nyata dari log yang sudah tersimpan di database, bukan daftar lengkap user terdaftar, bukan bukti identitas mesin. Nama, kartu, dan status enrollment memerlukan pembacaan master user dari perangkat.</p></div>
+        {observedError ? <p role="alert" className="text-sm">Data log X904 belum dapat dibaca dari database PROD.</p> :
+        observedLoading ? <p className="text-sm">Memuat data log X904...</p> :
         <div className="overflow-x-auto"><table className="min-w-[720px] w-full text-sm text-left">
-          <thead className="border-b"><tr><th className="p-3">PIN / User ID Mesin</th><th className="p-3">Nama pada mesin</th><th className="p-3">Nomor kartu</th><th className="p-3">Status</th><th className="p-3">Member SC terkait</th></tr></thead>
-          <tbody><tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Menunggu sinkronisasi data X904 ke Sport Center</td></tr></tbody>
-        </table></div>
+          <thead className="border-b"><tr><th className="p-3">PIN / User ID pada log</th><th className="p-3">Jumlah event</th><th className="p-3">Waktu event terakhir</th><th className="p-3">Terakhir diterima server</th><th className="p-3">Status</th></tr></thead>
+          <tbody>{observedRows.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Belum ada PIN dari log ADMS tersimpan</td></tr> :
+            observedRows.map((u) => <tr key={u.user_pin} className="border-b"><td className="p-3 font-mono">{u.user_pin}</td><td className="p-3">{u.event_count}</td><td className="p-3">{u.last_device_time ?? "—"} (waktu mesin)</td><td className="p-3">{u.last_received_at ? new Date(u.last_received_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"}) + " WIB" : "—"}</td><td className="p-3">Tercatat di log; enrollment belum diverifikasi</td></tr>)}</tbody>
+        </table></div>}
       </section>}
       {tab === "rules" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><ShieldCheck size={18} />Rule akses yang tersimpan di mesin</h2>
