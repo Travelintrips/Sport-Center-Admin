@@ -103,19 +103,29 @@ Deno.serve(async (request) => {
       if (jsonShape[0]?.kind !== "array") {
         return reply(422, { ok:false, error:"JSON_ARRAY_ENCODING_FAILED", kind:String(jsonShape[0]?.kind || "unknown") });
       }
-      const accepted = await db.unsafe(
-        "INSERT INTO sport_center.gym_x904_lan_users " +
-        "(device_serial,user_pin,device_uid,display_name,device_role,last_seen_snapshot) " +
-        "SELECT $1,u.pin,u.uid,u.name,u.role,$2::uuid " +
-        "FROM jsonb_to_recordset(($3::text)::jsonb) AS u(pin text,uid integer,name text,role integer) " +
-        "ON CONFLICT (device_serial,user_pin) DO UPDATE SET " +
-        "device_uid=EXCLUDED.device_uid,display_name=EXCLUDED.display_name," +
-        "device_role=EXCLUDED.device_role,last_seen_snapshot=EXCLUDED.last_seen_snapshot,last_seen_at=now() " +
-        "RETURNING user_pin",
-        [serial, snapshotId, JSON.stringify(users)],
-      );
-      if (accepted.length !== users.length) return error(503, "INCOMPLETE_USERS");
-      return reply(200, {ok:true, acknowledged: accepted.length, snapshotId});
+      const accepted = await db.begin(async (tx) => {
+        // Stage the next snapshot separately; do NOT invalidate the last completed one.
+        const inserted = await tx.unsafe(
+          "INSERT INTO sport_center.gym_x904_lan_users " +
+          "(device_serial,user_pin,device_uid,display_name,device_role,last_seen_snapshot) " +
+          "SELECT $1,u.pin,u.uid,u.name,u.role,$2::uuid " +
+          "FROM jsonb_to_recordset(($3::text)::jsonb) AS u(pin text,uid integer,name text,role integer) " +
+          "ON CONFLICT (device_serial,user_pin) DO UPDATE SET " +
+          "device_uid=EXCLUDED.device_uid,display_name=EXCLUDED.display_name," +
+          "device_role=EXCLUDED.device_role,last_seen_at=now() " +
+          "RETURNING user_pin",
+          [serial, snapshotId, JSON.stringify(users)],
+        );
+        await tx.unsafe(
+          "INSERT INTO sport_center.gym_x904_lan_pending_users (device_serial,snapshot_id,user_pin) " +
+          "SELECT $1,$2::uuid,u.pin FROM jsonb_to_recordset(($3::text)::jsonb) AS u(pin text) " +
+          "ON CONFLICT DO NOTHING",
+          [serial, snapshotId, JSON.stringify(users)],
+        );
+        return inserted.length;
+      });
+      if (accepted !== users.length) return error(503, "INCOMPLETE_USERS");
+      return reply(200, {ok:true, acknowledged: accepted, snapshotId});
     }
 
     if (match[1] === "logs") {
@@ -137,34 +147,71 @@ Deno.serve(async (request) => {
         const id = await sha256(JSON.stringify([serial, item.index, item.pin, item.uid, item.occurred]));
         logs.push({id, ix:item.index, pin:item.pin, uid:item.uid, occurred:item.occurred});
       }
-      const result = await db.unsafe(
-        "INSERT INTO sport_center.gym_x904_lan_logs " +
-        "(event_id,device_serial,event_index,user_pin,device_uid,device_time,last_seen_snapshot) " +
-        "SELECT e.id,$1,e.ix,e.pin,e.uid,e.occurred,$2::uuid " +
-        "FROM jsonb_to_recordset(($3::text)::jsonb) AS e(id text,ix integer,pin text,uid integer,occurred text) " +
-        "ON CONFLICT (event_id) DO UPDATE SET last_seen_snapshot=EXCLUDED.last_seen_snapshot " +
-        "RETURNING event_id",
-        [serial, snapshotId, JSON.stringify(logs)],
-      );
-      if (result.length !== logs.length) return error(503, "INCOMPLETE_LOGS");
-      return reply(200, {ok:true, acknowledged:logs.length, storedOrRefreshed:result.length, snapshotId});
+      const accepted = await db.begin(async (tx) => {
+        const inserted = await tx.unsafe(
+          "INSERT INTO sport_center.gym_x904_lan_logs " +
+          "(event_id,device_serial,event_index,user_pin,device_uid,device_time,last_seen_snapshot) " +
+          "SELECT e.id,$1,e.ix,e.pin,e.uid,e.occurred,$2::uuid " +
+          "FROM jsonb_to_recordset(($3::text)::jsonb) AS e(id text,ix integer,pin text,uid integer,occurred text) " +
+          "ON CONFLICT (event_id) DO UPDATE SET device_time=EXCLUDED.device_time " +
+          "RETURNING event_id",
+          [serial, snapshotId, JSON.stringify(logs)],
+        );
+        await tx.unsafe(
+          "INSERT INTO sport_center.gym_x904_lan_pending_logs (device_serial,snapshot_id,event_id) " +
+          "SELECT $1,$2::uuid,e.id FROM jsonb_to_recordset(($3::text)::jsonb) AS e(id text) " +
+          "ON CONFLICT DO NOTHING",
+          [serial, snapshotId, JSON.stringify(logs)],
+        );
+        return inserted.length;
+      });
+      if (accepted !== logs.length) return error(503, "INCOMPLETE_LOGS");
+      return reply(200, {ok:true, acknowledged:logs.length, storedOrRefreshed:accepted, snapshotId});
     }
 
     if (!integer(body.userCount, 1, 500) || !integer(body.deviceLogCount, 0, 1000000)) {
       return error(400, "INVALID_EXPECTED_COUNTS");
     }
     const receipt = await db.begin(async (tx) => {
+      const current = await tx.unsafe(
+        "SELECT last_snapshot_id::text AS snapshot_id,user_count,device_log_count,stored_log_count " +
+        "FROM sport_center.gym_x904_lan_state WHERE device_serial=$1 FOR UPDATE",
+        [serial],
+      );
+      if (current[0]?.snapshot_id === snapshotId) {
+        const users = Number(current[0].user_count);
+        const logs = Number(current[0].stored_log_count);
+        return {completed:users===body.userCount && logs===body.deviceLogCount,users,logs};
+      }
       const counts = await tx.unsafe(
-        "SELECT (SELECT count(*)::int FROM sport_center.gym_x904_lan_users " +
-        "WHERE device_serial=$1 AND last_seen_snapshot=$2::uuid) AS users," +
-        "(SELECT count(*)::int FROM sport_center.gym_x904_lan_logs " +
-        "WHERE device_serial=$1 AND last_seen_snapshot=$2::uuid) AS logs",
+        "SELECT (SELECT count(*)::int FROM sport_center.gym_x904_lan_pending_users " +
+        "WHERE device_serial=$1 AND snapshot_id=$2::uuid) AS users," +
+        "(SELECT count(*)::int FROM sport_center.gym_x904_lan_pending_logs " +
+        "WHERE device_serial=$1 AND snapshot_id=$2::uuid) AS logs",
         [serial, snapshotId],
       );
       const users = Number(counts[0]?.users ?? -1);
       const logs = Number(counts[0]?.logs ?? -1);
       if (users !== body.userCount || logs !== body.deviceLogCount) {
         return {completed:false,users,logs};
+      }
+      // Commit all visibility changes and the completed-snapshot pointer together.
+      const updatedUsers = await tx.unsafe(
+        "UPDATE sport_center.gym_x904_lan_users u SET last_seen_snapshot=$2::uuid " +
+        "FROM sport_center.gym_x904_lan_pending_users p " +
+        "WHERE p.device_serial=$1 AND p.snapshot_id=$2::uuid " +
+        "AND u.device_serial=p.device_serial AND u.user_pin=p.user_pin RETURNING u.user_pin",
+        [serial, snapshotId],
+      );
+      const updatedLogs = await tx.unsafe(
+        "UPDATE sport_center.gym_x904_lan_logs l SET last_seen_snapshot=$2::uuid " +
+        "FROM sport_center.gym_x904_lan_pending_logs p " +
+        "WHERE p.device_serial=$1 AND p.snapshot_id=$2::uuid " +
+        "AND l.device_serial=p.device_serial AND l.event_id=p.event_id RETURNING l.event_id",
+        [serial, snapshotId],
+      );
+      if (updatedUsers.length !== users || updatedLogs.length !== logs) {
+        throw new Error("ATOMIC_SNAPSHOT_ROW_MISMATCH");
       }
       await tx.unsafe(
         "INSERT INTO sport_center.gym_x904_lan_state " +
@@ -175,6 +222,17 @@ Deno.serve(async (request) => {
         "device_log_count=EXCLUDED.device_log_count,stored_log_count=EXCLUDED.stored_log_count," +
         "last_authenticated_at=now(),last_complete_at=now()",
         [serial, snapshotId, users, logs, logs],
+      );
+      // Staging rows are disposable after the atomic switch.
+      await tx.unsafe(
+        "DELETE FROM sport_center.gym_x904_lan_pending_users WHERE device_serial=$1 " +
+        "AND (snapshot_id=$2::uuid OR created_at < now() - interval '1 day')",
+        [serial, snapshotId],
+      );
+      await tx.unsafe(
+        "DELETE FROM sport_center.gym_x904_lan_pending_logs WHERE device_serial=$1 " +
+        "AND (snapshot_id=$2::uuid OR created_at < now() - interval '1 day')",
+        [serial, snapshotId],
       );
       return {completed:true,users,logs};
     });

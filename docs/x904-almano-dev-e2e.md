@@ -30,6 +30,11 @@ route machine traffic to the PROD website or change X904 network settings.
 - `POST .../logs`: batches of up to 500 records, idempotent by event SHA-256.
 - `POST .../complete`: returns success only after database verifies that the
   current snapshot contains the exact reported user and device log counts.
+- Batches are staged in RLS-protected pending tables. The last completed
+  dashboard snapshot remains visible until all new users and events have been
+  counted, and the final visibility switch commits atomically.
+- On success, pending rows are removed; failed or interrupted imports cannot
+  overwrite the currently completed snapshot.
 - A failed batch never marks the snapshot complete; retry creates a new snapshot.
 - Browser-facing admin routes in Sport-Center-Admin are independently protected
   by Sport Center's admin middleware. DEV records are **not** live PROD data.
