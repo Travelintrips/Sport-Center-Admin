@@ -20,6 +20,10 @@ const releaseFingerprint = "x904-release-proof-20261012-v1";
 let lastContact:Contact|null=null;
 let lastTrustedIngestAt:string|null=null;
 let lastTrustedIngestRows=0;
+let lastRejectedAttendanceAt:string|null=null;
+let rejectedUntrustedAttendance=0;
+let rejectedUnparseableAttendance=0;
+let attendanceStorageFailures=0;
 const trustedIngestRecent=()=>lastTrustedIngestAt!==null && Date.now()-Date.parse(lastTrustedIngestAt)<90000;
 // Counters disclose neither serials nor request bodies; reset on process restart.
 const refusedRequests:{unsupported:number;unknownSerial:number}={unsupported:0,unknownSerial:0};
@@ -62,7 +66,7 @@ const deviceSerial=()=>process.env.GYM_X904_DEVICE_SERIAL||"";
 export const getX904ReceiverState = () => ({ ready: enabled() && deviceSerial().length >= 4, lastContactAt: lastContact?.receivedAt ?? null, contactUnverified: true, lastTrustedIngestAt });
 router.get("/api/admin/gym-x904/adms-diagnostic",adminMiddleware,(_req,res)=>{
  res.setHeader("Cache-Control","no-store");
- res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,trustedIngestRecent:trustedIngestRecent(),lastTrustedIngestAt,lastTrustedIngestRows,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4,trialEnabled:process.env.GYM_X904_ADMS_TRIAL_INGEST_ENABLED==="true"},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
+ res.json({releaseFingerprint,enabled:enabled(),hardwareVerified:false,ingesting:false,trustedIngestRecent:trustedIngestRecent(),lastTrustedIngestAt,lastTrustedIngestRows,lastRejectedAttendanceAt,rejectedUntrustedAttendance,rejectedUnparseableAttendance,attendanceStorageFailures,lastContact,recentContacts,lastAttlogShape,startedAt,ephemeral:true,refusedRequests,rejectedReasons,rejectedOperations,rejectedTables,rejectedPostShapes,configuration:{probeEnabled:process.env.GYM_X904_ADMS_PROBE_ENABLED==="true",handshakeEnabled:process.env.GYM_X904_ADMS_HANDSHAKE_DIAGNOSTIC_ENABLED==="true",serialConfigured:deviceSerial().length>=4,trialEnabled:process.env.GYM_X904_ADMS_TRIAL_INGEST_ENABLED==="true"},blocker:!enabled()?"diagnostic_disabled":deviceSerial().length<4?"serial_not_configured":lastContact===null?"no_device_contact":"device_contact_unverified"});
 });
 router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () => true, limit: "32kb" }), async (req:Request,res:Response) => {
  res.setHeader("Cache-Control","no-store");
@@ -122,9 +126,9 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
      createHmac("sha256", secret).update(provided).digest("hex") ===
      createHmac("sha256", secret).update(secret).digest("hex");
-   if (!authenticated && !trialMode) return res.status(403).send("UNTRUSTED DEVICE\n");
+   if (!authenticated && !trialMode) { rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); return res.status(403).send("UNTRUSTED DEVICE\n"); }
    const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
-   if (!parsed) return res.status(400).send("INVALID ATTLOG\n");
+   if (!parsed) { rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); return res.status(400).send("INVALID ATTLOG\n"); }
    const records = parsed.map(event => ({
      id: createHash("sha256").update(JSON.stringify([allowed,event.pin,event.occurred,event.status,event.verify])).digest("hex"),
      pin: event.pin, occurred: event.occurred, status: event.status, verify: event.verify
@@ -143,6 +147,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      }
      return res.status(200).send("OK: " + parsed.length + "\n");
    } catch {
+     attendanceStorageFailures++; lastRejectedAttendanceAt=new Date().toISOString();
      return res.status(503).send("ATTLOG STORAGE UNAVAILABLE\n");
    }
  }
