@@ -87,7 +87,7 @@ router.post("/internal/gym-x904/lan-events", async (req, res) => {
         !Number.isInteger(index) || Number(index) < 0 || Number(index) > 1000000 ||
         typeof pin !== "string" || !/^[A-Za-z0-9_-]{1,50}$/.test(pin) ||
         !(uid === null || (Number.isInteger(uid) && Number(uid) >= 0 && Number(uid) <= 65535)) ||
-        typeof occurred !== "string" || !/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(occurred))
+        typeof occurred !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(occurred))
       return res.status(400).json({error:"Invalid event"});
     seen.add(id);
     parsed.push({id,index:Number(index),pin,uid:uid===null?null:Number(uid),occurred});
