@@ -85,17 +85,22 @@ export default function AiAsistenWidget() {
           tax: { id: number; referenceType: string; referenceId: number; transactionDate: string; dpp: number; dppNilaiLain: number | null; taxAmount: number; grandTotal: number | null; taxCode: string };
           payment: null | { id: number; bookingId: number; amount: number; status: string; paymentMethod: string | null; paymentType: string; proofExists: boolean };
           booking: null | { id: number; orderNumber: string; customerName: string; payerType: string; status: string; bookingDate: string; totalPrice: number; grandTotal: number | null; billingStatus: string | null };
+          relatedBookings: Array<{ id: number; orderNumber: string; totalPrice: number; status: string; bookingDate: string }>;
+          relatedTotal: number; groupRef: string | null; allocationVerified: boolean;
           traceStatus: string;
         }>
       } = await response.json();
-      return trace.items.map(({tax, payment, booking, traceStatus}) => [
+      return trace.items.map(({tax, payment, booking, relatedBookings, relatedTotal, groupRef, traceStatus}) => [
         `Penelusuran sumber transaksi ${requestedReference} — ${selected}`,
         `Catatan pajak #${tax.id} | sumber ${tax.referenceType} #${tax.referenceId} | tanggal ${tax.transactionDate}`,
         `DPP: ${money(tax.dpp)} | DPP nilai lain: ${tax.dppNilaiLain === null ? "tidak tersedia" : money(tax.dppNilaiLain)} | PPN: ${money(tax.taxAmount)} | Kode: ${tax.taxCode}`,
         `Nilai bruto pada catatan pajak: ${tax.grandTotal === null ? "tidak tersedia" : money(tax.grandTotal)}`,
         `Pembayaran sumber: ${payment ? `#${payment.id} | booking #${payment.bookingId} | ${money(payment.amount)} | status ${payment.status} | metode ${payment.paymentMethod || "-"} | bukti pembayaran ${payment.proofExists ? "tersimpan (isi tidak diperiksa)" : "tidak tercatat"}` : "tidak dapat ditautkan secara pasti"}`,
         `Booking sumber: ${booking ? `${booking.orderNumber} | #${booking.id} | ${booking.customerName} | payer ${booking.payerType} | status ${booking.status} | tanggal ${booking.bookingDate} | nilai booking ${money(booking.totalPrice)} | bruto ${booking.grandTotal === null ? "tidak tersedia" : money(booking.grandTotal)}` : "tidak dapat ditautkan secara pasti"}`,
-        `Status penelusuran: ${traceStatus}. Invoice PDF, isi bukti pembayaran, dan dasar hukum pajak belum diverifikasi. Data pembayaran dan booking bisa berbeda dari angka pajak karena cakupan/komponen transaksi.`,
+        `Sesi dengan groupRef yang sama: ${groupRef ?? "tidak ada"} | ${relatedBookings.length} booking | jumlah harga ${money(relatedTotal)}`,
+        ...relatedBookings.map(b => `${b.orderNumber} | #${b.id} | ${b.bookingDate} | ${money(b.totalPrice)} | ${b.status}`),
+        `Selisih nominal pembayaran terhadap jumlah harga sesi: ${payment ? money(payment.amount - relatedTotal) : "tidak tersedia"}. Hubungan groupRef tidak membuktikan alokasi atau pelunasan masing-masing sesi.`,
+        `Status penelusuran: ${traceStatus}. Alokasi pembayaran ke sesi, invoice PDF, isi bukti pembayaran, dan dasar hukum pajak belum diverifikasi.`,
         "Tidak ada data yang diubah."
       ].join("\n")).join("\n\n");
     }
