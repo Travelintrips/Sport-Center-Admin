@@ -70,9 +70,8 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     receiver: receiverState.ready ? "diagnostic-ready" : "not-connected",
     hardware: recent ? "connector-attested" : receiverState.lastTrustedIngestAt && storedEventCount !== null && storedEventCount > 0 && lastStoredEventAt ? "trusted-adms-data-received" : storedEventCount !== null && storedEventCount > 0 ? "stored-adms-unverified" : "unverified",
     synchronizing: false,
-    eventIngestConfigured: process.env.GYM_X904_EVENT_INGEST_ENABLED === "true" &&
-      (process.env.GYM_X904_EVENT_INGEST_KEY || "").length >= 32 &&
-      (process.env.GYM_X904_DEVICE_SERIAL || "").length >= 3,
+    eventIngestConfigured: process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED === "true" &&
+      (process.env.GYM_X904_DEVICE_SERIAL || "").length >= 4,
     connectorHeartbeatEnabled: heartbeatEnabled(),
     trustedAdmsIngestAt: receiverState.lastTrustedIngestAt,
     eventReadEnabled: process.env.GYM_X904_LOG_READ_ENABLED === "true",
