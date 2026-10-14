@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Bot, Send, X, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
 import { getToken } from "@/lib/auth";
@@ -49,6 +49,26 @@ function audit(report: TaxReport, period: string) {
     duplicates, active, personalWithTax
   };
 }
+/** Deterministic audit intent: prioritize record IDs, then grouped tax checks, then payments. */
+function identifyAuditIntent(question: string) {
+  const taxIds = /(?:catatan pajak|catatan.*#|simulasi|dengan dan tanpa|masuk dalam total)/i.test(question)
+    && /(?:laporan|total|simulasi|catatan pajak)/i.test(question) && /#\d+/.test(question);
+  const groupTax = /(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question)
+    && /(?:SCPAY-SC-|pembayaran)/i.test(question);
+  const paymentId = question.match(/SCPAY-SC-(\d+)/i)?.[1]
+    ?? question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
+  const bookingReference = question.match(/\bSC-\d+\b/i)?.[0]?.toUpperCase();
+  return { taxIds, groupTax, paymentId, reference: paymentId ? `SCPAY-SC-${paymentId}` : bookingReference };
+}
+function resolveFollowUp(question: string, history: Message[]) {
+  if (/\b(?:SC-\d+|SCPAY-SC-\d+)\b|(?:pembayaran|payment)\s*#?\d+|#\d+|\b20\d\d[-/]\d\d\b|\b(?:januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/i.test(question)) return question;
+  if (!/(?:transaksi (?:ini|itu)|pembayaran (?:ini|itu)|booking (?:ini|itu)|grup (?:ini|itu)|lanjut|yang tadi|tersebut|coba periksa|periksa lagi)/i.test(question)) return question;
+  const prior = [...history].reverse().find(m => m.role === "admin" && /(?:SCPAY-SC-\d+|SC-\d+|(?:pembayaran|payment)\s*#\d+)/i.test(m.text));
+  const match = prior?.text.match(/SCPAY-SC-\d+/i) ?? prior?.text.match(/(?:pembayaran|payment)\s*#(\d+)/i) ?? prior?.text.match(/SC-\d+/i);
+  if (!match) return question;
+  const reference = match[1] ? `SCPAY-SC-${match[1]}` : match[0];
+  return `${question} [referensi percakapan: ${reference}]`;
+}
 /** Widget hanya dimuat di layout admin setelah autentikasi. Tidak memiliki akses tulis. */
 export default function AiAsistenWidget() {
   const [open, setOpen] = useState(false);
@@ -56,6 +76,20 @@ export default function AiAsistenWidget() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<Message[]>([{ role: "assistant", text: "Halo! Saya AI Asisten CST. Saya bisa mengaudit data PPN Sport Center per masa pajak (baca-saja). Koneksi PPh, BizPortal, dan Coretax belum aktif." }]);
+  // Session-scoped transcript; no server-side storage of sensitive tax conversations.
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("sc-ai-asisten-history-v1");
+      if (!saved) return;
+      const parsed: unknown = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length <= 120 && parsed.every(m => m && typeof m.text === "string" && (m.role === "admin" || m.role === "assistant"))) {
+        setMessages(parsed.slice(-40));
+      }
+    } catch { /* Browser storage unavailable: continue without persistence. */ }
+  }, []);
+  useEffect(() => {
+    try { sessionStorage.setItem("sc-ai-asisten-history-v1", JSON.stringify(messages.slice(-40))); } catch { /* Storage may be disabled. */ }
+  }, [messages]);
   async function queryTax(question: string) {
     const selected = periodFromQuestion(question, period);
     const [year, month] = selected.split("-").map(Number);
@@ -70,11 +104,9 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
-    // IDs prefixed with # in a tax-record audit refer to tax_transactions.id, not payments.id.
-    const taxRecordAudit = /(?:catatan pajak|catatan.*#|simulasi|dengan dan tanpa|masuk dalam total)/i.test(question)
-      && /(?:laporan|total|simulasi|catatan pajak)/i.test(question)
-      && /#\d+/.test(question);
-    if (taxRecordAudit) {
+    const intent = identifyAuditIntent(question);
+    // IDs with # in tax audit refer to tax_transactions.id, not payments.id.
+    if (intent.taxIds) {
       const ids = [...new Set([...question.matchAll(/#(\d+)/g)].map(m => Number(m[1])))];
       const activeRows = result.active;
       const matches = ids.map(id => ({ id, row: activeRows.find(t => t.id === id) }));
@@ -101,9 +133,8 @@ export default function AiAsistenWidget() {
         "Tidak ada data yang diubah atau dihapus."
       ].join("\n");
     }
-    const paymentMention = question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
-    if (/(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question) && /(?:SCPAY-SC-|pembayaran)/i.test(question)) {
-      const paymentId = question.match(/SCPAY-SC-(\d+)/i)?.[1] ?? question.match(/pembayaran\s*#?(\d+)/i)?.[1];
+    if (intent.groupTax) {
+      const paymentId = intent.paymentId;
       if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
       const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
       if (!traceResponse.ok) throw new Error(`Audit pajak grup gagal (HTTP ${traceResponse.status})`);
@@ -122,7 +153,7 @@ export default function AiAsistenWidget() {
         g.note, "Sumber: catatan pajak Sport Center dan booking grup; tidak ada data yang diubah."
       ].join("\n");
     }
-    const requestedReference = paymentMention ? `SCPAY-SC-${paymentMention}` : question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
+    const requestedReference = intent.reference;
     if (requestedReference) {
       const response = await fetch(`${BASE}/admin/ai-asisten/tax-trace/${encodeURIComponent(requestedReference)}`, {
         headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin"
@@ -216,12 +247,13 @@ export default function AiAsistenWidget() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = input.trim();
+    const resolvedQuestion = resolveFollowUp(question, messages);
     if (!question || busy) return;
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
       const localAudit = /catatan pajak|simulasi|dengan dan tanpa|masuk dalam total|(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
-      const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
+      const answer = localAudit || identifyAuditIntent(resolvedQuestion).reference ? await queryTax(resolvedQuestion) : await queryAiCore(resolvedQuestion);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
       setMessages(v => [...v, { role: "assistant", text: `Permintaan gagal: ${err instanceof Error ? err.message : "Kesalahan tidak diketahui"}. Tidak ada data yang diubah.` }]);
@@ -231,7 +263,7 @@ export default function AiAsistenWidget() {
     {open && <section aria-label="Percakapan AI Asisten" className="flex h-[min(75dvh,600px)] w-[min(calc(100vw-2rem),410px)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
       <header className="flex items-center gap-2 border-b p-3"><Bot className="h-5 w-5 text-primary" /><div className="flex-1"><p className="text-sm font-semibold">AI Asisten</p><p className="text-xs text-muted-foreground">Administrasi CST · Audit baca-saja</p></div><button onClick={() => setOpen(false)} aria-label="Tutup AI Asisten" className="rounded p-2 hover:bg-muted"><X className="h-4 w-4" /></button></header>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm" role="log" aria-live="polite">{messages.map((m,i)=><div key={i} className={`max-w-[95%] whitespace-pre-wrap rounded-xl px-3 py-2 ${m.role === "admin" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"}`}>{m.text}</div>)}{busy && <p className="text-muted-foreground">Memproses...</p>}</div>
-      <div className="border-t p-3"><Link href="/admin/tax-report" onClick={() => setOpen(false)} className="mb-2 block text-xs text-primary underline">Buka laporan PPN Sport Center</Link><form className="flex gap-2" onSubmit={submit}><input aria-label="Pesan AI Asisten" value={input} onChange={e => setInput(e.target.value)} maxLength={1000} placeholder="Tanya AI Asisten atau audit PPN..." className="min-w-0 flex-1 rounded border bg-background px-3 py-2 text-sm" /><button type="submit" aria-label="Kirim pesan" disabled={busy || !input.trim()} className="rounded bg-primary px-3 text-primary-foreground disabled:opacity-50"><Send className="h-4 w-4" /></button></form><p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground"><ShieldCheck className="h-3 w-3" /> PPh / BizPortal / Coretax belum terhubung.</p></div>
+      <div className="border-t p-3"><button type="button" onClick={() => { setMessages([]); try { sessionStorage.removeItem("sc-ai-asisten-history-v1"); } catch { /* ignore */ } }} className="mb-2 text-xs text-muted-foreground underline">Hapus riwayat sesi</button><Link href="/admin/tax-report" onClick={() => setOpen(false)} className="mb-2 block text-xs text-primary underline">Buka laporan PPN Sport Center</Link><form className="flex gap-2" onSubmit={submit}><input aria-label="Pesan AI Asisten" value={input} onChange={e => setInput(e.target.value)} maxLength={1000} placeholder="Tanya AI Asisten atau audit PPN..." className="min-w-0 flex-1 rounded border bg-background px-3 py-2 text-sm" /><button type="submit" aria-label="Kirim pesan" disabled={busy || !input.trim()} className="rounded bg-primary px-3 text-primary-foreground disabled:opacity-50"><Send className="h-4 w-4" /></button></form><p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground"><ShieldCheck className="h-3 w-3" /> PPh / BizPortal / Coretax belum terhubung.</p></div>
     </section>}
     <button type="button" aria-expanded={open} aria-label={open ? "Tutup AI Asisten" : "Buka AI Asisten"} onClick={() => setOpen(v => !v)} className="flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-lg"><Bot className="h-5 w-5" />AI Asisten</button>
   </div>;
