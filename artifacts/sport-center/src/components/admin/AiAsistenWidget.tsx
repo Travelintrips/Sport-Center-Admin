@@ -70,11 +70,11 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
-    const requestedReference = question.match(/\\b(?:SCPAY-SC-\\d+|SC-\\d+)\\b/i)?.[0]?.toUpperCase();
+    const requestedReference = question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
     if (requestedReference) {
       const matches = body.transactions?.filter(row => row.referenceNumber?.toUpperCase() === requestedReference) ?? [];
       if (matches.length === 0) {
-        return `Pemeriksaan referensi ${requestedReference} — ${selected}\\nReferensi tidak ditemukan pada Sport Center Tax Report untuk periode ini. Tidak ada dasar untuk menyimpulkan status booking, pembayaran, atau pajaknya. Tidak ada data diubah.`;
+        return `Pemeriksaan referensi ${requestedReference} — ${selected}\nReferensi tidak ditemukan pada Sport Center Tax Report untuk periode ini. Tidak ada dasar untuk menyimpulkan status booking, pembayaran, atau pajaknya. Tidak ada data diubah.`;
       }
       return matches.map(row => {
         const dpp = Number(row.dpp);
@@ -98,8 +98,8 @@ export default function AiAsistenWidget() {
           comparison,
           `Langkah verifikasi: cocokkan referensi dengan booking sumber, jenis payer, invoice, nilai pembayaran aktual, dan kebijakan perpajakan yang berlaku. Jangan melakukan koreksi hanya berdasarkan rasio.`,
           `Tidak ada data yang diubah.`
-        ].join("\\n");
-      }).join("\\n\\n");
+        ].join("\n");
+      }).join("\n\n");
     }
     const deepAnalysis = /(?:kelompokkan|pengelompokan|analisis|analisa|hitung total|subtotal|total ppn dari|kemungkinan kesalahan klasifikasi|salah klasifikasi|prioritas|perlu diverifikasi)/i.test(question) && /(?:personal|perorangan|pribadi|transaksi itu|44 transaksi|ppn)/i.test(question);
     if (deepAnalysis) {
