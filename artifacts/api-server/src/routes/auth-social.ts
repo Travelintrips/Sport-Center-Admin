@@ -16,7 +16,7 @@ const router = Router();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-const otpStore = new Map<string, { otp: string; expires: number; name?: string }>();
+const otpStore = new Map<string, { otp: string; expires: number; attempts: number; lastSent: number; name?: string }>();
 const resetOtpStore = new Map<string, { otpHash: string; expires: number; token: string; attempts: number }>();
 const resetRequestLimiter = createPasswordResetLimiter(3, 30);
 const resetConfirmLimiter = createPasswordResetLimiter(10, 30);
@@ -41,7 +41,7 @@ function cleanPhone(raw: string): string {
 }
 
 function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(crypto.randomInt(100000, 1000000));
 }
 
 router.post("/auth/google", async (req, res) => {
@@ -69,7 +69,12 @@ router.post("/auth/google", async (req, res) => {
       return;
     }
 
-    const { sub: googleId, email, name, picture } = payload;
+    const { sub: googleId, email, name, picture, email_verified: emailVerified } = payload;
+    // Account linking by email requires a verified Google email address.
+    if (!googleId || !email || emailVerified !== true) {
+      res.status(401).json({ error: "Google email is not verified" });
+      return;
+    }
 
     let user = await db
       .select()
@@ -137,9 +142,15 @@ router.post("/auth/send-otp", async (req, res) => {
       return;
     }
 
+    const now = Date.now();
+    const previous = otpStore.get(cleaned);
+    if (previous && now - previous.lastSent < 60_000) {
+      res.status(429).json({ error: "Tunggu 60 detik sebelum meminta OTP baru." });
+      return;
+    }
     const otp = generateOtp();
-    const expires = Date.now() + 5 * 60 * 1000;
-    otpStore.set(cleaned, { otp, expires });
+    const expires = now + 5 * 60 * 1000;
+    otpStore.set(cleaned, { otp, expires, attempts: 0, lastSent: now });
 
     const fonnte = await getFonnteConfig();
     if (
@@ -197,8 +208,15 @@ router.post("/auth/verify-otp", async (req, res) => {
       res.status(400).json({ error: "OTP sudah kadaluarsa. Minta OTP baru." });
       return;
     }
+    if (record.attempts >= 5) {
+      otpStore.delete(cleaned);
+      res.status(429).json({ error: "Terlalu banyak percobaan OTP. Minta kode baru." });
+      return;
+    }
     if (record.otp !== String(otp)) {
-      res.status(400).json({ error: "OTP salah" });
+      record.attempts += 1;
+      if (record.attempts >= 5) otpStore.delete(cleaned);
+      res.status(record.attempts >= 5 ? 429 : 400).json({ error: "OTP salah atau batas percobaan tercapai" });
       return;
     }
 
