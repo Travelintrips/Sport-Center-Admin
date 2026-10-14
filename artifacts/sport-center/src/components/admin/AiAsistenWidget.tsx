@@ -96,7 +96,7 @@ export default function AiAsistenWidget() {
         `Booking sumber: ${booking ? `${booking.orderNumber} | #${booking.id} | ${booking.customerName} | payer ${booking.payerType} | status ${booking.status} | tanggal ${booking.bookingDate} | nilai booking ${money(booking.totalPrice)} | bruto ${booking.grandTotal === null ? "tidak tersedia" : money(booking.grandTotal)}` : "tidak dapat ditautkan secara pasti"}`,
         `Status penelusuran: ${traceStatus}. Invoice PDF, isi bukti pembayaran, dan dasar hukum pajak belum diverifikasi. Data pembayaran dan booking bisa berbeda dari angka pajak karena cakupan/komponen transaksi.`,
         "Tidak ada data yang diubah."
-      ].join("\\n")).join("\\n\\n");
+      ].join("\n")).join("\n\n");
     }
     const deepAnalysis = /(?:kelompokkan|pengelompokan|analisis|analisa|hitung total|subtotal|total ppn dari|kemungkinan kesalahan klasifikasi|salah klasifikasi|prioritas|perlu diverifikasi)/i.test(question) && /(?:personal|perorangan|pribadi|transaksi itu|44 transaksi|ppn)/i.test(question);
     if (deepAnalysis) {

@@ -35,7 +35,7 @@ router.post("/admin/ai-asisten/chat", adminMiddleware, async (req, res) => {
 /** Narrow, authenticated, read-only trace. Does not fetch or expose proof files or contact PII. */
 router.get("/admin/ai-asisten/tax-trace/:reference", adminMiddleware, async (req, res) => {
   const reference = String(req.params.reference || "").trim().toUpperCase();
-  if (!/^(?:SC-\\d+|SCPAY-SC-\\d+)$/.test(reference)) {
+  if (!/^(?:SC-\d+|SCPAY-SC-\d+)$/.test(reference)) {
     res.status(400).json({ error: "Referensi tidak valid." }); return;
   }
   try {
@@ -43,7 +43,7 @@ router.get("/admin/ai-asisten/tax-trace/:reference", adminMiddleware, async (req
     if (!records.length) { res.status(404).json({ error: "Catatan pajak tidak ditemukan." }); return; }
     const items = [];
     for (const tax of records) {
-      const paymentId = /^SCPAY-SC-(\\d+)$/.exec(reference)?.[1];
+      const paymentId = /^SCPAY-SC-(\d+)$/.exec(reference)?.[1];
       const canTracePayment = !!paymentId && tax.referenceId === Number(paymentId) && /payment/i.test(tax.referenceType);
       const isBooking = /booking/i.test(tax.referenceType);
       const payment = canTracePayment ? (await db.select().from(paymentsTable).where(eq(paymentsTable.id, tax.referenceId)).limit(1))[0] : null;
