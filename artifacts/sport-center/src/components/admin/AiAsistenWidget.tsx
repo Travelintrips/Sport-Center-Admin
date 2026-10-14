@@ -70,8 +70,8 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
-    const detail = /tampilkan|daftar|rincian|detail|urutkan|kelompokkan|44 transaksi|transaksi itu/i.test(question);
-    const personalOnly = /personal|perorangan|pribadi|44 transaksi/i.test(question);
+    const detail = /(?:tampilkan|daftar|rincian|detail|urutkan|kelompokkan)\\s+(?:(?:semua|seluruh|\d+|kandidat|transaksi|rincian|data|yang|itu|personal|perorangan|dengan|ppn|berdasarkan|dari|paling|teratas|terbesar|untuk|pada|bulan|masa|pajak|di|secara|nominal|nilai|ke|atas|bawah|dan|,|\\s)\\s*){0,15}(?:transaksi|booking|kandidat)|(?:44 transaksi|transaksi itu)/i.test(question) && !/\\b(?:total transaksi|total ppn|total dpp|jumlah temuan|status kesiapan|tampilkan total)\\b/i.test(question);
+    const personalOnly = /personal|perorangan|pribadi|44 transaksi|transaksi itu/i.test(question);
     if (!detail) return result.text + (result.personalWithTax.length ? "\n\nStatus: BELUM SIAP dinyatakan siap lapor — verifikasi transaksi personal dengan PPN serta rekonsiliasi pajak di luar Sport Center diperlukan." : "\n\nStatus: Perlu verifikasi silang sebelum pelaporan; audit ini belum mencakup pajak masukan dan PPh.");
     let rows = personalOnly ? result.personalWithTax : result.active.filter(r => !r.referenceNumber?.trim() || !r.taxCode?.trim() || Number(r.taxAmount) < 0 || Number(r.dpp) < 0);
     if (/terbesar|urutkan/i.test(question)) rows = [...rows].sort((a,b) => Number(b.taxAmount ?? 0)-Number(a.taxAmount ?? 0));
