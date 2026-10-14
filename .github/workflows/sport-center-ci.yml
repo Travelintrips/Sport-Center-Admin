@@ -103,6 +103,32 @@ jobs:
             --trace-deprecation \
             -e "require('google-auth-library'); console.log('google auth loaded')"
 
+      - name: Verify DEV database target and pooler credentials format
+        env:
+          EXPECTED_DEV_PROJECT_REF: xssrfshdrtdfupgqwfdw
+        run: |
+          node <<'NODE'
+          const input = process.env.SUPABASE_DATABASE_URL_DEV || "";
+          let url;
+          try { url = new URL(input); } catch {
+            console.error("::error::SUPABASE_DATABASE_URL_DEV is missing or is not a valid URL");
+            process.exit(1);
+          }
+          const host = url.hostname;
+          const user = decodeURIComponent(url.username);
+          const ref = process.env.EXPECTED_DEV_PROJECT_REF;
+          const expected = "postgres." + ref;
+          const hostOK = host.endsWith(".pooler.supabase.com");
+          const userOK = user === expected;
+          const portOK = url.port === "5432" || url.port === "6543";
+          if (!hostOK || !userOK || !portOK || !url.password) {
+            console.error("::error::Invalid DEV database URL target / pooler user / port / missing password. Use CST-DEV pooler URL with username postgres.<DEV_PROJECT_REF>. No database secret has been printed.");
+            console.log("Check only: pooler_host=" + hostOK + " dev_pooler_user=" + userOK + " port_valid=" + portOK + " password_present=" + Boolean(url.password));
+            process.exit(1);
+          }
+          console.log("DEV database URL structure PASS (actual PostgreSQL authentication is checked by tests).");
+          NODE
+
       - name: Verify Gym X904 admin isolation and navigation
         run: node scripts/verify-gym-x904-admin-contract.mjs
 
