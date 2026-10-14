@@ -70,6 +70,37 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
+    const requestedReference = question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
+    if (requestedReference) {
+      const matches = body.transactions?.filter(row => row.referenceNumber?.toUpperCase() === requestedReference) ?? [];
+      if (matches.length === 0) {
+        return `Pemeriksaan referensi ${requestedReference} — ${selected}\nReferensi tidak ditemukan pada Sport Center Tax Report untuk periode ini. Tidak ada dasar untuk menyimpulkan status booking, pembayaran, atau pajaknya. Tidak ada data diubah.`;
+      }
+      return matches.map(row => {
+        const dpp = Number(row.dpp);
+        const ppn = Number(row.taxAmount);
+        const numericValid = Number.isFinite(dpp) && Number.isFinite(ppn) && dpp >= 0 && ppn >= 0;
+        const effectiveRate = numericValid && dpp > 0 ? (ppn / dpp * 100).toFixed(2) + "%" : "tidak dapat dihitung";
+        const comparison = numericValid ? `Rasio PPN/DPP tercatat: ${effectiveRate}. Rasio saja tidak membuktikan benar/salah pajak; periksa jenis objek dan dasar pengenaan.` : "DPP/PPN tidak valid untuk perbandingan.";
+        return [
+          `Pemeriksaan transaksi ${requestedReference} — ${selected}`,
+          `Sumber: Sport Center Tax Report (baca-saja)`,
+          `ID catatan pajak: ${row.id ?? "tidak tersedia"}`,
+          `Tanggal transaksi: ${row.transactionDate || "tidak tersedia"}`,
+          `Nama customer: ${row.customerName || "tidak tersedia"}`,
+          `Tipe pembayar tercatat: ${row.payerType || "tidak tersedia"}`,
+          `Jenis transaksi: ${row.transactionType || "tidak tersedia"}; status: ${row.status || "tidak tersedia"}`,
+          `Kode pajak: ${row.taxCode || "tidak tersedia"}`,
+          `DPP tercatat: ${Number.isFinite(dpp) ? money(dpp) : "tidak tersedia"}`,
+          `PPN tercatat: ${Number.isFinite(ppn) ? money(ppn) : "tidak tersedia"}`,
+          `Nilai bruto: belum terverifikasi — tax report tidak menyediakan bukti nilai bruto transaksi ini.`,
+          `Booking terkait, invoice dan bukti pembayaran: belum tersedia dalam sumber data yang diakses AI Asisten pada pemeriksaan ini.`,
+          comparison,
+          `Langkah verifikasi: cocokkan referensi dengan booking sumber, jenis payer, invoice, nilai pembayaran aktual, dan kebijakan perpajakan yang berlaku. Jangan melakukan koreksi hanya berdasarkan rasio.`,
+          `Tidak ada data yang diubah.`
+        ].join("\n");
+      }).join("\n\n");
+    }
     const deepAnalysis = /(?:kelompokkan|pengelompokan|analisis|analisa|hitung total|subtotal|total ppn dari|kemungkinan kesalahan klasifikasi|salah klasifikasi|prioritas|perlu diverifikasi)/i.test(question) && /(?:personal|perorangan|pribadi|transaksi itu|44 transaksi|ppn)/i.test(question);
     if (deepAnalysis) {
       const rows = result.personalWithTax;
@@ -135,7 +166,7 @@ export default function AiAsistenWidget() {
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
-      const localAudit = /audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const localAudit = /SCPAY-SC-\\d+|SC-\\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
       const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
