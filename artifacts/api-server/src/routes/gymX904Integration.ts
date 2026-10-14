@@ -68,11 +68,10 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     attendanceSource: "sport-center-manual",
     legacyGymService: "retired",
     receiver: receiverState.ready ? "diagnostic-ready" : "not-connected",
-    hardware: recent ? "connector-attested" : "unverified",
+    hardware: recent ? "connector-attested" : receiverState.lastTrustedIngestAt && storedEventCount !== null && storedEventCount > 0 && lastStoredEventAt ? "trusted-adms-data-received" : storedEventCount !== null && storedEventCount > 0 ? "stored-adms-unverified" : "unverified",
     synchronizing: false,
-    eventIngestConfigured: process.env.GYM_X904_EVENT_INGEST_ENABLED === "true" &&
-      (process.env.GYM_X904_EVENT_INGEST_KEY || "").length >= 32 &&
-      (process.env.GYM_X904_DEVICE_SERIAL || "").length >= 3,
+    eventIngestConfigured: process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED === "true" &&
+      (process.env.GYM_X904_DEVICE_SERIAL || "").length >= 4,
     connectorHeartbeatEnabled: heartbeatEnabled(),
     trustedAdmsIngestAt: receiverState.lastTrustedIngestAt,
     eventReadEnabled: process.env.GYM_X904_LOG_READ_ENABLED === "true",
@@ -81,7 +80,11 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     lastDeviceEventAt: receiverState.lastTrustedIngestAt,
     note: recent && lastConnectorProof
       ? `Konektor tepercaya melaporkan pembacaan X904: ${lastConnectorProof.users} pengguna dan ${lastConnectorProof.logs} log. Ini bukan bukti sinkronisasi data ke database.`
-      : receiverState.ready
+      : receiverState.lastTrustedIngestAt && storedEventCount !== null && storedEventCount > 0 && lastStoredEventAt
+        ? `Log ADMS terautentikasi sudah diterima dan ${storedEventCount} event tersimpan. Status online fisik belum dibuktikan.`
+        : storedEventCount !== null && storedEventCount > 0
+        ? `Ada ${storedEventCount} log ADMS tersimpan pada database, tetapi identitas perangkat belum terautentikasi. Tidak membuktikan mesin online.`
+        : receiverState.ready
         ? "Receiver diagnostik aktif. Belum ada heartbeat konektor terautentikasi yang masih berlaku; absensi X904 belum diimpor."
         : "Receiver diagnostik belum siap. Data check-in yang tampil berasal dari SC.",
   });
