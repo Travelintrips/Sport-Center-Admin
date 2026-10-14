@@ -56,6 +56,7 @@ const ENV_KEYS = [
   "SMTP_FROM",
   "SMTP_PASS",
   "SMTP_PASSWORD",
+  "AI_CORE_CHAT_CONNECTOR_KEY",
 ];
 
 // These values are explicitly global/shared in the existing application.
@@ -161,6 +162,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
     "paylabs_prod_private_key",
     "PAYLABS_PROD_PRIVATE_KEY",
   ],
+  ai_core_chat_connector_key: ["ai_core_chat_connector_key", "AI_CORE_CHAT_CONNECTOR_KEY"],
   paylabs_prod_public_key: [
     "paylabs_prod_public_key",
     "PAYLABS_PROD_PUBLIC_KEY",
@@ -285,6 +287,7 @@ const SHARED_FIELDS = new Set([
   "SMTP_PORT",
   "SMTP_SECURE",
   "SMTP_USER",
+  "AI_CORE_CHAT_CONNECTOR_KEY",
 ]);
 
 const PROD_FIELDS = new Set([
@@ -379,6 +382,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
     ["google_service_account_json", "GOOGLE_SERVICE_ACCOUNT_JSON"],
     ["google_client_id", "GOOGLE_CLIENT_ID"],
     ["bizportal_sync_api_key", "BIZPORTAL_SYNC_API_KEY"],
+    ["ai_core_chat_connector_key", "AI_CORE_CHAT_CONNECTOR_KEY"],
     ["cashier_token_secret", "CASHIER_TOKEN_SECRET"],
     ["vapid_public_key", "VAPID_PUBLIC_KEY"],
     ["vapid_private_key", "VAPID_PRIVATE_KEY"],
