@@ -22,7 +22,7 @@ assert.match(gate, /ingesting:\s*false/);
 assert.match(events, /GYM_X904_EVENT_INGEST_ENABLED/);
 assert.match(events, /timingSafeEqual/);
 assert.match(events, /ON CONFLICT \(event_id\) DO NOTHING/);
-assert.match(integration, /hardware:\s*recent\s*\?\s*"connector-attested"\s*:\s*"unverified"/);
+assert.match(integration, /hardware:\s*recent\s*\?\s*"connector-attested"\s*:\s*receiverState\.lastTrustedIngestAt[\s\S]*?"trusted-adms-data-received"\s*:\s*"unverified"/);
 assert.match(integration, /GYM_X904_CONNECTOR_HEARTBEAT_ENABLED/);
 assert.match(integration, /timingSafeEqual/);
 assert.match(integration, /HEARTBEAT_TTL_MS\s*=\s*90_000/);
