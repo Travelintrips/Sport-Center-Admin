@@ -73,12 +73,12 @@ export default function AiAsistenWidget() {
     // IDs prefixed with # in a tax-record audit refer to tax_transactions.id, not payments.id.
     const taxRecordAudit = /(?:catatan pajak|catatan.*#|simulasi|dengan dan tanpa|masuk dalam total)/i.test(question)
       && /(?:laporan|total|simulasi|catatan pajak)/i.test(question)
-      && /#\\d+/.test(question);
+      && /#\d+/.test(question);
     if (taxRecordAudit) {
-      const ids = [...new Set([...question.matchAll(/#(\\d+)/g)].map(m => Number(m[1])))];
+      const ids = [...new Set([...question.matchAll(/#(\d+)/g)].map(m => Number(m[1])))];
       const activeRows = result.active;
       const matches = ids.map(id => ({ id, row: activeRows.find(t => t.id === id) }));
-      const excludedId = Number(question.match(/tanpa\\s+(?:catatan(?: pajak)?\\s*)?(?:pembayaran\\s*)?#(\\d+)/i)?.[1] ?? question.match(/(?:pembayaran|payment)\\s*#(\\d+)/i)?.[1] ?? 0);
+      const excludedId = Number(question.match(/tanpa\s+(?:catatan(?: pajak)?\s*)?(?:pembayaran\s*)?#(\d+)/i)?.[1] ?? question.match(/(?:pembayaran|payment)\s*#(\d+)/i)?.[1] ?? 0);
       const exclusion = activeRows.find(t => t.id === excludedId);
       const totalDpp = Number(body.summary?.totalDpp ?? 0);
       const totalPpn = Number(body.summary?.totalTaxAmount ?? 0);
@@ -99,7 +99,7 @@ export default function AiAsistenWidget() {
           : "Selisih simulasi: tidak dapat ditentukan tanpa ID catatan aktif yang tepat.",
         "Simulasi bukan usulan pembetulan. Keputusan duplikasi memerlukan pemeriksaan dasar pajak, dokumen sumber dan apakah transaksi berbeda mempunyai kewajiban pajak masing-masing.",
         "Tidak ada data yang diubah atau dihapus."
-      ].join("\\n");
+      ].join("\n");
     }
     const paymentMention = question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
     if (/(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question) && /(?:SCPAY-SC-|pembayaran)/i.test(question)) {
