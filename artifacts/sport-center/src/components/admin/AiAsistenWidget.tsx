@@ -72,7 +72,7 @@ export default function AiAsistenWidget() {
     setPeriod(selected);
     const paymentMention = question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
     if (/(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question) && /(?:SCPAY-SC-|pembayaran)/i.test(question)) {
-      const paymentId = question.match(/SCPAY-SC-(\\d+)/i)?.[1] ?? question.match(/pembayaran\\s*#?(\\d+)/i)?.[1];
+      const paymentId = question.match(/SCPAY-SC-(\d+)/i)?.[1] ?? question.match(/pembayaran\s*#?(\d+)/i)?.[1];
       if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
       const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
       if (!traceResponse.ok) throw new Error(`Audit pajak grup gagal (HTTP ${traceResponse.status})`);
@@ -89,7 +89,7 @@ export default function AiAsistenWidget() {
         `Jika semua catatan aktif dijumlahkan: DPP ${money(g.paymentTotals.dpp+g.bookingTotals.dpp)} | PPN ${money(g.paymentTotals.ppn+g.bookingTotals.ppn)}`,
         `Status kandidat tumpang tindih: ${g.overlapCandidate ? "YA — perlu pemeriksaan apakah kedua sumber masuk laporan yang sama" : "belum terindikasi dari catatan yang terbaca"}`,
         g.note, "Sumber: catatan pajak Sport Center dan booking grup; tidak ada data yang diubah."
-      ].join("\\n");
+      ].join("\n");
     }
     const requestedReference = paymentMention ? `SCPAY-SC-${paymentMention}` : question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
     if (requestedReference) {
