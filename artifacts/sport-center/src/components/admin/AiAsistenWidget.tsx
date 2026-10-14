@@ -104,11 +104,9 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
-    // IDs prefixed with # in a tax-record audit refer to tax_transactions.id, not payments.id.
-    const taxRecordAudit = /(?:catatan pajak|catatan.*#|simulasi|dengan dan tanpa|masuk dalam total)/i.test(question)
-      && /(?:laporan|total|simulasi|catatan pajak)/i.test(question)
-      && /#\d+/.test(question);
-    if (taxRecordAudit) {
+    const intent = identifyAuditIntent(question);
+    // IDs with # in tax audit refer to tax_transactions.id, not payments.id.
+    if (intent.taxIds) {
       const ids = [...new Set([...question.matchAll(/#(\d+)/g)].map(m => Number(m[1])))];
       const activeRows = result.active;
       const matches = ids.map(id => ({ id, row: activeRows.find(t => t.id === id) }));
@@ -135,9 +133,7 @@ export default function AiAsistenWidget() {
         "Tidak ada data yang diubah atau dihapus."
       ].join("\n");
     }
-    const intent = identifyAuditIntent(question);
-    const paymentMention = intent.paymentId;
-    if (/(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question) && /(?:SCPAY-SC-|pembayaran)/i.test(question)) {
+    if (intent.groupTax) {
       const paymentId = intent.paymentId;
       if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
       const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
