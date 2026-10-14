@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { adminMiddleware } from "../lib/auth";
 import { db, taxTransactionsTable, paymentsTable, bookingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 
 const router = Router();
 const CHAT_URL = "https://mcp.cstlogistic.co.id/api/ai/core-chat/messages";
@@ -83,12 +83,12 @@ router.get("/admin/ai-asisten/group-tax-audit/:paymentId", adminMiddleware, asyn
     const group = anchor.groupRef ? await db.select().from(bookingsTable).where(eq(bookingsTable.groupRef, anchor.groupRef)) : [anchor];
     const bookingIds = new Set(group.map(b => b.id));
     const refs = new Set(group.map(b => b.orderNumber));
-    const groupPayments = (await db.select().from(paymentsTable)).filter(p => bookingIds.has(p.bookingId));
-    const records = await db.select().from(taxTransactionsTable);
-    const relevant = records.filter(t =>
-      (t.referenceType === "sport_center_payment" && t.referenceId === paymentId) ||
-      (/booking/i.test(t.referenceType) && (bookingIds.has(t.referenceId) || refs.has(t.referenceNumber)))
-    );
+    const groupPayments = await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, [...bookingIds]));
+    const relevant = await db.select().from(taxTransactionsTable).where(or(
+      eq(taxTransactionsTable.referenceNumber, `SCPAY-SC-${paymentId}`),
+      inArray(taxTransactionsTable.referenceNumber, [...refs]),
+      inArray(taxTransactionsTable.referenceId, [...bookingIds])
+    ));
     const active = relevant.filter(t => t.transactionType === "original" && t.status !== "reversed");
     const toTax = (t: (typeof active)[number]) => ({ id:t.id, referenceNumber:t.referenceNumber, referenceType:t.referenceType, referenceId:t.referenceId, date:t.transactionDate, dpp:Number(t.dpp), ppn:Number(t.taxAmount), status:t.status });
     const paymentTax = active.filter(t => t.referenceType === "sport_center_payment" && t.referenceId === paymentId).map(toTax);
@@ -100,12 +100,15 @@ router.get("/admin/ai-asisten/group-tax-audit/:paymentId", adminMiddleware, asyn
       payment:{id:payment.id,amount:Number(payment.amount),status:payment.status,proofExists:!!payment.proofUrl,confirmedAt:payment.confirmedAt},
       groupRef:anchor.groupRef,
       bookings:group.map(b=>({id:b.id,reference:b.orderNumber,price:Number(b.totalPrice),invoicePdfExists:!!b.invoicePdfUrl,paidAt:b.paidAt,groupRef:b.groupRef})),
-      groupPayments:groupPayments.map(p=>({id:p.id,bookingId:p.bookingId,amount:Number(p.amount),status:p.status,paymentType:p.paymentType,proofExists:!!p.proofUrl,confirmedAt:p.confirmedAt})),
+      groupPayments:groupPayments.map(p=>({id:p.id,bookingId:p.bookingId,amount:Number(p.amount),status:p.status,paymentType:p.paymentType,proofExists:!!p.proofUrl,confirmedAt:p.confirmedAt,ocrAvailable:!!(p.ocrData || p.ocrRaw || p.ocrAmount || p.ocrName),ocrAmount:p.ocrAmount===null?null:Number(p.ocrAmount),ocrAmountMatchesRecorded:p.ocrAmount===null?null:Math.abs(Number(p.ocrAmount)-Number(p.amount))<0.01,ocrDateAvailable:!!p.ocrDate})),
       confirmedGroupPaymentTotal:confirmedAmount,
       groupBookingTotal:group.reduce((sum,b)=>sum+Number(b.totalPrice),0),
       paymentTax,bookingTax,paymentTotals:total(paymentTax),bookingTotals:total(bookingTax),
       overlapCandidate:paymentTax.length>0 && bookingTax.length>0,
       allocationVerified:false,
+      allocationStatus: groupPayments.length === 1 && group.length > 1
+        ? "one-payment-multiple-bookings-no-per-session-allocation"
+        : "allocation-not-proven",
       evidenceLimitations:["Isi invoice PDF tidak dibaca.","Isi bukti transfer tidak dibaca.","Pembayaran yang tercatat pada satu booking belum membuktikan alokasi per sesi."],
       note:"Potensi penghitungan ganda, bukan duplikasi yang dipastikan. Periksa basis transaksi, posting, dan aturan pajak sebelum koreksi."
     });
