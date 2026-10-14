@@ -72,34 +72,31 @@ export default function AiAsistenWidget() {
     setPeriod(selected);
     const requestedReference = question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
     if (requestedReference) {
-      const matches = body.transactions?.filter(row => row.referenceNumber?.toUpperCase() === requestedReference) ?? [];
-      if (matches.length === 0) {
-        return `Pemeriksaan referensi ${requestedReference} — ${selected}\nReferensi tidak ditemukan pada Sport Center Tax Report untuk periode ini. Tidak ada dasar untuk menyimpulkan status booking, pembayaran, atau pajaknya. Tidak ada data diubah.`;
+      const response = await fetch(`${BASE}/admin/ai-asisten/tax-trace/${encodeURIComponent(requestedReference)}`, {
+        headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin"
+      });
+      if (!response.ok) {
+        if (response.status === 404) return `Referensi ${requestedReference} tidak ditemukan pada sumber pajak. Tidak ada data yang diubah.`;
+        throw new Error(`Pencarian sumber transaksi gagal (HTTP ${response.status})`);
       }
-      return matches.map(row => {
-        const dpp = Number(row.dpp);
-        const ppn = Number(row.taxAmount);
-        const numericValid = Number.isFinite(dpp) && Number.isFinite(ppn) && dpp >= 0 && ppn >= 0;
-        const effectiveRate = numericValid && dpp > 0 ? (ppn / dpp * 100).toFixed(2) + "%" : "tidak dapat dihitung";
-        const comparison = numericValid ? `Rasio PPN/DPP tercatat: ${effectiveRate}. Rasio saja tidak membuktikan benar/salah pajak; periksa jenis objek dan dasar pengenaan.` : "DPP/PPN tidak valid untuk perbandingan.";
-        return [
-          `Pemeriksaan transaksi ${requestedReference} — ${selected}`,
-          `Sumber: Sport Center Tax Report (baca-saja)`,
-          `ID catatan pajak: ${row.id ?? "tidak tersedia"}`,
-          `Tanggal transaksi: ${row.transactionDate || "tidak tersedia"}`,
-          `Nama customer: ${row.customerName || "tidak tersedia"}`,
-          `Tipe pembayar tercatat: ${row.payerType || "tidak tersedia"}`,
-          `Jenis transaksi: ${row.transactionType || "tidak tersedia"}; status: ${row.status || "tidak tersedia"}`,
-          `Kode pajak: ${row.taxCode || "tidak tersedia"}`,
-          `DPP tercatat: ${Number.isFinite(dpp) ? money(dpp) : "tidak tersedia"}`,
-          `PPN tercatat: ${Number.isFinite(ppn) ? money(ppn) : "tidak tersedia"}`,
-          `Nilai bruto: belum terverifikasi — tax report tidak menyediakan bukti nilai bruto transaksi ini.`,
-          `Booking terkait, invoice dan bukti pembayaran: belum tersedia dalam sumber data yang diakses AI Asisten pada pemeriksaan ini.`,
-          comparison,
-          `Langkah verifikasi: cocokkan referensi dengan booking sumber, jenis payer, invoice, nilai pembayaran aktual, dan kebijakan perpajakan yang berlaku. Jangan melakukan koreksi hanya berdasarkan rasio.`,
-          `Tidak ada data yang diubah.`
-        ].join("\n");
-      }).join("\n\n");
+      const trace: {
+        items: Array<{
+          tax: { id: number; referenceType: string; referenceId: number; transactionDate: string; dpp: number; dppNilaiLain: number | null; taxAmount: number; grandTotal: number | null; taxCode: string };
+          payment: null | { id: number; bookingId: number; amount: number; status: string; paymentMethod: string | null; paymentType: string; proofExists: boolean };
+          booking: null | { id: number; orderNumber: string; customerName: string; payerType: string; status: string; bookingDate: string; totalPrice: number; grandTotal: number | null; billingStatus: string | null };
+          traceStatus: string;
+        }>
+      } = await response.json();
+      return trace.items.map(({tax, payment, booking, traceStatus}) => [
+        `Penelusuran sumber transaksi ${requestedReference} — ${selected}`,
+        `Catatan pajak #${tax.id} | sumber ${tax.referenceType} #${tax.referenceId} | tanggal ${tax.transactionDate}`,
+        `DPP: ${money(tax.dpp)} | DPP nilai lain: ${tax.dppNilaiLain === null ? "tidak tersedia" : money(tax.dppNilaiLain)} | PPN: ${money(tax.taxAmount)} | Kode: ${tax.taxCode}`,
+        `Nilai bruto pada catatan pajak: ${tax.grandTotal === null ? "tidak tersedia" : money(tax.grandTotal)}`,
+        `Pembayaran sumber: ${payment ? `#${payment.id} | booking #${payment.bookingId} | ${money(payment.amount)} | status ${payment.status} | metode ${payment.paymentMethod || "-"} | bukti pembayaran ${payment.proofExists ? "tersimpan (isi tidak diperiksa)" : "tidak tercatat"}` : "tidak dapat ditautkan secara pasti"}`,
+        `Booking sumber: ${booking ? `${booking.orderNumber} | #${booking.id} | ${booking.customerName} | payer ${booking.payerType} | status ${booking.status} | tanggal ${booking.bookingDate} | nilai booking ${money(booking.totalPrice)} | bruto ${booking.grandTotal === null ? "tidak tersedia" : money(booking.grandTotal)}` : "tidak dapat ditautkan secara pasti"}`,
+        `Status penelusuran: ${traceStatus}. Invoice PDF, isi bukti pembayaran, dan dasar hukum pajak belum diverifikasi. Data pembayaran dan booking bisa berbeda dari angka pajak karena cakupan/komponen transaksi.`,
+        "Tidak ada data yang diubah."
+      ].join("\\n")).join("\\n\\n");
     }
     const deepAnalysis = /(?:kelompokkan|pengelompokan|analisis|analisa|hitung total|subtotal|total ppn dari|kemungkinan kesalahan klasifikasi|salah klasifikasi|prioritas|perlu diverifikasi)/i.test(question) && /(?:personal|perorangan|pribadi|transaksi itu|44 transaksi|ppn)/i.test(question);
     if (deepAnalysis) {
