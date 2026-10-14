@@ -49,10 +49,17 @@ router.get("/admin/ai-asisten/tax-trace/:reference", adminMiddleware, async (req
       const payment = canTracePayment ? (await db.select().from(paymentsTable).where(eq(paymentsTable.id, tax.referenceId)).limit(1))[0] : null;
       const bookingId = payment?.bookingId ?? (isBooking ? tax.referenceId : null);
       const booking = bookingId ? (await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1))[0] : null;
+      const relatedBookings = booking?.groupRef
+        ? await db.select().from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
+        : booking ? [booking] : [];
+      const relatedTotal = relatedBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
       items.push({
         tax: { id: tax.id, referenceType: tax.referenceType, referenceId: tax.referenceId, referenceNumber: tax.referenceNumber, transactionDate: tax.transactionDate, status: tax.status, transactionType: tax.transactionType, taxCode: tax.taxCode, taxRate: Number(tax.taxRate), dpp: Number(tax.dpp), dppNilaiLain: tax.dppNilaiLain === null ? null : Number(tax.dppNilaiLain), taxAmount: Number(tax.taxAmount), grandTotal: tax.grandTotal === null ? null : Number(tax.grandTotal) },
         payment: payment ? { id: payment.id, bookingId: payment.bookingId, amount: Number(payment.amount), status: payment.status, paymentMethod: payment.paymentMethod, paymentType: payment.paymentType, confirmedAt: payment.confirmedAt, proofExists: !!payment.proofUrl } : null,
         booking: booking ? { id: booking.id, orderNumber: booking.orderNumber, customerName: booking.customerName, payerType: booking.payerType, status: booking.status, bookingDate: booking.bookingDate, totalPrice: Number(booking.totalPrice), grandTotal: booking.grandTotal === null ? null : Number(booking.grandTotal), billingStatus: booking.billingStatus } : null,
+        relatedBookings: relatedBookings.map(b => ({ id: b.id, orderNumber: b.orderNumber, totalPrice: Number(b.totalPrice), status: b.status, bookingDate: b.bookingDate })),
+        relatedTotal, groupRef: booking?.groupRef ?? null,
+        allocationVerified: false,
         traceStatus: booking ? "booking-linked" : payment ? "payment-only" : "unlinked",
         limitations: ["Invoice PDF dan isi bukti pembayaran tidak diperiksa.", "Catatan pajak tidak membuktikan perlakuan PPN final."]
       });
