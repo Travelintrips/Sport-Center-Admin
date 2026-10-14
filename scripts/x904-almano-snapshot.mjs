@@ -46,7 +46,8 @@ export async function sendSnapshot({ endpoint, serial, ingestKey, users, logs,
                                      fetchImpl = fetch, snapshotId = randomUUID() }) {
   const url = new URL(endpoint);
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
-      !url.pathname.endsWith("/api") || url.hostname === "sportcenter.travelintrips.co.id") {
+      url.hostname !== "xssrfshdrtdfupgqwfdw.supabase.co" ||
+      url.pathname !== "/functions/v1/x904-lan-dev/api") {
     throw new Error("UNAPPROVED_DEV_ENDPOINT");
   }
   if (!/^[A-Za-z0-9_-]{4,100}$/.test(serial) ||
@@ -61,7 +62,15 @@ export async function sendSnapshot({ endpoint, serial, ingestKey, users, logs,
       signal: AbortSignal.timeout(25000),
       redirect: "error",
     });
-    if (!result.ok) throw new Error("INGEST_HTTP_" + result.status);
+    if (!result.ok) {
+      let reason = "UNKNOWN";
+      try {
+        const failed = await result.json();
+        const raw = [failed?.error, failed?.errorClass].filter(v => typeof v === "string").join("_");
+        reason = raw.replace(/[^A-Za-z0-9_]/g, "").slice(0, 40) || "UNKNOWN";
+      } catch { /* do not log response bodies or secrets */ }
+      throw new Error("INGEST_HTTP_" + result.status + "_" + reason);
+    }
     const data = await result.json();
     if (data?.ok !== true || data?.snapshotId !== snapshotId) throw new Error("INVALID_INGEST_ACK");
     return data;
