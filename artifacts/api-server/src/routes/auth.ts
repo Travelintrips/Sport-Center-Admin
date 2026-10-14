@@ -102,6 +102,11 @@ router.post("/auth/register", async (req, res) => {
 
 router.post("/auth/setup-admin", async (req, res) => {
   try {
+    // Bootstrap must be explicitly enabled in production; never expose it by default.
+    if (process.env.NODE_ENV === "production" && process.env.ALLOW_ADMIN_BOOTSTRAP !== "true") {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
     const key = req.headers["x-setup-key"] as string;
     const PORTAL_ADMIN_KEY = process.env.PORTAL_ADMIN_KEY || "";
     if (!PORTAL_ADMIN_KEY || key !== PORTAL_ADMIN_KEY) {
