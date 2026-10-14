@@ -138,6 +138,11 @@ jobs:
       - name: Verify X904 release safety contract
         run: node scripts/verify-x904-release-readiness.mjs
 
+      - name: Verify X904 authenticated LAN sync and durable ACK
+        run: |
+          node scripts/verify-x904-lan-contract.mjs
+          node --test scripts/test-x904-almano-snapshot.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
