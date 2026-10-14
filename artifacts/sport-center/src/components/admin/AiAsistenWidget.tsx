@@ -71,6 +71,26 @@ export default function AiAsistenWidget() {
     const result = audit(body, selected);
     setPeriod(selected);
     const paymentMention = question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
+    if (/(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question) && /(?:SCPAY-SC-|pembayaran)/i.test(question)) {
+      const paymentId = question.match(/SCPAY-SC-(\d+)/i)?.[1] ?? question.match(/pembayaran\s*#?(\d+)/i)?.[1];
+      if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
+      const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
+      if (!traceResponse.ok) throw new Error(`Audit pajak grup gagal (HTTP ${traceResponse.status})`);
+      const g: { payment:{id:number;amount:number;status:string};groupRef:string|null;bookings:Array<{id:number;reference:string;price:number}>;paymentTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;bookingTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;paymentTotals:{dpp:number;ppn:number};bookingTotals:{dpp:number;ppn:number};overlapCandidate:boolean;note:string } = await traceResponse.json();
+      const rows = (arr:typeof g.paymentTax) => arr.map(t=>`#${t.id} ${t.referenceNumber} ${t.date} | DPP ${money(t.dpp)} | PPN ${money(t.ppn)}`);
+      return [
+        `Audit potensi duplikasi pajak pembayaran #${g.payment.id} — ${selected}`,
+        `Pembayaran ${money(g.payment.amount)} | groupRef ${g.groupRef ?? "tidak tersedia"}`,
+        `Booking terkait: ${g.bookings.map(b=>b.reference).join(", ")}`,
+        `Catatan pajak pembayaran (${g.paymentTax.length}):`, ...rows(g.paymentTax),
+        `Subtotal pembayaran: DPP ${money(g.paymentTotals.dpp)} | PPN ${money(g.paymentTotals.ppn)}`,
+        `Catatan pajak booking (${g.bookingTax.length}):`, ...rows(g.bookingTax),
+        `Subtotal booking: DPP ${money(g.bookingTotals.dpp)} | PPN ${money(g.bookingTotals.ppn)}`,
+        `Jika semua catatan aktif dijumlahkan: DPP ${money(g.paymentTotals.dpp+g.bookingTotals.dpp)} | PPN ${money(g.paymentTotals.ppn+g.bookingTotals.ppn)}`,
+        `Status kandidat tumpang tindih: ${g.overlapCandidate ? "YA — perlu pemeriksaan apakah kedua sumber masuk laporan yang sama" : "belum terindikasi dari catatan yang terbaca"}`,
+        g.note, "Sumber: catatan pajak Sport Center dan booking grup; tidak ada data yang diubah."
+      ].join("\n");
+    }
     const requestedReference = paymentMention ? `SCPAY-SC-${paymentMention}` : question.match(/\b(?:SCPAY-SC-\d+|SC-\d+)\b/i)?.[0]?.toUpperCase();
     if (requestedReference) {
       const response = await fetch(`${BASE}/admin/ai-asisten/tax-trace/${encodeURIComponent(requestedReference)}`, {

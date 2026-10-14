@@ -71,4 +71,30 @@ router.get("/admin/ai-asisten/tax-trace/:reference", adminMiddleware, async (req
   }
 });
 
+
+router.get("/admin/ai-asisten/group-tax-audit/:paymentId", adminMiddleware, async (req, res) => {
+  const paymentId = Number(req.params.paymentId);
+  if (!Number.isSafeInteger(paymentId) || paymentId < 1) { res.status(400).json({ error: "ID pembayaran tidak valid." }); return; }
+  try {
+    const payment = (await db.select().from(paymentsTable).where(eq(paymentsTable.id, paymentId)).limit(1))[0];
+    if (!payment) { res.status(404).json({ error: "Pembayaran tidak ditemukan." }); return; }
+    const anchor = (await db.select().from(bookingsTable).where(eq(bookingsTable.id, payment.bookingId)).limit(1))[0];
+    if (!anchor) { res.status(404).json({ error: "Booking pembayaran tidak ditemukan." }); return; }
+    const group = anchor.groupRef ? await db.select().from(bookingsTable).where(eq(bookingsTable.groupRef, anchor.groupRef)) : [anchor];
+    const bookingIds = new Set(group.map(b => b.id));
+    const refs = new Set(group.map(b => b.orderNumber));
+    const records = await db.select().from(taxTransactionsTable);
+    const relevant = records.filter(t =>
+      (t.referenceType === "sport_center_payment" && t.referenceId === paymentId) ||
+      (/booking/i.test(t.referenceType) && (bookingIds.has(t.referenceId) || refs.has(t.referenceNumber)))
+    );
+    const active = relevant.filter(t => t.transactionType === "original" && t.status !== "reversed");
+    const toTax = (t: (typeof active)[number]) => ({ id:t.id, referenceNumber:t.referenceNumber, referenceType:t.referenceType, referenceId:t.referenceId, date:t.transactionDate, dpp:Number(t.dpp), ppn:Number(t.taxAmount), status:t.status });
+    const paymentTax = active.filter(t => t.referenceType === "sport_center_payment" && t.referenceId === paymentId).map(toTax);
+    const bookingTax = active.filter(t => /booking/i.test(t.referenceType) && bookingIds.has(t.referenceId)).map(toTax);
+    const total = (items: typeof paymentTax) => ({ dpp:items.reduce((a,b)=>a+b.dpp,0), ppn:items.reduce((a,b)=>a+b.ppn,0) });
+    res.json({ payment:{id:payment.id,amount:Number(payment.amount),status:payment.status}, groupRef:anchor.groupRef, bookings:group.map(b=>({id:b.id,reference:b.orderNumber,price:Number(b.totalPrice)})), paymentTax, bookingTax, paymentTotals:total(paymentTax), bookingTotals:total(bookingTax), overlapCandidate:paymentTax.length>0 && bookingTax.length>0, note:"Potensi penghitungan ganda, bukan duplikasi yang dipastikan. Periksa basis transaksi, posting, dan aturan pajak sebelum koreksi." });
+  } catch(err) { req.log.error({err}, "AI Asisten group tax audit failed"); res.status(500).json({error:"Audit pajak grup gagal."}); }
+});
+
 export default router;
