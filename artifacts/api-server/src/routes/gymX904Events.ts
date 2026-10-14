@@ -62,14 +62,17 @@ router.post("/internal/gym-x904/events", async (req, res) => {
 });
 router.get("/admin/gym-x904/device-events", adminMiddleware, async (req,res) => {
   res.setHeader("Cache-Control","no-store");
-  if (process.env.GYM_X904_LOG_READ_ENABLED !== "true") return res.json({enabled:false,events:[]});
+  // Admin-only, read-only history is available whenever the event table exists.
+  // Do not tie viewing already-stored events to an independent ingest switch.
+  const serial = process.env.GYM_X904_DEVICE_SERIAL ?? "";
+  if (serial.length < 4) return res.status(503).json({error:"X904 serial is not configured"});
   const date = String(req.query.date || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({error:"Invalid date"});
   try {
     const result = await db.execute(sql`SELECT event_id, user_pin, device_time,
       attendance_status, verification_type, received_at
       FROM sport_center.gym_x904_raw_events
-      WHERE LEFT(device_time,10) = ${date}
+      WHERE device_serial = ${serial} AND LEFT(device_time,10) = ${date}
       ORDER BY device_time DESC LIMIT 200`);
     return res.json({enabled:true,events:result.rows});
   } catch {
