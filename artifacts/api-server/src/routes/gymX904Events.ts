@@ -76,4 +76,23 @@ router.get("/admin/gym-x904/device-events", adminMiddleware, async (req,res) => 
     return res.status(503).json({error:"X904 event storage unavailable"});
   }
 });
+
+/** Read-only observations from previously stored ADMS logs. These are NOT
+ * the device's full enrolled-user list and do not prove hardware identity. */
+router.get("/admin/gym-x904/observed-pins", adminMiddleware, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if ((process.env.GYM_X904_DEVICE_SERIAL ?? "").length < 4) {
+    return res.status(503).json({error:"X904 device serial is not configured"});
+  }
+  try {
+    const result = await db.execute(sql`SELECT user_pin, count(*)::int AS event_count,
+      max(device_time) AS last_device_time, max(received_at) AS last_received_at
+      FROM sport_center.gym_x904_raw_events
+      WHERE device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}
+      GROUP BY user_pin ORDER BY last_received_at DESC LIMIT 500`);
+    return res.json({source:"stored-adms-events-unverified", users: result.rows});
+  } catch {
+    return res.status(503).json({error:"X904 stored event data unavailable"});
+  }
+});
 export default router;
