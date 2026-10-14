@@ -89,7 +89,7 @@ router.get("/admin/ai-asisten/group-tax-audit/:paymentId", adminMiddleware, asyn
       (/booking/i.test(t.referenceType) && (bookingIds.has(t.referenceId) || refs.has(t.referenceNumber)))
     );
     const active = relevant.filter(t => t.transactionType === "original" && t.status !== "reversed");
-    const toTax = (t: (typeof active)[number]) => ({ id:t.id, referenceNumber:t.referenceNumber, referenceType:t.referenceType, referenceId:t.referenceId, date:t.transactionDate, dpp:Number(t.dpp), ppn:Number(t.taxAmount), status:t.status }));
+    const toTax = (t: (typeof active)[number]) => ({ id:t.id, referenceNumber:t.referenceNumber, referenceType:t.referenceType, referenceId:t.referenceId, date:t.transactionDate, dpp:Number(t.dpp), ppn:Number(t.taxAmount), status:t.status });
     const paymentTax = active.filter(t => t.referenceType === "sport_center_payment" && t.referenceId === paymentId).map(toTax);
     const bookingTax = active.filter(t => /booking/i.test(t.referenceType) && bookingIds.has(t.referenceId)).map(toTax);
     const total = (items: typeof paymentTax) => ({ dpp:items.reduce((a,b)=>a+b.dpp,0), ppn:items.reduce((a,b)=>a+b.ppn,0) });
