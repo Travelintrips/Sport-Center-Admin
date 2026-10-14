@@ -61,19 +61,31 @@ export default function AiAsistenWidget() {
     const result = audit(body, selected);
     return result.text;
   }
+  async function queryAiCore(message: string): Promise<string> {
+    const token = getToken();
+    if (!token) throw new Error("Sesi admin berakhir. Silakan masuk kembali.");
+    const response = await fetch(`${BASE}/admin/ai-asisten/chat`, {
+      method: "POST", credentials: "same-origin",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ message })
+    });
+    const payload: { reply?: string; error?: string } = await response.json();
+    if (!response.ok || !payload.reply) throw new Error(payload.error || `HTTP ${response.status}`);
+    return payload.reply;
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = input.trim();
     if (!question || busy) return;
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
-    if (!/pajak|ppn|laporan|audit|transaksi|sport center|rekap/i.test(question) || /pph|vendor|bizportal|coretax/i.test(question)) {
-      setMessages(v => [...v, { role: "assistant", text: "Data yang bisa saya audit sekarang adalah PPN Sport Center. PPh Unifikasi, invoice vendor BizPortal dan Coretax belum memiliki koneksi terverifikasi. Saya tidak akan membuat angka perkiraan." }]);
-      return;
-    }
     setBusy(true);
-    try { const answer = await queryTax(question); setMessages(v => [...v, { role: "assistant", text: answer }]); }
-    catch (err) { setMessages(v => [...v, { role: "assistant", text: `Audit gagal: ${err instanceof Error ? err.message : "Kesalahan tidak diketahui"}. Tidak ada data yang diubah.` }]); }
-    finally { setBusy(false); }
+    try {
+      const localAudit = /audit|rekap|total ppn|laporan ppn/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
+      setMessages(v => [...v, { role: "assistant", text: answer }]);
+    } catch (err) {
+      setMessages(v => [...v, { role: "assistant", text: `Permintaan gagal: ${err instanceof Error ? err.message : "Kesalahan tidak diketahui"}. Tidak ada data yang diubah.` }]);
+    } finally { setBusy(false); }
   }
   async function exportCsv() {
     const token = getToken();
