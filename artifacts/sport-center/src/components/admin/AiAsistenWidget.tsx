@@ -138,19 +138,20 @@ export default function AiAsistenWidget() {
       if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
       const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
       if (!traceResponse.ok) throw new Error(`Audit pajak grup gagal (HTTP ${traceResponse.status})`);
-      const g: { payment:{id:number;amount:number;status:string};groupRef:string|null;bookings:Array<{id:number;reference:string;price:number;invoicePdfExists:boolean;paidAt:string|null}>;paymentTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;bookingTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;paymentTotals:{dpp:number;ppn:number};bookingTotals:{dpp:number;ppn:number};overlapCandidate:boolean;note:string; groupPayments:Array<{id:number;bookingId:number;amount:number;status:string;paymentType:string;proofExists:boolean;ocrAvailable:boolean;ocrAmount:number|null;ocrAmountMatchesRecorded:boolean|null;ocrDateAvailable:boolean}>;confirmedGroupPaymentTotal:number;groupBookingTotal:number;allocationVerified:boolean;evidenceLimitations:string[] } = await traceResponse.json();
+      const g: { payment:{id:number;amount:number;status:string};groupRef:string|null;bookings:Array<{id:number;reference:string;price:number;invoicePdfExists:boolean;paidAt:string|null;payerType:string|null;ppnTreatment:string;ppnAmount:number|null;ppnCollectedByCustomer:boolean}>;paymentTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;bookingTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;paymentTotals:{dpp:number;ppn:number};bookingTotals:{dpp:number;ppn:number};overlapCandidate:boolean;personalWithBookingPpn:string[];note:string; groupPayments:Array<{id:number;bookingId:number;amount:number;status:string;paymentType:string;proofExists:boolean;ocrAvailable:boolean;ocrAmount:number|null;ocrAmountMatchesRecorded:boolean|null;ocrDateAvailable:boolean}>;confirmedGroupPaymentTotal:number;groupBookingTotal:number;allocationVerified:boolean;evidenceLimitations:string[] } = await traceResponse.json();
       const rows = (arr:typeof g.paymentTax) => arr.map(t=>`#${t.id} ${t.referenceNumber} ${t.date} | DPP ${money(t.dpp)} | PPN ${money(t.ppn)}`);
       return [
         `Audit potensi duplikasi pajak pembayaran #${g.payment.id} — ${selected}`,
         `Pembayaran ${money(g.payment.amount)} | groupRef ${g.groupRef ?? "tidak tersedia"}`,
         `Booking terkait: ${g.bookings.map(b=>b.reference).join(", ")}`,
-        ...g.bookings.map(b=>`${b.reference} | Nilai ${money(b.price)} | Invoice PDF ${b.invoicePdfExists ? "tersimpan (belum diperiksa)" : "belum tercatat"}`),
+        ...g.bookings.map(b=>`${b.reference} | Nilai ${money(b.price)} | Payer ${b.payerType??"tidak tersedia"} | perlakuan PPN ${b.ppnTreatment} | PPN booking ${b.ppnAmount===null?"tidak tersedia":money(b.ppnAmount)} | Invoice PDF ${b.invoicePdfExists ? "tersimpan (belum diperiksa)" : "belum tercatat"}`),
         `Pembayaran terkait grup (${g.groupPayments.length}):`,
         ...g.groupPayments.map(p=>`#${p.id} → booking ID #${p.bookingId} | ${money(p.amount)} | ${p.status} | bukti ${p.proofExists ? "ada (belum dibaca)" : "belum tercatat"} | OCR ${p.ocrAvailable ? `tersedia (nominal ${p.ocrAmount===null?"tidak ada":money(p.ocrAmount)}; ${p.ocrAmountMatchesRecorded===null?"belum bisa dicocokkan":p.ocrAmountMatchesRecorded?"cocok secara angka":"BERBEDA secara angka"})` : "tidak tersedia"}`),
         `Total pembayaran confirmed yang terhubung ke grup: ${money(g.confirmedGroupPaymentTotal)}`,
         `Total harga booking grup: ${money(g.groupBookingTotal)} | Selisih: ${money(g.confirmedGroupPaymentTotal-g.groupBookingTotal)}`,
         "Perhatian: satu pembayaran gabungan dapat tercatat pada satu booking. Selisih nol bukan bukti alokasi per sesi atau verifikasi bukti.",
 
+        `Pemeriksaan kebijakan booking personal tanpa PPN: ${g.personalWithBookingPpn.length ? "PERLU DITELUSURI — "+g.personalWithBookingPpn.join(", ") : "tidak ada kandidat dari catatan yang diperiksa"}. Jangan koreksi otomatis; cek versi aturan dan tanggal transaksi.`,
         `Catatan pajak pembayaran (${g.paymentTax.length}):`, ...rows(g.paymentTax),
         `Subtotal pembayaran: DPP ${money(g.paymentTotals.dpp)} | PPN ${money(g.paymentTotals.ppn)}`,
         `Catatan pajak booking (${g.bookingTax.length}):`, ...rows(g.bookingTax),
