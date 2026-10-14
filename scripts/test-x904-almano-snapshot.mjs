@@ -4,7 +4,7 @@ import { deviceTimestamp, normalizeUsers, normalizeLogs, sendSnapshot } from "./
 
 const users = normalizeUsers([{uid: 1, role: 0, userId: "123", name: "Gym Member", password: "DO_NOT_EXPORT", cardno: 9182}]);
 const logs = normalizeLogs([{userSn: 1, deviceUserId: "123", recordTime: new Date(2026, 9, 14, 14, 3, 5)}]);
-const base = { endpoint: "https://dev.example.com/api", serial: "X904TEST", ingestKey: "e".repeat(48), users, logs,
+const base = { endpoint: "https://xssrfshdrtdfupgqwfdw.supabase.co/functions/v1/x904-lan-dev/api", serial: "X904TEST", ingestKey: "e".repeat(48), users, logs,
   snapshotId: "eca99644-16da-44de-91f5-442ce935b0cf" };
 
 test("sanitizes credential, card and biometric fields", () => {
@@ -32,9 +32,9 @@ test("accepts only verified durable user and log ACK", async () => {
   };
   const result = await sendSnapshot({...base, fetchImpl: fake});
   assert.deepEqual(stages, [
-    "/api/internal/gym-x904/lan/users",
-    "/api/internal/gym-x904/lan/logs",
-    "/api/internal/gym-x904/lan/complete",
+    "/functions/v1/x904-lan-dev/api/internal/gym-x904/lan/users",
+    "/functions/v1/x904-lan-dev/api/internal/gym-x904/lan/logs",
+    "/functions/v1/x904-lan-dev/api/internal/gym-x904/lan/complete",
   ]);
   assert.equal(result.durableAck, true);
   assert.equal(result.logs, 1);
