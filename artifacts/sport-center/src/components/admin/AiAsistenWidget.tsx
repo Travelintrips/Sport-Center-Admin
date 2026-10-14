@@ -70,6 +70,37 @@ export default function AiAsistenWidget() {
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
     setPeriod(selected);
+    // IDs prefixed with # in a tax-record audit refer to tax_transactions.id, not payments.id.
+    const taxRecordAudit = /(?:catatan pajak|catatan.*#|simulasi|dengan dan tanpa|masuk dalam total)/i.test(question)
+      && /(?:laporan|total|simulasi|catatan pajak)/i.test(question)
+      && /#\\d+/.test(question);
+    if (taxRecordAudit) {
+      const ids = [...new Set([...question.matchAll(/#(\\d+)/g)].map(m => Number(m[1])))];
+      const activeRows = result.active;
+      const matches = ids.map(id => ({ id, row: activeRows.find(t => t.id === id) }));
+      const excludedId = Number(question.match(/tanpa\\s+(?:catatan(?: pajak)?\\s*)?(?:pembayaran\\s*)?#(\\d+)/i)?.[1] ?? question.match(/(?:pembayaran|payment)\\s*#(\\d+)/i)?.[1] ?? 0);
+      const exclusion = activeRows.find(t => t.id === excludedId);
+      const totalDpp = Number(body.summary?.totalDpp ?? 0);
+      const totalPpn = Number(body.summary?.totalTaxAmount ?? 0);
+      const formatRow = ({id,row}:typeof matches[number]) => row
+        ? `#${id} ${row.referenceNumber ?? "-"} | DPP ${money(Number(row.dpp ?? 0))} | PPN ${money(Number(row.taxAmount ?? 0))} | TERMASUK dalam total periode (aktif)`
+        : `#${id}: TIDAK TERMASUK dalam catatan aktif periode ${selected} (perlu periksa tanggal/status sumber)`;
+      return [
+        `Simulasi audit catatan pajak — ${selected} (baca-saja)`,
+        `ID catatan pajak yang diminta: ${ids.join(", ")}`,
+        ...matches.map(formatRow),
+        `Jumlah teridentifikasi: ${matches.filter(x=>x.row).length} dari ${ids.length} catatan aktif.`,
+        `Total laporan tercatat: DPP ${money(totalDpp)} | PPN ${money(totalPpn)}`,
+        exclusion
+          ? `Simulasi tanpa catatan pajak #${excludedId}: DPP ${money(totalDpp-Number(exclusion.dpp??0))} | PPN ${money(totalPpn-Number(exclusion.taxAmount??0))}`
+          : `Simulasi pengurangan: ID yang hendak dikecualikan tidak ditemukan sebagai catatan aktif. Tidak ada angka yang dikurangkan.`,
+        exclusion
+          ? `Selisih simulasi: DPP ${money(Number(exclusion.dpp??0))} | PPN ${money(Number(exclusion.taxAmount??0))}`
+          : "Selisih simulasi: tidak dapat ditentukan tanpa ID catatan aktif yang tepat.",
+        "Simulasi bukan usulan pembetulan. Keputusan duplikasi memerlukan pemeriksaan dasar pajak, dokumen sumber dan apakah transaksi berbeda mempunyai kewajiban pajak masing-masing.",
+        "Tidak ada data yang diubah atau dihapus."
+      ].join("\\n");
+    }
     const paymentMention = question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
     if (/(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question) && /(?:SCPAY-SC-|pembayaran)/i.test(question)) {
       const paymentId = question.match(/SCPAY-SC-(\d+)/i)?.[1] ?? question.match(/pembayaran\s*#?(\d+)/i)?.[1];
@@ -189,7 +220,7 @@ export default function AiAsistenWidget() {
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
-      const localAudit = /(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const localAudit = /catatan pajak|simulasi|dengan dan tanpa|masuk dalam total|(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
       const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
