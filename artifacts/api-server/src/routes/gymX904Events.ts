@@ -60,6 +60,52 @@ router.post("/internal/gym-x904/events", async (req, res) => {
     return res.status(503).json({error:"X904 event storage unavailable"});
   }
 });
+
+// LAN SDK snapshots have different provenance from ADMS and do not contain
+// authoritative attendance_status or verification_type. Preserve NULLs.
+// This endpoint is opt-in, uses its own credential, and cannot write ADMS events.
+router.post("/internal/gym-x904/lan-events", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const expected = process.env.GYM_X904_LAN_EVENT_INGEST_KEY || "";
+  if (process.env.GYM_X904_LAN_EVENT_INGEST_ENABLED !== "true" || expected.length < 32)
+    return res.status(404).json({error:"Not found"});
+  const received = req.headers["x-gym-lan-key"];
+  const token = typeof received === "string" ? received : "";
+  const serial = String(req.body?.serial || "");
+  if (!equal(token, expected) || !equal(serial, process.env.GYM_X904_DEVICE_SERIAL || ""))
+    return res.status(403).json({error:"Unauthorized"});
+  const events = req.body?.events;
+  if (!Array.isArray(events) || !events.length || events.length > 100)
+    return res.status(400).json({error:"Invalid batch"});
+  const seen = new Set<string>();
+  const parsed: Array<{id:string,index:number,pin:string,uid:number|null,occurred:string}> = [];
+  for (const item of events) {
+    if (!item || typeof item !== "object") return res.status(400).json({error:"Invalid event"});
+    const v = item as Record<string,unknown>;
+    const id = v.id, index = v.index, pin = v.pin, uid = v.uid, occurred = v.occurred;
+    if (typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id) || seen.has(id) ||
+        !Number.isInteger(index) || Number(index) < 0 || Number(index) > 1000000 ||
+        typeof pin !== "string" || !/^[A-Za-z0-9_-]{1,50}$/.test(pin) ||
+        !(uid === null || (Number.isInteger(uid) && Number(uid) >= 0 && Number(uid) <= 65535)) ||
+        typeof occurred !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(occurred))
+      return res.status(400).json({error:"Invalid event"});
+    seen.add(id);
+    parsed.push({id,index:Number(index),pin,uid:uid===null?null:Number(uid),occurred});
+  }
+  try {
+    const payload = JSON.stringify(parsed);
+    const result = await db.execute(sql`INSERT INTO sport_center.gym_x904_lan_events
+      (event_id,device_serial,event_index,user_pin,device_uid,device_time)
+      SELECT e.id, ${serial}, e.index, e.pin, e.uid, e.occurred
+      FROM jsonb_to_recordset(${payload}::jsonb)
+      AS e(id text,index integer,pin text,uid integer,occurred text)
+      ON CONFLICT (event_id) DO NOTHING RETURNING event_id`);
+    return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,duplicates:parsed.length-result.rows.length});
+  } catch {
+    return res.status(503).json({error:"LAN event storage unavailable"});
+  }
+});
+
 router.get("/admin/gym-x904/device-events", adminMiddleware, async (req,res) => {
   res.setHeader("Cache-Control","no-store");
   // Admin-only, read-only history is available whenever the event table exists.
