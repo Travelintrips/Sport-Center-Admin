@@ -143,6 +143,7 @@ jobs:
           node scripts/verify-x904-lan-contract.mjs
           node --test scripts/test-x904-almano-snapshot.mjs
           node --test scripts/test-x904-almano-prod-snapshot.mjs
+          node --test scripts/test-x904-almano-prod-autosync.mjs
 
       - name: Typecheck
         run: pnpm typecheck
