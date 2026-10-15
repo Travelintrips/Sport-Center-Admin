@@ -9,8 +9,8 @@ const migration=read("docs/sql/gym-x904-adms-durable-audit-prod.sql");
 
 test("server persists coarse only, with no attendance data or identity claims",()=>{
   assert.match(audit,/INSERT INTO sport_center\.gym_x904_adms_audit/);
-  assert.match(audit,/device_identity_verified\)/);
-  assert.match(audit,/__NEVER_PLACEHOLDER__|false\s*\n\s*\)/);
+  assert.match(audit,/device_identity_verified,/);
+  assert.match(audit,/\$\{event.connectorAuthorized === true\}, false,/);
   assert.doesNotMatch(audit,/INSERT INTO sport_center\.gym_x904_raw_events/);
   assert.doesNotMatch(migration,/\b(user_pin|source_ip|serial_number|ip_address|fingerprint|face_template|user_agent|payload)\b/i);
   assert.match(migration,/CHECK \(device_identity_verified = false\)/);
@@ -27,7 +27,7 @@ test("admin route uses auth and response always claims source unverified",()=>{
   assert.match(gate,/X-X904-ADMS-Audit/);
   assert.match(gate,/await persist\("configuration_sent"\)/);
   assert.match(gate,/await persist\("poll_ack"\)/);
-  assert.match(gate,/await persist\("attendance_not_imported"\)/);
+  assert.match(gate,/await persist\("attendance_not_imported"/);
   assert.match(gate,/return res\.status\(503\)\.send\("ATTLOG NOT IMPORTED/);
 });
 test("rate-limited, bounded audit and no new unsupported device command",()=>{

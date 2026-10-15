@@ -82,7 +82,8 @@ router.get("/api/admin/gym-x904/adms-audit",adminMiddleware,async (_req,res)=>{
   try {
     const result=await db.execute(sql`
       SELECT id::text, received_at::text, kind, outcome, method, client_hint,
-             body_bytes, row_count, connector_authorized, device_identity_verified
+             body_bytes, row_count, connector_authorized, device_identity_verified,
+             attlog_parseable, attlog_min_columns
       FROM sport_center.gym_x904_adms_audit
       ORDER BY received_at DESC, id DESC LIMIT 40
     `);
@@ -115,7 +116,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
  const agent=String(req.headers["user-agent"]||"").toLowerCase();
  const clientHint=/curl|wget|python-requests|postman|axios|node-fetch|undici/.test(agent) ? "automation-like" : /mozilla|chrome|safari|firefox/.test(agent) ? "browser-like" : agent ? "unknown-client" : "no-user-agent";
  res.setHeader("X-X904-ADMS-Audit", "db-v1");
- const persist = (outcome:X904AdmsOutcome,extra:{rows?:number;connectorAuthorized?:boolean}={}) =>
+ const persist = (outcome:X904AdmsOutcome,extra:{rows?:number;connectorAuthorized?:boolean;parseable?:boolean;minColumns?:number}={}) =>
    persistX904AdmsAudit({kind:classification.kind,outcome,method:req.method==="POST"?"POST":"GET",
      clientHint,bodyBytes:Number.isSafeInteger(bytes) && bytes>=0?bytes:0,...extra});
  recentContacts.unshift({...lastContact,sourceTag,clientHint,sourceTagIsAuthentication:false});
@@ -159,9 +160,9 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
      createHmac("sha256", secret).update(provided).digest("hex") ===
      createHmac("sha256", secret).update(secret).digest("hex");
-   if (!authenticated && !trialMode) { auditAdms("rejected_untrusted",{kind:"attendance"}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted"); return res.status(403).send("UNTRUSTED DEVICE\n"); }
+   if (!authenticated && !trialMode) { auditAdms("rejected_untrusted",{kind:"attendance"}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(403).send("UNTRUSTED DEVICE\n"); }
    const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
-   if (!parsed) { auditAdms("rejected_invalid_attlog",{kind:"attendance"}); rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_invalid"); return res.status(400).send("INVALID ATTLOG\n"); }
+   if (!parsed) { auditAdms("rejected_invalid_attlog",{kind:"attendance"}); rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_invalid",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(400).send("INVALID ATTLOG\n"); }
    const records = parsed.map(event => ({
      id: createHash("sha256").update(JSON.stringify([allowed,event.pin,event.occurred,event.status,event.verify])).digest("hex"),
      pin: event.pin, occurred: event.occurred, status: event.status, verify: event.verify
@@ -175,7 +176,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
        AS e(id text,pin text,occurred text,status integer,verify integer)
        ON CONFLICT (event_id) DO NOTHING`);
      auditAdms("stored",{kind:"attendance",rowCount:parsed.length,authenticated});
-     await persist("attendance_stored",{rows:parsed.length,connectorAuthorized:authenticated});
+     await persist("attendance_stored",{rows:parsed.length,connectorAuthorized:authenticated,parseable:true,minColumns:lastAttlogShape?.columnCounts[0] ?? 0});
      if(authenticated) {
        lastTrustedIngestAt=new Date().toISOString();
        lastTrustedIngestRows=parsed.length;
@@ -183,12 +184,12 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      return res.status(200).send("OK: " + parsed.length + "\n");
    } catch {
      auditAdms("storage_failed",{kind:"attendance"}); attendanceStorageFailures++; lastRejectedAttendanceAt=new Date().toISOString();
-     await persist("attendance_storage_failed");
+     await persist("attendance_storage_failed",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0});
      return res.status(503).send("ATTLOG STORAGE UNAVAILABLE\n");
    }
  }
  // No success ACK until identity and durable storage have been verified.
- if(classification.kind==="attendance") { auditAdms("not_imported",{kind:"attendance",ingestEnabled:process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED==="true"}); await persist("attendance_not_imported"); }
+ if(classification.kind==="attendance") { auditAdms("not_imported",{kind:"attendance",ingestEnabled:process.env.GYM_X904_ADMS_ATTLOG_INGEST_ENABLED==="true"}); await persist("attendance_not_imported",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); }
  return res.status(503).send("ATTLOG NOT IMPORTED\n");
 });
 export default router;

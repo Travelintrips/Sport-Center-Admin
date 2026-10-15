@@ -13,7 +13,7 @@ This is **not** a device authentication mechanism or an approval to import ATTLO
 - Table: sport_center.gym_x904_adms_audit
 - Backend role sport_center_app receives INSERT and SELECT only, with RLS policies.
 - anon/authenticated/public roles have no table permissions; users can read it only through the existing adminMiddleware protected endpoint.
-- The table stores **received_at, protocol kind, coarse outcome, method, coarse client_hint, body byte count, row count, and connector_authorized**. No raw URL, serial, IP, User-Agent, PIN, identity, name, card, biometric, body, token or payload is stored.
+- The table stores **received_at, protocol kind, coarse outcome, method, coarse client_hint, body byte count, row count, and connector_authorized**. Additive 2026-10-15 schema includes `attlog_parseable` and `attlog_min_columns` for privacy-safe grammar diagnostics, without persisting event values. No raw URL, serial, IP, User-Agent, PIN, identity, name, card, biometric, body, token or payload is stored.
 - device_identity_verified is always false in this flow and database CHECK enforces that invariant.
 - Writes from requests that pass the claimed serial match are rate-limited per outcome/client class per server process. It may omit repeated requests within the sample interval; it is a diagnostic history, not lossless packet capture.
 - A database audit write failure increments transient counters but **must not** falsely ACK an untrusted attendance upload.
