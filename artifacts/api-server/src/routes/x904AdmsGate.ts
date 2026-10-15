@@ -1,5 +1,5 @@
 import { Router, text as parseText, type Request, type Response } from "express";
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { classifyX904AdmsRequest } from "../lib/x904AdmsProtocol";
@@ -156,10 +156,13 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
    const trialMode = process.env.GYM_X904_ADMS_TRIAL_INGEST_ENABLED === "true" && Number.isFinite(trialUntil) && Date.now() < trialUntil && trialUntil-Date.now() <= 24*60*60*1000;
    const secret = process.env.GYM_X904_ADMS_TRUSTED_INGRESS_KEY ?? "";
    const provided = req.headers["x-gym-trusted-ingress-key"];
-   const authenticated = secret.length >= 32 && typeof provided === "string" &&
-     Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
-     createHmac("sha256", secret).update(provided).digest("hex") ===
-     createHmac("sha256", secret).update(secret).digest("hex");
+   // Constant-time equality for an explicitly provisioned trusted ingress key.
+   // A serial, diagnostic trial, or plain device request does not authorize writes.
+   const expectedKey = Buffer.from(secret, "utf8");
+   const receivedKey = typeof provided === "string" ? Buffer.from(provided, "utf8") : Buffer.alloc(0);
+   const authenticated = expectedKey.length >= 32 &&
+     expectedKey.length === receivedKey.length &&
+     timingSafeEqual(expectedKey, receivedKey);
    // A timed trial is a diagnostic switch, not proof of the sender. Do not
    // permit it to bypass ingress authentication for durable attendance writes.
    if (!authenticated) { auditAdms("rejected_untrusted",{kind:"attendance",trialMode}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(403).send("UNTRUSTED DEVICE\n"); }
