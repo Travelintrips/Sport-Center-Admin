@@ -160,7 +160,9 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      Buffer.byteLength(provided) === Buffer.byteLength(secret) &&
      createHmac("sha256", secret).update(provided).digest("hex") ===
      createHmac("sha256", secret).update(secret).digest("hex");
-   if (!authenticated && !trialMode) { auditAdms("rejected_untrusted",{kind:"attendance"}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(403).send("UNTRUSTED DEVICE\n"); }
+   // A timed trial is a diagnostic switch, not proof of the sender. Do not
+   // permit it to bypass ingress authentication for durable attendance writes.
+   if (!authenticated) { auditAdms("rejected_untrusted",{kind:"attendance",trialMode}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(403).send("UNTRUSTED DEVICE\n"); }
    const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
    if (!parsed) { auditAdms("rejected_invalid_attlog",{kind:"attendance"}); rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_invalid",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(400).send("INVALID ATTLOG\n"); }
    const records = parsed.map(event => ({
