@@ -17,6 +17,8 @@ export type X904AuditInput = {
   bodyBytes?: number;
   rows?: number;
   connectorAuthorized?: boolean;
+  parseable?: boolean;
+  minColumns?: number;
 };
 const allowedOutcomes: Record<X904AdmsKind, X904AdmsOutcome[]> = {
   handshake: ["configuration_sent"],
@@ -41,6 +43,9 @@ export async function persistX904AdmsAudit(event: X904AuditInput): Promise<boole
     ? Math.min(event.bodyBytes!, 32768) : 0;
   const rows = Number.isSafeInteger(event.rows) && event.rows! >= 0
     ? Math.min(event.rows!, 1000) : 0;
+  const parseable = event.kind === "attendance" && typeof event.parseable === "boolean" ? event.parseable : null;
+  const minColumns = event.kind === "attendance" && Number.isSafeInteger(event.minColumns) && event.minColumns! >= 0
+    ? Math.min(event.minColumns!, 32) : null;
   const clientHint: X904ClientHint =
     (["automation-like","browser-like","unknown-client","no-user-agent"] as string[])
       .includes(event.clientHint) ? event.clientHint : "unknown-client";
@@ -57,10 +62,12 @@ export async function persistX904AdmsAudit(event: X904AuditInput): Promise<boole
     await db.execute(sql`
       INSERT INTO sport_center.gym_x904_adms_audit
         (kind, outcome, method, client_hint, body_bytes, row_count,
-         connector_authorized, device_identity_verified)
+         connector_authorized, device_identity_verified,
+         attlog_parseable, attlog_min_columns)
       VALUES (
         ${event.kind}, ${event.outcome}, ${event.method}, ${clientHint},
-        ${bodyBytes}, ${rows}, ${event.connectorAuthorized === true}, false
+        ${bodyBytes}, ${rows}, ${event.connectorAuthorized === true}, false,
+        ${parseable}, ${minColumns}
       )
     `);
     acceptedAuditWrites += 1;

@@ -13,7 +13,7 @@ interface LanLog { event_id: string; user_pin: string; device_time: string; rece
 interface LanLogsResult { source: string; events: LanLog[]; }
 
 interface AdmsDiagnostic { lastRejectedAttendanceAt?: string | null; rejectedUntrustedAttendance?: number; rejectedUnparseableAttendance?: number; attendanceStorageFailures?: number; refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
-interface AdmsAuditEvent { id:string; received_at:string; kind:string; outcome:string; method:string; client_hint:string; body_bytes:number; row_count:number; connector_authorized:boolean; device_identity_verified:boolean; }
+interface AdmsAuditEvent { id:string; received_at:string; kind:string; outcome:string; method:string; client_hint:string; body_bytes:number; row_count:number; connector_authorized:boolean; device_identity_verified:boolean; attlog_parseable:boolean|null; attlog_min_columns:number|null; }
 interface AdmsAuditResult { ready:boolean; hardwareVerified:false; sourceIdentity:"unverified"; eventCount:number; events:AdmsAuditEvent[]; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
@@ -321,11 +321,12 @@ export default function GymX904() {
             !admsAudit?.ready ? <p className="text-xs text-muted-foreground">Menunggu audit database...</p> :
             admsAudit.events.length === 0 ? <p className="text-xs text-muted-foreground">Belum ada aktivitas ADMS yang tersimpan.</p> :
             <div className="overflow-x-auto"><table className="w-full text-xs">
-              <thead><tr className="border-b text-left"><th className="p-2">Diterima WIB</th><th className="p-2">Protokol</th><th className="p-2">Hasil</th><th className="p-2">Kelas klien</th><th className="p-2">Identitas fisik</th></tr></thead>
+              <thead><tr className="border-b text-left"><th className="p-2">Diterima WIB</th><th className="p-2">Protokol</th><th className="p-2">Hasil</th><th className="p-2">Kelas klien</th><th className="p-2">Identitas fisik</th><th className="p-2">Format ATTLOG</th></tr></thead>
               <tbody>{admsAudit.events.map(item => <tr key={item.id} className="border-b">
                 <td className="p-2">{new Date(item.received_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</td>
                 <td className="p-2">{item.method} {item.kind}</td><td className="p-2">{item.outcome}</td>
                 <td className="p-2">{item.client_hint}</td><td className="p-2">{item.device_identity_verified ? "Terverifikasi" : "Belum diverifikasi"}</td>
+                <td className="p-2">{item.kind !== "attendance" ? "—" : item.attlog_parseable == null ? "Belum dianalisis" : `${item.attlog_parseable ? "Valid" : "Tidak valid"} · min. ${item.attlog_min_columns ?? "?"} kolom`}</td>
               </tr>)}</tbody>
             </table></div>}
         </div>

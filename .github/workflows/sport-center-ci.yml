@@ -136,6 +136,7 @@ jobs:
         run: |
           node scripts/verify-x904-adms-safety-contract.mjs
           node --test scripts/test-x904-adms-durable-audit.mjs
+          node --test scripts/test-x904-adms-format-evidence.mjs
 
       - name: Verify X904 release safety contract
         run: node scripts/verify-x904-release-readiness.mjs
