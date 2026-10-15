@@ -133,7 +133,9 @@ jobs:
         run: node scripts/verify-gym-x904-admin-contract.mjs
 
       - name: Verify X904 ADMS safety contract
-        run: node scripts/verify-x904-adms-safety-contract.mjs
+        run: |
+          node scripts/verify-x904-adms-safety-contract.mjs
+          node --test scripts/test-x904-adms-durable-audit.mjs
 
       - name: Verify X904 release safety contract
         run: node scripts/verify-x904-release-readiness.mjs

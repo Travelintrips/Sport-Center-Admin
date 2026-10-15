@@ -13,6 +13,8 @@ interface LanLog { event_id: string; user_pin: string; device_time: string; rece
 interface LanLogsResult { source: string; events: LanLog[]; }
 
 interface AdmsDiagnostic { lastRejectedAttendanceAt?: string | null; rejectedUntrustedAttendance?: number; rejectedUnparseableAttendance?: number; attendanceStorageFailures?: number; refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
+interface AdmsAuditEvent { id:string; received_at:string; kind:string; outcome:string; method:string; client_hint:string; body_bytes:number; row_count:number; connector_authorized:boolean; device_identity_verified:boolean; }
+interface AdmsAuditResult { ready:boolean; hardwareVerified:false; sourceIdentity:"unverified"; eventCount:number; events:AdmsAuditEvent[]; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
 interface ObservedPin { user_pin: string; event_count: number; last_device_time: string | null; last_received_at: string | null; }
@@ -71,6 +73,21 @@ export default function GymX904() {
     },
     enabled: tab === "device" || tab === "audit" || tab === "dashboard",
     refetchInterval: 10000,
+    retry: 1,
+  });
+  const { data: admsAudit, isError: admsAuditError } = useQuery<AdmsAuditResult>({
+    queryKey: ["gym-x904-adms-durable-audit"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch("/api/admin/gym-x904/adms-audit", {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Audit permanen ADMS tidak tersedia");
+      return response.json();
+    },
+    enabled: tab === "device" || tab === "audit",
+    refetchInterval: 15000,
     retry: 1,
   });
   const { data: memberships, isLoading: membersLoading, isError: membersError } = useListMemberships({});
@@ -297,6 +314,21 @@ export default function GymX904() {
         <p className="text-xs text-muted-foreground">Jenis POST yang ditolak: {Object.entries(admsDiagnostic?.rejectedTables ?? {}).map(([category,count]) => `${category}: ${count}`).join(" · ") || "Belum ada"}. Nama tabel hanya kategori aman, bukan isi kiriman.</p>
         <p className="text-xs text-muted-foreground">Bentuk POST yang ditolak (tanpa menyimpan isi): {Object.entries(admsDiagnostic?.rejectedPostShapes ?? {}).map(([category,count]) => `${category}: ${count}`).join(" · ") || "Belum ada"}.</p>
         <div className="text-sm space-y-1"><p className="font-medium">Riwayat komunikasi (maks. 40 permintaan, sementara)</p>{admsDiagnostic?.recentContacts?.length ? admsDiagnostic.recentContacts.slice(0,10).map((entry, index) => <p key={`${entry.receivedAt}-${index}`} className="text-xs">{entry.receivedAt} · {entry.method} · {entry.kind} · sumber anonim {entry.sourceTag} · klien: {entry.clientHint ?? "belum diketahui"} (tidak terautentikasi)</p>) : <p className="text-xs text-muted-foreground">Belum ada permintaan tercatat pada proses ini.</p>}</div>
+        <div className="rounded-lg border p-3 space-y-2">
+          <p className="font-medium text-sm">Audit ADMS permanen (Supabase PROD, maksimal 40 aktivitas terakhir)</p>
+          <p className="text-xs text-muted-foreground">Hanya waktu, jenis protokol, status, ukuran dan kategori klien. Tidak menyimpan PIN, IP, serial, payload, kartu maupun data biometrik. Klaim serial tidak membuktikan identitas mesin; permintaan pengujian juga tercatat.</p>
+          {admsAuditError ? <p role="alert" className="text-xs text-red-700">Audit database tidak dapat dibaca. Jangan menganggapnya sebagai tidak ada koneksi.</p> :
+            !admsAudit?.ready ? <p className="text-xs text-muted-foreground">Menunggu audit database...</p> :
+            admsAudit.events.length === 0 ? <p className="text-xs text-muted-foreground">Belum ada aktivitas ADMS yang tersimpan.</p> :
+            <div className="overflow-x-auto"><table className="w-full text-xs">
+              <thead><tr className="border-b text-left"><th className="p-2">Diterima WIB</th><th className="p-2">Protokol</th><th className="p-2">Hasil</th><th className="p-2">Kelas klien</th><th className="p-2">Identitas fisik</th></tr></thead>
+              <tbody>{admsAudit.events.map(item => <tr key={item.id} className="border-b">
+                <td className="p-2">{new Date(item.received_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</td>
+                <td className="p-2">{item.method} {item.kind}</td><td className="p-2">{item.outcome}</td>
+                <td className="p-2">{item.client_hint}</td><td className="p-2">{item.device_identity_verified ? "Terverifikasi" : "Belum diverifikasi"}</td>
+              </tr>)}</tbody>
+            </table></div>}
+        </div>
         <p className="text-sm">Struktur kiriman ATTLOG terakhir: {admsDiagnostic?.lastAttlogShape ? `${admsDiagnostic.lastAttlogShape.rows} baris, jumlah kolom ${admsDiagnostic.lastAttlogShape.columnCounts.join(", ") || "tidak diketahui"} (tanpa identitas)` : "Belum ada kiriman ATTLOG yang dapat diperiksa"}</p>
         <p className="text-xs text-muted-foreground">Catatan bersifat sementara per proses server. Permintaan pengujian juga dapat tercatat; data ini bukan bukti mesin fisik online. Tidak ada data biometrik yang ditampilkan.</p>
       </section>}
