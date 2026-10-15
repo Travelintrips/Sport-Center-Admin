@@ -1,0 +1,90 @@
+import { db, gymCheckinsTable, bookingsTable, bookingHistoryTable } from "@workspace/db";
+import { sql } from "drizzle-orm";
+
+/** This processor is not wired to production ingress until DEV E2E is verified. */
+export type X904EventInput = { eventId: string; deviceSerial: string; userPin: string };
+export type X904Outcome = "processed" | "already_processed" | "review_required";
+export async function processX904Event(event: X904EventInput,
+  options: { failBeforeCommit?: boolean } = {}): Promise<X904Outcome> {
+  if (!/^[a-f0-9]{64}$/.test(event.eventId) || !event.deviceSerial || !/^\d+$/.test(event.userPin)) {
+    throw new Error("Invalid X904 event identity");
+  }
+  return db.transaction(async (tx) => {
+    const raw = await tx.execute(sql`SELECT event_id,device_serial,user_pin,device_time
+      FROM sport_center.gym_x904_raw_events WHERE event_id=${event.eventId} FOR UPDATE`);
+    if (raw.rows.length !== 1 || raw.rows[0]?.device_serial !== event.deviceSerial ||
+        raw.rows[0]?.user_pin !== event.userPin) throw new Error("Raw event missing or identity mismatch");
+
+    const ledger = await tx.execute(sql`SELECT status FROM sport_center.gym_x904_processed_events
+      WHERE event_id=${event.eventId}`);
+    if (ledger.rows.length) return "already_processed";
+
+    const mapping = await tx.execute(sql`SELECT membership_id,status
+      FROM sport_center.gym_x904_member_mapping
+      WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
+    const membershipId = Number(mapping.rows[0]?.membership_id);
+    let status: "success" | "review_required" = "review_required";
+    // A different event on the same day is a review case, not a replay of this event ID.
+    if (mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
+      const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
+        FROM sport_center.sport_memberships WHERE id=${membershipId} FOR UPDATE`);
+      const m = member.rows[0];
+      const day = String(raw.rows[0]?.device_time ?? "").slice(0,10);
+      const parts = new Intl.DateTimeFormat("en-US", {timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+      const part = (type: string) => parts.find(p => p.type === type)?.value ?? "";
+      const todayWib = `${part("year")}-${part("month")}-${part("day")}`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
+        // Out-of-day or malformed device events need manual review.
+      } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
+        const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_checkins
+          WHERE membership_id=${membershipId} AND checkin_date=${day}::date LIMIT 1`);
+        if (existing.rows.length) {
+          // Preserve the existing attendance; record this distinct event for review.
+        } else {
+          const gyms = await tx.execute(sql`SELECT id,open_time FROM sport_center.sport_facilities
+            WHERE is_active=true AND (booking_mode='walk_in' OR name ILIKE '%gym%' OR category ILIKE '%gym%' OR name ILIKE '%fitness%')
+            ORDER BY id LIMIT 1`);
+          const gym = gyms.rows[0];
+          if (gym) {
+            const start = String(gym.open_time);
+            const [h,minutes] = start.split(":").map(Number);
+            if (Number.isInteger(h) && Number.isInteger(minutes)) {
+              const end = `${String((h+1)%24).padStart(2,"0")}:${String(minutes).padStart(2,"0")}`;
+              // nextval is transaction-safe for uniqueness (gaps after rollback are acceptable).
+              await tx.execute(sql`SELECT pg_advisory_xact_lock(42003)`);
+              await tx.execute(sql`SELECT setval('sport_center.booking_order_no_seq', GREATEST(COALESCE((SELECT MAX(substring(order_number FROM 4)::bigint) FROM sport_center.sport_bookings WHERE order_number ~ '^SC-[0-9]+$'),0),(SELECT last_value FROM sport_center.booking_order_no_seq)),true)`);
+              const seq = await tx.execute(sql`SELECT nextval('sport_center.booking_order_no_seq') AS n`);
+              const orderNumber = `SC-${String(seq.rows[0]?.n).padStart(4,"0")}`;
+              await tx.insert(gymCheckinsTable).values({
+                membershipId, checkinDate: day, notes: `X904 event ${event.eventId}`
+              });
+              const [booking] = await tx.insert(bookingsTable).values({
+                orderNumber, customerName:String(m.name), customerEmail:String(m.email),
+                customerPhone:String(m.phone), facilityId:Number(gym.id), bookingDate:day,
+                startTime:start, endTime:end, durationHours:1, totalPrice:"0",
+                basePrice:"0", discountAmount:"0", apDiscountAmount:"0",
+                customerType:"umum", verificationStatus:"not_required", bookingType:"regular",
+                membershipId, status:"confirmed", source:"gym_membership",
+                numberOfPeople:1, notes:`X904 event ${event.eventId}`, paymentRequiredNow:false,
+                payerType:"personal", billingStatus:"paid", dpp:"0",
+                ppnAmount:"0", grandTotal:"0", checkedInAt:new Date(),
+              }).returning({id:bookingsTable.id});
+              if (!booking) throw new Error("X904 booking insertion failed");
+              await tx.insert(bookingHistoryTable).values({
+                bookingId:booking.id, fromStatus:null, toStatus:"confirmed",
+                changedByName:String(m.name), note:`X904 event ${event.eventId}`
+              });
+              status = "success";
+            }
+          }
+        }
+      }
+    }
+    // Existing check-in is not a success for this new event; record review for audit.
+    await tx.execute(sql`INSERT INTO sport_center.gym_x904_processed_events
+      (event_id,device_serial,user_pin,status)
+      VALUES (${event.eventId},${event.deviceSerial},${event.userPin},${status})`);
+    if (options.failBeforeCommit) throw new Error("X904_TEST_ROLLBACK_BEFORE_COMMIT");
+    return status === "success" ? "processed" : "review_required";
+  });
+}

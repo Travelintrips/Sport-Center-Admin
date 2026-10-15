@@ -47,6 +47,10 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   const receiverState = getX904ReceiverState();
   let eventStorageReady = false;
   let storedEventCount: number | null = null;
+  let processedEventCount: number | null = null;
+  let pendingEventCount: number | null = null;
+  const lastAuthenticatedAt: string | null = receiverState.lastTrustedIngestAt ?? null;
+  let processingLedgerReady = false;
   let lastStoredEventAt: string | null = null;
   try {
     const check = await db.execute(sql`SELECT to_regclass('sport_center.gym_x904_raw_events') IS NOT NULL AS ready`);
@@ -55,6 +59,24 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
       const summary = await db.execute(sql`SELECT count(*)::int AS total, max(received_at)::text AS latest FROM sport_center.gym_x904_raw_events WHERE device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}`);
       storedEventCount = Number(summary.rows[0]?.total ?? 0);
       lastStoredEventAt = summary.rows[0]?.latest ? String(summary.rows[0]?.latest) : null;
+      // Ledger-backed metrics remain unavailable until a durable event writer exists.
+      const ledger = await db.execute(sql`SELECT to_regclass('sport_center.gym_x904_processed_events') IS NOT NULL AS ready`);
+      processingLedgerReady = ledger.rows[0]?.ready === true;
+      if (processingLedgerReady) {
+        const counts = await db.execute(sql`
+          SELECT
+            (SELECT count(*)::int FROM sport_center.gym_x904_processed_events p
+             JOIN sport_center.gym_x904_raw_events r ON r.event_id = p.event_id
+             WHERE r.device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}) AS processed,
+            (SELECT count(*)::int FROM sport_center.gym_x904_raw_events r
+             WHERE r.device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}
+               AND NOT EXISTS (
+                 SELECT 1 FROM sport_center.gym_x904_processed_events p
+                 WHERE p.event_id = r.event_id
+               )) AS pending`);
+        processedEventCount = Number(counts.rows[0]?.processed ?? 0);
+        pendingEventCount = Number(counts.rows[0]?.pending ?? 0);
+      }
     }
   } catch { /* Fail closed on DB errors. */ }
   const recent = heartbeatEnabled() && lastConnectorProof !== null &&
@@ -63,6 +85,11 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   res.json({
     eventStorageReady,
     storedEventCount,
+    stored_logs: storedEventCount,
+    processed_events: processedEventCount,
+    pending_events: pendingEventCount,
+    last_authenticated_at: lastAuthenticatedAt,
+    processingLedgerReady,
     lastStoredEventAt,
     device: "Solution X904",
     attendanceSource: "sport-center-manual",
