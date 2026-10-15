@@ -30,13 +30,18 @@ export function createToken(userId: number, role: string, tenantId?: number | nu
 
 export function verifyToken(token: string): { userId: number; role: string; tenantId: number | null } | null {
   try {
-    const [dataB64, hmac] = token.split(".");
-    if (!dataB64 || !hmac) return null;
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
+    const [dataB64, hmac] = parts;
+    if (!dataB64 || !/^[a-f0-9]{64}$/.test(hmac)) return null;
     const data = Buffer.from(dataB64, "base64").toString("utf-8");
     const expectedHmac = crypto.createHmac("sha256", SECRET).update(data).digest("hex");
-    if (hmac !== expectedHmac) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(expectedHmac, "hex"))) return null;
     const payload = JSON.parse(data);
-    if (payload.exp < Date.now()) return null;
+    if (!payload || !Number.isSafeInteger(payload.userId) || payload.userId <= 0 ||
+        typeof payload.role !== "string" || !payload.role ||
+        !Number.isFinite(payload.exp) || payload.exp <= Date.now() ||
+        (payload.tenantId != null && (!Number.isSafeInteger(payload.tenantId) || payload.tenantId <= 0))) return null;
     return { userId: payload.userId, role: payload.role, tenantId: payload.tenantId ?? null };
   } catch {
     return null;
