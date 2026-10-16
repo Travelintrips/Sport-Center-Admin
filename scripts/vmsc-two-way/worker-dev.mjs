@@ -2,7 +2,9 @@
 // Default adapter is a safe simulator; no writes to the X904 device.
 const base=process.env.X904_VMSC_DEV_API_URL;
 const token=process.env.X904_VMSC_WORKER_TOKEN_DEV;
-if(!base||!token||token.length<32||!/^https:\/\//.test(base)) throw Error('DEV_API_CONFIG_REQUIRED');
+if(!base||!token||token.length<32) throw Error('DEV_API_CONFIG_REQUIRED');
+const parsed=new URL(base);
+if(parsed.protocol!=='https:' && !(parsed.protocol==='http:' && parsed.hostname==='127.0.0.1')) throw Error('DEV_API_HTTPS_REQUIRED');
 const root=base.replace(/\/$/,'');
 if(!root.endsWith('/api')) throw Error('DEV_API_BASE_MUST_END_IN_API');
 const headers={'content-type':'application/json','x-vmsc-worker-token':token};
