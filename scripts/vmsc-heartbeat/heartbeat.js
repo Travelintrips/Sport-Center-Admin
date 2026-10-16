@@ -33,4 +33,4 @@ async function send() {
   }
 }
 await send();
-setInterval(send, 120000).unref?.();
+setInterval(send, 120000);
