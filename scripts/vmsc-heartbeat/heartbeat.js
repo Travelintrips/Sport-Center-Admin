@@ -32,5 +32,5 @@ async function send() {
     running = false;
   }
 }
-await send();
+void send();
 setInterval(send, 120000);
