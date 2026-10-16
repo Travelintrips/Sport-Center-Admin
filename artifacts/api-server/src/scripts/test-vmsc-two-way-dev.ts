@@ -86,7 +86,21 @@ try {
  assert.equal((await request("/internal/dev/x904-vmsc/result",{...payload,result:{changed:true}})).status,409,"reject conflicting callback");
  const receipt=await request("/internal/dev/x904-vmsc/receipt/"+second);
  assert.equal(receipt.body.receipt?.verified,true);
- console.log("VMSC_DEV_FULL_MOCK_E2E_PASS claim result persisted_ack retry_duplicate conflict restart");
+ const abandoned=await queue("clock_read");
+ const firstClaim=await request("/internal/dev/x904-vmsc/claim",{});
+ assert.equal(firstClaim.body.job?.id,abandoned);
+ await db.execute(sql`UPDATE sport_center.x904_vmsc_commands
+  SET claimed_at=now()-interval '65 seconds' WHERE id=${abandoned}::uuid`);
+ const reclaimed=await request("/internal/dev/x904-vmsc/claim",{});
+ assert.equal(reclaimed.body.job?.id,abandoned,"reclaim abandoned lease");
+ assert.notEqual(reclaimed.body.job.claimToken,firstClaim.body.job.claimToken);
+ const invalidOld=await request("/internal/dev/x904-vmsc/result",{
+  id:abandoned,claimToken:firstClaim.body.job.claimToken,status:"completed",result:{mock:true}});
+ assert.equal(invalidOld.status,409,"stale claim cannot finish");
+ const validNew=await request("/internal/dev/x904-vmsc/result",{
+  id:abandoned,claimToken:reclaimed.body.job.claimToken,status:"completed",result:{mock:true}});
+ assert.equal(validNew.body.ack,"RESULT_VERIFIED");
+ console.log("VMSC_DEV_FULL_MOCK_E2E_PASS claim result persisted_ack retry_duplicate conflict restart lease_recovery");
 } finally {
  await close();
  for(const id of ids) {
