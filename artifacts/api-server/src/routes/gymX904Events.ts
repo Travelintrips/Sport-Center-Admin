@@ -144,4 +144,19 @@ router.get("/admin/gym-x904/observed-pins", adminMiddleware, async (_req, res) =
     return res.status(503).json({error:"X904 stored event data unavailable"});
   }
 });
+// DEV-only read-only member mapping; distinct from actual enrolled LAN users.
+router.get("/admin/gym-x904/member-mapping", adminMiddleware, async (_req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) return res.status(404).json({error:"Not found"});
+  if (!process.env.GYM_X904_DEVICE_SERIAL) return res.status(503).json({error:"Device serial not configured"});
+  try {
+    const result = await db.execute(sql`SELECT device_serial,user_pin,membership_id,status,review_reason,verified_at,updated_at
+      FROM sport_center.gym_x904_member_mapping
+      WHERE device_serial = ${process.env.GYM_X904_DEVICE_SERIAL}
+      ORDER BY user_pin LIMIT 500`);
+    return res.json({source:"database-mapping",readOnly:true,rows:result.rows});
+  } catch {
+    return res.status(503).json({error:"Mapping X904 unavailable"});
+  }
+});
 export default router;

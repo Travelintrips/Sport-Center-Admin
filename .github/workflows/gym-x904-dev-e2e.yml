@@ -1,0 +1,45 @@
+name: Gym X904 isolated DEV E2E
+on:
+  push:
+    branches:
+      - fix/x904-durable-adms-status
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gym-x904-dev-e2e
+  cancel-in-progress: false
+jobs:
+  x904-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NODE_ENV: development
+      APP_ENV: development
+      SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Verify DEV URL available without printing it
+        shell: bash
+        run: |
+          test -n "$SUPABASE_DATABASE_URL_DEV"
+          [[ "$SUPABASE_DATABASE_URL_DEV" == *"xssrfshdrtdfupgqwfdw"* ]]
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir . run typecheck:libs
+      - name: Run isolated X904 E2E on CST-DEV (Direct Execution)
+        run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-e2e.ts
+      - name: Upload Runtime Error Log if Failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x904-error-report
+          path: x904_runtime_error_log.json
+          if-no-files-found: warn
+          retention-days: 3
