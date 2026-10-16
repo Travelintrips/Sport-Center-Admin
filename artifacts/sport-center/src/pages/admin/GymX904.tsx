@@ -15,6 +15,7 @@ interface LanLogsResult { source: string; events: LanLog[]; }
 interface AdmsDiagnostic { lastRejectedAttendanceAt?: string | null; rejectedUntrustedAttendance?: number; rejectedUnparseableAttendance?: number; attendanceStorageFailures?: number; refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
 interface AdmsAuditEvent { id:string; received_at:string; kind:string; outcome:string; method:string; client_hint:string; body_bytes:number; row_count:number; connector_authorized:boolean; device_identity_verified:boolean; attlog_parseable:boolean|null; attlog_min_columns:number|null; }
 interface AdmsAuditResult { ready:boolean; hardwareVerified:false; sourceIdentity:"unverified"; eventCount:number; events:AdmsAuditEvent[]; }
+interface MappingReviewQueue {readOnly:boolean;environment:string;total:number;rows:Array<{id:number;user_pin:string;device_name:string|null;device_uid:number|null;status:string;membership_id:number|null}>;}
 interface DeviceMapping { device_serial:string; user_pin:string; membership_id:number|null; status:string; review_reason:string|null; verified_at:string|null; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
@@ -193,6 +194,19 @@ export default function GymX904() {
       return res.json();
     },
     enabled:tab==="users" || tab==="mapping" || tab==="audit",
+    refetchInterval:30000,
+  });
+  const {data: reviewQueue, isLoading: reviewLoading, isError: reviewError} = useQuery<MappingReviewQueue>({
+    queryKey:["gym-x904-review-queue"],
+    queryFn:async () => {
+      const token=getToken();
+      if(!token) throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(`${API}/admin/gym-x904/mapping-review-queue`,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
+      if(!response.ok) throw new Error("Antrean verifikasi belum tersedia");
+      return response.json();
+    },
+    enabled:tab==="mapping",
+    retry:1,
     refetchInterval:30000,
   });
   const mappingRows=mappingData?.rows ?? [];
@@ -399,6 +413,12 @@ export default function GymX904() {
           <thead className="border-b"><tr><th className="p-3">User / Grup mesin</th><th className="p-3">Zona waktu / jadwal</th><th className="p-3">Akses pintu</th><th className="p-3">Sumber verifikasi</th></tr></thead>
           <tbody><tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Menunggu pembacaan rule X904</td></tr></tbody>
         </table></div>
+      </section>}
+      {tab === "mapping" && <section className="rounded-2xl border bg-card p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Antrean verifikasi pengguna X904</h2><p className="text-sm text-muted-foreground">Mode DEV · hanya baca · tidak mengubah PIN, sidik jari, atau akses pintu.</p></div><span className="rounded-full border px-3 py-1 text-xs font-semibold">{reviewQueue?.total ?? "—"} perlu ditinjau</span></div>
+        {reviewLoading ? <p className="text-sm">Memuat antrean...</p> : reviewError || !reviewQueue ? <p className="text-sm text-muted-foreground">Antrean DEV belum tersedia pada server ini. Tidak ada perubahan pada mesin.</p> :
+          <div className="max-h-[420px] overflow-auto rounded-xl border"><table className="w-full min-w-[560px] text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="p-3">PIN mesin</th><th className="p-3">Nama di mesin</th><th className="p-3">Membership</th><th className="p-3">Status</th></tr></thead><tbody>{reviewQueue.rows.map(item=><tr className="border-t" key={item.id}><td className="p-3 font-mono">{item.user_pin}</td><td className="p-3">{item.device_name || "Tidak tersedia"}</td><td className="p-3">{item.membership_id ?? "Belum dipetakan"}</td><td className="p-3">{item.status==="pending_review"?"Perlu verifikasi":item.status}</td></tr>)}</tbody></table></div>}
+        <p className="text-xs text-muted-foreground">Pencocokan nama hanya kandidat. Persetujuan identitas belum tersedia sampai alur verifikasi dan audit final diuji.</p>
       </section>}
       {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Mapping database DEV (read-only): {mappingError ? "Tidak tersedia" : mappingLoading ? "Memuat..." : `${mappingRows.filter(r=>r.status==="verified").length} verified, ${mappingRows.filter(r=>r.status==="review_required").length} review_required, ${mappingRows.filter(r=>r.status==="inactive").length} inactive`}. Data ini bukan bukti pengguna mesin online.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
       {tab === "access" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Hak akses pintu Gym</h2><p className="text-sm text-muted-foreground">Kontrol pintu dan pendaftaran kartu masih dikelola pada mesin X904. Belum ada perintah membuka pintu atau mengubah hak akses dari portal ini sampai koneksi dan protokol diverifikasi.</p></section>}
