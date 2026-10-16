@@ -22,6 +22,13 @@ export async function processX904Event(event: X904EventInput,
     const mapping = await tx.execute(sql`SELECT membership_id,status
       FROM sport_center.gym_x904_member_mapping
       WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
+    // Never treat a missing or unverified PIN as a valid membership.
+    // Log event ID only, excluding device PIN and personal information.
+    if (!mapping.rows.length) {
+      console.warn("[x904] MAPPING_NOT_FOUND", {eventId: event.eventId, deviceSerial: event.deviceSerial});
+    } else if (mapping.rows[0]?.status !== "verified") {
+      console.warn("[x904] MAPPING_NOT_VERIFIED", {eventId: event.eventId, deviceSerial: event.deviceSerial});
+    }
     const membershipId = Number(mapping.rows[0]?.membership_id);
     let status: "success" | "review_required" = "review_required";
     // A different event on the same day is a review case, not a replay of this event ID.
