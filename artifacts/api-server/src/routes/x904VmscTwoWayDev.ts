@@ -30,7 +30,8 @@ router.post("/internal/dev/x904-vmsc/claim", async (req,res) => {
   try {
     const answer = await db.execute(sql`WITH selected AS (
       SELECT id FROM sport_center.x904_vmsc_commands
-      WHERE device_id='VMSC' AND expires_at > now()\n      AND (status='queued' OR (status='claimed' AND claimed_at < now() - interval '60 seconds'))
+      WHERE device_id='VMSC' AND expires_at > now()
+      AND (status='queued' OR (status='claimed' AND claimed_at < now() - interval '60 seconds'))
       ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
     ) UPDATE sport_center.x904_vmsc_commands AS c
       SET status='claimed', claimed_at=now(), claim_token_hash=${hash}
