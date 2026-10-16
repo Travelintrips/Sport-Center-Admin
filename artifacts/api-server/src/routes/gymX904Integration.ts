@@ -116,16 +116,17 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     Date.now() - lastConnectorProof.at < HEARTBEAT_TTL_MS &&
     lastConnectorProof.serial === process.env.GYM_X904_DEVICE_SERIAL;
   let vmscLastSeenAt: string | null = null;
-  if (vmscConfigured()) {
+  // Read the canonical heartbeat ledger already written by the VMSC Supabase
+  // Edge Function. Do not infer availability from ADMS contacts or ALMANO.
+  if ((process.env.GYM_X904_DEVICE_SERIAL ?? "").length >= 4) {
     try {
-      const status = await db.execute(sql`SELECT last_seen_at
-        FROM sport_center.vmsc_heartbeats
-        WHERE device_id = 'VMSC'
-          AND device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}`);
-      const raw = status.rows[0]?.last_seen_at;
-      if (raw) {
-        const stamp = raw instanceof Date ? raw.toISOString() : String(raw);
-        if (Number.isFinite(Date.parse(stamp))) vmscLastSeenAt = stamp;
+      const status = await db.execute(sql`SELECT (extract(epoch FROM last_seen) * 1000)::bigint AS heartbeat_ms
+        FROM sport_center.gym_x904_connector_heartbeats
+        WHERE device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}
+          AND connector_id = 'VMSC' AND read_authenticated = true`);
+      const millis = Number(status.rows[0]?.heartbeat_ms);
+      if (Number.isFinite(millis) && millis > 0 && millis <= Date.now()) {
+        vmscLastSeenAt = new Date(millis).toISOString();
       }
     } catch { /* Missing table or DB unavailable: fail closed. */ }
   }
