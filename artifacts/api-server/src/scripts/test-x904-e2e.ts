@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
 if(process.env.NODE_ENV!=="development") throw Error("DEV_ONLY");
 const url=process.env.SUPABASE_DATABASE_URL_DEV;
 if(!url) throw Error("DEV_URL_MISSING");
@@ -36,10 +37,12 @@ try{
  if(first!=="processed" || replay!=="already_processed" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
- const safe = (value: string) => value.replace(/postgres(?:ql)?:\\/\\/[^\\s]+/gi, "[REDACTED_DATABASE_URL]").replace(/password\\s*[=:]\\s*[^\\s,;]+/gi, "password=[REDACTED]");
- console.error("DETAILE_ERROR_E2E:", safe(e.message), safe(e.stack ?? ""));
- process.exitCode = 1;
- throw e;
+ const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
+ const report = {message:redact(e.message), stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
+ writeFileSync("x904_runtime_error_log.json",JSON.stringify(report,null,2),{mode:0o600});
+ console.error("DETAILE_ERROR_E2E:",report.message,report.stack);
+ process.exitCode=1;
+ throw new Error("X904_E2E_FAILED_CHECK_REPORT");
 } finally {
  try {
   if(mappingChanged) {
@@ -48,9 +51,11 @@ try{
   }
  } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
- const safe = (value: string) => value.replace(/postgres(?:ql)?:\\/\\/[^\\s]+/gi, "[REDACTED_DATABASE_URL]").replace(/password\\s*[=:]\\s*[^\\s,;]+/gi, "password=[REDACTED]");
- console.error("DETAILE_ERROR_E2E:", safe(e.message), safe(e.stack ?? ""));
- process.exitCode = 1;
- throw e;
+ const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
+ const report = {message:redact(e.message), stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
+ writeFileSync("x904_runtime_error_log.json",JSON.stringify(report,null,2),{mode:0o600});
+ console.error("DETAILE_ERROR_E2E:",report.message,report.stack);
+ process.exitCode=1;
+ throw new Error("X904_E2E_FAILED_CHECK_REPORT");
 } finally {await pool.end();}
 }

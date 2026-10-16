@@ -35,3 +35,11 @@ jobs:
       - run: pnpm --dir . run typecheck:libs
       - name: Run isolated X904 E2E on CST-DEV (Direct Execution)
         run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-e2e.ts
+      - name: Upload Runtime Error Log if Failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x904-error-report
+          path: x904_runtime_error_log.json
+          if-no-files-found: warn
+          retention-days: 3
