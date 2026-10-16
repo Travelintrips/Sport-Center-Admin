@@ -23,8 +23,12 @@ async function once(){
  let payload;
  try {payload={id:job.id,claimToken:job.claimToken,status:'completed',result:await execute(job.command_type)};}
  catch {payload={id:job.id,claimToken:job.claimToken,status:'failed',errorCode:'DEVICE_READ_FAILED'};}
- const ack=await post('/internal/dev/x904-vmsc/result',payload);
- if(ack.ack!=='RESULT_VERIFIED')throw Error('RESULT_ACK_MISSING');
+ let ack;
+ for(let attempt=0;attempt<4;attempt++){
+   try {ack=await post('/internal/dev/x904-vmsc/result',payload);break;}
+   catch(error){if(attempt===3)throw error;await sleep(1000*(attempt+1));}
+ }
+ if(ack?.ack!=='RESULT_VERIFIED')throw Error('RESULT_ACK_MISSING');
  const response=await fetch(root+'/internal/dev/x904-vmsc/receipt/'+encodeURIComponent(job.id),{headers,signal:AbortSignal.timeout(12000)});
  if(!response.ok)throw Error('RECEIPT_HTTP_'+response.status);
  const receipt=await response.json();
