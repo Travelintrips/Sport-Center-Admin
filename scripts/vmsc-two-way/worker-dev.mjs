@@ -15,6 +15,7 @@ async function post(path,body){
  return res.json();
 }
 async function execute(command){
+ if(command==='device_info' && process.env.X904_VMSC_PHYSICAL_READ_DEV==='true') { const {readDevice}=await import('./device-readonly.mjs'); return readDevice(command); }
  if(command==='device_info') return {adapter:'simulated',model:'DEV-MOCK-X904',readOnly:true};
  if(command==='clock_read') return {adapter:'simulated',clock:new Date().toISOString(),readOnly:true};
  throw Error('COMMAND_NOT_ALLOWED');
