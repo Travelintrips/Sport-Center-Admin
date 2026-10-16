@@ -5,7 +5,8 @@ import { sql } from "drizzle-orm";
 
 // DEV ONLY: read-only machine commands; no deployment to PROD.
 const router = Router();
-const enabled = () => process.env.NODE_ENV !== "production" &&
+const enabled = () => process.env.NODE_ENV === "development" &&
+  process.env.APP_ENV === "development" &&
   process.env.X904_VMSC_COMMANDS_DEV_ENABLED === "true" &&
   (process.env.X904_VMSC_WORKER_TOKEN_DEV ?? "").length >= 32;
 const authorized = (req: any, res: any) => {
