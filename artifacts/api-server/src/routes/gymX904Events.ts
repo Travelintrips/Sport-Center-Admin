@@ -169,4 +169,25 @@ router.get("/admin/gym-x904/member-mapping", adminMiddleware, async (_req,res) =
     return res.status(503).json({error:"Mapping X904 unavailable"});
   }
 });
+
+/** DEV-only review queue. Read access never approves mapping or writes to a device. */
+router.get("/admin/gym-x904/mapping-review-queue", adminMiddleware, async (_req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) {
+    return res.status(404).json({error:"Not found"});
+  }
+  try {
+    const result = await db.execute(sql`SELECT q.id, q.device_serial, q.user_pin,
+      q.requested_action, q.status, q.membership_id, q.created_at,
+      u.display_name AS device_name, u.device_uid
+      FROM sport_center.gym_x904_sync_review_queue q
+      LEFT JOIN sport_center.gym_x904_lan_users u
+        ON u.device_serial=q.device_serial AND u.user_pin=q.user_pin
+      WHERE q.requested_action='review_mapping'
+      ORDER BY q.id LIMIT 500`);
+    return res.json({readOnly:true,environment:"DEV",total:result.rows.length,rows:result.rows});
+  } catch {
+    return res.status(503).json({error:"Antrean pemetaan X904 DEV belum tersedia"});
+  }
+});
 export default router;
