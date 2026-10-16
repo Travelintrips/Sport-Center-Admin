@@ -35,4 +35,5 @@ async function once(){
  if(receipt.receipt?.verified!==true||receipt.receipt?.status!==payload.status)throw Error('SERVER_RECEIPT_NOT_VERIFIED');
  console.log('E2E_ACK_VERIFIED',job.id);
 }
-for(;;){try{await once()}catch(e){console.error('DEV_WORKER_CHECK_FAILED',e.message)}await sleep(15000)}
+if(process.argv.includes('--once')) { await once(); }
+else for(;;){try{await once()}catch(e){console.error('DEV_WORKER_CHECK_FAILED',e.message)}await sleep(15000)}
