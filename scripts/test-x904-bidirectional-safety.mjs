@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const src=readFileSync("artifacts/api-server/src/services/x904BidirectionalSafety.ts","utf8");
+assert.match(src,/READ_ONLY_SNAPSHOT/);
+assert.match(src,/MAPPING_NOT_VERIFIED/);
+assert.match(src,/HARDWARE_PROTOCOL_NOT_VERIFIED/);
+assert.match(src,/DEVICE_WRITE_APPROVAL_REQUIRED/);
+assert.match(src,/WRITE_EXECUTOR_NOT_IMPLEMENTED/);
+assert.doesNotMatch(src,/setUser\(|deleteUser\(|unlockDoor\(/);
+console.log("X904_BIDIRECTIONAL_FAIL_CLOSED_PASS");

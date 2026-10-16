@@ -33,6 +33,10 @@ jobs:
           [[ "$SUPABASE_DATABASE_URL_DEV" == *"xssrfshdrtdfupgqwfdw"* ]]
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir . run typecheck:libs
+      - name: Verify X904 LAN candidate cannot create official attendance
+        run: node scripts/test-x904-lan-candidate.mjs
+      - name: Verify persistent heartbeat and 300-second TTL
+        run: node scripts/test-x904-heartbeat-durable.mjs
       - name: Run isolated X904 E2E on CST-DEV (Direct Execution)
         run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-e2e.ts
       - name: Upload Runtime Error Log if Failed

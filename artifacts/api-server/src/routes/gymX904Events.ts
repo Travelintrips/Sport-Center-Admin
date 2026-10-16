@@ -2,7 +2,7 @@ import { Router } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { adminMiddleware, superAdminMiddleware } from "../lib/auth";
 import { processX904Event } from "../services/processX904Event";
 
 const router = Router();
@@ -168,5 +168,104 @@ router.get("/admin/gym-x904/member-mapping", adminMiddleware, async (_req,res) =
   } catch {
     return res.status(503).json({error:"Mapping X904 unavailable"});
   }
+});
+
+/** DEV-only review queue. Read access never approves mapping or writes to a device. */
+router.get("/admin/gym-x904/mapping-review-queue", adminMiddleware, async (_req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) {
+    return res.status(404).json({error:"Not found"});
+  }
+  try {
+    const result = await db.execute(sql`SELECT q.id, q.device_serial, q.user_pin,
+      q.requested_action, q.status, q.membership_id, q.created_at,
+      u.display_name AS device_name, u.device_uid
+      FROM sport_center.gym_x904_sync_review_queue q
+      LEFT JOIN sport_center.gym_x904_lan_users u
+        ON u.device_serial=q.device_serial AND u.user_pin=q.user_pin
+      WHERE q.requested_action='review_mapping'
+      ORDER BY q.id LIMIT 500`);
+    return res.json({readOnly:true,environment:"DEV",total:result.rows.length,rows:result.rows});
+  } catch {
+    return res.status(503).json({error:"Antrean pemetaan X904 DEV belum tersedia"});
+  }
+});
+
+/** DEV-only review decision. This endpoint never verifies a device user mapping and
+ * can only authorize a simulation, never a physical X904 command. */
+router.post("/admin/gym-x904/mapping-review-queue/:id/decision", superAdminMiddleware, async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) {
+    return res.status(404).json({error:"Not found"});
+  }
+  const id=Number(req.params.id);
+  const decision=String(req.body?.decision ?? "");
+  const evidence=String(req.body?.evidence ?? "").trim();
+  if (!Number.isSafeInteger(id) || id<1 || !["reject","approve_simulation"].includes(decision) ||
+      evidence.length<12 || evidence.length>500) {
+    return res.status(400).json({error:"Invalid review decision or evidence"});
+  }
+  const actor=(req as any).user?.userId;
+  if (!Number.isSafeInteger(actor)) return res.status(403).json({error:"Verified admin identity required"});
+  const nextStatus=decision==="reject"?"rejected":"approved_for_simulation";
+  try {
+    const result=await db.execute(sql`WITH changed AS (
+      UPDATE sport_center.gym_x904_sync_review_queue q
+      SET status=${nextStatus},reviewed_at=now(),reviewed_by=${String(actor)},notes=${evidence}
+      WHERE q.id=${id} AND q.status='pending_review'
+        AND (${decision}='reject' OR (q.membership_id IS NOT NULL
+          AND EXISTS(SELECT 1 FROM sport_center.gym_x904_member_mapping m
+          WHERE m.device_serial=q.device_serial AND m.user_pin=q.user_pin
+            AND m.membership_id=q.membership_id AND m.status='verified')))
+      RETURNING q.id,q.status
+    ), audited AS (
+      INSERT INTO sport_center.gym_x904_sync_review_audit
+        (queue_id,action,actor,from_status,to_status,notes)
+      SELECT changed.id,${decision},${String(actor)},'pending_review',changed.status,${evidence} FROM changed
+      RETURNING id
+    )
+    SELECT changed.id,changed.status,(SELECT count(*)::int FROM audited) AS audit_records FROM changed`);
+    if(result.rows.length!==1) return res.status(409).json({error:"Not pending or verified membership mapping is required"});
+    return res.json({ok:true,simulationOnly:true,deviceWriteAllowed:false,review:result.rows[0]});
+  } catch {
+    return res.status(503).json({error:"Review audit transaction unavailable"});
+  }
+});
+
+/** DEV-exclusive simulated approval; NEVER updates actual member mappings or bookings. */
+router.get("/admin/gym-x904/simulation-candidates", adminMiddleware, async (_req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) return res.status(404).json({error:"Not found"});
+  try {
+    const result=await db.execute(sql`SELECT candidate_id,device_user_pin,simulated_member_id,review_status,
+      reviewed_at,simulation_status FROM sport_center.x904_dev_identity_simulation
+      ORDER BY candidate_id LIMIT 100`);
+    return res.json({readOnly:true,simulationOnly:true,rows:result.rows});
+  } catch { return res.status(503).json({error:"DEV simulation unavailable"}); }
+});
+router.post("/admin/gym-x904/simulation-candidates/:id/approve", superAdminMiddleware, async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) return res.status(404).json({error:"Not found"});
+  const id=Number(req.params.id);
+  const evidence=String(req.body?.evidence ?? "").trim();
+  const actor=(req as any).user?.userId;
+  if (!Number.isSafeInteger(id) || id<1 || !Number.isSafeInteger(actor) || evidence.length<12 || evidence.length>500)
+    return res.status(400).json({error:"Candidate, admin session and review evidence required"});
+  try {
+    const result=await db.execute(sql`WITH changed AS (
+      UPDATE sport_center.x904_dev_identity_simulation c
+      SET review_status='approved_for_mock', reviewed_at=now(), reviewed_by=${String(actor)}
+      WHERE candidate_id=${id} AND review_status='pending'
+        AND simulation_status='verified_simulation' AND live_mapping_approved=false
+      RETURNING candidate_id
+    ), audited AS (
+      INSERT INTO sport_center.x904_dev_simulation_approval_audit(candidate_id,actor,decision,evidence)
+      SELECT candidate_id,${String(actor)},'approved_for_mock',${evidence} FROM changed RETURNING id
+    )
+    SELECT candidate_id,(SELECT count(*)::int FROM audited) AS audit_records FROM changed`);
+    if(result.rows.length!==1) return res.status(409).json({error:"Candidate already reviewed or ineligible"});
+    return res.json({ok:true,simulationOnly:true,machineWriteAllowed:false,bookingAllowed:false,
+      reviewStatus:"approved_for_mock",candidateId:id,auditRecords:1});
+  } catch {return res.status(503).json({error:"DEV simulation approval transaction unavailable"});}
 });
 export default router;
