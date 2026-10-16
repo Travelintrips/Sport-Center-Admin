@@ -231,15 +231,40 @@ export default function GymX904() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Absensi Gym X904</h1>
-        <p className="text-sm text-muted-foreground mt-1">Pantau check-in Gym Sport Center dan status komunikasi mesin X904. Koneksi mesin X904 belum aktif sebagai integrasi absensi; status perangkat ditentukan dari bukti koneksi, bukan keberhasilan tes server.</p>
-      </div>
-      <nav aria-label="Menu Gym X904" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
+      <header className="relative overflow-hidden rounded-3xl border border-slate-700/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-7 text-white shadow-xl shadow-slate-900/10 md:px-9 md:py-9">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-400/15 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-1/4 h-36 w-36 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl space-y-3">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-100"><Fingerprint size={13} /> Gym Intelligence · Solution X904</span>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Pusat Kendali Gym</h1>
+            <p className="max-w-xl text-sm leading-relaxed text-slate-300 md:text-base">Pantau member, aktivitas gym, dan sinkronisasi perangkat dalam satu workspace yang mudah digunakan.</p>
+            <p className="text-xs text-slate-400">Monitoring perangkat dan absensi resmi dipisahkan untuk menjaga keakuratan data.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              <p className="text-[11px] font-medium text-slate-300">Member aktif</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{membersLoading ? "—" : membersError ? "—" : activeMembers ?? "—"}</p>
+              <p className="mt-1 text-[11px] text-slate-400">Data Sport Center</p>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              <p className="text-[11px] font-medium text-slate-300">Log tersimpan</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{lanStatusError ? "—" : lanStatus?.logs?.toLocaleString("id-ID") ?? "—"}</p>
+              <p className="mt-1 text-[11px] text-slate-400">Snapshot LAN</p>
+            </div>
+            <div className="col-span-2 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm sm:col-span-1">
+              <p className="text-[11px] font-medium text-slate-300">Gateway utama</p>
+              <p className="mt-1 flex items-center gap-2 text-xl font-bold"><span className="h-2 w-2 rounded-full bg-cyan-400" />VMSC</p>
+              <p className="mt-1 text-[11px] text-slate-400">Status aktual di panel monitoring</p>
+            </div>
+          </div>
+        </div>
+      </header>
+      <nav aria-label="Menu Gym X904" className="flex flex-wrap gap-2 rounded-2xl border border-slate-200/80 bg-white/90 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button key={id} type="button" aria-current={tab === id ? "page" : undefined}
             onClick={() => setTab(id)}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${tab === id ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"}`}>
+            className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${tab === id ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "border-transparent bg-slate-50 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"}`}>
             <Icon size={16} />{label}
           </button>
         ))}
