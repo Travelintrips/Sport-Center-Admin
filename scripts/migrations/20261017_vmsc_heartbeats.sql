@@ -9,3 +9,11 @@ CREATE TABLE IF NOT EXISTS sport_center.vmsc_heartbeats (
 REVOKE ALL ON sport_center.vmsc_heartbeats FROM PUBLIC;
 -- Effective status must be derived from last_seen_at, not the stale stored
 -- device_status value: offline when now() - last_seen_at >= 300 seconds.
+
+-- Live status is computed at query time; no scheduler is required to flip stale rows.
+CREATE OR REPLACE VIEW sport_center.vmsc_heartbeat_status AS
+SELECT device_id, device_serial, last_seen_at,
+  CASE WHEN last_seen_at <= now() AND last_seen_at > now() - interval '300 seconds'
+       THEN 'Online' ELSE 'Offline' END AS effective_status
+FROM sport_center.vmsc_heartbeats;
+REVOKE ALL ON sport_center.vmsc_heartbeat_status FROM PUBLIC;
