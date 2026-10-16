@@ -8,24 +8,26 @@ if(!u.username.endsWith(".xssrfshdrtdfupgqwfdw")) throw Error("WRONG_PROJECT");
 const {db,pool}=await import("@workspace/db");
 const {sql}=await import("drizzle-orm");
 const {processX904Event}=await import("../services/processX904Event");
-const serial="TDBD234200545",pin="1",eventId=randomBytes(32).toString("hex");
+const serial="TDBD234200545",pin=String(100000+randomBytes(4).readUInt32BE(0)%900000),eventId=randomBytes(32).toString("hex");
 const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
 const field=(n:string)=>parts.find(p=>p.type===n)?.value;
 const day=field("year")+"-"+field("month")+"-"+field("day");
-let mappingChanged=false;
+let membershipId: number | null = null;
+const marker="X904 event "+eventId;
 try{
- const state=await db.execute(sql`SELECT membership_id,status FROM sport_center.gym_x904_member_mapping WHERE device_serial=${serial} AND user_pin=${pin}`);
- if(state.rows.length!==1 || state.rows[0]?.status!=="review_required") throw Error("MAPPING_NOT_READY");
- const mid=Number(state.rows[0]?.membership_id);
- const previous=await db.execute(sql`SELECT count(*)::int AS n FROM sport_center.gym_checkins WHERE membership_id=${mid} AND checkin_date=${day}::date`);
- if(Number(previous.rows[0]?.n)>0) throw Error("TODAY_ALREADY_CHECKED_IN");
- const changed=await db.execute(sql`UPDATE sport_center.gym_x904_member_mapping SET status='verified',verified_at=now(),verified_by='x904-ci-test' WHERE device_serial=${serial} AND user_pin=${pin} AND membership_id=${mid} AND status='review_required' RETURNING membership_id`);
- if(changed.rows.length!==1) throw Error("MAPPING_UPDATE_FAILED");
- mappingChanged=true;
+ // DEV-only synthetic membership and mapping; never touch an existing member.
+ const member=await db.execute(sql`INSERT INTO sport_center.sport_memberships
+  (name,email,phone,start_date,end_date,months,total_price,status,notes)
+  VALUES (${`X904 CI ${eventId}`},${`x904-ci-${eventId}@example.invalid`},${`000${pin}`},${day},${day},1,0,'active',${`X904 E2E ${eventId}`})
+  RETURNING id`);
+ membershipId=Number(member.rows[0]?.id);
+ if(!Number.isSafeInteger(membershipId)||membershipId<=0) throw Error('FIXTURE_MEMBERSHIP_FAILED');
+ await db.execute(sql`INSERT INTO sport_center.gym_x904_member_mapping
+  (device_serial,user_pin,membership_id,status,verified_at,verified_by)
+  VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
  await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES(${eventId},${serial},${pin},${day+" 10:00:00"},0,1)`);
  const first=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
  const replay=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
- const marker="X904 event "+eventId;
  const counts=await db.execute(sql`SELECT
  (SELECT count(*)::int FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId} AND status='success') AS ledger,
  (SELECT count(*)::int FROM sport_center.gym_checkins WHERE notes=${marker}) AS checkins,
@@ -45,17 +47,15 @@ try{
  throw new Error("X904_E2E_FAILED_CHECK_REPORT");
 } finally {
  try {
-  if(mappingChanged) {
-   await db.execute(sql`UPDATE sport_center.gym_x904_member_mapping SET status='review_required',verified_at=NULL,verified_by=NULL,review_reason='CI E2E completed' WHERE device_serial=${serial} AND user_pin=${pin} AND verified_by='x904-ci-test'`);
-   console.log("X904_MAPPING_RESET=review_required");
-  }
- } catch (error) {
- const e = error instanceof Error ? error : new Error(String(error));
- const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
- const report = {message:redact(e.message), stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
- writeFileSync("x904_runtime_error_log.json",JSON.stringify(report,null,2),{mode:0o600});
- console.error("DETAILE_ERROR_E2E:",report.message,report.stack);
- process.exitCode=1;
- throw new Error("X904_E2E_FAILED_CHECK_REPORT");
-} finally {await pool.end();}
+  // Delete only rows bearing this run's random event identity, children first.
+  await db.execute(sql`DELETE FROM sport_center.booking_history WHERE note=${marker}`);
+  await db.execute(sql`DELETE FROM sport_center.sport_bookings WHERE notes=${marker}`);
+  await db.execute(sql`DELETE FROM sport_center.gym_checkins WHERE notes=${marker}`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId}`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_raw_events WHERE event_id=${eventId}`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_member_mapping WHERE device_serial=${serial} AND user_pin=${pin} AND verified_by='x904-ci-test'`);
+  if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_memberships WHERE id=${membershipId} AND notes=${`X904 E2E ${eventId}`}`);
+  console.log('X904_FIXTURE_CLEANUP=PASS');
+ } catch(error) { console.error('X904_FIXTURE_CLEANUP_FAILED',error instanceof Error?error.message:String(error)); process.exitCode=1; }
+ finally {await pool.end();}
 }
