@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { processX904Event } from "../services/processX904Event";
 
 const router = Router();
 const equal = (a: string, b: string) => {
@@ -55,9 +56,18 @@ router.post("/internal/gym-x904/events", async (req, res) => {
         AS e(id text, pin text, occurred text, status integer, verify integer)
       ON CONFLICT (event_id) DO NOTHING
       RETURNING event_id`);
-    return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,duplicates:parsed.length-result.rows.length});
-  } catch {
-    return res.status(503).json({error:"X904 event storage unavailable"});
+    const outcomes = {processed:0, already_processed:0, review_required:0};
+    for (const event of parsed) {
+      const outcome = await processX904Event({eventId:event.id, deviceSerial:serial, userPin:event.pin});
+      outcomes[outcome]++;
+    }
+    return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,duplicates:parsed.length-result.rows.length,outcomes});
+  } catch (error) {
+    console.error("[gym-x904] ingress persistence/processing failed", {
+      error: error instanceof Error ? error.message : String(error),
+      eventCount: parsed.length,
+    });
+    return res.status(503).json({error:"X904 event processing unavailable"});
   }
 });
 
