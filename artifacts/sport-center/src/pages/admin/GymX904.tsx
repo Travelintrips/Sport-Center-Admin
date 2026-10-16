@@ -202,11 +202,9 @@ export default function GymX904() {
     { id: "dashboard", label: "Dashboard Gym", icon: LayoutDashboard },
     { id: "device", label: "Monitoring X904", icon: Cpu },
     { id: "users", label: "User Mesin X904", icon: Users },
-    { id: "rules", label: "Rule Akses Mesin", icon: ShieldCheck },
-    { id: "events", label: "Riwayat Akses Mesin", icon: Fingerprint },
+    { id: "events", label: "Riwayat Log X904", icon: Fingerprint },
     { id: "members", label: "Member Gym", icon: Users },
-    { id: "mapping", label: "Sinkronisasi Member", icon: Link2 },
-    { id: "access", label: "Hak Akses Pintu", icon: DoorOpen },
+    { id: "mapping", label: "Pemetaan Member", icon: Link2 },
     { id: "audit", label: "Audit & Diagnostik", icon: ScrollText },
   ];
   const rows = Array.isArray(data) ? data : [];
@@ -400,7 +398,7 @@ export default function GymX904() {
           <tbody><tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Menunggu pembacaan rule X904</td></tr></tbody>
         </table></div>
       </section>}
-      {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Mapping database DEV (read-only): {mappingError ? "Tidak tersedia" : mappingLoading ? "Memuat..." : `${mappingRows.filter(r=>r.status==="verified").length} verified, ${mappingRows.filter(r=>r.status==="review_required").length} review_required, ${mappingRows.filter(r=>r.status==="inactive").length} inactive`}. Data ini bukan bukti pengguna mesin online.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
+      {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Status pemetaan PIN dan membership (baca saja): {mappingError ? "Tidak tersedia" : mappingLoading ? "Memuat..." : `${mappingRows.filter(r=>r.status==="verified").length} verified, ${mappingRows.filter(r=>r.status==="review_required").length} review_required, ${mappingRows.filter(r=>r.status==="inactive").length} inactive`}. Data ini bukan bukti pengguna mesin online.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
       {tab === "access" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Hak akses pintu Gym</h2><p className="text-sm text-muted-foreground">Kontrol pintu dan pendaftaran kartu masih dikelola pada mesin X904. Belum ada perintah membuka pintu atau mengubah hak akses dari portal ini sampai koneksi dan protokol diverifikasi.</p></section>}
       {tab === "audit" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Audit sumber data</h2><p className="text-sm">Riwayat SC: {isError ? "Tidak tersedia" : isLoading ? "Memuat..." : `${rows.length} check-in (SC manual)`}</p><p className="text-sm">Log mesin: {deviceError ? "Gagal dibaca" : !deviceData?.enabled ? "Pembacaan belum aktif" : `${deviceRows.length} event X904 pada tanggal terpilih`}</p><p className="text-sm">Koneksi mesin: {integration?.hardware === "stored-adms-unverified" ? "Log ADMS tersimpan; mesin belum terverifikasi" : integration?.hardware === "unverified" ? "Belum terverifikasi" : integration?.hardware ?? "Status tidak diketahui"}</p><p className="text-xs text-muted-foreground">Kedua sumber tidak digabungkan tanpa pemetaan identitas terverifikasi.</p></section>}
       <div className="rounded-xl border bg-card p-5 flex flex-wrap items-start justify-between gap-4">
