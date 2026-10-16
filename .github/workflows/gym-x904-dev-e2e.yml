@@ -33,7 +33,5 @@ jobs:
           [[ "$SUPABASE_DATABASE_URL_DEV" == *"xssrfshdrtdfupgqwfdw"* ]]
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir . run typecheck:libs
-      - name: Build isolated E2E runner
-        run: pnpm --filter @workspace/api-server exec esbuild src/scripts/test-x904-e2e.ts --bundle --platform=node --packages=external --format=esm --outfile=tmp/test-x904-e2e.mjs
-      - name: Run isolated X904 E2E on CST-DEV
-        run: node artifacts/api-server/tmp/test-x904-e2e.mjs
+      - name: Run isolated X904 E2E on CST-DEV (Direct Execution)
+        run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-e2e.ts
