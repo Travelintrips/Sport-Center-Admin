@@ -1,5 +1,8 @@
 name: Gym X904 isolated DEV E2E
 on:
+  push:
+    branches:
+      - fix/x904-durable-adms-status
   workflow_dispatch:
 permissions:
   contents: read
