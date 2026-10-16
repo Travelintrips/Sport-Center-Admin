@@ -209,6 +209,35 @@ export default function GymX904() {
     retry:1,
     refetchInterval:30000,
   });
+  const [simulationEvidence,setSimulationEvidence]=useState("Verifikasi simulasi X904 DEV, bukan persetujuan identitas riil");
+  const [simulationMessage,setSimulationMessage]=useState("");
+  const [simulationBusy,setSimulationBusy]=useState<number|null>(null);
+  const {data: simulationCandidates,refetch:refreshSimulations} = useQuery<{simulationOnly:boolean;rows:Array<{candidate_id:number;device_user_pin:string;simulated_member_id:number;review_status:string}>}>({
+    queryKey:["gym-x904-dev-simulation-candidates"],
+    enabled:tab==="mapping",
+    retry:false,
+    queryFn:async()=>{
+      const token=getToken();if(!token)throw new Error("Sesi admin diperlukan");
+      const response=await fetch(`${API}/admin/gym-x904/simulation-candidates`,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
+      if(!response.ok)throw new Error("Tidak tersedia di lingkungan ini");
+      return response.json();
+    }
+  });
+  const approveSimulation=async(candidateId:number)=>{
+    if(simulationEvidence.trim().length<12){setSimulationMessage("Bukti pengujian harus diisi minimal 12 karakter");return;}
+    setSimulationBusy(candidateId);setSimulationMessage("");
+    try{
+      const token=getToken();if(!token)throw new Error("Sesi admin diperlukan");
+      const response=await fetch(`${API}/admin/gym-x904/simulation-candidates/${candidateId}/approve`,{
+        method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({evidence:simulationEvidence.trim()})
+      });
+      if(!response.ok)throw new Error(`Simulasi ditolak (HTTP ${response.status})`);
+      setSimulationMessage("Persetujuan simulasi tercatat di audit DEV. Mapping resmi tidak berubah.");
+      await refreshSimulations();
+    }catch(error){setSimulationMessage(error instanceof Error?error.message:"Gagal memproses simulasi");}
+    finally{setSimulationBusy(null);}
+  };
   const mappingRows=mappingData?.rows ?? [];
   const observedRows = Array.isArray(observedPins?.users) ? observedPins.users : [];
   const deviceRows = deviceData?.enabled && Array.isArray(deviceData.events) ? deviceData.events : [];
@@ -436,6 +465,13 @@ export default function GymX904() {
           <thead className="border-b"><tr><th className="p-3">User / Grup mesin</th><th className="p-3">Zona waktu / jadwal</th><th className="p-3">Akses pintu</th><th className="p-3">Sumber verifikasi</th></tr></thead>
           <tbody><tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Menunggu pembacaan rule X904</td></tr></tbody>
         </table></div>
+      </section>}
+      {tab === "mapping" && simulationCandidates?.simulationOnly && <section className="rounded-xl border bg-card p-5 space-y-3">
+        <h2 className="font-semibold">18 kandidat untuk persetujuan simulasi DEV</h2>
+        <p className="text-xs text-muted-foreground">Hanya data tiruan; tombol ini TIDAK memverifikasi identitas asli, membuat booking Rp0, atau mengirim data ke mesin.</p>
+        <input aria-label="Catatan persetujuan simulasi" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={simulationEvidence} onChange={e=>setSimulationEvidence(e.target.value)} />
+        {simulationMessage && <p role="status" className="text-sm">{simulationMessage}</p>}
+        <div className="max-h-72 overflow-auto"><table className="w-full text-sm"><thead><tr><th className="p-2 text-left">PIN</th><th className="p-2 text-left">Member simulasi</th><th className="p-2 text-left">Status</th><th className="p-2">Tindakan</th></tr></thead><tbody>{simulationCandidates.rows.map(candidate=><tr key={candidate.candidate_id} className="border-t"><td className="p-2 font-mono">{candidate.device_user_pin}</td><td className="p-2">#{candidate.simulated_member_id}</td><td className="p-2">{candidate.review_status}</td><td className="p-2"><button type="button" disabled={candidate.review_status!=="pending"||simulationBusy!==null} onClick={()=>approveSimulation(candidate.candidate_id)} className="rounded-md border px-3 py-1 disabled:opacity-50">Setujui Simulasi</button></td></tr>)}</tbody></table></div>
       </section>}
       {tab === "mapping" && <section className="rounded-2xl border bg-card p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Antrean verifikasi pengguna X904</h2><p className="text-sm text-muted-foreground">Mode DEV · hanya baca · tidak mengubah PIN, sidik jari, atau akses pintu.</p></div><span className="rounded-full border px-3 py-1 text-xs font-semibold">{reviewQueue?.total ?? "—"} perlu ditinjau</span></div>
