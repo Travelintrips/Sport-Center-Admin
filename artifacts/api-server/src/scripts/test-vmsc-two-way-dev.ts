@@ -94,3 +94,6 @@ try {
    await db.execute(sql`DELETE FROM sport_center.x904_vmsc_commands WHERE id=${id}::uuid`).catch(()=>{});
  }
 }
+
+// The shared PostgreSQL pool intentionally lives for API servers; stop the isolated CI process.
+process.exit(0);
