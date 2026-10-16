@@ -133,10 +133,20 @@ jobs:
         run: node scripts/verify-gym-x904-admin-contract.mjs
 
       - name: Verify X904 ADMS safety contract
-        run: node scripts/verify-x904-adms-safety-contract.mjs
+        run: |
+          node scripts/verify-x904-adms-safety-contract.mjs
+          node --test scripts/test-x904-adms-durable-audit.mjs
+          node --test scripts/test-x904-adms-format-evidence.mjs
 
       - name: Verify X904 release safety contract
         run: node scripts/verify-x904-release-readiness.mjs
+
+      - name: Verify X904 authenticated LAN sync and durable ACK
+        run: |
+          node scripts/verify-x904-lan-contract.mjs
+          node --test scripts/test-x904-almano-snapshot.mjs
+          node --test scripts/test-x904-almano-prod-snapshot.mjs
+          node --test scripts/test-x904-almano-prod-autosync.mjs
 
       - name: Typecheck
         run: pnpm typecheck

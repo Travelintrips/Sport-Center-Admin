@@ -1,11 +1,11 @@
-import { useState, type FormEvent } from "react";
-import { Bot, Send, X, ShieldCheck, Download } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Bot, Send, X, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
 import { getToken } from "@/lib/auth";
 
 type Message = { role: "admin" | "assistant"; text: string };
 type TaxItem = {
-  id?: number; referenceNumber?: string | null; taxCode?: string | null;
+  id?: number; customerName?: string | null; facilityName?: string | null; referenceNumber?: string | null; taxCode?: string | null;
   taxRate?: number; taxAmount?: number; dpp?: number; payerType?: string | null;
   status?: string | null; transactionType?: string | null; transactionDate?: string | null;
 };
@@ -13,9 +13,19 @@ type TaxReport = { summary?: { totalDpp?: number; totalTaxAmount?: number; total
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const money = (value: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value);
 const currentPeriod = () => new Date().toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", timeZone: "Asia/Jakarta" }).slice(0, 7);
+const MONTHS = ["januari","februari","maret","april","mei","juni","juli","agustus","september","oktober","november","desember"];
 function periodFromQuestion(question: string, selected: string) {
-  const found = question.match(/(20\d{2})[-/](0[1-9]|1[0-2])/);
-  return found ? `${found[1]}-${found[2]}` : selected;
+  const lower = question.toLowerCase();
+  const numeric = lower.match(/(20\d{2})[-/](0?[1-9]|1[0-2])/);
+  if (numeric) return `${numeric[1]}-${numeric[2].padStart(2,"0")}`;
+  const named = lower.match(/(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s*(20\d{2})?/);
+  if (named) return `${named[2] || selected.slice(0,4)}-${String(MONTHS.indexOf(named[1])+1).padStart(2,"0")}`;
+  if (/bulan (ini|berjalan)/.test(lower)) return currentPeriod();
+  if (/bulan lalu|bulan sebelumnya/.test(lower)) {
+    const [year, month] = currentPeriod().split("-").map(Number);
+    return new Date(Date.UTC(year,month-2,1)).toISOString().slice(0,7);
+  }
+  return selected;
 }
 function audit(report: TaxReport, period: string) {
   if (!Array.isArray(report.transactions) || !report.summary) throw new Error("Skema respons pajak tidak sesuai.");
@@ -36,8 +46,28 @@ function audit(report: TaxReport, period: string) {
   return {
     text: `Audit pajak Sport Center — ${period}\nTransaksi aktif: ${active.length}\nDPP tercatat: ${money(Number(report.summary.totalDpp ?? 0))}\nPPN tercatat: ${money(Number(report.summary.totalTaxAmount ?? 0))}\nReferensi kosong: ${missingRef.length}\nKode pajak kosong: ${missingTaxCode.length}\nNilai tidak valid: ${invalidNumbers.length}\nKandidat duplikasi: ${duplicates.length}\nTransaksi personal dengan PPN tercatat: ${personalWithTax.length}\n\nTemuan merupakan kandidat audit, bukan koreksi atau kesimpulan pajak final. Transaksi personal perlu dinilai menurut aturan yang berlaku. Belum mencakup PPh, BizPortal, pajak masukan, atau data Coretax.`,
     flagged: [...missingRef, ...missingTaxCode, ...invalidNumbers, ...personalWithTax],
-    duplicates
+    duplicates, active, personalWithTax
   };
+}
+/** Deterministic audit intent: prioritize record IDs, then grouped tax checks, then payments. */
+function identifyAuditIntent(question: string) {
+  const taxIds = /(?:catatan pajak|catatan.*#|simulasi|dengan dan tanpa|masuk dalam total)/i.test(question)
+    && /(?:laporan|total|simulasi|catatan pajak)/i.test(question) && /#\d+/.test(question);
+  const groupTax = /(?:duplikas|dihitung ganda|penghitungan ganda|pajak ganda)/i.test(question)
+    && /(?:SCPAY-SC-|pembayaran)/i.test(question);
+  const paymentId = question.match(/SCPAY-SC-(\d+)/i)?.[1]
+    ?? question.match(/(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*(\d+)/i)?.[1];
+  const bookingReference = question.match(/\bSC-\d+\b/i)?.[0]?.toUpperCase();
+  return { taxIds, groupTax, paymentId, reference: paymentId ? `SCPAY-SC-${paymentId}` : bookingReference };
+}
+function resolveFollowUp(question: string, history: Message[]) {
+  if (/\b(?:SC-\d+|SCPAY-SC-\d+)\b|(?:pembayaran|payment)\s*#?\d+|#\d+|\b20\d\d[-/]\d\d\b|\b(?:januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/i.test(question)) return question;
+  if (!/(?:transaksi (?:ini|itu)|pembayaran (?:ini|itu)|booking (?:ini|itu)|grup (?:ini|itu)|lanjut|yang tadi|tersebut|coba periksa|periksa lagi)/i.test(question)) return question;
+  const prior = [...history].reverse().find(m => m.role === "admin" && /(?:SCPAY-SC-\d+|SC-\d+|(?:pembayaran|payment)\s*#\d+)/i.test(m.text));
+  const match = prior?.text.match(/SCPAY-SC-\d+/i) ?? prior?.text.match(/(?:pembayaran|payment)\s*#(\d+)/i) ?? prior?.text.match(/SC-\d+/i);
+  if (!match) return question;
+  const reference = match[1] ? `SCPAY-SC-${match[1]}` : match[0];
+  return `${question} [referensi percakapan: ${reference}]`;
 }
 /** Widget hanya dimuat di layout admin setelah autentikasi. Tidak memiliki akses tulis. */
 export default function AiAsistenWidget() {
@@ -46,10 +76,24 @@ export default function AiAsistenWidget() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<Message[]>([{ role: "assistant", text: "Halo! Saya AI Asisten CST. Saya bisa mengaudit data PPN Sport Center per masa pajak (baca-saja). Koneksi PPh, BizPortal, dan Coretax belum aktif." }]);
+  // Session-scoped transcript; no server-side storage of sensitive tax conversations.
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("sc-ai-asisten-history-v1");
+      if (!saved) return;
+      const parsed: unknown = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length <= 120 && parsed.every(m => m && typeof m.text === "string" && (m.role === "admin" || m.role === "assistant"))) {
+        setMessages(parsed.slice(-40));
+      }
+    } catch { /* Browser storage unavailable: continue without persistence. */ }
+  }, []);
+  useEffect(() => {
+    try { sessionStorage.setItem("sc-ai-asisten-history-v1", JSON.stringify(messages.slice(-40))); } catch { /* Storage may be disabled. */ }
+  }, [messages]);
   async function queryTax(question: string) {
     const selected = periodFromQuestion(question, period);
     const [year, month] = selected.split("-").map(Number);
-    if (!year || !month || month > 12) throw new Error("Masa pajak tidak valid.");
+    if (!year || month < 1 || month > 12) throw new Error("Masa pajak tidak valid.");
     const startDate = `${selected}-01`;
     const endDate = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
     const token = getToken();
@@ -59,7 +103,142 @@ export default function AiAsistenWidget() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body: TaxReport = await response.json();
     const result = audit(body, selected);
-    return result.text;
+    setPeriod(selected);
+    const intent = identifyAuditIntent(question);
+    // IDs with # in tax audit refer to tax_transactions.id, not payments.id.
+    if (intent.taxIds) {
+      const ids = [...new Set([...question.matchAll(/#(\d+)/g)].map(m => Number(m[1])))];
+      const activeRows = result.active;
+      const matches = ids.map(id => ({ id, row: activeRows.find(t => t.id === id) }));
+      const excludedId = Number(question.match(/tanpa\s+(?:catatan(?: pajak)?\s*)?(?:pembayaran\s*)?#(\d+)/i)?.[1] ?? question.match(/(?:pembayaran|payment)\s*#(\d+)/i)?.[1] ?? 0);
+      const exclusion = activeRows.find(t => t.id === excludedId);
+      const totalDpp = Number(body.summary?.totalDpp ?? 0);
+      const totalPpn = Number(body.summary?.totalTaxAmount ?? 0);
+      const formatRow = ({id,row}:typeof matches[number]) => row
+        ? `#${id} ${row.referenceNumber ?? "-"} | DPP ${money(Number(row.dpp ?? 0))} | PPN ${money(Number(row.taxAmount ?? 0))} | TERMASUK dalam total periode (aktif)`
+        : `#${id}: TIDAK TERMASUK dalam catatan aktif periode ${selected} (perlu periksa tanggal/status sumber)`;
+      return [
+        `Simulasi audit catatan pajak — ${selected} (baca-saja)`,
+        `ID catatan pajak yang diminta: ${ids.join(", ")}`,
+        ...matches.map(formatRow),
+        `Jumlah teridentifikasi: ${matches.filter(x=>x.row).length} dari ${ids.length} catatan aktif.`,
+        `Total laporan tercatat: DPP ${money(totalDpp)} | PPN ${money(totalPpn)}`,
+        exclusion
+          ? `Simulasi tanpa catatan pajak #${excludedId}: DPP ${money(totalDpp-Number(exclusion.dpp??0))} | PPN ${money(totalPpn-Number(exclusion.taxAmount??0))}`
+          : `Simulasi pengurangan: ID yang hendak dikecualikan tidak ditemukan sebagai catatan aktif. Tidak ada angka yang dikurangkan.`,
+        exclusion
+          ? `Selisih simulasi: DPP ${money(Number(exclusion.dpp??0))} | PPN ${money(Number(exclusion.taxAmount??0))}`
+          : "Selisih simulasi: tidak dapat ditentukan tanpa ID catatan aktif yang tepat.",
+        "Simulasi bukan usulan pembetulan. Keputusan duplikasi memerlukan pemeriksaan dasar pajak, dokumen sumber dan apakah transaksi berbeda mempunyai kewajiban pajak masing-masing.",
+        "Tidak ada data yang diubah atau dihapus."
+      ].join("\n");
+    }
+    if (intent.groupTax) {
+      const paymentId = intent.paymentId;
+      if (!paymentId) throw new Error("ID pembayaran untuk audit duplikasi tidak ditemukan.");
+      const traceResponse = await fetch(`${BASE}/admin/ai-asisten/group-tax-audit/${paymentId}`, { headers: { Authorization: `Bearer ${token}` }, credentials:"same-origin" });
+      if (!traceResponse.ok) throw new Error(`Audit pajak grup gagal (HTTP ${traceResponse.status})`);
+      const g: { payment:{id:number;amount:number;status:string};groupRef:string|null;bookings:Array<{id:number;reference:string;price:number;invoicePdfExists:boolean;paidAt:string|null;payerType:string|null;ppnTreatment:string;ppnAmount:number|null;ppnCollectedByCustomer:boolean}>;paymentTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;bookingTax:Array<{id:number;referenceNumber:string;dpp:number;ppn:number;date:string}>;paymentTotals:{dpp:number;ppn:number};bookingTotals:{dpp:number;ppn:number};overlapCandidate:boolean;personalWithBookingPpn:string[];note:string; groupPayments:Array<{id:number;bookingId:number;amount:number;status:string;paymentType:string;proofExists:boolean;ocrAvailable:boolean;ocrAmount:number|null;ocrAmountMatchesRecorded:boolean|null;ocrDateAvailable:boolean}>;confirmedGroupPaymentTotal:number;groupBookingTotal:number;allocationVerified:boolean;evidenceLimitations:string[] } = await traceResponse.json();
+      const rows = (arr:typeof g.paymentTax) => arr.map(t=>`#${t.id} ${t.referenceNumber} ${t.date} | DPP ${money(t.dpp)} | PPN ${money(t.ppn)}`);
+      return [
+        `Audit potensi duplikasi pajak pembayaran #${g.payment.id} — ${selected}`,
+        `Pembayaran ${money(g.payment.amount)} | groupRef ${g.groupRef ?? "tidak tersedia"}`,
+        `Booking terkait: ${g.bookings.map(b=>b.reference).join(", ")}`,
+        ...g.bookings.map(b=>`${b.reference} | Nilai ${money(b.price)} | Payer ${b.payerType??"tidak tersedia"} | perlakuan PPN ${b.ppnTreatment} | PPN booking ${b.ppnAmount===null?"tidak tersedia":money(b.ppnAmount)} | Invoice PDF ${b.invoicePdfExists ? "tersimpan (belum diperiksa)" : "belum tercatat"}`),
+        `Pembayaran terkait grup (${g.groupPayments.length}):`,
+        ...g.groupPayments.map(p=>`#${p.id} → booking ID #${p.bookingId} | ${money(p.amount)} | ${p.status} | bukti ${p.proofExists ? "ada (belum dibaca)" : "belum tercatat"} | OCR ${p.ocrAvailable ? `tersedia (nominal ${p.ocrAmount===null?"tidak ada":money(p.ocrAmount)}; ${p.ocrAmountMatchesRecorded===null?"belum bisa dicocokkan":p.ocrAmountMatchesRecorded?"cocok secara angka":"BERBEDA secara angka"})` : "tidak tersedia"}`),
+        `Total pembayaran confirmed yang terhubung ke grup: ${money(g.confirmedGroupPaymentTotal)}`,
+        `Total harga booking grup: ${money(g.groupBookingTotal)} | Selisih: ${money(g.confirmedGroupPaymentTotal-g.groupBookingTotal)}`,
+        "Perhatian: satu pembayaran gabungan dapat tercatat pada satu booking. Selisih nol bukan bukti alokasi per sesi atau verifikasi bukti.",
+
+        `Pemeriksaan kebijakan booking personal tanpa PPN: ${g.personalWithBookingPpn.length ? "PERLU DITELUSURI — "+g.personalWithBookingPpn.join(", ") : "tidak ada kandidat dari catatan yang diperiksa"}. Jangan koreksi otomatis; cek versi aturan dan tanggal transaksi.`,
+        `Catatan pajak pembayaran (${g.paymentTax.length}):`, ...rows(g.paymentTax),
+        `Subtotal pembayaran: DPP ${money(g.paymentTotals.dpp)} | PPN ${money(g.paymentTotals.ppn)}`,
+        `Catatan pajak booking (${g.bookingTax.length}):`, ...rows(g.bookingTax),
+        `Subtotal booking: DPP ${money(g.bookingTotals.dpp)} | PPN ${money(g.bookingTotals.ppn)}`,
+        `Jika semua catatan aktif dijumlahkan: DPP ${money(g.paymentTotals.dpp+g.bookingTotals.dpp)} | PPN ${money(g.paymentTotals.ppn+g.bookingTotals.ppn)}`,
+        `Status kandidat tumpang tindih: ${g.overlapCandidate ? "YA — perlu pemeriksaan apakah kedua sumber masuk laporan yang sama" : "belum terindikasi dari catatan yang terbaca"}`,
+        g.note, "Sumber: catatan pajak Sport Center dan booking grup; tidak ada data yang diubah."
+      ].join("\n");
+    }
+    const requestedReference = intent.reference;
+    if (requestedReference) {
+      const response = await fetch(`${BASE}/admin/ai-asisten/tax-trace/${encodeURIComponent(requestedReference)}`, {
+        headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin"
+      });
+      if (!response.ok) {
+        if (response.status === 404) return `Referensi ${requestedReference} tidak ditemukan pada sumber pajak. Tidak ada data yang diubah.`;
+        throw new Error(`Pencarian sumber transaksi gagal (HTTP ${response.status})`);
+      }
+      const trace: {
+        items: Array<{
+          tax: { id: number; referenceType: string; referenceId: number; transactionDate: string; dpp: number; dppNilaiLain: number | null; taxAmount: number; grandTotal: number | null; taxCode: string };
+          payment: null | { id: number; bookingId: number; amount: number; status: string; paymentMethod: string | null; paymentType: string; proofExists: boolean };
+          booking: null | { id: number; orderNumber: string; customerName: string; payerType: string; status: string; bookingDate: string; totalPrice: number; grandTotal: number | null; billingStatus: string | null };
+          relatedBookings: Array<{ id: number; orderNumber: string; totalPrice: number; status: string; bookingDate: string }>;
+          relatedTotal: number; groupRef: string | null; allocationVerified: boolean;
+          traceStatus: string;
+        }>
+      } = await response.json();
+      return trace.items.map(({tax, payment, booking, relatedBookings, relatedTotal, groupRef, traceStatus}) => [
+        `Penelusuran sumber transaksi ${requestedReference} — ${selected}`,
+        `Catatan pajak #${tax.id} | sumber ${tax.referenceType} #${tax.referenceId} | tanggal ${tax.transactionDate}`,
+        `DPP: ${money(tax.dpp)} | DPP nilai lain: ${tax.dppNilaiLain === null ? "tidak tersedia" : money(tax.dppNilaiLain)} | PPN: ${money(tax.taxAmount)} | Kode: ${tax.taxCode}`,
+        `Nilai bruto pada catatan pajak: ${tax.grandTotal === null ? "tidak tersedia" : money(tax.grandTotal)}`,
+        `Pembayaran sumber: ${payment ? `#${payment.id} | booking #${payment.bookingId} | ${money(payment.amount)} | status ${payment.status} | metode ${payment.paymentMethod || "-"} | bukti pembayaran ${payment.proofExists ? "tersimpan (isi tidak diperiksa)" : "tidak tercatat"}` : "tidak dapat ditautkan secara pasti"}`,
+        `Booking sumber: ${booking ? `${booking.orderNumber} | #${booking.id} | ${booking.customerName} | payer ${booking.payerType} | status ${booking.status} | tanggal ${booking.bookingDate} | nilai booking ${money(booking.totalPrice)} | bruto ${booking.grandTotal === null ? "tidak tersedia" : money(booking.grandTotal)}` : "tidak dapat ditautkan secara pasti"}`,
+        `Sesi dengan groupRef yang sama: ${groupRef ?? "tidak ada"} | ${relatedBookings.length} booking | jumlah harga ${money(relatedTotal)}`,
+        ...relatedBookings.map(b => `${b.orderNumber} | #${b.id} | ${b.bookingDate} | ${money(b.totalPrice)} | ${b.status}`),
+        `Selisih nominal pembayaran terhadap jumlah harga sesi: ${payment ? money(payment.amount - relatedTotal) : "tidak tersedia"}. Hubungan groupRef tidak membuktikan alokasi atau pelunasan masing-masing sesi.`,
+        `Status penelusuran: ${traceStatus}. Alokasi pembayaran ke sesi, invoice PDF, isi bukti pembayaran, dan dasar hukum pajak belum diverifikasi.`,
+        "Tidak ada data yang diubah."
+      ].join("\n")).join("\n\n");
+    }
+    const deepAnalysis = /(?:kelompokkan|pengelompokan|analisis|analisa|hitung total|subtotal|total ppn dari|kemungkinan kesalahan klasifikasi|salah klasifikasi|prioritas|perlu diverifikasi)/i.test(question) && /(?:personal|perorangan|pribadi|transaksi itu|44 transaksi|ppn)/i.test(question);
+    if (deepAnalysis) {
+      const rows = result.personalWithTax;
+      const totalPpn = rows.reduce((sum, row) => sum + Number(row.taxAmount ?? 0), 0);
+      const totalDpp = rows.reduce((sum, row) => sum + Number(row.dpp ?? 0), 0);
+      const groups = new Map<number, { count: number; total: number; references: string[] }>();
+      for (const row of rows) {
+        const amount = Number(row.taxAmount ?? 0);
+        const entry = groups.get(amount) ?? { count: 0, total: 0, references: [] };
+        entry.count += 1; entry.total += amount;
+        if (row.referenceNumber) entry.references.push(row.referenceNumber);
+        groups.set(amount, entry);
+      }
+      const breakdown = [...groups.entries()].sort((a, b) => b[0] - a[0]).map(([amount, group]) =>
+        `PPN ${money(amount)}: ${group.count} transaksi, subtotal ${money(group.total)}`
+      );
+      const priority = [...rows].sort((a,b) => Number(b.taxAmount ?? 0) - Number(a.taxAmount ?? 0)).slice(0,10).map((row,i) =>
+        `${i+1}. ${row.referenceNumber || `ID ${row.id ?? "-"}`} | ${row.customerName || "Customer tidak tercatat"} | ${row.transactionDate || "tanggal kosong"} | PPN ${money(Number(row.taxAmount ?? 0))} | Verifikasi identitas pembayar, tipe booking, invoice, dan bukti pembayaran`
+      );
+      const totalOverallPpn = Number(body.summary?.totalTaxAmount ?? 0);
+      const proportion = totalOverallPpn > 0 ? `${(totalPpn / totalOverallPpn * 100).toFixed(1)}%` : "tidak dapat dihitung";
+      return [
+        `Analisis transaksi personal dengan PPN — ${selected}`,
+        `Sumber: Sport Center Tax Report. Data aktif: ${rows.length} transaksi.`,
+        `Total DPP kandidat personal: ${money(totalDpp)}`,
+        `Total PPN kandidat personal: ${money(totalPpn)} (${proportion} dari PPN seluruh transaksi).`,
+        `PPN seluruh transaksi: ${money(totalOverallPpn)}.`,
+        "",
+        "Kelompok nominal PPN:",
+        ...(breakdown.length ? breakdown : ["Tidak ada transaksi personal dengan PPN."]),
+        "",
+        "Prioritas verifikasi (10 PPN terbesar):",
+        ...(priority.length ? priority : ["Tidak ada kandidat."]),
+        "",
+        "Potensi salah klasifikasi: status payer personal belum membuktikan transaksi harus dikoreksi; nama customer atau nominal tidak cukup untuk menyimpulkan corporate. Cocokkan booking, pembayar sebenarnya, invoice, dan bukti pembayaran. Transaksi dengan PPN besar diprioritaskan untuk pemeriksaan, bukan otomatis dianggap salah.",
+        "Status: BELUM SIAP dinyatakan siap lapor sebelum transaksi kandidat dan data pajak lain direkonsiliasi. Tidak ada data yang diubah."
+      ].join("\n");
+    }
+    const detail = /(?:rincian|detail|daftar|urutkan|kelompokkan|44 transaksi|transaksi itu|tampilkan.{0,70}(?:transaksi personal|transaksi yang|booking|kandidat))/i.test(question) && !/(?:total transaksi|total ppn|total dpp|jumlah temuan|status kesiapan|tampilkan total)/i.test(question);
+    const personalOnly = /personal|perorangan|pribadi|44 transaksi|transaksi itu/i.test(question);
+    if (!detail) return result.text + (result.personalWithTax.length ? "\n\nStatus: BELUM SIAP dinyatakan siap lapor — verifikasi transaksi personal dengan PPN serta rekonsiliasi pajak di luar Sport Center diperlukan." : "\n\nStatus: Perlu verifikasi silang sebelum pelaporan; audit ini belum mencakup pajak masukan dan PPh.");
+    let rows = personalOnly ? result.personalWithTax : result.active.filter(r => !r.referenceNumber?.trim() || !r.taxCode?.trim() || Number(r.taxAmount) < 0 || Number(r.dpp) < 0);
+    if (/terbesar|urutkan/i.test(question)) rows = [...rows].sort((a,b) => Number(b.taxAmount ?? 0)-Number(a.taxAmount ?? 0));
+    const list = rows.slice(0,50).map((r,i) => `${i+1}. ID ${r.id ?? "-"} | Ref ${r.referenceNumber || "-"} | ${r.transactionDate || "-"} | ${r.customerName || "Customer tidak tercatat"} | ${r.payerType || "payer tidak ada"} | DPP ${money(Number(r.dpp || 0))} | PPN ${money(Number(r.taxAmount || 0))}`);
+    return `Detail kandidat audit — ${selected}\nTotal: ${rows.length} transaksi; menampilkan ${list.length} pertama.\n${list.join("\n") || "Tidak ada kandidat untuk kriteria ini."}\n\nSumber: Sport Center Tax Report. Temuan perlu pemeriksaan bukti, bukan instruksi koreksi otomatis.`;
   }
   async function queryAiCore(message: string): Promise<string> {
     const token = getToken();
@@ -76,41 +255,23 @@ export default function AiAsistenWidget() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = input.trim();
+    const resolvedQuestion = resolveFollowUp(question, messages);
     if (!question || busy) return;
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
-      const localAudit = /audit|rekap|total ppn|laporan ppn/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
-      const answer = localAudit ? await queryTax(question) : await queryAiCore(question);
+      const localAudit = /catatan pajak|simulasi|dengan dan tanpa|masuk dalam total|(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const answer = localAudit || identifyAuditIntent(resolvedQuestion).reference ? await queryTax(resolvedQuestion) : await queryAiCore(resolvedQuestion);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
       setMessages(v => [...v, { role: "assistant", text: `Permintaan gagal: ${err instanceof Error ? err.message : "Kesalahan tidak diketahui"}. Tidak ada data yang diubah.` }]);
     } finally { setBusy(false); }
   }
-  async function exportCsv() {
-    const token = getToken();
-    if (!token || busy) return;
-    const [y, m] = period.split("-").map(Number);
-    const startDate = `${period}-01`;
-    const endDate = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-    setBusy(true);
-    try {
-      const query = new URLSearchParams({ startDate, endDate });
-      const response = await fetch(`${BASE}/admin/tax-report/export/csv?${query}`, { headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url; link.download = `sport-center-ppn-${period}.csv`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
-    } catch (err) { setMessages(v => [...v, { role: "assistant", text: `Ekspor gagal: ${err instanceof Error ? err.message : "Kesalahan tidak diketahui"}` }]); }
-    finally { setBusy(false); }
-  }
   return <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
     {open && <section aria-label="Percakapan AI Asisten" className="flex h-[min(75dvh,600px)] w-[min(calc(100vw-2rem),410px)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
       <header className="flex items-center gap-2 border-b p-3"><Bot className="h-5 w-5 text-primary" /><div className="flex-1"><p className="text-sm font-semibold">AI Asisten</p><p className="text-xs text-muted-foreground">Administrasi CST · Audit baca-saja</p></div><button onClick={() => setOpen(false)} aria-label="Tutup AI Asisten" className="rounded p-2 hover:bg-muted"><X className="h-4 w-4" /></button></header>
-      <div className="flex items-center gap-2 border-b p-2 text-xs"><label htmlFor="ai-tax-period">Masa pajak</label><input id="ai-tax-period" type="month" value={period} onChange={e => setPeriod(e.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1" /><button title="Ekspor laporan pajak PPN CSV" aria-label="Ekspor CSV" type="button" disabled={busy} onClick={() => void exportCsv()} className="rounded border p-2 disabled:opacity-50"><Download className="h-4 w-4" /></button></div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm" role="log" aria-live="polite">{messages.map((m,i)=><div key={i} className={`max-w-[95%] whitespace-pre-wrap rounded-xl px-3 py-2 ${m.role === "admin" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"}`}>{m.text}</div>)}{busy && <p className="text-muted-foreground">Memproses...</p>}</div>
-      <div className="border-t p-3"><Link href="/admin/tax-report" onClick={() => setOpen(false)} className="mb-2 block text-xs text-primary underline">Buka laporan PPN Sport Center</Link><form className="flex gap-2" onSubmit={submit}><input aria-label="Pesan AI Asisten" value={input} onChange={e => setInput(e.target.value)} maxLength={1000} placeholder="Audit PPN masa pajak ini..." className="min-w-0 flex-1 rounded border bg-background px-3 py-2 text-sm" /><button type="submit" aria-label="Kirim pesan" disabled={busy || !input.trim()} className="rounded bg-primary px-3 text-primary-foreground disabled:opacity-50"><Send className="h-4 w-4" /></button></form><p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground"><ShieldCheck className="h-3 w-3" /> PPh / BizPortal / Coretax belum terhubung.</p></div>
+      <div className="border-t p-3"><button type="button" onClick={() => { setMessages([]); try { sessionStorage.removeItem("sc-ai-asisten-history-v1"); } catch { /* ignore */ } }} className="mb-2 text-xs text-muted-foreground underline">Hapus riwayat sesi</button><Link href="/admin/tax-report" onClick={() => setOpen(false)} className="mb-2 block text-xs text-primary underline">Buka laporan PPN Sport Center</Link><form className="flex gap-2" onSubmit={submit}><input aria-label="Pesan AI Asisten" value={input} onChange={e => setInput(e.target.value)} maxLength={1000} placeholder="Tanya AI Asisten atau audit PPN..." className="min-w-0 flex-1 rounded border bg-background px-3 py-2 text-sm" /><button type="submit" aria-label="Kirim pesan" disabled={busy || !input.trim()} className="rounded bg-primary px-3 text-primary-foreground disabled:opacity-50"><Send className="h-4 w-4" /></button></form><p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground"><ShieldCheck className="h-3 w-3" /> PPh / BizPortal / Coretax belum terhubung.</p></div>
     </section>}
     <button type="button" aria-expanded={open} aria-label={open ? "Tutup AI Asisten" : "Buka AI Asisten"} onClick={() => setOpen(v => !v)} className="flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-lg"><Bot className="h-5 w-5" />AI Asisten</button>
   </div>;
