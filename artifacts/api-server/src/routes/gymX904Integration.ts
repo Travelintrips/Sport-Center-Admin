@@ -42,6 +42,28 @@ router.post("/internal/gym-x904/connector-heartbeat", (req, res) => {
   return res.json({ok:true,acceptedAt:new Date(lastConnectorProof.at).toISOString()});
 });
 
+/** VMSC-only gateway heartbeat. A dedicated key prevents ALMANO or anonymous ADMS
+ * traffic from being mistaken for the primary Windows gateway. The heartbeat
+ * attests the connector, NOT the physical X904 or any member attendance event.
+ */
+let vmscHeartbeat: null | { at: number; serial: string } = null;
+const vmscConfigured = () => (process.env.GYM_VMSC_HEARTBEAT_KEY ?? "").length >= 32 &&
+  (process.env.GYM_X904_DEVICE_SERIAL ?? "").length >= 4;
+router.post("/internal/gym-x904/vmsc-heartbeat", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!vmscConfigured()) return res.status(404).json({ error: "Not found" });
+  const provided = req.headers["x-vmsc-heartbeat-key"];
+  const expected = process.env.GYM_VMSC_HEARTBEAT_KEY ?? "";
+  if (typeof provided !== "string" || !equal(provided, expected) ||
+      req.body?.source !== "VMSC" ||
+      typeof req.body?.serial !== "string" ||
+      !equal(req.body.serial, process.env.GYM_X904_DEVICE_SERIAL ?? "")) {
+    return res.status(403).json({ error: "Unauthorized gateway" });
+  }
+  vmscHeartbeat = { at: Date.now(), serial: req.body.serial };
+  return res.json({ ok: true, acceptedAt: new Date(vmscHeartbeat.at).toISOString() });
+});
+
 router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const receiverState = getX904ReceiverState();
@@ -83,6 +105,9 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     Date.now() - lastConnectorProof.at < HEARTBEAT_TTL_MS &&
     lastConnectorProof.serial === process.env.GYM_X904_DEVICE_SERIAL;
   res.json({
+    vmscSource: vmscHeartbeat && vmscConfigured() ? "VMSC" : null,
+    vmscHeartbeatVerified: Boolean(vmscHeartbeat && vmscConfigured() && vmscHeartbeat.serial === process.env.GYM_X904_DEVICE_SERIAL),
+    vmscHeartbeatAt: vmscHeartbeat && vmscConfigured() ? new Date(vmscHeartbeat.at).toISOString() : null,
     eventStorageReady,
     storedEventCount,
     stored_logs: storedEventCount,
