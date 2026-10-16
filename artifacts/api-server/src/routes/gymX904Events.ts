@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { processX904Event } from "../services/processX904Event";
 
 const router = Router();
 const equal = (a: string, b: string) => {
@@ -55,7 +56,26 @@ router.post("/internal/gym-x904/events", async (req, res) => {
         AS e(id text, pin text, occurred text, status integer, verify integer)
       ON CONFLICT (event_id) DO NOTHING
       RETURNING event_id`);
-    return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,duplicates:parsed.length-result.rows.length});
+    // Raw log ingestion stays the default. A separate activation flag enables the
+    // transactional, idempotent processor only after a production pilot is approved.
+    if (process.env.GYM_X904_AUTO_PROCESS_ENABLED !== "true") {
+      return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,
+        duplicates:parsed.length-result.rows.length,autoProcessing:"disabled"});
+    }
+    let processed = 0, alreadyProcessed = 0, reviewRequired = 0;
+    for (const event of parsed) {
+      if (!/^\d+$/.test(event.pin)) {
+        return res.status(422).json({error:"X904 numeric PIN required for automatic processing",stored:true});
+      }
+      // Always retry even when raw storage reports a duplicate. Ledger idempotency
+      // avoids a second booking and allows recovery from interrupted processing.
+      const outcome = await processX904Event({eventId:event.id,deviceSerial:serial,userPin:event.pin});
+      if (outcome === "processed") processed++;
+      else if (outcome === "already_processed") alreadyProcessed++;
+      else reviewRequired++;
+    }
+    return res.json({ok:true,accepted:parsed.length,inserted:result.rows.length,
+      duplicates:parsed.length-result.rows.length,autoProcessing:"enabled",processed,alreadyProcessed,reviewRequired});
   } catch {
     return res.status(503).json({error:"X904 event storage unavailable"});
   }
