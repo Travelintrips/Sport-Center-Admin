@@ -5,9 +5,10 @@ import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck, Users, Link2, DoorOpen, ScrollText, LayoutDashboard, Cpu } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
-interface IntegrationStatus { receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; }
+interface IntegrationStatus { stored_logs?: number|null; processed_events?: number|null; pending_events?: number|null; processingLedgerReady?: boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; }
 
 interface AdmsDiagnostic { refusedRequests?: {unsupported:number;unknownSerial:number}; rejectedReasons?: {invalid_url:number;serial_invalid:number;unsupported:number}; rejectedOperations?: Record<string,number>; rejectedTables?: Record<string,number>; rejectedPostShapes?: Record<string,number>; recentContacts?: Array<{kind:string;receivedAt:string;sourceTag:string;method:string;clientHint?:string;sourceTagIsAuthentication?:boolean}>; releaseFingerprint?: string; enabled: boolean; hardwareVerified: boolean; ingesting: boolean; lastContact: null | {kind:string;receivedAt:string;method:string;contentType:string;bytes:number}; lastAttlogShape?: null | {receivedAt:string;rows:number;columnCounts:number[];bodyBytes:number;parseable:boolean}; }
+interface DeviceMapping { device_serial:string; user_pin:string; membership_id:number|null; status:string; review_reason:string|null; verified_at:string|null; }
 interface DeviceEvent { event_id: string; user_pin: string; device_time: string; attendance_status: number; verification_type: number; received_at: string; }
 interface DeviceEventResult { enabled: boolean; events: DeviceEvent[]; }
 type GymTab = "dashboard" | "device" | "users" | "rules" | "events" | "members" | "mapping" | "access" | "audit";
@@ -99,6 +100,19 @@ export default function GymX904() {
     refetchInterval: 30000,
     retry: 1,
   });
+  const {data: mappingData, isError: mappingError, isLoading: mappingLoading} = useQuery<{rows:DeviceMapping[],source:string}>({
+    queryKey:["gym-x904-member-mapping"],
+    queryFn:async () => {
+      const token=getToken();
+      if(!token) throw new Error("Sesi admin tidak tersedia");
+      const res=await fetch(`${API}/admin/gym-x904/member-mapping`,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
+      if(!res.ok) throw new Error("Mapping tidak tersedia");
+      return res.json();
+    },
+    enabled:tab==="users" || tab==="mapping" || tab==="audit",
+    refetchInterval:30000,
+  });
+  const mappingRows=mappingData?.rows ?? [];
   const deviceRows = deviceData?.enabled && Array.isArray(deviceData.events) ? deviceData.events : [];
   const tabs: { id: GymTab; label: string; icon: typeof Activity }[] = [
     { id: "dashboard", label: "Dashboard Gym", icon: LayoutDashboard },
@@ -160,6 +174,9 @@ export default function GymX904() {
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Check-in SC pada tanggal dipilih</p><p className="text-2xl font-bold mt-1">{isLoading ? "Memuat..." : isError ? "Tidak tersedia" : rows.length}</p></section>
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">{integrationError ? "Status tidak tersedia" : integration?.hardware === "connector-attested" ? "Konektor terautentikasi (sementara)" : integration?.hardware === "trusted-adms-data-received" ? "Data ADMS tepercaya telah tersimpan" : integration?.hardware === "stored-adms-unverified" ? "Log ADMS tersimpan; mesin belum terverifikasi" : integration?.hardware === "unverified" ? "Belum terverifikasi" : "Status mesin belum diketahui"}</p><p className="text-xs text-muted-foreground">{(integration?.hardware === "connector-attested" || integration?.hardware === "trusted-adms-data-received" || integration?.hardware === "stored-adms-unverified") ? integration.note : admsDiagnostic?.enabled ? "Server ADMS siap; belum ada heartbeat dari konektor mesin terautentikasi." : "Server ADMS belum siap atau belum terbaca."}</p></section>
       </div>}
+      {(tab === "dashboard" || tab === "device") && <section className="grid grid-cols-1 sm:grid-cols-3 gap-4" aria-label="Ledger X904">
+        {([["Total log X904",integration?.stored_logs],["Diproses (ledger)",integration?.processed_events],["Tertunda (anti-join)",integration?.pending_events]] as const).map(([label,value])=><div key={label} className="rounded-xl border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-bold">{integrationError || value == null ? "Tidak tersedia" : value}</p></div>)}
+      </section>}
       {(tab === "dashboard" || tab === "members") && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><h2 className="font-semibold flex items-center gap-2"><Activity className="h-5 w-5 text-primary" />Riwayat check-in Sport Center</h2><p className="text-xs text-muted-foreground">Sumber: endpoint membership SC, baca saja. Penyegaran otomatis setiap 30 detik.</p></div>
@@ -232,7 +249,7 @@ export default function GymX904() {
         </div>
         <div className="overflow-x-auto"><table className="min-w-[720px] w-full text-sm text-left">
           <thead className="border-b"><tr><th className="p-3">PIN / User ID Mesin</th><th className="p-3">Nama pada mesin</th><th className="p-3">Nomor kartu</th><th className="p-3">Status</th><th className="p-3">Member SC terkait</th></tr></thead>
-          <tbody><tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Menunggu sinkronisasi data X904 ke Sport Center</td></tr></tbody>
+          <tbody>{mappingRows.map(r=><tr key={r.device_serial+":"+r.user_pin} className="border-b"><td className="p-3">{r.user_pin}</td><td className="p-3">Tidak tersedia dari mesin</td><td className="p-3">Tidak tersedia</td><td className="p-3">{r.status}</td><td className="p-3">{r.membership_id ?? "Belum dipetakan"}</td></tr>)}</tbody>
         </table></div>
       </section>}
       {tab === "rules" && <section className="rounded-xl border bg-card p-5 space-y-4">
@@ -246,7 +263,7 @@ export default function GymX904() {
           <tbody><tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Menunggu pembacaan rule X904</td></tr></tbody>
         </table></div>
       </section>}
-      {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Belum ada pemetaan identitas mesin yang terverifikasi. Menu disiapkan; pencocokan tidak boleh dibuat secara otomatis hanya berdasarkan nama atau telepon.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
+      {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Mapping tersimpan di database (read-only), bukan bukti user mesin sedang online.</p><p className="text-sm">{mappingError ? "Mapping tidak tersedia" : mappingLoading ? "Memuat..." : `${mappingRows.filter(r=>r.status==="verified").length} verified, ${mappingRows.filter(r=>r.status==="review_required").length} review_required, ${mappingRows.filter(r=>r.status==="inactive").length} inactive`}</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
       {tab === "access" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Hak akses pintu Gym</h2><p className="text-sm text-muted-foreground">Kontrol pintu dan pendaftaran kartu masih dikelola pada mesin X904. Belum ada perintah membuka pintu atau mengubah hak akses dari portal ini sampai koneksi dan protokol diverifikasi.</p></section>}
       {tab === "audit" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Audit sumber data</h2><p className="text-sm">Riwayat SC: {isError ? "Tidak tersedia" : isLoading ? "Memuat..." : `${rows.length} check-in (SC manual)`}</p><p className="text-sm">Log mesin: {deviceError ? "Gagal dibaca" : !deviceData?.enabled ? "Pembacaan belum aktif" : `${deviceRows.length} event X904 pada tanggal terpilih`}</p><p className="text-sm">Koneksi mesin: {integration?.hardware === "stored-adms-unverified" ? "Log ADMS tersimpan; mesin belum terverifikasi" : integration?.hardware === "unverified" ? "Belum terverifikasi" : integration?.hardware ?? "Status tidak diketahui"}</p><p className="text-xs text-muted-foreground">Kedua sumber tidak digabungkan tanpa pemetaan identitas terverifikasi.</p></section>}
       <div className="rounded-xl border bg-card p-5 flex flex-wrap items-start justify-between gap-4">
