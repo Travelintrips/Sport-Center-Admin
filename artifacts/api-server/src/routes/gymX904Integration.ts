@@ -46,22 +46,33 @@ router.post("/internal/gym-x904/connector-heartbeat", (req, res) => {
  * traffic from being mistaken for the primary Windows gateway. The heartbeat
  * attests the connector, NOT the physical X904 or any member attendance event.
  */
-let vmscHeartbeat: null | { at: number; serial: string } = null;
+const VMSC_TTL_MS = 300_000;
 const vmscConfigured = () => (process.env.GYM_VMSC_HEARTBEAT_KEY ?? "").length >= 32 &&
   (process.env.GYM_X904_DEVICE_SERIAL ?? "").length >= 4;
-router.post("/internal/gym-x904/vmsc-heartbeat", (req, res) => {
+router.post("/internal/gym-x904/vmsc-heartbeat", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   if (!vmscConfigured()) return res.status(404).json({ error: "Not found" });
   const provided = req.headers["x-vmsc-heartbeat-key"];
-  const expected = process.env.GYM_VMSC_HEARTBEAT_KEY ?? "";
-  if (typeof provided !== "string" || !equal(provided, expected) ||
+  if (typeof provided !== "string" ||
+      !equal(provided, process.env.GYM_VMSC_HEARTBEAT_KEY ?? "") ||
       req.body?.source !== "VMSC" ||
       typeof req.body?.serial !== "string" ||
       !equal(req.body.serial, process.env.GYM_X904_DEVICE_SERIAL ?? "")) {
     return res.status(403).json({ error: "Unauthorized gateway" });
   }
-  vmscHeartbeat = { at: Date.now(), serial: req.body.serial };
-  return res.json({ ok: true, acceptedAt: new Date(vmscHeartbeat.at).toISOString() });
+  try {
+    const result = await db.execute(sql`INSERT INTO sport_center.vmsc_heartbeats
+      (device_id, device_serial, last_seen_at, device_status)
+      VALUES ('VMSC', ${req.body.serial}, now(), 'online')
+      ON CONFLICT (device_id) DO UPDATE SET
+        device_serial = EXCLUDED.device_serial,
+        last_seen_at = now(),
+        device_status = 'online'
+      RETURNING last_seen_at`);
+    return res.json({ ok: true, acceptedAt: result.rows[0]?.last_seen_at });
+  } catch {
+    return res.status(503).json({ error: "VMSC heartbeat persistence unavailable" });
+  }
 });
 
 router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => {
@@ -104,10 +115,25 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   const recent = heartbeatEnabled() && lastConnectorProof !== null &&
     Date.now() - lastConnectorProof.at < HEARTBEAT_TTL_MS &&
     lastConnectorProof.serial === process.env.GYM_X904_DEVICE_SERIAL;
+  let vmscLastSeenAt: string | null = null;
+  if (vmscConfigured()) {
+    try {
+      const status = await db.execute(sql`SELECT last_seen_at
+        FROM sport_center.vmsc_heartbeats
+        WHERE device_id = 'VMSC'
+          AND device_serial = ${process.env.GYM_X904_DEVICE_SERIAL ?? ""}`);
+      const raw = status.rows[0]?.last_seen_at;
+      if (raw) {
+        const stamp = raw instanceof Date ? raw.toISOString() : String(raw);
+        if (Number.isFinite(Date.parse(stamp))) vmscLastSeenAt = stamp;
+      }
+    } catch { /* Missing table or DB unavailable: fail closed. */ }
+  }
   res.json({
-    vmscSource: vmscHeartbeat && vmscConfigured() ? "VMSC" : null,
-    vmscHeartbeatVerified: Boolean(vmscHeartbeat && vmscConfigured() && vmscHeartbeat.serial === process.env.GYM_X904_DEVICE_SERIAL),
-    vmscHeartbeatAt: vmscHeartbeat && vmscConfigured() ? new Date(vmscHeartbeat.at).toISOString() : null,
+    vmscSource: vmscLastSeenAt ? "VMSC" : null,
+    vmscHeartbeatVerified: Boolean(vmscLastSeenAt),
+    vmscHeartbeatAt: vmscLastSeenAt,
+    vmscOnline: Boolean(vmscLastSeenAt && Date.now() - Date.parse(vmscLastSeenAt) >= 0 && Date.now() - Date.parse(vmscLastSeenAt) < VMSC_TTL_MS),
     eventStorageReady,
     storedEventCount,
     stored_logs: storedEventCount,
