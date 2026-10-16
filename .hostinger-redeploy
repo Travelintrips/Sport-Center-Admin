@@ -1,3 +1,4 @@
 force hostinger redeploy after Mina webhook signing separation
 2026-10-12T10:01Z
 2026-10-17 VMSC GymX904 frontend rebuild requested after commit 6066ce2; verify asset contains VMSC label
+2026-10-17 request premium GymX904 UI production rebuild from 8c622f1
