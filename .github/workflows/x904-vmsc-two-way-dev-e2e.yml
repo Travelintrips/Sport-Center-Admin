@@ -1,0 +1,36 @@
+name: VMSC Two-Way Isolated DEV E2E
+on:
+  push:
+    branches:
+      - feat/x904-vmsc-two-way-readonly-dev
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: x904-vmsc-two-way-dev-only
+  cancel-in-progress: false
+jobs:
+  readonly-two-way:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NODE_ENV: development
+      APP_ENV: development
+      SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Verify isolated CST DEV target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DATABASE_URL_DEV"
+          [[ "$SUPABASE_DATABASE_URL_DEV" == *"xssrfshdrtdfupgqwfdw"* ]]
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-vmsc-two-way-dev.ts
