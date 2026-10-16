@@ -33,6 +33,28 @@ jobs:
             exit 1
           fi
           echo "PASS: Production no longer short-circuits ADMS OPTIONS with CORS."
+      - name: Verify published Gym X904 frontend is VMSC build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, urllib.request
+          base="https://sc.travelintrips.co.id"
+          def get(path):
+              req=urllib.request.Request(base+path,headers={"Cache-Control":"no-cache","User-Agent":"x904-release-verifier"})
+              with urllib.request.urlopen(req,timeout=25) as response:
+                  return response.read().decode("utf-8")
+          html=get("/admin/gym-x904")
+          entry=re.search(r'/assets/index-[^"\\s]+\\.js',html)
+          if not entry: raise SystemExit("FAIL: missing frontend entry")
+          js=get(entry.group(0))
+          chunk=re.search(r'assets/GymX904-[A-Za-z0-9_-]+\\.js',js)
+          if not chunk: raise SystemExit("FAIL: missing GymX904 chunk reference")
+          bundle=get("/"+chunk.group(0))
+          if "Sinkronisasi LAN via VMSC" not in bundle or "Sinkronisasi LAN via ALMANO" in bundle:
+              raise SystemExit("FAIL: Hostinger still serves obsolete ALMANO frontend")
+          print("PASS: Production Gym X904 frontend references VMSC")
+          PY
       - name: Explain deployment boundary
         if: always()
         run: |

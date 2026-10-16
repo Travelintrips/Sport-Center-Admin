@@ -1,5 +1,5 @@
 import path from "node:path";
-import { cp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, rm, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +24,17 @@ async function assertDirectory(dir, label) {
 
 await assertDirectory(apiDist, "API build output");
 await assertDirectory(webDist, "Sport Center build output");
+
+// Block a misleading successful release when a cached Gym X904 chunk is stale.
+const assets = await readdir(path.join(webDist, "assets"));
+const gymChunks = assets.filter((name) => /^GymX904-.*\.js$/.test(name));
+if (gymChunks.length !== 1) throw new Error("Expected exactly one GymX904 production JS chunk");
+const gymScript = await readFile(path.join(webDist, "assets", gymChunks[0]), "utf8");
+if (!gymScript.includes("Sinkronisasi LAN via VMSC") ||
+    gymScript.includes("Sinkronisasi LAN via ALMANO")) {
+  throw new Error("Stale Gym X904 frontend detected: refusing Hostinger release");
+}
+
 
 await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });

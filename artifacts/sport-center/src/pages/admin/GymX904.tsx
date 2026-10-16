@@ -216,11 +216,9 @@ export default function GymX904() {
     { id: "dashboard", label: "Dashboard Gym", icon: LayoutDashboard },
     { id: "device", label: "Monitoring X904", icon: Cpu },
     { id: "users", label: "User Mesin X904", icon: Users },
-    { id: "rules", label: "Rule Akses Mesin", icon: ShieldCheck },
-    { id: "events", label: "Riwayat Akses Mesin", icon: Fingerprint },
+    { id: "events", label: "Riwayat Log X904", icon: Fingerprint },
     { id: "members", label: "Member Gym", icon: Users },
-    { id: "mapping", label: "Sinkronisasi Member", icon: Link2 },
-    { id: "access", label: "Hak Akses Pintu", icon: DoorOpen },
+    { id: "mapping", label: "Pemetaan Member", icon: Link2 },
     { id: "audit", label: "Audit & Diagnostik", icon: ScrollText },
   ];
   const rows = Array.isArray(data) ? data : [];
@@ -247,15 +245,40 @@ export default function GymX904() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Absensi Gym X904</h1>
-        <p className="text-sm text-muted-foreground mt-1">Pantau check-in Gym Sport Center dan status komunikasi mesin X904. Koneksi mesin X904 belum aktif sebagai integrasi absensi; status perangkat ditentukan dari bukti koneksi, bukan keberhasilan tes server.</p>
-      </div>
-      <nav aria-label="Menu Gym X904" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
+      <header className="relative overflow-hidden rounded-3xl border border-slate-700/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-7 text-white shadow-xl shadow-slate-900/10 md:px-9 md:py-9">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-400/15 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-1/4 h-36 w-36 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl space-y-3">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-100"><Fingerprint size={13} /> Gym Intelligence · Solution X904</span>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Pusat Kendali Gym</h1>
+            <p className="max-w-xl text-sm leading-relaxed text-slate-300 md:text-base">Pantau member, aktivitas gym, dan sinkronisasi perangkat dalam satu workspace yang mudah digunakan.</p>
+            <p className="text-xs text-slate-400">Monitoring perangkat dan absensi resmi dipisahkan untuk menjaga keakuratan data.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              <p className="text-[11px] font-medium text-slate-300">Member aktif</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{membersLoading ? "—" : membersError ? "—" : activeMembers ?? "—"}</p>
+              <p className="mt-1 text-[11px] text-slate-400">Data Sport Center</p>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              <p className="text-[11px] font-medium text-slate-300">Log tersimpan</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{lanStatusError ? "—" : lanStatus?.logs?.toLocaleString("id-ID") ?? "—"}</p>
+              <p className="mt-1 text-[11px] text-slate-400">Snapshot LAN</p>
+            </div>
+            <div className="col-span-2 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm sm:col-span-1">
+              <p className="text-[11px] font-medium text-slate-300">Gateway utama</p>
+              <p className="mt-1 flex items-center gap-2 text-xl font-bold"><span className="h-2 w-2 rounded-full bg-cyan-400" />VMSC</p>
+              <p className="mt-1 text-[11px] text-slate-400">Status aktual di panel monitoring</p>
+            </div>
+          </div>
+        </div>
+      </header>
+      <nav aria-label="Menu Gym X904" className="flex flex-wrap gap-2 rounded-2xl border border-slate-200/80 bg-white/90 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button key={id} type="button" aria-current={tab === id ? "page" : undefined}
             onClick={() => setTab(id)}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${tab === id ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"}`}>
+            className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${tab === id ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "border-transparent bg-slate-50 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"}`}>
             <Icon size={16} />{label}
           </button>
         ))}
@@ -268,8 +291,8 @@ export default function GymX904() {
         </div>
       </div>}
       {(tab === "dashboard" || tab === "device") && <section className="rounded-xl border bg-card p-4 space-y-2">
-        <h2 className="font-semibold">Sinkronisasi LAN via ALMANO (baca saja)</h2>
-        {lanStatus?.lastCompleteAt && <p className="text-sm" role="status">{Number.isFinite(Date.parse(lanStatus.lastCompleteAt)) && Date.now() - Date.parse(lanStatus.lastCompleteAt) < 10 * 60 * 1000 && Date.now() >= Date.parse(lanStatus.lastCompleteAt) ? "Snapshot LAN terbaru (kurang dari 10 menit). Ini bukan bukti X904 online." : "Snapshot LAN lama: sinkronisasi otomatis belum terbukti aktif. Periksa konektor sebelum mengandalkan data terbaru."}</p>}
+        <h2 className="font-semibold">Sinkronisasi LAN via VMSC (gateway utama, baca saja)</h2>
+        {lanStatus?.lastCompleteAt && <p className="text-sm" role="status">{Number.isFinite(Date.parse(lanStatus.lastCompleteAt)) && Date.now() - Date.parse(lanStatus.lastCompleteAt) < 10 * 60 * 1000 && Date.now() >= Date.parse(lanStatus.lastCompleteAt) ? "Snapshot LAN terbaru (kurang dari 10 menit). Ini bukan bukti X904 online." : "Snapshot terakhir lebih dari 10 menit lalu. Sinkronisasi log terjadwal setiap 30 menit; status online dilihat dari heartbeat VMSC."}</p>}
         {lanStatusError ? <p role="status">Backend konektor LAN belum tersedia atau belum dikonfigurasi.</p> :
           lanStatus?.synchronized ? <>
             <p className="text-sm">Snapshot berhasil disimpan: <strong>{lanStatus.users} pengguna dan {lanStatus.logs} log</strong> (dari {lanStatus.deviceLogs ?? "?"} log di perangkat).</p>
@@ -279,7 +302,7 @@ export default function GymX904() {
       {(tab === "dashboard" || tab === "device") && <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Member Gym aktif (SC)</p><p className="text-2xl font-bold mt-1">{membersLoading ? "Memuat..." : membersError ? "Tidak tersedia" : activeMembers ?? "—"}</p></section>
         <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Check-in SC pada tanggal dipilih</p><p className="text-2xl font-bold mt-1">{isLoading ? "Memuat..." : isError ? "Tidak tersedia" : rows.length}</p></section>
-        <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">{integrationError ? "Status tidak tersedia" : integration?.hardware === "connector-attested" ? "Konektor terautentikasi (sementara)" : integration?.hardware === "trusted-adms-data-received" ? "Data ADMS tepercaya telah tersimpan" : integration?.hardware === "stored-adms-unverified" ? "Log ADMS tersimpan; mesin belum terverifikasi" : integration?.hardware === "unverified" ? "Belum terverifikasi" : "Status mesin belum diketahui"}</p><p className="text-xs text-muted-foreground">{(integration?.hardware === "connector-attested" || integration?.hardware === "trusted-adms-data-received" || integration?.hardware === "stored-adms-unverified") ? integration.note : admsDiagnostic?.enabled ? "Server ADMS siap; belum ada heartbeat dari konektor mesin terautentikasi." : "Server ADMS belum siap atau belum terbaca."}</p></section>
+        <section className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Koneksi mesin X904</p><p className="text-lg font-semibold mt-1">{integrationError ? "Status tidak tersedia" : integration?.hardware === "connector-attested" ? "Gateway VMSC online (heartbeat)" : integration?.hardware === "trusted-adms-data-received" ? "Data ADMS tepercaya telah tersimpan" : integration?.hardware === "stored-adms-unverified" ? "Log ADMS tersimpan; mesin belum terverifikasi" : integration?.hardware === "unverified" ? "Belum terverifikasi melalui ADMS" : "Status mesin belum diketahui"}</p><p className="text-xs text-muted-foreground">{(integration?.hardware === "connector-attested" || integration?.hardware === "trusted-adms-data-received" || integration?.hardware === "stored-adms-unverified") ? integration.note : admsDiagnostic?.enabled ? "Receiver ADMS terpisah dari heartbeat VMSC; periksa status gateway pada panel koneksi." : "Server ADMS belum siap atau belum terbaca."}</p></section>
       </div>}
       {(tab === "dashboard" || tab === "device") && <section className="grid grid-cols-1 sm:grid-cols-3 gap-4" aria-label="Ledger X904">
         {([["Total log X904",integration?.stored_logs],["Diproses (ledger)",integration?.processed_events],["Tertunda (anti-join)",integration?.pending_events]] as const).map(([label,value])=><div key={label} className="rounded-xl border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-bold">{integrationError || value == null ? "Tidak tersedia" : value}</p></div>)}
@@ -420,7 +443,7 @@ export default function GymX904() {
           <div className="max-h-[420px] overflow-auto rounded-xl border"><table className="w-full min-w-[560px] text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="p-3">PIN mesin</th><th className="p-3">Nama di mesin</th><th className="p-3">Membership</th><th className="p-3">Status</th></tr></thead><tbody>{reviewQueue.rows.map(item=><tr className="border-t" key={item.id}><td className="p-3 font-mono">{item.user_pin}</td><td className="p-3">{item.device_name || "Tidak tersedia"}</td><td className="p-3">{item.membership_id ?? "Belum dipetakan"}</td><td className="p-3">{item.status==="pending_review"?"Perlu verifikasi":item.status}</td></tr>)}</tbody></table></div>}
         <p className="text-xs text-muted-foreground">Pencocokan nama hanya kandidat. Persetujuan identitas belum tersedia sampai alur verifikasi dan audit final diuji.</p>
       </section>}
-      {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Mapping database DEV (read-only): {mappingError ? "Tidak tersedia" : mappingLoading ? "Memuat..." : `${mappingRows.filter(r=>r.status==="verified").length} verified, ${mappingRows.filter(r=>r.status==="review_required").length} review_required, ${mappingRows.filter(r=>r.status==="inactive").length} inactive`}. Data ini bukan bukti pengguna mesin online.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
+      {tab === "mapping" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Pencocokan member dan PIN perangkat</h2><p className="text-sm text-muted-foreground">Status pemetaan PIN dan membership (baca saja): {mappingError ? "Tidak tersedia" : mappingLoading ? "Memuat..." : `${mappingRows.filter(r=>r.status==="verified").length} verified, ${mappingRows.filter(r=>r.status==="review_required").length} review_required, ${mappingRows.filter(r=>r.status==="inactive").length} inactive`}. Data ini bukan bukti pengguna mesin online.</p><Link href="/admin/memberships" className="text-primary underline text-sm">Lihat member dari Sport Center</Link></section>}
       {tab === "access" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Hak akses pintu Gym</h2><p className="text-sm text-muted-foreground">Kontrol pintu dan pendaftaran kartu masih dikelola pada mesin X904. Belum ada perintah membuka pintu atau mengubah hak akses dari portal ini sampai koneksi dan protokol diverifikasi.</p></section>}
       {tab === "audit" && <section className="rounded-xl border bg-card p-5 space-y-2"><h2 className="font-semibold">Audit sumber data</h2><p className="text-sm">Riwayat SC: {isError ? "Tidak tersedia" : isLoading ? "Memuat..." : `${rows.length} check-in (SC manual)`}</p><p className="text-sm">Log mesin: {deviceError ? "Gagal dibaca" : !deviceData?.enabled ? "Pembacaan belum aktif" : `${deviceRows.length} event X904 pada tanggal terpilih`}</p><p className="text-sm">Koneksi mesin: {integration?.hardware === "stored-adms-unverified" ? "Log ADMS tersimpan; mesin belum terverifikasi" : integration?.hardware === "unverified" ? "Belum terverifikasi" : integration?.hardware ?? "Status tidak diketahui"}</p><p className="text-xs text-muted-foreground">Kedua sumber tidak digabungkan tanpa pemetaan identitas terverifikasi.</p></section>}
       <div className="rounded-xl border bg-card p-5 flex flex-wrap items-start justify-between gap-4">
