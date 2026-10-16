@@ -25,7 +25,7 @@ assert.match(events, /ON CONFLICT \(event_id\) DO NOTHING/);
 assert.match(integration, /hardware:\s*recent\s*\?\s*"connector-attested"\s*:\s*receiverState\.lastTrustedIngestAt[\s\S]*?"trusted-adms-data-received"[\s\S]*?"stored-adms-unverified"\s*:\s*"unverified"/);
 assert.match(integration, /GYM_X904_CONNECTOR_HEARTBEAT_ENABLED/);
 assert.match(integration, /timingSafeEqual/);
-assert.match(integration, /HEARTBEAT_TTL_MS\s*=\s*90_000/);
+assert.match(integration, /HEARTBEAT_TTL_MS\s*=\s*300_000/);
 assert.match(integration, /req\.body\?\.readAuthenticated\s*!==\s*true/);
 assert.match(integration, /synchronizing:\s*false/);
 assert.doesNotMatch(deploy, /\b(?:ssh|scp|rsync|ftp|sftp)\b/);
