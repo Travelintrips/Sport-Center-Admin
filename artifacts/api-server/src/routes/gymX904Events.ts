@@ -231,4 +231,41 @@ router.post("/admin/gym-x904/mapping-review-queue/:id/decision", superAdminMiddl
     return res.status(503).json({error:"Review audit transaction unavailable"});
   }
 });
+
+/** DEV-exclusive simulated approval; NEVER updates actual member mappings or bookings. */
+router.get("/admin/gym-x904/simulation-candidates", adminMiddleware, async (_req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) return res.status(404).json({error:"Not found"});
+  try {
+    const result=await db.execute(sql`SELECT candidate_id,device_user_pin,simulated_member_id,review_status,
+      reviewed_at,simulation_status FROM sport_center.x904_dev_identity_simulation
+      ORDER BY candidate_id LIMIT 100`);
+    return res.json({readOnly:true,simulationOnly:true,rows:result.rows});
+  } catch { return res.status(503).json({error:"DEV simulation unavailable"}); }
+});
+router.post("/admin/gym-x904/simulation-candidates/:id/approve", superAdminMiddleware, async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (!["development","dev"].includes(process.env.APP_ENV ?? process.env.NODE_ENV ?? "")) return res.status(404).json({error:"Not found"});
+  const id=Number(req.params.id);
+  const evidence=String(req.body?.evidence ?? "").trim();
+  const actor=(req as any).user?.userId;
+  if (!Number.isSafeInteger(id) || id<1 || !Number.isSafeInteger(actor) || evidence.length<12 || evidence.length>500)
+    return res.status(400).json({error:"Candidate, admin session and review evidence required"});
+  try {
+    const result=await db.execute(sql`WITH changed AS (
+      UPDATE sport_center.x904_dev_identity_simulation c
+      SET review_status='approved_for_mock', reviewed_at=now(), reviewed_by=${String(actor)}
+      WHERE candidate_id=${id} AND review_status='pending'
+        AND simulation_status='verified_simulation' AND live_mapping_approved=false
+      RETURNING candidate_id
+    ), audited AS (
+      INSERT INTO sport_center.x904_dev_simulation_approval_audit(candidate_id,actor,decision,evidence)
+      SELECT candidate_id,${String(actor)},'approved_for_mock',${evidence} FROM changed RETURNING id
+    )
+    SELECT candidate_id,(SELECT count(*)::int FROM audited) AS audit_records FROM changed`);
+    if(result.rows.length!==1) return res.status(409).json({error:"Candidate already reviewed or ineligible"});
+    return res.json({ok:true,simulationOnly:true,machineWriteAllowed:false,bookingAllowed:false,
+      reviewStatus:"approved_for_mock",candidateId:id,auditRecords:1});
+  } catch {return res.status(503).json({error:"DEV simulation approval transaction unavailable"});}
+});
 export default router;
