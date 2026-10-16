@@ -34,11 +34,23 @@ try{
  const nums=[row?.ledger,row?.checkins,row?.bookings,row?.history].map(Number);
  console.log("X904_E2E",JSON.stringify({first,replay,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
  if(first!=="processed" || replay!=="already_processed" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
+} catch (error) {
+ const e = error instanceof Error ? error : new Error(String(error));
+ const safe = (value: string) => value.replace(/postgres(?:ql)?:\\/\\/[^\\s]+/gi, "[REDACTED_DATABASE_URL]").replace(/password\\s*[=:]\\s*[^\\s,;]+/gi, "password=[REDACTED]");
+ console.error("DETAILE_ERROR_E2E:", safe(e.message), safe(e.stack ?? ""));
+ process.exitCode = 1;
+ throw e;
 } finally {
  try {
   if(mappingChanged) {
    await db.execute(sql`UPDATE sport_center.gym_x904_member_mapping SET status='review_required',verified_at=NULL,verified_by=NULL,review_reason='CI E2E completed' WHERE device_serial=${serial} AND user_pin=${pin} AND verified_by='x904-ci-test'`);
    console.log("X904_MAPPING_RESET=review_required");
   }
- } finally {await pool.end();}
+ } catch (error) {
+ const e = error instanceof Error ? error : new Error(String(error));
+ const safe = (value: string) => value.replace(/postgres(?:ql)?:\\/\\/[^\\s]+/gi, "[REDACTED_DATABASE_URL]").replace(/password\\s*[=:]\\s*[^\\s,;]+/gi, "password=[REDACTED]");
+ console.error("DETAILE_ERROR_E2E:", safe(e.message), safe(e.stack ?? ""));
+ process.exitCode = 1;
+ throw e;
+} finally {await pool.end();}
 }
