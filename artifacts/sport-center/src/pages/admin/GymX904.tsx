@@ -330,7 +330,7 @@ export default function GymX904() {
         <p className="mt-2 text-xs text-muted-foreground">Heartbeat bukan bukti pengiriman data. Waktu sinkronisasi menunjukkan penyimpanan terakhir, bukan koneksi mesin saat ini.</p>
         {command?.result && <details className="mt-3 rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Detail jawaban terakhir VMSC</summary><pre className="mt-3 overflow-x-auto text-xs">{JSON.stringify(command.result,null,2)}</pre></details>}
       </section>}
-      {(tab === "dashboard" || tab === "device") && <div className="rounded-xl border bg-card p-5 space-y-3">
+      {tab === "audit" && <div className="rounded-xl border bg-card p-5 space-y-3">
         <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : admsDiagnostic?.enabled ? "Receiver diagnostik aktif — mesin belum terverifikasi" : "Server ADMS belum siap"}</span></div>
         <p className="text-sm text-muted-foreground">Receiver diagnostik dapat menerima handshake, tetapi tidak membuktikan X904 fisik online. Data check-in SC tidak dianggap sebagai absensi mesin.</p>
         <div className="text-sm" role="status">
