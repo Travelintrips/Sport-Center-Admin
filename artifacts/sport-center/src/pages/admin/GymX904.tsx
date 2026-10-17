@@ -260,19 +260,6 @@ export default function GymX904() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <section className="rounded-xl border bg-card p-4 space-y-2">
-        <h2 className="font-semibold">Komunikasi dua arah X904 — baca saja</h2>
-        <p className="text-sm text-muted-foreground">Permintaan status melalui Supabase → VMSC; tidak mengubah pengguna atau mesin.</p>
-        <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium" onClick={() => {void requestReadStatus();}}>Cek Status Mesin</button>
-        <p className="text-sm" role="status">{commandMessage || (readCommand?.command ? `GET_STATUS: ${readCommand.command.state}` : "Belum ada permintaan")}</p>
-        <div className="grid gap-2 text-sm md:grid-cols-3">
-          <p>Heartbeat VMSC: <strong>{heartbeatHealthy ? "Aktif" : "Terlambat / tidak tersedia"}</strong>{heartbeatAt ? ` (terakhir ${formatTime(heartbeatAt)} WIB)` : ""}</p>
-          <p>Sinkronisasi database: <strong>{integration?.lastDurableSyncAt ? `Berhasil ${formatTime(integration.lastDurableSyncAt)} WIB` : "Belum tersedia"}</strong>{integration?.storedEventCount != null ? ` · ${integration.storedEventCount} event ADMS` : ""}</p>
-          <p>ACK: <strong>{ackDelayed ? "Terlambat lebih dari 3 menit" : (command?.state ?? "Belum ada")}</strong>{command?.completed_at ? ` (${formatTime(command.completed_at)} WIB)` : ""}</p>
-        </div>
-        <p className="text-xs text-muted-foreground">Heartbeat membuktikan laporan konektor, bukan pengiriman bukti otomatis. Jumlah log menunjukkan data yang tersimpan di database.</p>
-        {readCommand?.command?.result && <pre className="overflow-x-auto text-xs rounded-lg bg-muted p-3">{JSON.stringify(readCommand.command.result,null,2)}</pre>}
-      </section>
       <header className="relative overflow-hidden rounded-3xl border border-slate-700/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-7 text-white shadow-xl shadow-slate-900/10 md:px-9 md:py-9">
         <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-400/15 blur-3xl" />
         <div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-1/4 h-36 w-36 rounded-full bg-cyan-400/10 blur-3xl" />
@@ -311,6 +298,38 @@ export default function GymX904() {
           </button>
         ))}
       </nav>
+      {(tab === "dashboard" || tab === "device" || tab === "audit") && <section aria-label="Komunikasi dua arah X904" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 md:p-6">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300"><Activity size={22} aria-hidden="true" /></span>
+            <div className="space-y-1">
+              <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-900 dark:text-slate-50">Komunikasi dua arah X904 <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">Baca saja</span></h2>
+              <p className="text-sm text-muted-foreground">Permintaan status melalui Supabase → VMSC, tanpa mengubah data pengguna atau mesin.</p>
+            </div>
+          </div>
+          <button type="button" className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500" onClick={() => {void requestReadStatus();}}><RefreshCw size={16} aria-hidden="true" /> Cek Status Mesin</button>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4 dark:border-emerald-900 dark:bg-emerald-950/20">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Heartbeat VMSC</p>
+            <p className={`mt-2 text-lg font-semibold ${integrationError || !heartbeatHealthy ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>{integrationError ? "Tidak tersedia" : heartbeatHealthy ? "Aktif" : "Terlambat / tidak tersedia"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{heartbeatAt ? `Terakhir ${formatTime(heartbeatAt)} WIB` : "Belum ada heartbeat terverifikasi"}</p>
+          </div>
+          <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-4 dark:border-sky-900 dark:bg-sky-950/20">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Sinkronisasi database</p>
+            <p className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-50">{integrationError ? "Tidak tersedia" : integration?.lastDurableSyncAt ? `Terakhir ${formatTime(integration.lastDurableSyncAt)} WIB` : "Belum tersedia"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{integration?.lastDurableSyncAt ? "Snapshot database tersimpan" : "Belum ada konfirmasi penyimpanan"}</p>
+          </div>
+          <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">ACK status mesin</p>
+            <p className={`mt-2 text-lg font-semibold ${ackDelayed || command?.state === "failed" ? "text-amber-700 dark:text-amber-400" : "text-slate-900 dark:text-slate-50"}`}>{ackDelayed ? "Terlambat > 3 menit" : command?.state === "completed" ? "Selesai" : command?.state === "queued" ? "Menunggu VMSC" : command?.state === "failed" ? "Gagal" : "Belum ada permintaan"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{command?.completed_at ? `Diterima ${formatTime(command.completed_at)} WIB` : command?.state === "queued" ? "Menunggu jawaban gateway" : "Perintah baca status saja"}</p>
+          </div>
+        </div>
+        <p className="mt-4 text-sm text-muted-foreground" role="status" aria-live="polite">{command?.state === "completed" ? "Permintaan status terakhir selesai diproses VMSC." : commandMessage || (command?.state === "queued" ? "GET_STATUS masuk antrean. Menunggu ACK VMSC." : "Belum ada permintaan baru.")}</p>
+        <p className="mt-2 text-xs text-muted-foreground">Heartbeat bukan bukti pengiriman data. Waktu sinkronisasi menunjukkan penyimpanan terakhir, bukan koneksi mesin saat ini.</p>
+        {command?.result && <details className="mt-3 rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Detail jawaban terakhir VMSC</summary><pre className="mt-3 overflow-x-auto text-xs">{JSON.stringify(command.result,null,2)}</pre></details>}
+      </section>}
       {(tab === "dashboard" || tab === "device") && <div className="rounded-xl border bg-card p-5 space-y-3">
         <div className="flex flex-wrap items-center gap-3"><Fingerprint className="h-6 w-6 text-primary" aria-hidden="true" /><h2 className="font-semibold">Solution X904</h2><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{integration?.synchronizing ? "Sedang sinkronisasi" : admsDiagnostic?.enabled ? "Receiver diagnostik aktif — mesin belum terverifikasi" : "Server ADMS belum siap"}</span></div>
         <p className="text-sm text-muted-foreground">Receiver diagnostik dapat menerima handshake, tetapi tidak membuktikan X904 fisik online. Data check-in SC tidak dianggap sebagai absensi mesin.</p>
