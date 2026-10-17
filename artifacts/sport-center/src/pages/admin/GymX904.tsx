@@ -378,7 +378,7 @@ export default function GymX904() {
         )}
       </section>}
       {tab === "events" && <section className="rounded-xl border bg-card p-5 space-y-3">
-        <h2 className="font-semibold">Log mesin dari ALMANO (baca saja)</h2>
+        <h2 className="font-semibold">Riwayat Log Mesin X904 — Sinkronisasi melalui VMSC (baca saja)</h2>
         <p className="text-xs text-muted-foreground">Waktu lokal mesin; jenis verifikasi tidak tersedia melalui pembacaan TCP. Tidak otomatis dihitung sebagai check-in member Sport Center.</p>
         {lanLogsError ? <p role="alert" className="text-sm">Log LAN belum tersedia atau backend belum aktif.</p> :
           lanLogsLoading ? <p className="text-sm">Memuat catatan LAN...</p> :
