@@ -64,6 +64,7 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   let processingLedgerReady = false;
   let lastStoredEventAt: string | null = null;
   let connectorProof: null | {at:string;users:number;logs:number;serial:string} = null;
+  let lastDurableSyncAt: string | null = null;
   try {
     const check = await db.execute(sql`SELECT to_regclass('sport_center.gym_x904_raw_events') IS NOT NULL AS ready`);
     eventStorageReady = check.rows[0]?.ready === true;
@@ -101,6 +102,12 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
         users:Number(row.reported_users),logs:Number(row.reported_logs)};
     }
   } catch { /* fail closed if DB cannot be queried */ }
+  try {
+    const sync = await db.execute(sql`SELECT last_complete_at::text AS last_complete_at
+      FROM sport_center.gym_x904_lan_state
+      WHERE device_serial=${process.env.GYM_X904_DEVICE_SERIAL || "TDBD234200545"} LIMIT 1`);
+    lastDurableSyncAt = sync.rows[0]?.last_complete_at ? String(sync.rows[0].last_complete_at) : null;
+  } catch { /* Keep status unavailable rather than inventing a successful sync. */ }
   const recent = connectorProof !== null &&
     Number.isFinite(Date.parse(connectorProof.at)) &&
     Date.now() - Date.parse(connectorProof.at) >= 0 &&
@@ -128,6 +135,7 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     eventReadEnabled: process.env.GYM_X904_LOG_READ_ENABLED === "true",
     doorControl: "device-local",
     connectionTestedAt: recent && connectorProof ? new Date(connectorProof.at).toISOString() : null,
+    lastDurableSyncAt,
     lastDeviceEventAt: receiverState.lastTrustedIngestAt,
     note: recent && connectorProof
       ? `Konektor tepercaya melaporkan pembacaan X904: ${connectorProof.users} pengguna dan ${connectorProof.logs} log. Ini bukan bukti sinkronisasi data ke database.`
