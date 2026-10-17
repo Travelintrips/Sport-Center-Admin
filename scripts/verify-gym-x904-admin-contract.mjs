@@ -11,7 +11,12 @@ assert.match(app, /return <AdminLayout><AdminErrorBoundary>\{content\}<\/AdminEr
 assert.match(nav, /href: "\/admin\/memberships", label: "Member Gym"/);
 assert.match(nav, /href: "\/admin\/gym-x904", label: "Absensi Gym X904"/);
 assert.match(nav, /useGetMe\(/);
-assert.match(page, /Koneksi mesin X904 belum aktif/i);
+// The device safety contract describes attested VMSC heartbeat distinctly from
+// an ADMS receiver; it must never declare hardware online from receiver alone.
+assert.match(page, /Koneksi mesin X904/i);
+assert.match(page, /Status mesin belum diketahui/i);
+assert.match(page, /Gateway VMSC online \(heartbeat\)/i);
+assert.match(page, /Receiver diagnostik dapat menerima handshake, tetapi tidak membuktikan X904 fisik online/i);
 assert.match(page, /href="\/admin\/memberships"/);
 assert.match(page, /\/memberships\/checkins\?date=/);
 assert.match(page, /getToken\(/);
