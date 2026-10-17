@@ -69,6 +69,23 @@ describe("Sport Center finance event contract", () => {
     expect(runtime).toContain("LIMIT 50");
   });
 
+  it("keeps posted journal financial fields immutable after canonical settlement", () => {
+    const migration = readFileSync(
+      resolve(process.cwd(), "../../scripts/patch_dev_settlement_posted_journal_snapshot.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("CREATE OR REPLACE FUNCTION sport_center.sync_payment_accounting_journal()");
+    expect(migration).toContain("v_journal_status = 'posted' AND TG_OP = 'UPDATE'");
+    expect(migration).toContain("OLD.settlement_status = 'unsettled'");
+    expect(migration).toContain("NEW.settlement_status = 'settled'");
+    expect(migration).toContain("IS NOT DISTINCT FROM");
+    expect(migration).toContain("to_jsonb(OLD)");
+    expect(migration).toContain("to_jsonb(NEW)");
+    expect(migration).not.toContain("allow_posted_accounting_metadata_correction");
+    expect(migration).not.toContain("DISABLE TRIGGER");
+    expect(migration).not.toContain("CREATE OR REPLACE FUNCTION sport_center.guard_posted_accounting_journal()");
+  });
+
   it("keeps database-level event uniqueness in both runtime and migration definitions", () => {
     const runtime = readFileSync(resolve(process.cwd(), "src/lib/bizportalSync.ts"), "utf8");
     const migration = readFileSync(resolve(process.cwd(), "../../scripts/migrate.ts"), "utf8");
