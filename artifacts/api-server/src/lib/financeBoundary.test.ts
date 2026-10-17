@@ -60,6 +60,15 @@ describe("Sport Center finance event contract", () => {
     expect(route).toContain("postConfirmedPaymentAccounting");
   });
 
+  it("reclaims an expired outbox processing lease without stealing live work", () => {
+    const runtime = readFileSync(resolve(process.cwd(), "src/lib/bizportalSync.ts"), "utf8");
+    expect(runtime).toContain("status IN ('pending', 'failed', 'processing')");
+    expect(runtime).toContain("available_at <= NOW()");
+    expect(runtime).toContain("locked_at < NOW() - INTERVAL '15 minutes'");
+    expect(runtime).toContain("FOR UPDATE SKIP LOCKED");
+    expect(runtime).toContain("LIMIT 50");
+  });
+
   it("keeps database-level event uniqueness in both runtime and migration definitions", () => {
     const runtime = readFileSync(resolve(process.cwd(), "src/lib/bizportalSync.ts"), "utf8");
     const migration = readFileSync(resolve(process.cwd(), "../../scripts/migrate.ts"), "utf8");
