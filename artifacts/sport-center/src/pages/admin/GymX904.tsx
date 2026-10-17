@@ -5,7 +5,7 @@ import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck, Users, Link2, DoorOpen, ScrollText, LayoutDashboard, Cpu } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
-interface IntegrationStatus { stored_logs?:number|null; processed_events?:number|null; pending_events?:number|null; processingLedgerReady?:boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; }
+interface IntegrationStatus { stored_logs?:number|null; processed_events?:number|null; pending_events?:number|null; processingLedgerReady?:boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; connectionTestedAt?: string | null; lastDurableSyncAt?: string | null; }
 interface LanStatus { synchronized: boolean; users: number; logs: number; deviceLogs?: number; lastCompleteAt?: string; }
 interface LanUser { user_pin: string; display_name: string; device_uid: number; device_role: number; last_seen_at: string; }
 interface LanUsersResult { source: string; users: LanUser[]; }
@@ -49,7 +49,7 @@ export default function GymX904() {
   const [tab, setTab] = useState<GymTab>("dashboard");
   const queryClient = useQueryClient();
   const [commandMessage, setCommandMessage] = useState("");
-  const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
+  const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;created_at:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
     queryKey: ["gym-x904-read-command"],
     queryFn: async () => {
       const token = getToken();
@@ -84,6 +84,12 @@ export default function GymX904() {
     },
     refetchInterval: 30000,
   });
+  const heartbeatAt = integration?.connectionTestedAt;
+  const heartbeatAge = heartbeatAt ? Date.now() - new Date(heartbeatAt).getTime() : null;
+  const heartbeatHealthy = heartbeatAge !== null && Number.isFinite(heartbeatAge) && heartbeatAge >= 0 && heartbeatAge < 300000;
+  const command = readCommand?.command;
+  const ackAge = command?.state === "queued" ? Date.now() - new Date(command.created_at).getTime() : null;
+  const ackDelayed = ackAge !== null && Number.isFinite(ackAge) && ackAge > 180000;
   const { data: admsDiagnostic, isError: admsDiagnosticError } = useQuery<AdmsDiagnostic>({
     queryKey: ["gym-x904-adms-diagnostic"],
     queryFn: async () => {
@@ -259,6 +265,12 @@ export default function GymX904() {
         <p className="text-sm text-muted-foreground">Permintaan status melalui Supabase → VMSC; tidak mengubah pengguna atau mesin.</p>
         <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium" onClick={() => {void requestReadStatus();}}>Cek Status Mesin</button>
         <p className="text-sm" role="status">{commandMessage || (readCommand?.command ? `GET_STATUS: ${readCommand.command.state}` : "Belum ada permintaan")}</p>
+        <div className="grid gap-2 text-sm md:grid-cols-3">
+          <p>Heartbeat VMSC: <strong>{heartbeatHealthy ? "Aktif" : "Terlambat / tidak tersedia"}</strong>{heartbeatAt ? ` (terakhir ${formatTime(heartbeatAt)} WIB)` : ""}</p>
+          <p>Sinkronisasi database: <strong>{integration?.lastDurableSyncAt ? `Berhasil ${formatTime(integration.lastDurableSyncAt)} WIB` : "Belum tersedia"}</strong>{integration?.storedEventCount != null ? ` · ${integration.storedEventCount} event ADMS` : ""}</p>
+          <p>ACK: <strong>{ackDelayed ? "Terlambat lebih dari 3 menit" : (command?.state ?? "Belum ada")}</strong>{command?.completed_at ? ` (${formatTime(command.completed_at)} WIB)` : ""}</p>
+        </div>
+        <p className="text-xs text-muted-foreground">Heartbeat membuktikan laporan konektor, bukan pengiriman bukti otomatis. Jumlah log menunjukkan data yang tersimpan di database.</p>
         {readCommand?.command?.result && <pre className="overflow-x-auto text-xs rounded-lg bg-muted p-3">{JSON.stringify(readCommand.command.result,null,2)}</pre>}
       </section>
       <header className="relative overflow-hidden rounded-3xl border border-slate-700/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-7 text-white shadow-xl shadow-slate-900/10 md:px-9 md:py-9">
