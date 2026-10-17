@@ -1925,7 +1925,9 @@ export async function processPaymentAccountingOutbox(): Promise<{
     const result = await client.query(`
       SELECT id, payment_id
         FROM sport_center.payment_accounting_outbox
-       WHERE status IN ('pending', 'failed')
+       -- Recover orphaned processing rows only after their 15-minute lease expires.
+       -- A live worker's recent lock must never be stolen.
+       WHERE status IN ('pending', 'failed', 'processing')
          AND available_at <= NOW()
          AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '15 minutes')
        ORDER BY id
