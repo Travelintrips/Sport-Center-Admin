@@ -4,3 +4,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-17 request premium GymX904 UI production rebuild from 8c622f1
 
 2026-10-18 request clean Hostinger rebuild for merged PR #152: Solution X904 diagnostic panel only under Audit & Diagnostik; verify GymX904 chunk uses tab audit guard
+
+2026-10-18 request rebuild GymX904 after PR #153: update stale ALMANO caption to VMSC; UI text only.
