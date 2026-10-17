@@ -422,15 +422,38 @@ async function ensureSportCenterPaymentMirror(
   const payment = source.rows[0];
   if (!payment) throw new Error(`[accounting] Source confirmed payment ${input.sourcePaymentId} tidak ditemukan.`);
 
-  const booking = await client.query(
-    `SELECT id
+  // A confirmed payment may predate its canonical public booking mirror.
+  // The database owner replays the payment trigger in the same transaction,
+  // validating its company/facility mapping and preserving posted entries.
+  const findBooking = () => client.query(
+    `SELECT id, company_id
        FROM public.sport_bookings
       WHERE sc_booking_id = $1
-      LIMIT 1`,
+      ORDER BY id
+      LIMIT 2`,
     [payment.booking_id],
   );
+  let booking = await findBooking();
+  if (booking.rows.length === 0) {
+    const replay = await client.query(
+      `SELECT sport_center.replay_confirmed_payment_mirror($1::integer) AS replayed`,
+      [input.sourcePaymentId],
+    );
+    if (replay.rows[0]?.replayed !== true) {
+      throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} gagal dipulihkan.`);
+    }
+    booking = await findBooking();
+  }
   if (booking.rows.length !== 1) {
-    throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} tidak ditemukan.`);
+    throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} tidak tunggal atau tidak ditemukan.`);
+  }
+  const mirrorCompanyId = booking.rows[0].company_id == null
+    ? null : Number(booking.rows[0].company_id);
+  if (
+    (payment.company_id != null && mirrorCompanyId !== Number(payment.company_id)) ||
+    (input.companyId != null && mirrorCompanyId !== Number(input.companyId))
+  ) {
+    throw new Error(`[accounting] Mirror booking perusahaan berbeda untuk source booking ${payment.booking_id}.`);
   }
 
   // NOTE: bank_account_id is intentionally omitted from this INSERT/UPDATE.
