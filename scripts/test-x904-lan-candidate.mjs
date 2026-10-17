@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const mapping=readFileSync("artifacts/api-server/src/services/processX904Event.ts","utf8");
+const candidate=readFileSync("artifacts/api-server/src/services/x904LanInferenceCandidate.ts","utf8");
+assert.match(mapping,/MAPPING_NOT_FOUND/);
+assert.match(mapping,/MAPPING_NOT_VERIFIED/);
+assert.match(mapping,/mapping\.rows\[0\]\?\.status === "verified"/);
+assert.match(candidate,/eligibleForOfficialCheckin: false/);
+assert.match(candidate,/if \(!membershipVerifiedActive/);
+assert.doesNotMatch(candidate,/processX904Event|postTrustedEvents|INSERT INTO/);
+console.log("X904_CANDIDATE_GUARDS_PASS");

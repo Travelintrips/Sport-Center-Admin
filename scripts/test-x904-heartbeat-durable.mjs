@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const route = readFileSync("artifacts/api-server/src/routes/gymX904Integration.ts", "utf8");
+assert.match(route, /HEARTBEAT_TTL_MS = 300_000/);
+assert.match(route, /ON CONFLICT \(device_serial\) DO UPDATE SET/);
+assert.match(route, /INSERT INTO sport_center\.gym_x904_connector_heartbeats/);
+assert.match(route, /SELECT device_serial, last_seen::text AS last_seen/);
+assert.doesNotMatch(route, /lastConnectorProof/);
+assert.match(route, /Heartbeat persistence unavailable/);
+console.log("X904_DURABLE_HEARTBEAT_CONTRACT_PASS");
