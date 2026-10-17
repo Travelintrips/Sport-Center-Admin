@@ -86,6 +86,24 @@ describe("Sport Center finance event contract", () => {
     expect(migration).not.toContain("CREATE OR REPLACE FUNCTION sport_center.guard_posted_accounting_journal()");
   });
 
+  it("requires canonical posted settlement evidence before skipping payment-journal snapshot sync", () => {
+    const migration = readFileSync(
+      resolve(process.cwd(), "../../scripts/patch_dev_settlement_posted_journal_batch_evidence.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("batch.status IN ('posted', 'reconciled')");
+    expect(migration).toContain("item.item_status = 'active'");
+    expect(migration).toContain("batch.company_id = NEW.company_id");
+    expect(migration).toContain("batch.bank_account_id = NEW.bank_account_id");
+    expect(migration).toContain("batch.settlement_date::text = NEW.expected_settlement_date");
+    expect(migration).toContain("batch.settlement_rule_version = NEW.settlement_rule_version");
+    expect(migration).toContain("settlement_journal.status = 'posted'");
+    expect(migration).toContain("settlement_journal.journal_type = 'settlement'");
+    expect(migration).toContain("settlement_journal.is_reversal = false");
+    expect(migration).not.toContain("allow_posted_accounting_metadata_correction");
+    expect(migration).not.toContain("DISABLE TRIGGER");
+  });
+
   it("keeps database-level event uniqueness in both runtime and migration definitions", () => {
     const runtime = readFileSync(resolve(process.cwd(), "src/lib/bizportalSync.ts"), "utf8");
     const migration = readFileSync(resolve(process.cwd(), "../../scripts/migrate.ts"), "utf8");
