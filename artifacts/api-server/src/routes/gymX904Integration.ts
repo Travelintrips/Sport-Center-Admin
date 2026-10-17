@@ -156,7 +156,7 @@ router.post("/admin/gym-x904/read-command", adminMiddleware, async (_req, res) =
     const result = await db.execute(sql`INSERT INTO sport_center.gym_x904_read_commands(command_type)
       VALUES ('GET_STATUS') ON CONFLICT (device_serial,command_type) WHERE state='queued' DO NOTHING
       RETURNING command_id,state`);
-    if (!result.rows.length) return res.status(409).json({ error: "COMMAND_ALREADY_QUEUED" });
+    if (!result.rows.length) { res.status(409).json({ error: "COMMAND_ALREADY_QUEUED" }); return; }
     res.status(202).json({ command: result.rows[0] });
   } catch { res.status(503).json({ error: "COMMAND_QUEUE_UNAVAILABLE" }); }
 });
