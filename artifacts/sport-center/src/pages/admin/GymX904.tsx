@@ -322,7 +322,7 @@ export default function GymX904() {
           </div>
           <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-4 dark:border-amber-900 dark:bg-amber-950/20">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">ACK status mesin</p>
-            <p className={`mt-2 text-lg font-semibold ${ackDelayed || command?.state === "failed" ? "text-amber-700 dark:text-amber-400" : "text-slate-900 dark:text-slate-50"}`}>{ackDelayed ? "Terlambat > 3 menit" : command?.state === "completed" ? "Selesai" : command?.state === "queued" ? "Menunggu VMSC" : command?.state === "failed" ? "Gagal" : "Belum ada permintaan"}</p>
+            <p className={`mt-2 text-lg font-semibold ${ackDelayed || command?.state === "failed" ? "text-amber-700 dark:text-amber-400" : "text-slate-900 dark:text-slate-50"}`}>{ackDelayed ? "Terlambat lebih dari 3 menit" : command?.state === "completed" ? "Selesai" : command?.state === "queued" ? "Menunggu VMSC" : command?.state === "failed" ? "Gagal" : "Belum ada permintaan"}</p>
             <p className="mt-1 text-xs text-muted-foreground">{command?.completed_at ? `Diterima ${formatTime(command.completed_at)} WIB` : command?.state === "queued" ? "Menunggu jawaban gateway" : "Perintah baca status saja"}</p>
           </div>
         </div>
