@@ -48,6 +48,29 @@ export default function GymX904() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<GymTab>("dashboard");
   const queryClient = useQueryClient();
+  const [commandMessage, setCommandMessage] = useState("");
+  const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
+    queryKey: ["gym-x904-read-command"],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) throw new Error("Sesi admin tidak tersedia");
+      const response = await fetch(`${API}/admin/gym-x904/read-command`, {headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
+      if (!response.ok) throw new Error("Status perintah tidak tersedia");
+      return response.json();
+    },
+    refetchInterval: 15000,
+  });
+  const requestReadStatus = async () => {
+    const token = getToken();
+    if (!token) {setCommandMessage("Sesi admin tidak tersedia");return;}
+    setCommandMessage("Mengirim permintaan status...");
+    try {
+      const response = await fetch(`${API}/admin/gym-x904/read-command`, {method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:"{}"});
+      if (!response.ok) throw new Error(response.status===409?"Permintaan sebelumnya masih menunggu ACK":"Gagal mengirim perintah");
+      setCommandMessage("GET_STATUS masuk antrean. Menunggu ACK VMSC.");
+      await refetchReadCommand();
+    } catch(e) {setCommandMessage(e instanceof Error?e.message:"Permintaan gagal");}
+  };
   const { data: integration, isError: integrationError } = useQuery<IntegrationStatus>({
     queryKey: ["gym-x904-integration"],
     queryFn: async () => {
@@ -231,6 +254,13 @@ export default function GymX904() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
+      <section className="rounded-xl border bg-card p-4 space-y-2">
+        <h2 className="font-semibold">Komunikasi dua arah X904 — baca saja</h2>
+        <p className="text-sm text-muted-foreground">Permintaan status melalui Supabase → VMSC; tidak mengubah pengguna atau mesin.</p>
+        <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium" onClick={() => {void requestReadStatus();}}>Cek Status Mesin</button>
+        <p className="text-sm" role="status">{commandMessage || (readCommand?.command ? `GET_STATUS: ${readCommand.command.state}` : "Belum ada permintaan")}</p>
+        {readCommand?.command?.result && <pre className="overflow-x-auto text-xs rounded-lg bg-muted p-3">{JSON.stringify(readCommand.command.result,null,2)}</pre>}
+      </section>
       <header className="relative overflow-hidden rounded-3xl border border-slate-700/30 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-7 text-white shadow-xl shadow-slate-900/10 md:px-9 md:py-9">
         <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-400/15 blur-3xl" />
         <div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-1/4 h-36 w-36 rounded-full bg-cyan-400/10 blur-3xl" />

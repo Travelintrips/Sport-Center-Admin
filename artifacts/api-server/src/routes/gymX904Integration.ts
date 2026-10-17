@@ -140,4 +140,25 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
         : "Receiver diagnostik belum siap. Data check-in yang tampil berasal dari SC.",
   });
 });
+
+router.get("/admin/gym-x904/read-command", adminMiddleware, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const result = await db.execute(sql`SELECT command_id, command_type, state, created_at, completed_at, result, error_code
+      FROM sport_center.gym_x904_read_commands
+      WHERE device_serial='TDBD234200545' ORDER BY created_at DESC LIMIT 1`);
+    res.json({ command: result.rows[0] ?? null });
+  } catch { res.status(503).json({ error: "COMMAND_STATUS_UNAVAILABLE" }); }
+});
+router.post("/admin/gym-x904/read-command", adminMiddleware, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const result = await db.execute(sql`INSERT INTO sport_center.gym_x904_read_commands(command_type)
+      VALUES ('GET_STATUS') ON CONFLICT (device_serial,command_type) WHERE state='queued' DO NOTHING
+      RETURNING command_id,state`);
+    if (!result.rows.length) { res.status(409).json({ error: "COMMAND_ALREADY_QUEUED" }); return; }
+    res.status(202).json({ command: result.rows[0] });
+  } catch { res.status(503).json({ error: "COMMAND_QUEUE_UNAVAILABLE" }); }
+});
+
 export default router;

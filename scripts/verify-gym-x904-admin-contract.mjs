@@ -11,7 +11,9 @@ assert.match(app, /return <AdminLayout><AdminErrorBoundary>\{content\}<\/AdminEr
 assert.match(nav, /href: "\/admin\/memberships", label: "Member Gym"/);
 assert.match(nav, /href: "\/admin\/gym-x904", label: "Absensi Gym X904"/);
 assert.match(nav, /useGetMe\(/);
-assert.match(page, /Koneksi mesin X904 belum aktif/i);
+assert.match(page, /Komunikasi dua arah X904/);
+assert.match(page, /Cek Status Mesin/);
+assert.match(page, /gym-x904\/read-command/);
 assert.match(page, /href="\/admin\/memberships"/);
 assert.match(page, /\/memberships\/checkins\?date=/);
 assert.match(page, /getToken\(/);
