@@ -39,6 +39,10 @@ type FakeState = {
   nextMirrorId: number;
   nextEntrySequence: number;
   confirmedSourcePaymentIds: number[];
+  missingBookingIds: number[];
+  deniedReplayIds: number[];
+  wrongCompanyBookingIds: number[];
+  mirrorReplayIds: number[];
 };
 
 const state: FakeState = {
@@ -51,6 +55,10 @@ const state: FakeState = {
   nextMirrorId: 1,
   nextEntrySequence: 1,
   confirmedSourcePaymentIds: [],
+  missingBookingIds: [],
+  deniedReplayIds: [],
+  wrongCompanyBookingIds: [],
+  mirrorReplayIds: [],
 };
 
 function resetState(): void {
@@ -63,6 +71,10 @@ function resetState(): void {
   state.nextMirrorId = 1;
   state.nextEntrySequence = 1;
   state.confirmedSourcePaymentIds = [];
+  state.missingBookingIds = [];
+  state.deniedReplayIds = [];
+  state.wrongCompanyBookingIds = [];
+  state.mirrorReplayIds = [];
 }
 
 function scalar(value: unknown): number {
@@ -175,8 +187,28 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     };
   }
 
-  if (sql.includes("SELECT id FROM public.sport_bookings WHERE sc_booking_id = $1 LIMIT 1")) {
-    return { rows: [{ id: scalar(values[0]) + 10_000 }], rowCount: 1 };
+  if (sql.startsWith("SELECT sport_center.replay_confirmed_payment_mirror(")) {
+    const sourceId = scalar(values[0]);
+    state.mirrorReplayIds.push(sourceId);
+    const replayed = !state.deniedReplayIds.includes(sourceId);
+    if (replayed) {
+      state.missingBookingIds = state.missingBookingIds.filter((id) => id !== sourceId);
+    }
+    return { rows: [{ replayed }], rowCount: 1 };
+  }
+
+  if (sql.includes("FROM public.sport_bookings") &&
+      sql.includes("WHERE sc_booking_id = $1") &&
+      sql.includes("LIMIT 2")) {
+    const sourceId = scalar(values[0]);
+    if (state.missingBookingIds.includes(sourceId)) return { rows: [], rowCount: 0 };
+    return {
+      rows: [{
+        id: sourceId + 10_000,
+        company_id: state.wrongCompanyBookingIds.includes(sourceId) ? 2 : 1,
+      }],
+      rowCount: 1,
+    };
   }
 
   if (sql.startsWith("INSERT INTO public.sport_payments")) {
@@ -607,6 +639,64 @@ describe("Sport Center payment accounting integration", () => {
     expect(state.entries).toHaveLength(1);
     expect(state.lines).toHaveLength(3);
     expect(state.taxRows).toHaveLength(1);
+  });
+
+  it("replays a missing canonical booking mirror once before posting", async () => {
+    const sourcePaymentId = 52;
+    state.missingBookingIds = [sourcePaymentId];
+    const mirror = addMirror(`SCPAY-SC-${sourcePaymentId}`, 100_000);
+
+    const first = await postSportCenterBookingPayment({
+      paymentNumber: mirror.paymentNumber,
+      sourcePaymentId,
+      bookingId: sourcePaymentId,
+      orderNumber: `SC-${sourcePaymentId}`,
+      amount: 100_000,
+      companyId: 1,
+      paymentMethod: "QRIS",
+      paymentType: "full_payment",
+      paidAt: PAYMENT_TIMESTAMP,
+      ppnRate: 0,
+    });
+    expect(first.postingStatus).toBe("posted");
+    expect(state.mirrorReplayIds).toEqual([sourcePaymentId]);
+    expect(state.missingBookingIds).toEqual([]);
+    expect(state.entries).toHaveLength(1);
+  });
+
+  it("rejects an unavailable canonical mirror replay without posting", async () => {
+    const sourcePaymentId = 53;
+    state.missingBookingIds = [sourcePaymentId];
+    state.deniedReplayIds = [sourcePaymentId];
+    const mirror = addMirror(`SCPAY-SC-${sourcePaymentId}`, 100_000);
+
+    await expect(postSportCenterBookingPayment({
+      paymentNumber: mirror.paymentNumber,
+      sourcePaymentId,
+      bookingId: sourcePaymentId,
+      orderNumber: `SC-${sourcePaymentId}`,
+      amount: 100_000,
+      companyId: 1,
+    })).rejects.toThrow("gagal dipulihkan");
+    expect(state.mirrorReplayIds).toEqual([sourcePaymentId]);
+    expect(state.entries).toHaveLength(0);
+  });
+
+  it("fails closed on cross-company canonical booking mirrors", async () => {
+    const sourcePaymentId = 54;
+    state.wrongCompanyBookingIds = [sourcePaymentId];
+    const mirror = addMirror(`SCPAY-SC-${sourcePaymentId}`, 100_000);
+
+    await expect(postSportCenterBookingPayment({
+      paymentNumber: mirror.paymentNumber,
+      sourcePaymentId,
+      bookingId: sourcePaymentId,
+      orderNumber: `SC-${sourcePaymentId}`,
+      amount: 100_000,
+      companyId: 1,
+    })).rejects.toThrow("perusahaan berbeda");
+    expect(state.entries).toHaveLength(0);
+    expect(state.mirrorReplayIds).toEqual([]);
   });
 
   it("counts missing, failed, and unposted mirrors as pending", async () => {
