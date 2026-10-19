@@ -127,13 +127,21 @@ router.post("/auth/google", async (req, res) => {
 router.post("/auth/admin-google", async (req, res) => {
   try {
     const idToken = req.body?.idToken;
-    if (typeof idToken !== "string" || !idToken || !GOOGLE_CLIENT_ID) {
+    if (typeof idToken !== "string" || !idToken) {
       res.status(400).json({ error: "Google login tidak tersedia." });
+      return;
+    }
+    // Resolve the backend audience at request time. A missing Hostinger runtime
+    // setting is a configuration fault, not an invalid credential.
+    const adminGoogleAudience = (process.env.GOOGLE_CLIENT_ID ?? "").trim();
+    if (!adminGoogleAudience) {
+      req.log.error({ route: "admin-google", missingConfig: "GOOGLE_CLIENT_ID" }, "Google admin login runtime configuration missing");
+      res.status(503).json({ error: "Login Google admin belum dikonfigurasi di server." });
       return;
     }
     let payload;
     try {
-      const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
+      const ticket = await googleClient.verifyIdToken({ idToken, audience: adminGoogleAudience });
       payload = ticket.getPayload();
     } catch {
       res.status(401).json({ error: "Autentikasi Google gagal." });
