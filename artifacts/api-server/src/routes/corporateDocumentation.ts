@@ -123,7 +123,7 @@ router.post(
       // Tentukan siapa yang upload
       const user = (req as any).user;
       const uploadedBy: "admin" | "customer" =
-        user?.role === "admin" ? "admin" : "customer";
+        ["owner", "super_admin", "admin"].includes(user?.role) ? "admin" : "customer";
 
       // Simpan record ke database
       const caption = typeof req.body.caption === "string" ? req.body.caption.trim() : null;
