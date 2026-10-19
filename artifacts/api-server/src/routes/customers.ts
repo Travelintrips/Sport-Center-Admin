@@ -491,7 +491,7 @@ router.delete("/customers/:id", adminMiddleware, async (req, res) => {
     const [existing] = await db.select({ id: usersTable.id, role: usersTable.role })
       .from(usersTable).where(eq(usersTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-    if (existing.role === "admin") { res.status(403).json({ error: "Tidak bisa menghapus akun admin" }); return; }
+    if (["owner", "super_admin", "admin", "admin_booking"].includes(existing.role)) { res.status(403).json({ error: "Tidak bisa menghapus akun admin" }); return; }
     await db.update(bookingsTable).set({ customerId: null }).where(eq(bookingsTable.customerId, id));
     await db.delete(usersTable).where(eq(usersTable.id, id));
     res.json({ ok: true });
