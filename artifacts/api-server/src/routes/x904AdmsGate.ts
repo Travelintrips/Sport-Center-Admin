@@ -9,8 +9,9 @@ import { persistX904AdmsAudit, x904AdmsAuditCounters, type X904AdmsOutcome } fro
 
 /**
  * Deliberately narrow, opt-in diagnostic handshake. Same SC backend, no new service.
- * Records only anonymous protocol metadata; never ACKs untrusted ATTLOG,
- * enrolls members or controls the door.
+ * Records only anonymous protocol metadata. Matching-serial untrusted ATTLOG
+ * may receive a transport ACK to stop retry storms, but is never persisted,
+ * enrolled, or treated as authenticated device data.
  * Serial numbers are NOT authentication, so diagnostic activation is time-limited
  * by operations and must not be treated as production device trust.
  */
@@ -165,7 +166,7 @@ router.all(/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i, parseText({ type: () 
      timingSafeEqual(expectedKey, receivedKey);
    // A timed trial is a diagnostic switch, not proof of the sender. Do not
    // permit it to bypass ingress authentication for durable attendance writes.
-   if (!authenticated) { auditAdms("rejected_untrusted",{kind:"attendance",trialMode}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(403).send("UNTRUSTED DEVICE\n"); }
+   if (!authenticated) { auditAdms("rejected_untrusted",{kind:"attendance",trialMode}); rejectedUntrustedAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_untrusted",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(200).send("OK\n"); }
    const parsed = parseX904Attlog(typeof req.body === "string" ? req.body : "");
    if (!parsed) { auditAdms("rejected_invalid_attlog",{kind:"attendance"}); rejectedUnparseableAttendance++; lastRejectedAttendanceAt=new Date().toISOString(); await persist("attendance_invalid",{rows:lastAttlogShape?.rows ?? 0,parseable:lastAttlogShape?.parseable ?? false,minColumns:lastAttlogShape?.columnCounts[0] ?? 0}); return res.status(400).send("INVALID ATTLOG\n"); }
    const records = parsed.map(event => ({
