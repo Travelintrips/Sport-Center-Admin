@@ -23,12 +23,9 @@ export async function processX904Event(event: X904EventInput,
       FROM sport_center.gym_x904_member_mapping
       WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
     const membershipId = Number(mapping.rows[0]?.membership_id);
-    // Fail closed: LAN metadata is insufficient. Only explicitly approved ADMS
-    // verification codes may produce automatic attendance; an unset allowlist
-    // keeps production in review-only mode until hardware evidence is verified.
-    const approvedCodes = (process.env.GYM_X904_TRUSTED_VERIFICATION_CODES ?? "")
-      .split(",").map(code => code.trim()).filter(code => /^\d{1,3}$/.test(code))
-      .map(Number);
+    // Approved after controlled X904 tests: fingerprint=1, card=4, face=15.
+    // The trusted ADMS ingress and verified membership mapping remain mandatory.
+    const approvedCodes = [1, 4, 15];
     const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
       raw.rows[0]?.attendance_status !== null &&
       raw.rows[0]?.verification_type !== null &&
