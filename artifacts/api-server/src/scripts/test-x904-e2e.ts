@@ -8,7 +8,7 @@ if(!u.username.endsWith(".xssrfshdrtdfupgqwfdw")) throw Error("WRONG_PROJECT");
 const {db,pool}=await import("@workspace/db");
 const {sql}=await import("drizzle-orm");
 const {processX904Event}=await import("../services/processX904Event");
-const serial="TDBD234200545",pin=String(100000+randomBytes(4).readUInt32BE(0)%900000),eventId=randomBytes(32).toString("hex");
+const serial="TDBD234200545",pin=String(100000+randomBytes(4).readUInt32BE(0)%900000),eventId=randomBytes(32).toString("hex"),secondEventId=randomBytes(32).toString("hex");
 const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
 const field=(n:string)=>parts.find(p=>p.type===n)?.value;
 const day=field("year")+"-"+field("month")+"-"+field("day");
@@ -32,7 +32,12 @@ try{
    processX904Event({eventId,deviceSerial:serial,userPin:pin})
  ]);
  const first=concurrent.includes("processed") ? "processed" : concurrent[0];
- const replay=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
+ // A second event ID from the same verified PIN on the same date must never create another booking.
+ await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES(${secondEventId},${serial},${pin},${day+" 10:00:01"},0,1)`);
+ const [replay,other] = await Promise.all([
+   processX904Event({eventId,deviceSerial:serial,userPin:pin}),
+   processX904Event({eventId:secondEventId,deviceSerial:serial,userPin:pin})
+ ]);
  const counts=await db.execute(sql`SELECT
  (SELECT count(*)::int FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId} AND status='success') AS ledger,
  (SELECT count(*)::int FROM sport_center.gym_checkins WHERE notes=${marker} AND x904_event_id=${eventId}) AS checkins,
@@ -40,8 +45,8 @@ try{
  (SELECT count(*)::int FROM sport_center.booking_history WHERE note=${marker}) AS history`);
  const row=counts.rows[0];
  const nums=[row?.ledger,row?.checkins,row?.bookings,row?.history].map(Number);
- console.log("X904_E2E",JSON.stringify({first,concurrent,replay,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
- if(first!=="processed" || concurrent.filter(x=>x==="processed").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
+ console.log("X904_E2E",JSON.stringify({first,concurrent,replay,other,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
+ if(first!=="processed" || concurrent.filter(x=>x==="processed").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || other!=="review_required" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
  const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
@@ -56,8 +61,8 @@ try{
   await db.execute(sql`DELETE FROM sport_center.booking_history WHERE note=${marker}`);
   await db.execute(sql`DELETE FROM sport_center.sport_bookings WHERE notes=${marker}`);
   await db.execute(sql`DELETE FROM sport_center.gym_checkins WHERE notes=${marker}`);
-  await db.execute(sql`DELETE FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId}`);
-  await db.execute(sql`DELETE FROM sport_center.gym_x904_raw_events WHERE event_id=${eventId}`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_processed_events WHERE event_id IN (${eventId},${secondEventId})`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_raw_events WHERE event_id IN (${eventId},${secondEventId})`);
   await db.execute(sql`DELETE FROM sport_center.gym_x904_member_mapping WHERE device_serial=${serial} AND user_pin=${pin} AND verified_by='x904-ci-test'`);
   if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_memberships WHERE id=${membershipId} AND notes=${`X904 E2E ${eventId}`}`);
   console.log('X904_FIXTURE_CLEANUP=PASS');
