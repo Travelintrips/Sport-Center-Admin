@@ -1,7 +1,7 @@
 import { db, gymCheckinsTable, bookingsTable, bookingHistoryTable } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
-/** This processor is not wired to production ingress until DEV E2E is verified. */
+/** X904 automatic attendance is gated at ingress; only trusted, verified, current-day ADMS events qualify. */
 export type X904EventInput = { eventId: string; deviceSerial: string; userPin: string };
 export type X904Outcome = "processed" | "already_processed" | "review_required";
 export async function processX904Event(event: X904EventInput,
@@ -36,6 +36,8 @@ export async function processX904Event(event: X904EventInput,
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
       } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
+        // A member row lock serializes concurrent X904 events for this membership.
+        // Existing manual check-ins are also respected; historical duplicate dates remain untouched.
         const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_checkins
           WHERE membership_id=${membershipId} AND checkin_date=${day}::date LIMIT 1`);
         if (existing.rows.length) {
@@ -55,9 +57,9 @@ export async function processX904Event(event: X904EventInput,
               await tx.execute(sql`SELECT setval('sport_center.booking_order_no_seq', GREATEST(COALESCE((SELECT MAX(substring(order_number FROM 4)::bigint) FROM sport_center.sport_bookings WHERE order_number ~ '^SC-[0-9]+$'),0),(SELECT last_value FROM sport_center.booking_order_no_seq)),true)`);
               const seq = await tx.execute(sql`SELECT nextval('sport_center.booking_order_no_seq') AS n`);
               const orderNumber = `SC-${String(seq.rows[0]?.n).padStart(4,"0")}`;
-              await tx.insert(gymCheckinsTable).values({
-                membershipId, checkinDate: day, notes: `X904 event ${event.eventId}`
-              });
+              await tx.execute(sql`INSERT INTO sport_center.gym_checkins
+                (membership_id,checkin_date,notes,x904_event_id)
+                VALUES (${membershipId},${day}::date,${`X904 event ${event.eventId}`},${event.eventId})`);
               const [booking] = await tx.insert(bookingsTable).values({
                 orderNumber, customerName:String(m.name), customerEmail:String(m.email),
                 customerPhone:String(m.phone), facilityId:Number(gym.id), bookingDate:day,
