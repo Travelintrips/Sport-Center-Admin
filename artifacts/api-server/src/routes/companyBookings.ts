@@ -13,7 +13,7 @@ router.post("/company-bookings/prepare-customer", authMiddleware, async (req, re
     const { companyId, customerName, customerPhone, employeeId } = req.body;
     const loggedInUserId: number = (req as any).user.userId;
     const loggedInRole: string = (req as any).user.role;
-    const isAdminBooking = loggedInRole === "admin_booking" || loggedInRole === "admin" || loggedInRole === "super_admin" || loggedInRole === "staff";
+    const isAdminBooking = loggedInRole === "owner" || loggedInRole === "admin_booking" || loggedInRole === "admin" || loggedInRole === "super_admin" || loggedInRole === "staff";
     const { ipAddress, userAgent } = getClientInfo(req);
 
     if (!companyId) {
