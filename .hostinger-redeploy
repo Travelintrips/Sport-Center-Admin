@@ -9,3 +9,5 @@ force hostinger redeploy after Mina webhook signing separation
 
 2026-10-19 request Hostinger rebuild for PR #157: ACK matching-serial untrusted X904 ATTLOG without ingest to stop 403 retry storm; owner role schema sync.
 2026-10-19 trigger production rebuild after merged X904 untrusted ATTLOG transport-ACK fix (#157)
+
+2026-10-19 request Hostinger clean rebuild from latest main including X904 PR #158 and #159; preserve VMSC send-disabled and no historical replay.
