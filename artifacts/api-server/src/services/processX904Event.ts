@@ -10,7 +10,7 @@ export async function processX904Event(event: X904EventInput,
     throw new Error("Invalid X904 event identity");
   }
   return db.transaction(async (tx) => {
-    const raw = await tx.execute(sql`SELECT event_id,device_serial,user_pin,device_time
+    const raw = await tx.execute(sql`SELECT event_id,device_serial,user_pin,device_time,attendance_status,verification_type
       FROM sport_center.gym_x904_raw_events WHERE event_id=${event.eventId} FOR UPDATE`);
     if (raw.rows.length !== 1 || raw.rows[0]?.device_serial !== event.deviceSerial ||
         raw.rows[0]?.user_pin !== event.userPin) throw new Error("Raw event missing or identity mismatch");
@@ -23,9 +23,12 @@ export async function processX904Event(event: X904EventInput,
       FROM sport_center.gym_x904_member_mapping
       WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
     const membershipId = Number(mapping.rows[0]?.membership_id);
+    const hasVerifiedAdmsPayload = raw.rows[0]?.attendance_status !== null &&
+      raw.rows[0]?.attendance_status !== undefined &&
+      raw.rows[0]?.verification_type !== null && raw.rows[0]?.verification_type !== undefined;
     let status: "success" | "review_required" = "review_required";
     // A different event on the same day is a review case, not a replay of this event ID.
-    if (mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
+    if (hasVerifiedAdmsPayload && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
       const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
         FROM sport_center.sport_memberships WHERE id=${membershipId} FOR UPDATE`);
       const m = member.rows[0];
