@@ -1,0 +1,2 @@
+Trigger Hostinger production rebuild for X904 ATTLOG ACK release.
+Source main already contains the security-preserving 200 ACK + discard behavior for untrusted direct ADMS ATTLOG.
