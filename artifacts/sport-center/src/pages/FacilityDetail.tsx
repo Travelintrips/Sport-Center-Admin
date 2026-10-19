@@ -46,6 +46,7 @@ const MULTIGUNA_ACTIVITIES = [
 
 const OPERATIONAL_BOOKING_ROLES = new Set([
   "admin",
+  "owner",
   "super_admin",
   "admin_booking",
   "staff",
