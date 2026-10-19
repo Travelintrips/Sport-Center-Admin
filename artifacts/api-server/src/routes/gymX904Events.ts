@@ -126,10 +126,8 @@ router.get("/admin/gym-x904/lan-reconciliation", adminMiddleware, async (req,res
     const result = await db.execute(sql`SELECT l.event_index,l.user_pin,l.device_time,u.display_name,m.membership_id,
       COALESCE(m.status,'unmapped') AS mapping_status,sm.status AS membership_status,
       sm.start_date,sm.end_date,v.verification_code,v.evidence_status,
-      (v.capture_source='vmsc_automated'
-       AND v.evidence_status='verified'
-       AND v.verification_code IN (1,4,15)
-       AND v.raw_hex ~ '^[0-9a-f]{80}
+      (v.capture_source='vmsc_automated' AND v.evidence_status='verified' AND v.verification_code IN (1,4,15)
+       AND CASE WHEN v.raw_hex ~ '^[0-9a-f]{80}
       (SELECT count(*)::integer FROM sport_center.gym_checkins c WHERE c.membership_id=m.membership_id
         AND c.checkin_date=${date}::date) AS existing_checkins
       FROM sport_center.gym_x904_lan_logs l
@@ -230,8 +228,7 @@ router.get("/admin/gym-x904/member-mapping", adminMiddleware, async (_req,res) =
 });
 export default router;
 
-       AND get_byte(decode(substr(v.raw_hex,53,2),'hex'),0)=v.verification_code
-      ) AS evidence_trusted,
+         THEN get_byte(decode(substr(v.raw_hex,53,2),'hex'),0)=v.verification_code ELSE false END) AS evidence_trusted,
       (SELECT count(*)::integer FROM sport_center.gym_checkins c WHERE c.membership_id=m.membership_id
         AND c.checkin_date=${date}::date) AS existing_checkins
       FROM sport_center.gym_x904_lan_logs l
