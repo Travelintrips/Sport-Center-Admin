@@ -126,6 +126,9 @@ router.get("/admin/gym-x904/lan-reconciliation", adminMiddleware, async (req,res
     const result = await db.execute(sql`SELECT l.event_index,l.user_pin,l.device_time,u.display_name,m.membership_id,
       COALESCE(m.status,'unmapped') AS mapping_status,sm.status AS membership_status,
       sm.start_date,sm.end_date,v.verification_code,v.evidence_status,
+      (v.capture_source='vmsc_automated' AND v.evidence_status='verified' AND v.verification_code IN (1,4,15)
+       AND CASE WHEN v.raw_hex ~ '^[0-9a-f]{80}$'
+         THEN get_byte(decode(substr(v.raw_hex,53,2),'hex'),0)=v.verification_code ELSE false END) AS evidence_trusted,
       (SELECT count(*)::integer FROM sport_center.gym_checkins c WHERE c.membership_id=m.membership_id
         AND c.checkin_date=${date}::date) AS existing_checkins
       FROM sport_center.gym_x904_lan_logs l
@@ -139,7 +142,7 @@ router.get("/admin/gym-x904/lan-reconciliation", adminMiddleware, async (req,res
     return res.json({readOnly:true,source:"lan_shadow",date,events:result.rows.map(r => ({
       ...r,review_category:r.mapping_status!=="verified"?"identity_review":
       r.membership_status!=="active" || String(r.start_date).slice(0,10)>date || String(r.end_date).slice(0,10)<date?"membership_review":
-      r.evidence_status!=="verified"?"verification_review":
+      r.evidence_trusted!==true?"verification_review":
       Number(r.existing_checkins)>0?"already_checked_in":"shadow_eligible"
     }))});
   } catch(error) {
