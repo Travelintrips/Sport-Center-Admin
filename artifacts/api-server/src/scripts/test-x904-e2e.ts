@@ -29,6 +29,17 @@ try{
   (device_serial,user_pin,membership_id,status,verified_at,verified_by)
   VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
  await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES(${eventId},${serial},${pin},${day+" 10:00:00"},0,1)`);
+ // Rollback must not leave a check-in, booking, or processing ledger.
+ let rolledBack=false;
+ try { await processX904Event({eventId,deviceSerial:serial,userPin:pin},{failBeforeCommit:true}); }
+ catch(e) { rolledBack=e instanceof Error && e.message.includes("X904_TEST_ROLLBACK_BEFORE_COMMIT"); }
+ if(!rolledBack) throw Error("X904_ROLLBACK_NOT_TRIGGERED");
+ const rollbackCheck=await db.execute(sql`SELECT
+   (SELECT count(*)::int FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId}) AS ledger,
+   (SELECT count(*)::int FROM sport_center.gym_checkins WHERE x904_event_id=${eventId}) AS checkins,
+   (SELECT count(*)::int FROM sport_center.sport_bookings WHERE notes=${marker}) AS bookings`);
+ if([rollbackCheck.rows[0]?.ledger,rollbackCheck.rows[0]?.checkins,rollbackCheck.rows[0]?.bookings].some(n=>Number(n)!==0))
+   throw Error("X904_ROLLBACK_LEFT_WRITES");
  // Simulate two concurrent retries for the exact same authenticated event.
  const concurrent=await Promise.all([
    processX904Event({eventId,deviceSerial:serial,userPin:pin}),
