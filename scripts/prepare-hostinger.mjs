@@ -1,4 +1,5 @@
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { cp, mkdir, rm, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -40,6 +41,27 @@ await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });
 await cp(apiDist, outputDir, { recursive: true });
 await cp(webDist, path.join(outputDir, "public"), { recursive: true });
+
+// Capture the exact source commit during build, before deployment copies can
+// lose their .git directory. Runtime reads this immutable file, not a panel label.
+function sourceCommit() {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: repoRoot, encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (/^[0-9a-f]{40}$/.test(sha)) return sha;
+  } catch { /* Git may be omitted by some managed builders. */ }
+  const supplied = process.env.GITHUB_SHA || process.env.HOSTINGER_GIT_COMMIT || "";
+  return /^[0-9a-f]{40}$/.test(supplied) ? supplied : null;
+}
+const commit = sourceCommit();
+const buildIdentity = {
+  git_commit: commit,
+  provenance: commit ? "build_source" : "unavailable",
+  built_at: new Date().toISOString(),
+};
+await writeFile(path.join(outputDir, "build-info.json"), JSON.stringify(buildIdentity) + "\\n", "utf8");
+console.log("[hostinger] build identity " + (commit ? "captured" : "unavailable"));
 
 // Tesseract.js otherwise downloads English language data at runtime. Hostinger
 // may not allow/reliably reach that CDN, so ship the traineddata with the app.
