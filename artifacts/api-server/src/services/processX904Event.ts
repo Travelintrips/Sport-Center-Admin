@@ -23,9 +23,17 @@ export async function processX904Event(event: X904EventInput,
       FROM sport_center.gym_x904_member_mapping
       WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
     const membershipId = Number(mapping.rows[0]?.membership_id);
-    const hasVerifiedAdmsPayload = raw.rows[0]?.attendance_status !== null &&
-      raw.rows[0]?.attendance_status !== undefined &&
-      raw.rows[0]?.verification_type !== null && raw.rows[0]?.verification_type !== undefined;
+    // Fail closed: LAN metadata is insufficient. Only explicitly approved ADMS
+    // verification codes may produce automatic attendance; an unset allowlist
+    // keeps production in review-only mode until hardware evidence is verified.
+    const approvedCodes = (process.env.GYM_X904_TRUSTED_VERIFICATION_CODES ?? "")
+      .split(",").map(code => code.trim()).filter(code => /^\d{1,3}$/.test(code))
+      .map(Number);
+    const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
+      raw.rows[0]?.attendance_status !== null &&
+      raw.rows[0]?.verification_type !== null &&
+      raw.rows[0]?.verification_type !== undefined &&
+      approvedCodes.includes(Number(raw.rows[0]?.verification_type));
     let status: "success" | "review_required" = "review_required";
     // A different event on the same day is a review case, not a replay of this event ID.
     if (hasVerifiedAdmsPayload && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
