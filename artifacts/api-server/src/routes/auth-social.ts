@@ -146,7 +146,7 @@ router.post("/auth/admin-google", async (req, res) => {
     const [user] = await db.select().from(usersTable)
       .where(and(eq(usersTable.googleId, payload.sub), eq(usersTable.email, payload.email.toLowerCase())))
       .limit(1);
-    if (!user || !["admin", "super_admin", "admin_booking"].includes(user.role) ||
+    if (!user || !["owner", "admin", "super_admin", "admin_booking"].includes(user.role) ||
         (user.accountStatus && user.accountStatus !== "active")) {
       res.status(403).json({ error: "Akun Google tidak memiliki akses administrator." });
       return;
