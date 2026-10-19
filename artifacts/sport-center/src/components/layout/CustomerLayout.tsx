@@ -110,7 +110,7 @@ function UserMenu() {
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
                 <UserCircle size={15} className="text-primary" /> {t("Profil Saya", "My Profile")}
               </Link>
-              {(["staff", "admin", "super_admin", "admin_booking", "ap2_employee"] as string[]).includes(user.role) && (
+              {(["owner", "staff", "admin", "super_admin", "admin_booking", "ap2_employee"] as string[]).includes(user.role) && (
                 <Link href="/verify-id" onClick={() => setOpen(false)}
                   className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
                   <BadgeCheck size={15} className="text-primary" /> {t("Verifikasi ID AP2", "Verify AP2 ID")}
@@ -269,7 +269,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><UserCircle size={14} /></div>
                     {t("Profil Saya", "My Profile")}
                   </Link>
-                  {(["staff", "admin", "super_admin", "admin_booking", "ap2_employee"] as string[]).includes(user.role as string) && (
+                  {(["owner", "staff", "admin", "super_admin", "admin_booking", "ap2_employee"] as string[]).includes(user.role as string) && (
                     <Link href="/verify-id" onClick={() => setIsMobileMenuOpen(false)}
                       className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-foreground/80 hover:bg-muted/60">
                       <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><BadgeCheck size={14} /></div>
