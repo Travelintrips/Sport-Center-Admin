@@ -1,9 +1,24 @@
 import { Router, type IRouter } from "express";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { isStartupReady } from "../lib/startupReadiness";
 
 const router: IRouter = Router();
+// Immutable build attestation loaded from the deployed Node.js artifact.
+// Missing metadata is reported as unknown rather than claiming a commit.
+const buildIdentity = (() => {
+  try {
+    const location = path.join(path.dirname(fileURLToPath(import.meta.url)), "build-info.json");
+    const raw = JSON.parse(readFileSync(location, "utf8")) as { git_commit?: unknown; built_at?: unknown };
+    return {
+      git_commit: typeof raw.git_commit === "string" && /^[0-9a-f]{40}$/.test(raw.git_commit) ? raw.git_commit : null,
+      built_at: typeof raw.built_at === "string" && !Number.isNaN(Date.parse(raw.built_at)) ? raw.built_at : null,
+    };
+  } catch { return { git_commit: null, built_at: null }; }
+})();
 
 /**
  * GET /health — lightweight health check for App Engine and load balancers.
@@ -27,7 +42,8 @@ router.get("/health", (_req, res) => {
  */
 router.get("/healthz", (_req, res) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
-  res.json(data);
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ...data, ...buildIdentity });
 });
 
 /**
