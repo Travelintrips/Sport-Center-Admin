@@ -14,6 +14,9 @@ const field=(n:string)=>parts.find(p=>p.type===n)?.value;
 const day=field("year")+"-"+field("month")+"-"+field("day");
 let membershipId: number | null = null;
 const marker="X904 event "+eventId;
+// DEV fixture only: the synthetic event uses code 1. Production stays fail-closed.
+const originalTrustedCodes=process.env.GYM_X904_TRUSTED_VERIFICATION_CODES;
+process.env.GYM_X904_TRUSTED_VERIFICATION_CODES="1";
 try{
  // DEV-only synthetic membership and mapping; never touch an existing member.
  const member=await db.execute(sql`INSERT INTO sport_center.sport_memberships
@@ -67,5 +70,7 @@ try{
   if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_memberships WHERE id=${membershipId} AND notes=${`X904 E2E ${eventId}`}`);
   console.log('X904_FIXTURE_CLEANUP=PASS');
  } catch(error) { console.error('X904_FIXTURE_CLEANUP_FAILED',error instanceof Error?error.message:String(error)); process.exitCode=1; }
- finally {await pool.end();}
+ finally {if(originalTrustedCodes===undefined) delete process.env.GYM_X904_TRUSTED_VERIFICATION_CODES;
+  else process.env.GYM_X904_TRUSTED_VERIFICATION_CODES=originalTrustedCodes;
+  await pool.end();}
 }
