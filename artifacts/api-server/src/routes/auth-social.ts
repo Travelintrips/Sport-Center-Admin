@@ -123,6 +123,43 @@ router.post("/auth/google", async (req, res) => {
   }
 });
 
+// Admin Google sign-in never provisions, links, or promotes accounts.
+router.post("/auth/admin-google", async (req, res) => {
+  try {
+    const idToken = req.body?.idToken;
+    if (typeof idToken !== "string" || !idToken || !GOOGLE_CLIENT_ID) {
+      res.status(400).json({ error: "Google login tidak tersedia." });
+      return;
+    }
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
+      payload = ticket.getPayload();
+    } catch {
+      res.status(401).json({ error: "Autentikasi Google gagal." });
+      return;
+    }
+    if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+      res.status(401).json({ error: "Akun Google belum terverifikasi." });
+      return;
+    }
+    const [user] = await db.select().from(usersTable)
+      .where(and(eq(usersTable.googleId, payload.sub), eq(usersTable.email, payload.email.toLowerCase())))
+      .limit(1);
+    if (!user || !["admin", "super_admin", "admin_booking"].includes(user.role) ||
+        (user.accountStatus && user.accountStatus !== "active")) {
+      res.status(403).json({ error: "Akun Google tidak memiliki akses administrator." });
+      return;
+    }
+    const token = createToken(user.id, user.role, null);
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email,
+      role: user.role, phone: user.phone, tenantId: null, createdAt: user.createdAt } });
+  } catch (err) {
+    req.log.error({ err }, "Admin Google login error");
+    res.status(500).json({ error: "Login Google admin tidak dapat diproses." });
+  }
+});
+
 router.post("/auth/send-otp", async (req, res) => {
   try {
     const { phone } = req.body;
