@@ -8,3 +8,4 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-18 request rebuild GymX904 after PR #153: update stale ALMANO caption to VMSC; UI text only.
 
 2026-10-19 request Hostinger rebuild for PR #157: ACK matching-serial untrusted X904 ATTLOG without ingest to stop 403 retry storm; owner role schema sync.
+2026-10-19 trigger production rebuild after merged X904 untrusted ATTLOG transport-ACK fix (#157)
