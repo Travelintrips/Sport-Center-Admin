@@ -1,6 +1,7 @@
 import {
   calculateInclusiveInvoiceTax,
   calculateWithholdingTax,
+  resolveBookingPpnTreatment,
 } from "./tax";
 
 describe("company tax math", () => {
@@ -33,5 +34,27 @@ describe("company tax math", () => {
     expect(tax.dpp + tax.ppnAmount).toBe(2_700_000);
     expect(pph.amount).toBe(0);
     expect(pph.netAmount).toBe(2_700_000);
+  });
+});
+
+describe("booking PPN policy", () => {
+  test.each([true, false, null, undefined])(
+    "personal bookings must never incur PPN (ppnEnabled=%s)",
+    (enabled) => {
+      const treatment = resolveBookingPpnTreatment("personal", enabled);
+      expect(treatment).toBe("none");
+    },
+  );
+
+  test("corporate booking retains PPN when enabled", () => {
+    expect(resolveBookingPpnTreatment("company", true)).toBe("inclusive");
+  });
+
+  test("corporate booking does not have PPN when disabled", () => {
+    expect(resolveBookingPpnTreatment("company", false)).toBe("none");
+  });
+
+  test("corporate booking legacy default remains enabled", () => {
+    expect(resolveBookingPpnTreatment("company", null)).toBe("inclusive");
   });
 });
