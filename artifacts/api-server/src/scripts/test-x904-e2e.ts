@@ -30,7 +30,7 @@ try{
  const replay=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
  const counts=await db.execute(sql`SELECT
  (SELECT count(*)::int FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId} AND status='success') AS ledger,
- (SELECT count(*)::int FROM sport_center.gym_checkins WHERE notes=${marker}) AS checkins,
+ (SELECT count(*)::int FROM sport_center.gym_checkins WHERE notes=${marker} AND x904_event_id=${eventId}) AS checkins,
  (SELECT count(*)::int FROM sport_center.sport_bookings WHERE notes=${marker} AND total_price=0) AS bookings,
  (SELECT count(*)::int FROM sport_center.booking_history WHERE note=${marker}) AS history`);
  const row=counts.rows[0];
