@@ -116,6 +116,38 @@ router.post("/internal/gym-x904/lan-events", async (req, res) => {
   }
 });
 
+// Read-only shadow view: LAN logs are not authoritative ADMS attestations.
+router.get("/admin/gym-x904/lan-reconciliation", adminMiddleware, async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  const date = String(req.query.date ?? "");
+  const serial = process.env.GYM_X904_DEVICE_SERIAL ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || serial.length < 4) return res.status(400).json({error:"Invalid date/device"});
+  try {
+    const result = await db.execute(sql`SELECT l.event_index,l.user_pin,l.device_time,u.display_name,m.membership_id,
+      COALESCE(m.status,'unmapped') AS mapping_status,sm.status AS membership_status,
+      sm.start_date,sm.end_date,v.verification_code,v.evidence_status,
+      (SELECT count(*)::integer FROM sport_center.gym_checkins c WHERE c.membership_id=m.membership_id
+        AND c.checkin_date=${date}::date) AS existing_checkins
+      FROM sport_center.gym_x904_lan_logs l
+      LEFT JOIN sport_center.gym_x904_lan_users u ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
+      LEFT JOIN sport_center.gym_x904_member_mapping m ON m.device_serial=l.device_serial AND m.user_pin=l.user_pin
+      LEFT JOIN sport_center.sport_memberships sm ON sm.id=m.membership_id
+      LEFT JOIN sport_center.gym_x904_verification_evidence v ON v.device_serial=l.device_serial
+        AND v.event_index=l.event_index AND v.user_pin=l.user_pin AND v.source_event_id=l.event_id
+      WHERE l.device_serial=${serial} AND LEFT(l.device_time,10)=${date}
+      ORDER BY l.device_time DESC LIMIT 250`);
+    return res.json({readOnly:true,source:"lan_shadow",date,events:result.rows.map(r => ({
+      ...r,review_category:r.mapping_status!=="verified"?"identity_review":
+      r.membership_status!=="active" || String(r.start_date).slice(0,10)>date || String(r.end_date).slice(0,10)<date?"membership_review":
+      r.evidence_status!=="verified"?"verification_review":
+      Number(r.existing_checkins)>0?"already_checked_in":"shadow_eligible"
+    }))});
+  } catch(error) {
+    console.error("[gym-x904] LAN shadow reconciliation failed",error instanceof Error?error.message:String(error));
+    return res.status(503).json({error:"LAN reconciliation unavailable"});
+  }
+});
+
 // Explicit read-only review queue. Historical events are never replayed into bookings.
 router.get("/admin/gym-x904/event-review", adminMiddleware, async (req,res) => {
   res.setHeader("Cache-Control","no-store");
