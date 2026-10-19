@@ -60,7 +60,7 @@ const buildIdentity = {
   provenance: commit ? "build_source" : "unavailable",
   built_at: new Date().toISOString(),
 };
-await writeFile(path.join(outputDir, "build-info.json"), JSON.stringify(buildIdentity) + "\\n", "utf8");
+await writeFile(path.join(outputDir, "build-info.json"), JSON.stringify(buildIdentity), "utf8");
 console.log("[hostinger] build identity " + (commit ? "captured" : "unavailable"));
 
 // Tesseract.js otherwise downloads English language data at runtime. Hostinger
