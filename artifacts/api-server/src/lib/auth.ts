@@ -134,7 +134,7 @@ export function authMiddlewareWithQueryToken(req: Request, res: Response, next: 
   next();
 }
 
-const ADMIN_ROLES = ["admin", "super_admin", "admin_booking", "finance", "staff"];
+const ADMIN_ROLES = ["owner", "admin", "super_admin", "admin_booking", "finance", "staff"];
 
 /**
  * Admin middleware that also accepts ?_token= query param.
@@ -165,7 +165,7 @@ export function adminMiddleware(req: Request, res: Response, next: NextFunction)
 export function superAdminMiddleware(req: Request, res: Response, next: NextFunction): void {
   authMiddleware(req, res, () => {
     const role = (req as any).user?.role;
-    if (role !== "admin" && role !== "super_admin") {
+    if (role !== "owner" && role !== "admin" && role !== "super_admin") {
       res.status(403).json({ error: "Forbidden: Super Admin only" });
       return;
     }
@@ -176,7 +176,7 @@ export function superAdminMiddleware(req: Request, res: Response, next: NextFunc
 export function financeMiddleware(req: Request, res: Response, next: NextFunction): void {
   authMiddleware(req, res, () => {
     const role = (req as any).user?.role;
-    if (!["admin", "super_admin", "finance"].includes(role)) {
+    if (!["owner", "admin", "super_admin", "finance"].includes(role)) {
       res.status(403).json({ error: "Forbidden: Finance access required" });
       return;
     }
@@ -187,7 +187,7 @@ export function financeMiddleware(req: Request, res: Response, next: NextFunctio
 export function bookingAdminMiddleware(req: Request, res: Response, next: NextFunction): void {
   authMiddleware(req, res, () => {
     const role = (req as any).user?.role;
-    if (!["admin", "super_admin", "admin_booking"].includes(role)) {
+    if (!["owner", "admin", "super_admin", "admin_booking"].includes(role)) {
       res.status(403).json({ error: "Forbidden: Booking Admin access required" });
       return;
     }
@@ -217,4 +217,15 @@ export function roleMiddleware(...roles: string[]) {
       next();
     });
   };
+}
+
+/** Owner-only operations, such as assigning/removing privileged admin roles. */
+export function ownerMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authMiddleware(req, res, () => {
+    if ((req as any).user?.role !== "owner") {
+      res.status(403).json({ error: "Forbidden: Owner only" });
+      return;
+    }
+    next();
+  });
 }
