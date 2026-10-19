@@ -157,7 +157,9 @@ jobs:
       - name: X904 DEV E2E (synthetic fixtures, cleanup mandatory)
         env:
           NODE_ENV: development
-        run: pnpm --filter @workspace/api-server exec tsx src/scripts/test-x904-e2e.ts
+        run: |
+          pnpm --filter @workspace/api-server exec esbuild src/scripts/test-x904-e2e.ts --bundle --platform=node --format=esm --packages=external --outfile=.x904-e2e-ci.mjs
+          pnpm --filter @workspace/api-server exec node .x904-e2e-ci.mjs
 
       - name: Build
         run: pnpm build
