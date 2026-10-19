@@ -116,6 +116,29 @@ router.post("/internal/gym-x904/lan-events", async (req, res) => {
   }
 });
 
+// Explicit read-only review queue. Historical events are never replayed into bookings.
+router.get("/admin/gym-x904/event-review", adminMiddleware, async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  const serial = process.env.GYM_X904_DEVICE_SERIAL ?? "";
+  if (serial.length < 4) return res.status(503).json({error:"Device not configured"});
+  try {
+    const result = await db.execute(sql`SELECT r.event_id,r.user_pin,r.device_time,
+      COALESCE(p.status,'unprocessed') AS processing_status,
+      COALESCE(m.status,'unmapped') AS mapping_status,
+      m.membership_id,
+      CASE WHEN LEFT(r.device_time,10) <> to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD')
+           THEN 'historical_manual_review'
+           WHEN m.status IS DISTINCT FROM 'verified' THEN 'identity_review'
+           ELSE 'current_day_review' END AS review_category
+      FROM sport_center.gym_x904_raw_events r
+      LEFT JOIN sport_center.gym_x904_processed_events p ON p.event_id=r.event_id
+      LEFT JOIN sport_center.gym_x904_member_mapping m ON m.device_serial=r.device_serial AND m.user_pin=r.user_pin
+      WHERE r.device_serial=${serial} AND COALESCE(p.status,'unprocessed')<>'success'
+      ORDER BY r.device_time DESC LIMIT 200`);
+    return res.json({readOnly:true,events:result.rows});
+  } catch { return res.status(503).json({error:"Review queue unavailable"}); }
+});
+
 router.get("/admin/gym-x904/device-events", adminMiddleware, async (req,res) => {
   res.setHeader("Cache-Control","no-store");
   // Admin-only, read-only history is available whenever the event table exists.

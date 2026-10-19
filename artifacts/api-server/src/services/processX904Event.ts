@@ -1,7 +1,7 @@
-import { db, gymCheckinsTable, bookingsTable, bookingHistoryTable } from "@workspace/db";
+import { db, bookingsTable, bookingHistoryTable } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
-/** This processor is not wired to production ingress until DEV E2E is verified. */
+/** X904 automatic attendance is gated at ingress; only trusted, verified, current-day ADMS events qualify. */
 export type X904EventInput = { eventId: string; deviceSerial: string; userPin: string };
 export type X904Outcome = "processed" | "already_processed" | "review_required";
 export async function processX904Event(event: X904EventInput,
@@ -10,7 +10,7 @@ export async function processX904Event(event: X904EventInput,
     throw new Error("Invalid X904 event identity");
   }
   return db.transaction(async (tx) => {
-    const raw = await tx.execute(sql`SELECT event_id,device_serial,user_pin,device_time
+    const raw = await tx.execute(sql`SELECT event_id,device_serial,user_pin,device_time,attendance_status,verification_type
       FROM sport_center.gym_x904_raw_events WHERE event_id=${event.eventId} FOR UPDATE`);
     if (raw.rows.length !== 1 || raw.rows[0]?.device_serial !== event.deviceSerial ||
         raw.rows[0]?.user_pin !== event.userPin) throw new Error("Raw event missing or identity mismatch");
@@ -23,9 +23,20 @@ export async function processX904Event(event: X904EventInput,
       FROM sport_center.gym_x904_member_mapping
       WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
     const membershipId = Number(mapping.rows[0]?.membership_id);
+    // Fail closed: LAN metadata is insufficient. Only explicitly approved ADMS
+    // verification codes may produce automatic attendance; an unset allowlist
+    // keeps production in review-only mode until hardware evidence is verified.
+    const approvedCodes = (process.env.GYM_X904_TRUSTED_VERIFICATION_CODES ?? "")
+      .split(",").map(code => code.trim()).filter(code => /^\d{1,3}$/.test(code))
+      .map(Number);
+    const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
+      raw.rows[0]?.attendance_status !== null &&
+      raw.rows[0]?.verification_type !== null &&
+      raw.rows[0]?.verification_type !== undefined &&
+      approvedCodes.includes(Number(raw.rows[0]?.verification_type));
     let status: "success" | "review_required" = "review_required";
     // A different event on the same day is a review case, not a replay of this event ID.
-    if (mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
+    if (hasVerifiedAdmsPayload && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
       const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
         FROM sport_center.sport_memberships WHERE id=${membershipId} FOR UPDATE`);
       const m = member.rows[0];
@@ -36,6 +47,8 @@ export async function processX904Event(event: X904EventInput,
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
       } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
+        // A member row lock serializes concurrent X904 events for this membership.
+        // Existing manual check-ins are also respected; historical duplicate dates remain untouched.
         const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_checkins
           WHERE membership_id=${membershipId} AND checkin_date=${day}::date LIMIT 1`);
         if (existing.rows.length) {
@@ -55,9 +68,9 @@ export async function processX904Event(event: X904EventInput,
               await tx.execute(sql`SELECT setval('sport_center.booking_order_no_seq', GREATEST(COALESCE((SELECT MAX(substring(order_number FROM 4)::bigint) FROM sport_center.sport_bookings WHERE order_number ~ '^SC-[0-9]+$'),0),(SELECT last_value FROM sport_center.booking_order_no_seq)),true)`);
               const seq = await tx.execute(sql`SELECT nextval('sport_center.booking_order_no_seq') AS n`);
               const orderNumber = `SC-${String(seq.rows[0]?.n).padStart(4,"0")}`;
-              await tx.insert(gymCheckinsTable).values({
-                membershipId, checkinDate: day, notes: `X904 event ${event.eventId}`
-              });
+              await tx.execute(sql`INSERT INTO sport_center.gym_checkins
+                (membership_id,checkin_date,notes,x904_event_id)
+                VALUES (${membershipId},${day}::date,${`X904 event ${event.eventId}`},${event.eventId})`);
               const [booking] = await tx.insert(bookingsTable).values({
                 orderNumber, customerName:String(m.name), customerEmail:String(m.email),
                 customerPhone:String(m.phone), facilityId:Number(gym.id), bookingDate:day,
