@@ -26,7 +26,12 @@ try{
   (device_serial,user_pin,membership_id,status,verified_at,verified_by)
   VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
  await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES(${eventId},${serial},${pin},${day+" 10:00:00"},0,1)`);
- const first=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
+ // Simulate two concurrent retries for the exact same authenticated event.
+ const concurrent=await Promise.all([
+   processX904Event({eventId,deviceSerial:serial,userPin:pin}),
+   processX904Event({eventId,deviceSerial:serial,userPin:pin})
+ ]);
+ const first=concurrent.includes("processed") ? "processed" : concurrent[0];
  const replay=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
  const counts=await db.execute(sql`SELECT
  (SELECT count(*)::int FROM sport_center.gym_x904_processed_events WHERE event_id=${eventId} AND status='success') AS ledger,
@@ -35,8 +40,8 @@ try{
  (SELECT count(*)::int FROM sport_center.booking_history WHERE note=${marker}) AS history`);
  const row=counts.rows[0];
  const nums=[row?.ledger,row?.checkins,row?.bookings,row?.history].map(Number);
- console.log("X904_E2E",JSON.stringify({first,replay,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
- if(first!=="processed" || replay!=="already_processed" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
+ console.log("X904_E2E",JSON.stringify({first,concurrent,replay,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
+ if(first!=="processed" || concurrent.filter(x=>x==="processed").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
  const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
