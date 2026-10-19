@@ -158,7 +158,7 @@ jobs:
         env:
           NODE_ENV: development
         run: |
-          pnpm --filter @workspace/api-server exec esbuild src/scripts/test-x904-e2e.ts --bundle --platform=node --format=esm --packages=external --alias:@workspace/db=../../lib/db/src/index.ts --outfile=.x904-e2e-ci.mjs
+          pnpm --filter @workspace/api-server exec esbuild src/scripts/test-x904-e2e.ts --bundle --platform=node --format=esm --external:pg --outfile=.x904-e2e-ci.mjs
           pnpm --filter @workspace/api-server exec node .x904-e2e-ci.mjs
 
       - name: Build
