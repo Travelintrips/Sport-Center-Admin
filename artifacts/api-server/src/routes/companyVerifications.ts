@@ -162,7 +162,7 @@ router.get("/company-verifications/billing-status", authMiddleware, async (req, 
     // Admin/operator booking on behalf of another customer can check that
     // customer's corporate-billing eligibility via ?customerId=.
     const requestedCustomerId = req.query.customerId ? parseInt(String(req.query.customerId)) : undefined;
-    const isAdminRole = role === "admin" || role === "admin_booking";
+    const isAdminRole = role === "owner" || role === "super_admin" || role === "admin" || role === "admin_booking";
     const targetUserId = isAdminRole && requestedCustomerId && requestedCustomerId > 0 ? requestedCustomerId : userId;
 
     const [companyUser] = await db.select().from(companyUsersTable)
