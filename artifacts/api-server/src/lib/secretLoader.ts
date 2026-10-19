@@ -350,10 +350,14 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
   // a fallback; never carry it into the production loader.
   const directDevCustomerToken =
     env === "dev" ? stringValue(process.env.FONNTE_CUSTOMER_TOKEN) : undefined;
+  // Hostinger is the authority for this app-specific OAuth audience.
+  // Preserve only this key; all other production secrets remain GCP managed.
+  const hostingerGoogleClientId = stringValue(process.env.GOOGLE_CLIENT_ID);
 
   for (const key of ENV_KEYS) {
     if (!SHARED_RUNTIME_ENV_KEYS.has(key)) delete process.env[key];
   }
+  if (hostingerGoogleClientId) process.env.GOOGLE_CLIENT_ID = hostingerGoogleClientId;
   clearLegacyDatabaseEnvironment();
 
   const suffix = env === "dev" ? "_DEV" : "";
@@ -394,6 +398,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
   ];
 
   for (const [field, envKey] of mappings) {
+    if (field === "google_client_id" && hostingerGoogleClientId) continue;
     const value = findField(section, field);
     if (value) {
       process.env[envKey] =
