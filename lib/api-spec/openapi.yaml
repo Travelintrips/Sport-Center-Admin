@@ -2911,7 +2911,7 @@ components:
           type: ["string", "null"]
         role:
           type: string
-          enum: [admin, super_admin, admin_booking, finance, staff, customer, tenant, ap2_employee]
+          enum: [owner, admin, super_admin, admin_booking, finance, staff, customer, tenant, ap2_employee]
         phone:
           type: ["string", "null"]
         googleId:
