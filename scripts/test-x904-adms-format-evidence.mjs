@@ -20,11 +20,12 @@ test("the durable audit records only constrained metadata",()=>{
  assert.match(audit,/attlog_parseable, attlog_min_columns/);
  assert.match(audit,/device_identity_verified,/);
 });
-test("untrusted device ATTLOG remains rejected without successful ACK",()=>{
+test("untrusted direct ATTLOG is transport-acked but never ingested",()=>{
  assert.match(gate,/await persist\("attendance_untrusted"/);
- assert.match(gate,/return res.status\(403\).send\("UNTRUSTED DEVICE/);
+ assert.match(gate,/return res.status\(200\).send\("OK\\n"/);
  assert.match(gate,/classification\.serial!==allowed/);
- assert.match(gate,/return res.status\(503\).send\("ATTLOG NOT IMPORTED/);
+ assert.match(gate,/timingSafeEqual\(expectedKey,\s*receivedKey\)/);
+ assert.match(gate,/attendance_stored/);
  assert.match(gate,/hardwareVerified:false/);
 });
 test("backend uses existing parsed shape; admin audit labels formats",()=>{
@@ -33,3 +34,5 @@ test("backend uses existing parsed shape; admin audit labels formats",()=>{
  assert.match(ui,/Format ATTLOG/);
  assert.match(ui,/Belum dianalisis/);
 });
+
+[executed on device: srv1792369 (0891e23a-6a6b-4f8c-a16a-962e888e2014)]
