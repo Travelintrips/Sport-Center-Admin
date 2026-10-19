@@ -34,5 +34,3 @@ test("backend uses existing parsed shape; admin audit labels formats",()=>{
  assert.match(ui,/Format ATTLOG/);
  assert.match(ui,/Belum dianalisis/);
 });
-
-[executed on device: srv1792369 (0891e23a-6a6b-4f8c-a16a-962e888e2014)]
