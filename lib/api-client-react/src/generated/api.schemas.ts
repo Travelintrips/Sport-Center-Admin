@@ -39,6 +39,7 @@ export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 
 export const UserRole = {
+  owner: 'owner',
   admin: 'admin',
   super_admin: 'super_admin',
   admin_booking: 'admin_booking',
@@ -2142,4 +2143,3 @@ companyId?: number;
  */
 _token?: string;
 };
-
