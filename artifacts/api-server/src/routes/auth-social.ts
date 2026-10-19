@@ -123,6 +123,19 @@ router.post("/auth/google", async (req, res) => {
   }
 });
 
+// Classify trusted Google library failures without ever logging exception messages,
+// tokens, account identifiers, OAuth client identifiers, or token payloads.
+function googleAdminVerifyFailureCategory(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/wrong recipient|audience/i.test(message)) return "audience_mismatch";
+  if (/expired|expiry date/i.test(message)) return "expired_token";
+  if (/not yet valid|used too early|issued at/i.test(message)) return "token_time_invalid";
+  if (/wrong number of segments|invalid token|invalid jwt|malformed/i.test(message)) return "malformed_token";
+  if (/certificate|signature|invalid signature|no pem found/i.test(message)) return "signature_verification_failed";
+  if (/network|fetch|timeout|ETIMEDOUT|ECONNRESET/i.test(message)) return "google_verification_unavailable";
+  return "verification_failed_other";
+}
+
 // Admin Google sign-in never provisions, links, or promotes accounts.
 router.post("/auth/admin-google", async (req, res) => {
   try {
@@ -143,8 +156,13 @@ router.post("/auth/admin-google", async (req, res) => {
     try {
       const ticket = await googleClient.verifyIdToken({ idToken, audience: adminGoogleAudience });
       payload = ticket.getPayload();
-    } catch {
-      res.status(401).json({ error: "Autentikasi Google gagal." });
+    } catch (error) {
+      const category = googleAdminVerifyFailureCategory(error);
+      req.log.warn({ route: "admin-google", category }, "Google admin credential verification rejected");
+      res.status(category === "google_verification_unavailable" ? 503 : 401)
+        .json({ error: category === "google_verification_unavailable"
+          ? "Verifikasi Google sementara tidak tersedia."
+          : "Autentikasi Google gagal." });
       return;
     }
     if (!payload?.sub || !payload.email || payload.email_verified !== true) {
