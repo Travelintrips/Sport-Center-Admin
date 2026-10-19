@@ -1,4 +1,4 @@
-import { db, gymCheckinsTable, bookingsTable, bookingHistoryTable } from "@workspace/db";
+import { db, bookingsTable, bookingHistoryTable } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
 /** X904 automatic attendance is gated at ingress; only trusted, verified, current-day ADMS events qualify. */
