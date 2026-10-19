@@ -1201,6 +1201,7 @@ function getNowMinutesWIB(): number {
 }
 
 const OPERATIONAL_BOOKING_ROLES = new Set([
+  "owner",
   "admin",
   "super_admin",
   "admin_booking",
