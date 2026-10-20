@@ -248,6 +248,7 @@ router.get("/admin/gym-x904/cross-system-reconciliation", adminMiddleware, async
           COALESCE(paid.has_confirmed_payment,false) AS has_confirmed_payment,
           COALESCE(bookings.booking_count,0) AS booking_count,
           COALESCE(bookings.today_booking_count,0) AS today_booking_count,
+          COALESCE(bookings.today_paid_booking_count,0) AS today_paid_booking_count,
           verified_map.status AS verified_mapping_status,
           verified_map.membership_id AS mapped_membership_id
         FROM sport_center.gym_x904_lan_users u
@@ -267,7 +268,10 @@ router.get("/admin/gym-x904/cross-system-reconciliation", adminMiddleware, async
         ) paid ON true
         LEFT JOIN LATERAL (
           SELECT count(*)::int AS booking_count,
-            count(*) FILTER (WHERE b.booking_date=d.today AND b.status::text NOT IN ('cancelled','rejected'))::int AS today_booking_count
+            count(*) FILTER (WHERE b.booking_date=d.today AND b.status::text NOT IN ('cancelled','rejected'))::int AS today_booking_count,
+            count(*) FILTER (WHERE b.booking_date=d.today AND b.status::text IN ('confirmed','completed')
+              AND EXISTS (SELECT 1 FROM sport_center.sport_payments sp
+                WHERE sp.booking_id=b.id AND sp.status::text='confirmed' AND sp.amount>0))::int AS today_paid_booking_count
           FROM sport_center.sport_bookings b
           WHERE lower(trim(b.customer_name))=lower(trim(u.display_name))
             OR lower(trim(coalesce(b.booked_for_name,'')))=lower(trim(u.display_name))
@@ -277,7 +281,7 @@ router.get("/admin/gym-x904/cross-system-reconciliation", adminMiddleware, async
         WHERE u.device_serial=${serial}
       )
       SELECT user_pin, display_name,device_uid,device_role,match_count,membership_id,
-        membership_status,start_date,end_date,has_confirmed_payment,booking_count,today_booking_count,
+        membership_status,start_date,end_date,has_confirmed_payment,booking_count,today_booking_count,today_paid_booking_count,
         verified_mapping_status,mapped_membership_id,
         CASE
           WHEN device_role <> 0 THEN 'device_admin_not_member'
@@ -286,7 +290,9 @@ router.get("/admin/gym-x904/cross-system-reconciliation", adminMiddleware, async
             AND start_date<=to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD')
             AND end_date>=to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD')
             AND has_confirmed_payment THEN 'paid_member_candidate'
-          WHEN today_booking_count>0 THEN 'today_booking_candidate'
+          WHEN today_paid_booking_count=1 THEN 'paid_visitor_booking_candidate_requires_identity_attestation'
+          WHEN today_paid_booking_count>1 THEN 'multiple_paid_bookings_review'
+          WHEN today_booking_count>0 THEN 'today_booking_unpaid_or_unconfirmed_review'
           WHEN match_count>0 THEN 'inactive_or_unpaid_member'
           WHEN booking_count>0 THEN 'historical_booking_candidate'
           ELSE 'unmatched_review'
