@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 if(process.env.NODE_ENV!=="development") throw Error("DEV_ONLY");
 const url=process.env.SUPABASE_DATABASE_URL_DEV;
@@ -25,6 +25,13 @@ try{
   RETURNING id`);
  membershipId=Number(member.rows[0]?.id);
  if(!Number.isSafeInteger(membershipId)||membershipId<=0) throw Error('FIXTURE_MEMBERSHIP_FAILED');
+ // A trusted synthetic device-user snapshot and payment period are required for automatic attendance.
+ await db.execute(sql`INSERT INTO sport_center.gym_x904_lan_users
+  (device_serial,user_pin,device_uid,display_name,device_role,last_seen_snapshot)
+  VALUES (${serial},${pin},1,${`X904 CI ${eventId}`},0,${randomUUID()}::uuid)`);
+ await db.execute(sql`INSERT INTO sport_center.sport_membership_payments
+  (membership_id,period_start,period_end,months,amount,status,confirmed_at)
+  VALUES (${membershipId},${day},${day},1,0,'confirmed',now())`);
  await db.execute(sql`INSERT INTO sport_center.gym_x904_member_mapping
   (device_serial,user_pin,membership_id,status,verified_at,verified_by)
   VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
@@ -78,6 +85,8 @@ try{
   await db.execute(sql`DELETE FROM sport_center.gym_x904_processed_events WHERE event_id IN (${eventId},${secondEventId})`);
   await db.execute(sql`DELETE FROM sport_center.gym_x904_raw_events WHERE event_id IN (${eventId},${secondEventId})`);
   await db.execute(sql`DELETE FROM sport_center.gym_x904_member_mapping WHERE device_serial=${serial} AND user_pin=${pin} AND verified_by='x904-ci-test'`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_lan_users WHERE device_serial=${serial} AND user_pin=${pin} AND display_name=${`X904 CI ${eventId}`}`);
+  if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_membership_payments WHERE membership_id=${membershipId} AND amount=0 AND period_start=${day} AND period_end=${day}`);
   if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_memberships WHERE id=${membershipId} AND notes=${`X904 E2E ${eventId}`}`);
   console.log('X904_FIXTURE_CLEANUP=PASS');
  } catch(error) { console.error('X904_FIXTURE_CLEANUP_FAILED',error instanceof Error?error.message:String(error)); process.exitCode=1; }
