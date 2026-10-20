@@ -83,6 +83,12 @@ router.post("/auth/google", async (req, res) => {
       const [byEmail] = await db.select().from(usersTable)
         .where(eq(usersTable.email, verifiedEmail)).limit(1);
       if (byEmail) {
+        // Pending admin invitations must be accepted through the verified
+        // admin invitation flow; a public customer login cannot consume them.
+        if (byEmail.accountStatus && byEmail.accountStatus !== "active") {
+          res.status(403).json({ error: "Akun tidak aktif atau belum disetujui." });
+          return;
+        }
         if (byEmail.googleId && byEmail.googleId !== payload.sub) {
           res.status(403).json({ error: "Akun sudah ditautkan ke identitas Google lain." });
           return;
