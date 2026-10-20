@@ -46,74 +46,78 @@ function generateOtp(): string {
 
 router.post("/auth/google", async (req, res) => {
   try {
-    const { idToken } = req.body;
-    if (!idToken) {
+    const idToken = req.body?.idToken;
+    if (typeof idToken !== "string" || !idToken) {
       res.status(400).json({ error: "idToken is required" });
       return;
     }
-
-    let payload: any;
+    const audience = (process.env.GOOGLE_CLIENT_ID ?? "").trim();
+    if (!audience) {
+      res.status(503).json({ error: "Login Google belum dikonfigurasi." });
+      return;
+    }
+    let payload;
     try {
-      const ticket = await googleClient.verifyIdToken({
-        idToken,
-        audience: GOOGLE_CLIENT_ID,
-      });
+      const ticket = await googleClient.verifyIdToken({ idToken, audience });
       payload = ticket.getPayload();
     } catch {
       res.status(401).json({ error: "Invalid Google token" });
       return;
     }
-
-    if (!payload) {
-      res.status(401).json({ error: "Invalid Google token" });
+    if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+      res.status(401).json({ error: "Email Google belum terverifikasi." });
       return;
     }
 
-    const { sub: googleId, email, name, picture } = payload;
-
-    let user = await db
-      .select()
-      .from(usersTable)
-      .where(
-        or(
-          eq(usersTable.googleId, googleId),
-          ...(email ? [eq(usersTable.email, email)] : [])
-        )
-      )
-      .limit(1)
-      .then((r) => r[0] ?? null);
-
-    if (!user) {
-      const [created] = await db
-        .insert(usersTable)
-        .values({
-          name: name ?? email ?? "Google User",
-          email: email ?? null,
-          googleId,
-          passwordHash: crypto.randomBytes(32).toString("hex"),
-          role: "customer",
-        })
-        .returning();
-      user = created;
-    } else if (!user.googleId) {
-      const [updated] = await db
-        .update(usersTable)
-        .set({ googleId })
-        .where(eq(usersTable.id, user.id))
-        .returning();
-      user = updated;
+    const verifiedEmail = payload.email.trim().toLowerCase();
+    const [byGoogleId] = await db.select().from(usersTable)
+      .where(eq(usersTable.googleId, payload.sub)).limit(1);
+    // An existing Google identity must never silently change owners/emails.
+    if (byGoogleId && byGoogleId.email?.trim().toLowerCase() !== verifiedEmail) {
+      res.status(403).json({ error: "Identitas Google tidak cocok dengan akun terdaftar." });
+      return;
     }
 
+    let user = byGoogleId ?? null;
+    if (!user) {
+      const [byEmail] = await db.select().from(usersTable)
+        .where(eq(usersTable.email, verifiedEmail)).limit(1);
+      if (byEmail) {
+        if (byEmail.googleId && byEmail.googleId !== payload.sub) {
+          res.status(403).json({ error: "Akun sudah ditautkan ke identitas Google lain." });
+          return;
+        }
+        if (!byEmail.googleId) {
+          const [linked] = await db.update(usersTable)
+            .set({ googleId: payload.sub, updatedAt: new Date() })
+            .where(and(eq(usersTable.id, byEmail.id),
+              eq(usersTable.email, verifiedEmail), isNull(usersTable.googleId)))
+            .returning();
+          user = linked ?? null;
+        } else {
+          user = byEmail;
+        }
+      } else {
+        const [created] = await db.insert(usersTable).values({
+          name: payload.name ?? verifiedEmail,
+          email: verifiedEmail,
+          googleId: payload.sub,
+          passwordHash: crypto.randomBytes(32).toString("hex"),
+          role: "customer",
+        }).returning();
+        user = created;
+      }
+    }
+    // Role is taken exclusively from the existing account, never from the caller.
+    if (!user || (user.accountStatus && user.accountStatus !== "active")) {
+      res.status(403).json({ error: "Akun tidak aktif atau belum disetujui." });
+      return;
+    }
     const token = createToken(user.id, user.role, null);
     res.json({
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
-        tenantId: null,
-        createdAt: user.createdAt,
+        id: user.id, name: user.name, email: user.email, role: user.role,
+        phone: user.phone, tenantId: null, createdAt: user.createdAt,
       },
       token,
     });
