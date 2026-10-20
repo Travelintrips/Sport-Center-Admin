@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 if(process.env.NODE_ENV!=="development") throw Error("DEV_ONLY");
 const url=process.env.SUPABASE_DATABASE_URL_DEV;
@@ -25,6 +25,13 @@ try{
   RETURNING id`);
  membershipId=Number(member.rows[0]?.id);
  if(!Number.isSafeInteger(membershipId)||membershipId<=0) throw Error('FIXTURE_MEMBERSHIP_FAILED');
+ // A trusted synthetic device-user snapshot and payment period are required for automatic attendance.
+ await db.execute(sql`INSERT INTO sport_center.gym_x904_lan_users
+  (device_serial,user_pin,device_uid,display_name,device_role,last_seen_snapshot)
+  VALUES (${serial},${pin},1,${`X904 CI ${eventId}`},0,${randomUUID()}::uuid)`);
+ // No confirmed payment fixture: the canonical payment trigger requires a
+ // real booking and settlement configuration. Test the safe unpaid rejection,
+ // rather than forging an accounting transaction in DEV.
  await db.execute(sql`INSERT INTO sport_center.gym_x904_member_mapping
   (device_serial,user_pin,membership_id,status,verified_at,verified_by)
   VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
@@ -60,7 +67,7 @@ try{
  const row=counts.rows[0];
  const nums=[row?.ledger,row?.checkins,row?.bookings,row?.history].map(Number);
  console.log("X904_E2E",JSON.stringify({first,concurrent,replay,other,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
- if(first!=="processed" || concurrent.filter(x=>x==="processed").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || other!=="review_required" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
+ if(first!=="review_required" || concurrent.filter(x=>x==="review_required").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || other!=="review_required" || nums.some(n=>n!==0)) throw Error("X904_E2E_FAILED");
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
  const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
@@ -78,6 +85,8 @@ try{
   await db.execute(sql`DELETE FROM sport_center.gym_x904_processed_events WHERE event_id IN (${eventId},${secondEventId})`);
   await db.execute(sql`DELETE FROM sport_center.gym_x904_raw_events WHERE event_id IN (${eventId},${secondEventId})`);
   await db.execute(sql`DELETE FROM sport_center.gym_x904_member_mapping WHERE device_serial=${serial} AND user_pin=${pin} AND verified_by='x904-ci-test'`);
+  await db.execute(sql`DELETE FROM sport_center.gym_x904_lan_users WHERE device_serial=${serial} AND user_pin=${pin} AND display_name=${`X904 CI ${eventId}`}`);
+  if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_membership_payments WHERE membership_id=${membershipId} AND amount=0 AND period_start=${day} AND period_end=${day}`);
   if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_memberships WHERE id=${membershipId} AND notes=${`X904 E2E ${eventId}`}`);
   console.log('X904_FIXTURE_CLEANUP=PASS');
  } catch(error) { console.error('X904_FIXTURE_CLEANUP_FAILED',error instanceof Error?error.message:String(error)); process.exitCode=1; }

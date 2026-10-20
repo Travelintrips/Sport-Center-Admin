@@ -23,6 +23,11 @@ export async function processX904Event(event: X904EventInput,
       FROM sport_center.gym_x904_member_mapping
       WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin} FOR UPDATE`);
     const membershipId = Number(mapping.rows[0]?.membership_id);
+    // A device administrator must never be converted into a gym member check-in.
+    // The role comes from the synchronized enrolled-user list, not name similarity.
+    const enrolled = await tx.execute(sql`SELECT device_role FROM sport_center.gym_x904_lan_users
+      WHERE device_serial=${event.deviceSerial} AND user_pin=${event.userPin}`);
+    const ordinaryDeviceUser = enrolled.rows.length === 1 && Number(enrolled.rows[0]?.device_role) === 0;
     // Approved after controlled X904 tests: fingerprint=1, card=4, face=15.
     // The trusted ADMS ingress and verified membership mapping remain mandatory.
     const approvedCodes = [1, 4, 15];
@@ -33,7 +38,7 @@ export async function processX904Event(event: X904EventInput,
       approvedCodes.includes(Number(raw.rows[0]?.verification_type));
     let status: "success" | "review_required" = "review_required";
     // A different event on the same day is a review case, not a replay of this event ID.
-    if (hasVerifiedAdmsPayload && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
+    if (ordinaryDeviceUser && hasVerifiedAdmsPayload && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
       const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
         FROM sport_center.sport_memberships WHERE id=${membershipId} FOR UPDATE`);
       const m = member.rows[0];
@@ -54,6 +59,14 @@ export async function processX904Event(event: X904EventInput,
       if (!timestampTrusted || !/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
       } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
+        // Active status alone is not proof that the current month's fee was paid.
+        // Fail closed if there is no confirmed payment covering the scan date.
+        const paid = await tx.execute(sql`SELECT id FROM sport_center.sport_membership_payments
+          WHERE membership_id=${membershipId} AND status='confirmed'
+            AND period_start<=${day} AND period_end>=${day} LIMIT 1`);
+        if (paid.rows.length === 0) {
+          // Unpaid or pending membership is a review case, not free admission.
+        } else {
         // A member row lock serializes concurrent X904 events for this membership.
         // Existing manual check-ins are also respected; historical duplicate dates remain untouched.
         const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_checkins
@@ -97,6 +110,7 @@ export async function processX904Event(event: X904EventInput,
               status = "success";
             }
           }
+        }
         }
       }
     }
