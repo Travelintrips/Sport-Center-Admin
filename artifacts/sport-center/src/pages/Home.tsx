@@ -321,17 +321,7 @@ function ScheduleCalendar() {
                   <p className="text-xs text-muted-foreground">Cari nomor booking di halaman admin untuk mengubah tanggal atau jam. Pemeriksaan bentrok dilakukan melalui proses penyimpanan booking.</p>
                 </div>
               )}
-              {!adminDetail && !detailLoading && selectedBooking.type === "booking" && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Identitas pemesan serta perubahan jadwal hanya tersedia bagi administrator yang login.</p>
-                  <Link
-                    href={`/admin/login?next=${encodeURIComponent(`/?booking=${selectedBooking.id}&date=${selectedBooking.date}`)}`}
-                    className="inline-block rounded-lg bg-orange-600 px-4 py-2 font-semibold text-white"
-                  >
-                    Login Admin untuk Lihat & Kelola
-                  </Link>
-                </div>
-              )}
+
             </div>
           </div>
         </div>
