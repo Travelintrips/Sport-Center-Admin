@@ -2,12 +2,6 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-12T10:01Z
 2026-10-17 VMSC GymX904 frontend rebuild requested after commit 6066ce2; verify asset contains VMSC label
 2026-10-17 request premium GymX904 UI production rebuild from 8c622f1
-
-2026-10-18 request clean Hostinger rebuild for merged PR #152: Solution X904 diagnostic panel only under Audit & Diagnostik; verify GymX904 chunk uses tab audit guard
-
-2026-10-18 request rebuild GymX904 after PR #153: update stale ALMANO caption to VMSC; UI text only.
-
-2026-10-19 request Hostinger rebuild for PR #157: ACK matching-serial untrusted X904 ATTLOG without ingest to stop 403 retry storm; owner role schema sync.
-2026-10-19 trigger production rebuild after merged X904 untrusted ATTLOG transport-ACK fix (#157)
-
-2026-10-19 request Hostinger clean rebuild from latest main including X904 PR #158 and #159; preserve VMSC send-disabled and no historical replay.
+2026-10-18 request clean Hostinger rebuild for merged PR #152
+2026-10-19 request Hostinger clean rebuild from latest main including X904 PR #158 and #159
+2026-10-20 request Hostinger clean rebuild after X904 PR #163 and #164; maintain send disabled; no historical replay; verify /api/healthz git_commit before asserting deployment.
