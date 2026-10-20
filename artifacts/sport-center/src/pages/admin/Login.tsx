@@ -24,7 +24,7 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undef
 // Never trust an arbitrary "next" URL from the query string.
 function adminLoginDestination(): string {
   const next = new URLSearchParams(window.location.search).get("next");
-  return next && /^\/\?booking=booking-\d+$/.test(next) ? next : "/admin/dashboard";
+  return next && /^\/\?booking=booking-\d+&date=\d{4}-\d{2}-\d{2}$/.test(next) ? next : "/admin/dashboard";
 }
 
 export default function AdminLogin() {
