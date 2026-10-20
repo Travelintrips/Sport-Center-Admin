@@ -1,4 +1,5 @@
 import SEOHead from "@/components/SEOHead";
+import { getToken } from "@/lib/auth";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -94,13 +95,16 @@ function ScheduleCalendar() {
   const { t } = useLang();
   const [anchor, setAnchor] = useState(new Date());
   const [facilityId, setFacilityId] = useState("all");
+  const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [adminDetail, setAdminDetail] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const year = anchor.getFullYear();
   const month = anchor.getMonth();
   const startDate = formatSchedDate(new Date(year, month, 1));
   const endDate = formatSchedDate(new Date(year, month + 1, 0));
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["public-calendar", startDate, endDate, facilityId],
     queryFn: () =>
       fetch(
@@ -123,6 +127,28 @@ function ScheduleCalendar() {
     const d = new Date(anchor);
     d.setMonth(d.getMonth() + dir);
     setAnchor(d);
+  }
+
+  async function openBooking(event: any) {
+    setSelectedBooking(event);
+    setAdminDetail(null);
+    const token = getToken();
+    if (!token || event.type !== "booking") return;
+    setDetailLoading(true);
+    try {
+      const res = await fetch(
+        `${API}/admin/calendar?startDate=${encodeURIComponent(event.date)}&endDate=${encodeURIComponent(event.date)}`,
+        { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+      );
+      if (res.ok) {
+        const result = await res.json();
+        setAdminDetail(result.events?.find((item: any) => item.id === event.id) ?? null);
+      }
+    } catch {
+      // Fail closed: never show customer identity without successful admin authorization.
+    } finally {
+      setDetailLoading(false);
+    }
   }
 
   return (
@@ -196,6 +222,8 @@ function ScheduleCalendar() {
           <div className="h-64 flex items-center justify-center text-muted-foreground text-sm font-medium">
             {t("Memuat jadwal...", "Loading schedule...")}
           </div>
+        ) : isError ? (
+          <div className="p-8 text-center text-red-600">Jadwal belum tersedia. Silakan coba lagi.</div>
         ) : (
           <div className="grid grid-cols-7">
             {days.map((day, i) => {
@@ -223,14 +251,17 @@ function ScheduleCalendar() {
                   </div>
                   <div className="space-y-0.5">
                     {dayEvents.slice(0, 2).map((e: any) => (
-                      <div
+                      <button
+                        type="button"
                         key={e.id}
-                        className={`text-[10px] px-1 py-0.5 rounded truncate text-white font-medium ${SCHED_STATUS_COLORS[e.status] ?? "bg-gray-400"}`}
+                        onClick={() => void openBooking(e)}
+                        className={`block w-full text-left text-[10px] px-1 py-0.5 rounded truncate text-white font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${SCHED_STATUS_COLORS[e.status] ?? "bg-gray-400"}`}
                         title={`${e.facilityName} ${e.start?.split("T")[1]?.slice(0, 5) ?? ""}`}
+                        aria-label={`Lihat jadwal ${e.facilityName} pada ${e.date}`}
                       >
                         {e.start?.split("T")[1]?.slice(0, 5)}{" "}
                         {e.facilityName?.split(" ").slice(-1)[0]}
-                      </div>
+                      </button>
                     ))}
                     {dayEvents.length > 2 && (
                       <div className="text-[10px] text-muted-foreground pl-0.5 font-medium">
@@ -245,6 +276,39 @@ function ScheduleCalendar() {
         )}
       </div>
 
+      {selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedBooking(null)}>
+          <div role="dialog" aria-modal="true" aria-label="Detail jadwal fasilitas"
+            className="w-full max-w-md rounded-xl bg-white dark:bg-slate-900 p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-lg font-bold">Detail Jadwal</h3>
+              <button type="button" aria-label="Tutup" onClick={() => setSelectedBooking(null)}>✕</button>
+            </div>
+            <div className="mt-4 space-y-2 text-sm">
+              <p><strong>Fasilitas:</strong> {selectedBooking.facilityName}</p>
+              <p><strong>Tanggal:</strong> {selectedBooking.date}</p>
+              <p><strong>Jam terisi:</strong> {selectedBooking.start?.split("T")[1]?.slice(0, 5)} – {selectedBooking.end?.split("T")[1]?.slice(0, 5)} WIB</p>
+              <p><strong>Status:</strong> {SCHED_STATUS_LABELS[selectedBooking.status]?.id ?? selectedBooking.status}</p>
+              {detailLoading && <p>Memeriksa akses administrator...</p>}
+              {adminDetail && (
+                <div className="border-t pt-3 space-y-2">
+                  <p><strong>Nama pemesan:</strong> {adminDetail.customerName || "-"}</p>
+                  <p><strong>Nomor booking:</strong> {adminDetail.orderNumber || "-"}</p>
+                  <p><strong>Telepon:</strong> {adminDetail.customerPhone || "-"}</p>
+                  <Link href={`/admin/bookings?search=${encodeURIComponent(adminDetail.orderNumber ?? "")}`} className="inline-block rounded-lg bg-orange-600 px-4 py-2 font-semibold text-white">
+                    Kelola booking / Edit & reschedule
+                  </Link>
+                  <p className="text-xs text-muted-foreground">Cari nomor booking di halaman admin untuk mengubah tanggal atau jam. Pemeriksaan bentrok dilakukan melalui proses penyimpanan booking.</p>
+                </div>
+              )}
+              {!adminDetail && !detailLoading && selectedBooking.type === "booking" && (
+                <p className="text-xs text-muted-foreground">Identitas pemesan serta perubahan jadwal hanya tersedia bagi administrator yang login.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground mt-3 text-center font-medium">
         {t(
           "Hanya menampilkan booking yang sudah dikonfirmasi.",
