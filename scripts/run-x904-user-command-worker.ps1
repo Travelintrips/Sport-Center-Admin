@@ -15,8 +15,8 @@ if(-not $mutex.WaitOne(0)) { Report 'SKIP_RUNNING';exit 0 }
 try {
   $e=@{}
   Get-Content (Join-Path $base '.env') | Where-Object {$_ -match '^[A-Z0-9_]+='} | ForEach-Object {$a=$_.Split('=',2);$e[$a[0]]=$a[1]}
-  if($e['X904_SEND_ENABLED'] -ne 'false' -or $e['X904_DEVICE_IP'] -ne '192.168.100.185'
-     -or $e['X904_DEVICE_SERIAL'] -ne 'TDBD234200545') {throw 'LOCAL_GUARD_FAILED'}
+  if($e['X904_SEND_ENABLED'] -ne 'false' -or $e['X904_DEVICE_IP'] -ne '192.168.100.185' -or
+     $e['X904_DEVICE_SERIAL'] -ne 'TDBD234200545') {throw 'LOCAL_GUARD_FAILED'}
   if($e['X904_USER_WRITE_ENABLED'] -ne 'true') {Report 'USER_WRITE_DISABLED';exit 0}
   $credentialFile=Join-Path $base 'secrets\x904-evidence-machine.dpapi'
   if(-not(Test-Path $credentialFile)) {throw 'CREDENTIAL_NOT_CONFIGURED'}
@@ -36,8 +36,78 @@ try {
   if($text -eq 'null' -or $text -eq '') {Report 'IDLE';exit 0}
   $job=$text|ConvertFrom-Json -ErrorAction Stop
   $id=[string]$job.commandId; $lease=[string]$job.leaseToken
-  if($id -notmatch '^[a-fA-F0-9-]{36}$' -or $lease -notmatch '^[a-fA-F0-9-]{36}$'
-     -or $job.deviceSerial -ne 'TDBD234200545') {throw 'CLAIM_SHAPE_INVALID'}
+  if($id -notmatch '^[a-fA-F0-9-]{36} -ne 'TDBD234200545') {throw 'CLAIM_SHAPE_INVALID'}
+  $cfg=@{deviceIp=$e['X904_DEVICE_IP'];deviceSerial=$e['X904_DEVICE_SERIAL'];
+    sendEnabled=$e['X904_SEND_ENABLED'];userWriteEnabled=$e['X904_USER_WRITE_ENABLED'];
+    commKey=$e['X904_DEVICE_COMM_KEY'];command=$job}|ConvertTo-Json -Depth 9 -Compress
+  Push-Location $base
+  try {
+    $output=$cfg | & $node $executor --execute-claimed 2>&1
+    $nodeExit=$LASTEXITCODE
+  } finally {Pop-Location}
+  $result=$null
+  try {$result=([string]($output|Select-Object -Last 1))|ConvertFrom-Json -ErrorAction Stop}catch{}
+  $ok=($nodeExit -eq 0 -and $null -ne $result -and $result.readBackConfirmed -eq $true)
+  $uid='NULL';$before='NULL';$after='NULL'
+  if($null -ne $result){
+    if($result.deviceUid -is [int] -and $result.deviceUid -gt 0 -and $result.deviceUid -lt 65535){$uid=[string]$result.deviceUid}
+    if($result.beforeCount -is [int] -and $result.beforeCount -ge 0 -and $result.beforeCount -le 10000){$before=[string]$result.beforeCount}
+    if($result.afterCount -is [int] -and $result.afterCount -ge 0 -and $result.afterCount -le 10000){$after=[string]$result.afterCount}
+  }
+  $errorCode='EXECUTOR_UNAVAILABLE'
+  if($null -ne $result -and [string]$result.errorCode -match '^[A-Z0-9_]{1,64}$'){$errorCode=[string]$result.errorCode}
+  $success=if($ok){'true'}else{'false'}
+  $err=if($ok){'NULL'}else{"'$errorCode'"}
+  $ackSql="SELECT sport_center.x904_complete_user_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
+  $ack=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c $ackSql 2>&1
+  if($LASTEXITCODE -eq 0 -and (($ack|Out-String).Trim() -eq 't')){
+    Report ('COMMAND_ACK command='+$id+' readback='+$success)
+  }else{Report ('COMMAND_ACK_FAILED command='+$id);exit 2}
+} catch {
+  Report ('WORKER_FAILED reason='+($_.Exception.Message -replace '[^A-Z0-9_]',''))
+  exit 1
+} finally {
+  $env:PGPASSWORD=$null
+  $mutex.ReleaseMutex()
+  $mutex.Dispose()
+}
+ -or $lease -notmatch '^[a-fA-F0-9-]{36} -ne 'TDBD234200545') {throw 'CLAIM_SHAPE_INVALID'}
+  $cfg=@{deviceIp=$e['X904_DEVICE_IP'];deviceSerial=$e['X904_DEVICE_SERIAL'];
+    sendEnabled=$e['X904_SEND_ENABLED'];userWriteEnabled=$e['X904_USER_WRITE_ENABLED'];
+    commKey=$e['X904_DEVICE_COMM_KEY'];command=$job}|ConvertTo-Json -Depth 9 -Compress
+  Push-Location $base
+  try {
+    $output=$cfg | & $node $executor --execute-claimed 2>&1
+    $nodeExit=$LASTEXITCODE
+  } finally {Pop-Location}
+  $result=$null
+  try {$result=([string]($output|Select-Object -Last 1))|ConvertFrom-Json -ErrorAction Stop}catch{}
+  $ok=($nodeExit -eq 0 -and $null -ne $result -and $result.readBackConfirmed -eq $true)
+  $uid='NULL';$before='NULL';$after='NULL'
+  if($null -ne $result){
+    if($result.deviceUid -is [int] -and $result.deviceUid -gt 0 -and $result.deviceUid -lt 65535){$uid=[string]$result.deviceUid}
+    if($result.beforeCount -is [int] -and $result.beforeCount -ge 0 -and $result.beforeCount -le 10000){$before=[string]$result.beforeCount}
+    if($result.afterCount -is [int] -and $result.afterCount -ge 0 -and $result.afterCount -le 10000){$after=[string]$result.afterCount}
+  }
+  $errorCode='EXECUTOR_UNAVAILABLE'
+  if($null -ne $result -and [string]$result.errorCode -match '^[A-Z0-9_]{1,64}$'){$errorCode=[string]$result.errorCode}
+  $success=if($ok){'true'}else{'false'}
+  $err=if($ok){'NULL'}else{"'$errorCode'"}
+  $ackSql="SELECT sport_center.x904_complete_user_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
+  $ack=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c $ackSql 2>&1
+  if($LASTEXITCODE -eq 0 -and (($ack|Out-String).Trim() -eq 't')){
+    Report ('COMMAND_ACK command='+$id+' readback='+$success)
+  }else{Report ('COMMAND_ACK_FAILED command='+$id);exit 2}
+} catch {
+  Report ('WORKER_FAILED reason='+($_.Exception.Message -replace '[^A-Z0-9_]',''))
+  exit 1
+} finally {
+  $env:PGPASSWORD=$null
+  $mutex.ReleaseMutex()
+  $mutex.Dispose()
+}
+ -or
+     $job.deviceSerial -ne 'TDBD234200545') {throw 'CLAIM_SHAPE_INVALID'}
   $cfg=@{deviceIp=$e['X904_DEVICE_IP'];deviceSerial=$e['X904_DEVICE_SERIAL'];
     sendEnabled=$e['X904_SEND_ENABLED'];userWriteEnabled=$e['X904_USER_WRITE_ENABLED'];
     commKey=$e['X904_DEVICE_COMM_KEY'];command=$job}|ConvertTo-Json -Depth 9 -Compress
