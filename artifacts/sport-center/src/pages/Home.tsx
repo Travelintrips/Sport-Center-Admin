@@ -93,7 +93,13 @@ function getDaysInMonthSched(year: number, month: number): Date[] {
 
 function ScheduleCalendar() {
   const { t } = useLang();
-  const [anchor, setAnchor] = useState(new Date());
+  const [anchor, setAnchor] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const date = params.get("date");
+    return date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? new Date(`${date}T12:00:00`)
+      : new Date();
+  });
   const [facilityId, setFacilityId] = useState("all");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [adminDetail, setAdminDetail] = useState<any>(null);
@@ -114,6 +120,19 @@ function ScheduleCalendar() {
   });
 
   const events: any[] = data?.events ?? [];
+  const [returnBookingOpened, setReturnBookingOpened] = useState(false);
+  useEffect(() => {
+    if (returnBookingOpened || !data?.events) return;
+    const requestedId = new URLSearchParams(window.location.search).get("booking");
+    if (!requestedId || !/^booking-\d+$/.test(requestedId)) return;
+    const match = (data.events as any[]).find((event) => event.id === requestedId);
+    if (match) {
+      setReturnBookingOpened(true);
+      void openBooking(match);
+      // Clear the deep link, preventing reopening after a refresh.
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [data, returnBookingOpened]);
   const facilities: any[] = data?.facilities ?? [];
   const days = useMemo(() => getDaysInMonthSched(year, month), [year, month]);
   const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
@@ -303,7 +322,15 @@ function ScheduleCalendar() {
                 </div>
               )}
               {!adminDetail && !detailLoading && selectedBooking.type === "booking" && (
-                <p className="text-xs text-muted-foreground">Identitas pemesan serta perubahan jadwal hanya tersedia bagi administrator yang login.</p>
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">Identitas pemesan serta perubahan jadwal hanya tersedia bagi administrator yang login.</p>
+                  <Link
+                    href={`/admin/login?next=${encodeURIComponent(`/?booking=${selectedBooking.id}&date=${selectedBooking.date}`)}`}
+                    className="inline-block rounded-lg bg-orange-600 px-4 py-2 font-semibold text-white"
+                  >
+                    Login Admin untuk Lihat & Kelola
+                  </Link>
+                </div>
               )}
             </div>
           </div>
