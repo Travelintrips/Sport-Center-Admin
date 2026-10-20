@@ -169,9 +169,35 @@ router.post("/auth/admin-google", async (req, res) => {
       res.status(401).json({ error: "Akun Google belum terverifikasi." });
       return;
     }
-    const [user] = await db.select().from(usersTable)
-      .where(and(eq(usersTable.googleId, payload.sub), eq(usersTable.email, payload.email.toLowerCase())))
+    // Accept only an explicitly pre-provisioned invitation after Google verifies
+    // the email and subject. A normal Google sign-in can never elevate privileges.
+    const verifiedEmail = payload.email.trim().toLowerCase();
+    let [user] = await db.select().from(usersTable)
+      .where(and(eq(usersTable.googleId, payload.sub), eq(usersTable.email, verifiedEmail)))
       .limit(1);
+
+    if (!user) {
+      const [invitation] = await db.select().from(usersTable)
+        .where(eq(usersTable.email, verifiedEmail)).limit(1);
+      if (invitation?.registrationSource === "admin_invitation" &&
+          invitation.accountStatus === "pending_verification" &&
+          invitation.role === "customer" && !invitation.googleId) {
+        // Compare-and-swap: only a pending invite can be consumed once.
+        const [activated] = await db.update(usersTable)
+          .set({ googleId: payload.sub, role: "super_admin", accountStatus: "active",
+            registrationSource: "admin_invitation_accepted", updatedAt: new Date() })
+          .where(and(eq(usersTable.id, invitation.id), eq(usersTable.email, verifiedEmail),
+            eq(usersTable.accountStatus, "pending_verification"),
+            eq(usersTable.registrationSource, "admin_invitation"),
+            eq(usersTable.role, "customer"), isNull(usersTable.googleId)))
+          .returning();
+        if (activated) {
+          user = activated;
+          req.log.info({ route: "admin-google", userId: activated.id },
+            "Verified administrator invitation activated");
+        }
+      }
+    }
     if (!user || !["owner", "admin", "super_admin", "admin_booking"].includes(user.role) ||
         (user.accountStatus && user.accountStatus !== "active")) {
       res.status(403).json({ error: "Akun Google tidak memiliki akses administrator." });
