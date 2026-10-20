@@ -42,16 +42,16 @@ export async function processX904Event(event: X904EventInput,
       // X904 stores local wall-clock time. Interpret it explicitly as WIB
       // instead of using the later server processing time as arrival time.
       // Do not accept impossible timestamps or clocks in the future.
-      const scanOccurredAt = /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(deviceTimestamp)
+      const scanOccurredAt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(deviceTimestamp)
         ? new Date(deviceTimestamp.replace(" ", "T") + "+07:00")
         : new Date(NaN);
       const timestampTrusted = Number.isFinite(scanOccurredAt.getTime()) &&
         scanOccurredAt.getTime() <= Date.now() + 120000 &&
-        scanOccurredAt.toLocaleDateString("en-CA", {timeZone:"Asia/Jakarta"}) === day;
+        scanOccurredAt.toISOString().slice(0,10) === day;
       const parts = new Intl.DateTimeFormat("en-US", {timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
       const part = (type: string) => parts.find(p => p.type === type)?.value ?? "";
       const todayWib = `${part("year")}-${part("month")}-${part("day")}`;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
+      if (!timestampTrusted || !/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
       } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
         // A member row lock serializes concurrent X904 events for this membership.
