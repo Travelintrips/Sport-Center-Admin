@@ -47,7 +47,7 @@ export async function processX904Event(event: X904EventInput,
         : new Date(NaN);
       const timestampTrusted = Number.isFinite(scanOccurredAt.getTime()) &&
         scanOccurredAt.getTime() <= Date.now() + 120000 &&
-        scanOccurredAt.toISOString().slice(0,10) === day;
+        new Date(scanOccurredAt.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0,10) === day;
       const parts = new Intl.DateTimeFormat("en-US", {timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
       const part = (type: string) => parts.find(p => p.type === type)?.value ?? "";
       const todayWib = `${part("year")}-${part("month")}-${part("day")}`;
