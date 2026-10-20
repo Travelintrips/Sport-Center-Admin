@@ -248,11 +248,12 @@ router.get("/admin/gym-x904/user-command/:commandId",adminMiddleware,async(req,r
   res.setHeader("Cache-Control","no-store");
   const actor=(req as any).user;
   if(!actor||!["owner","super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
-  if(!/^[0-9a-f-]{36}$/i.test(req.params.commandId)) return res.status(400).json({error:"INVALID_COMMAND_ID"});
+  const commandId=String(req.params.commandId ?? "");
+  if(!/^[0-9a-f-]{36}$/i.test(commandId)) return res.status(400).json({error:"INVALID_COMMAND_ID"});
   try {
     const r=await db.execute(sql`SELECT command_id,command_type,user_pin,state,created_at,
       completed_at,result FROM sport_center.x904_user_commands
-      WHERE command_id=${req.params.commandId}::uuid AND requested_by=${actor.userId}
+      WHERE command_id=${commandId}::uuid AND requested_by=${actor.userId}
         AND device_serial='TDBD234200545'`);
     if(!r.rows.length) return res.status(404).json({error:"COMMAND_NOT_FOUND"});
     return res.json({command:r.rows[0]});
