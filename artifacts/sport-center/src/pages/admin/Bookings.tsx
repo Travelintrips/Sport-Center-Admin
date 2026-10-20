@@ -3088,8 +3088,8 @@ export default function AdminBookings() {
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [settlementFilter, setSettlementFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
@@ -3213,6 +3213,19 @@ export default function AdminBookings() {
   }, [bookingPage, page]);
 
   const bookings = bookingPage?.items ?? [];
+  // Deep link from the public schedule: prefilter and open the exact existing
+  // admin editor. This never bypasses the bookings API's admin middleware.
+  const [calendarBookingOpened, setCalendarBookingOpened] = useState(false);
+  useEffect(() => {
+    if (calendarBookingOpened || !bookingPage || !debouncedSearch) return;
+    const linkedOrder = new URLSearchParams(window.location.search).get("search");
+    if (!linkedOrder || debouncedSearch !== linkedOrder) return;
+    const target = bookings.find((b: any) => b.orderNumber === linkedOrder);
+    if (target) {
+      setSelectedBooking(target);
+      setCalendarBookingOpened(true);
+    }
+  }, [bookingPage, bookings, debouncedSearch, calendarBookingOpened]);
   const totalRows = bookingPage?.totalRows ?? 0;
   const totalBookings = bookingPage?.totalBookings ?? 0;
   const totalPages = bookingPage?.totalPages ?? 1;
