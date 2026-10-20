@@ -7,3 +7,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-20 request Hostinger clean rebuild after X904 PR #163 and #164; maintain send disabled; no historical replay; verify /api/healthz git_commit before asserting deployment.
 
 2026-10-20 Hostinger service recovered: request one clean build of current main with X904 PR #163/#164; verify runtime /api/healthz SHA; DO NOT enable X904 production send or replay history.
+
+2026-10-20 request Hostinger rebuild latest main for Calendar PR #166 commit 26f7a2a6; preserve existing X904 settings and all booking data; verify healthz SHA and admin role access after deploy.
