@@ -57,7 +57,13 @@ export default function Login() {
     setToken(data.token);
     queryClient.setQueryData(getGetMeQueryKey(), data.user);
     toast({ title: t("Selamat datang!", "Welcome!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
-    setLocation(redirectTo ?? "/my-bookings");
+    const adminRoles = ["owner", "super_admin", "admin", "admin_booking", "finance", "staff"];
+    const isAdmin = adminRoles.includes(data.user.role);
+    // Preserve a requested local return path. Without one, choose the
+    // appropriate landing page using the role returned by the server.
+    const safeRedirect = redirectTo?.startsWith("/") && !redirectTo.startsWith("//")
+      ? redirectTo : null;
+    setLocation(safeRedirect ?? (isAdmin ? "/admin/dashboard" : "/my-bookings"));
   }
 
   const loginMutation = useLogin({
