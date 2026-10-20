@@ -20,6 +20,13 @@ import { ForgotPasswordDialog } from "@/components/ForgotPasswordDialog";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
+// Only allow returning to a known in-app calendar booking after admin login.
+// Never trust an arbitrary "next" URL from the query string.
+function adminLoginDestination(): string {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && /^\/\?booking=booking-\d+$/.test(next) ? next : "/admin/dashboard";
+}
+
 export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -51,7 +58,7 @@ export default function AdminLogin() {
             if (!res.ok || !data.token) throw new Error(data.error || "Login Google gagal");
             setToken(data.token);
             queryClient.setQueryData(getGetMeQueryKey(), data.user);
-            setLocation("/admin/dashboard");
+            setLocation(adminLoginDestination());
           } catch (error) {
             toast({ title: "Login Google gagal", description: error instanceof Error ? error.message : "Silakan coba lagi.", variant: "destructive" });
           } finally {
@@ -116,7 +123,7 @@ export default function AdminLogin() {
       setToken(data.token);
       queryClient.setQueryData(getGetMeQueryKey(), data.user);
       toast({ title: "Login berhasil", description: "Selamat datang, Admin." });
-      setLocation("/admin/dashboard");
+      setLocation(adminLoginDestination());
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Terjadi kesalahan. Coba lagi.";
