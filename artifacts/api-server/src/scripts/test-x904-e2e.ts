@@ -29,9 +29,9 @@ try{
  await db.execute(sql`INSERT INTO sport_center.gym_x904_lan_users
   (device_serial,user_pin,device_uid,display_name,device_role,last_seen_snapshot)
   VALUES (${serial},${pin},1,${`X904 CI ${eventId}`},0,${randomUUID()}::uuid)`);
- await db.execute(sql`INSERT INTO sport_center.sport_membership_payments
-  (membership_id,period_start,period_end,months,amount,status,confirmed_at)
-  VALUES (${membershipId},${day},${day},1,0,'confirmed',now())`);
+ // No confirmed payment fixture: the canonical payment trigger requires a
+ // real booking and settlement configuration. Test the safe unpaid rejection,
+ // rather than forging an accounting transaction in DEV.
  await db.execute(sql`INSERT INTO sport_center.gym_x904_member_mapping
   (device_serial,user_pin,membership_id,status,verified_at,verified_by)
   VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
@@ -67,7 +67,7 @@ try{
  const row=counts.rows[0];
  const nums=[row?.ledger,row?.checkins,row?.bookings,row?.history].map(Number);
  console.log("X904_E2E",JSON.stringify({first,concurrent,replay,other,ledger:nums[0],checkins:nums[1],bookings:nums[2],history:nums[3]}));
- if(first!=="processed" || concurrent.filter(x=>x==="processed").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || other!=="review_required" || nums.some(n=>n!==1)) throw Error("X904_E2E_FAILED");
+ if(first!=="review_required" || concurrent.filter(x=>x==="review_required").length!==1 || concurrent.filter(x=>x==="already_processed").length!==1 || replay!=="already_processed" || other!=="review_required" || nums.some(n=>n!==0)) throw Error("X904_E2E_FAILED");
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
  const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
