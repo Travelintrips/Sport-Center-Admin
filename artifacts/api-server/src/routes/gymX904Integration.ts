@@ -194,4 +194,69 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
   } catch { return res.status(503).json({error:"USER_COMMAND_QUEUE_UNAVAILABLE"}); }
 });
 
+// Connector worker claims are lease-fenced and require the existing private VMSC ingest key.
+// QUEUE ACK is not physical device success. Connector must read back target after execution.
+router.post("/internal/gym-x904/user-command/claim", async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return res.status(404).json({error:"Not found"});
+  const key=req.headers["x-gym-ingress-key"];
+  if (typeof key !== "string" || !equal(key,process.env.GYM_X904_EVENT_INGEST_KEY ?? "") ||
+      key.length < 32 || req.body?.deviceSerial !== "TDBD234200545" ||
+      req.body?.connectorId !== "VMSC") return res.status(403).json({error:"CONNECTOR_UNAUTHORIZED"});
+  try {
+    const r=await db.execute(sql`WITH pick AS (
+      SELECT command_id FROM sport_center.x904_user_commands
+      WHERE device_serial='TDBD234200545' AND state='queued'
+      ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
+    ) UPDATE sport_center.x904_user_commands q
+    SET state='claimed', lease_token=gen_random_uuid(),
+        leased_until=now()+interval '90 seconds', attempts=attempts+1
+    FROM pick WHERE q.command_id=pick.command_id
+    RETURNING q.command_id,q.command_type,q.user_pin,q.payload,q.lease_token,q.leased_until`);
+    return res.json({command:r.rows[0] ?? null});
+  } catch { return res.status(503).json({error:"USER_CLAIM_UNAVAILABLE"}); }
+});
+router.post("/internal/gym-x904/user-command/result", async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  if (process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return res.status(404).json({error:"Not found"});
+  const key=req.headers["x-gym-ingress-key"];
+  if (typeof key !== "string" || key.length < 32 ||
+      !equal(key,process.env.GYM_X904_EVENT_INGEST_KEY ?? "") ||
+      req.body?.deviceSerial !== "TDBD234200545" ||
+      req.body?.connectorId !== "VMSC") return res.status(403).json({error:"CONNECTOR_UNAUTHORIZED"});
+  const {commandId,leaseToken,readBackConfirmed,errorCode}=req.body ?? {};
+  if (typeof commandId !== "string" || !/^[0-9a-f-]{36}$/i.test(commandId) ||
+      typeof leaseToken !== "string" || !/^[0-9a-f-]{36}$/i.test(leaseToken) ||
+      typeof readBackConfirmed !== "boolean" ||
+      (errorCode !== undefined && (typeof errorCode !== "string" || !/^[A-Z0-9_]{1,64}$/.test(errorCode)))) {
+    return res.status(400).json({error:"INVALID_RESULT_RECEIPT"});
+  }
+  try {
+    const r=await db.execute(sql`UPDATE sport_center.x904_user_commands
+      SET state=${readBackConfirmed?'completed':'failed'},
+          result=jsonb_build_object('readBackConfirmed',${readBackConfirmed},'errorCode',${errorCode??null}),
+          completed_at=now(),leased_until=NULL
+      WHERE command_id=${commandId}::uuid AND lease_token=${leaseToken}::uuid
+        AND state='claimed' AND leased_until>now()
+        AND device_serial='TDBD234200545'
+      RETURNING command_id,state`);
+    if (!r.rows.length) return res.status(409).json({error:"STALE_OR_UNKNOWN_LEASE"});
+    return res.json({receipt:r.rows[0]});
+  } catch {return res.status(503).json({error:"USER_RECEIPT_UNAVAILABLE"});}
+});
+router.get("/admin/gym-x904/user-command/:commandId",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor||!["owner","super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  if(!/^[0-9a-f-]{36}$/i.test(req.params.commandId)) return res.status(400).json({error:"INVALID_COMMAND_ID"});
+  try {
+    const r=await db.execute(sql`SELECT command_id,command_type,user_pin,state,created_at,
+      completed_at,result FROM sport_center.x904_user_commands
+      WHERE command_id=${req.params.commandId}::uuid AND requested_by=${actor.userId}
+        AND device_serial='TDBD234200545'`);
+    if(!r.rows.length) return res.status(404).json({error:"COMMAND_NOT_FOUND"});
+    return res.json({command:r.rows[0]});
+  } catch {return res.status(503).json({error:"COMMAND_STATUS_UNAVAILABLE"});}
+});
+
 export default router;
