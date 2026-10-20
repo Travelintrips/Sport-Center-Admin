@@ -225,7 +225,7 @@ function ScheduleCalendar() {
         ) : isError ? (
           <div className="p-8 text-center text-red-600">Jadwal belum tersedia. Silakan coba lagi.</div>
         ) : (
-          <div className="grid grid-cols-7"
+          <div className="grid grid-cols-7">
             {days.map((day, i) => {
               const dateStr = formatSchedDate(day);
               const dayEvents = events.filter(
