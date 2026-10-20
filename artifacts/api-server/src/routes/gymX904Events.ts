@@ -227,4 +227,77 @@ router.get("/admin/gym-x904/member-mapping", adminMiddleware, async (_req,res) =
     return res.status(503).json({error:"Mapping X904 unavailable"});
   }
 });
+
+/** Cross-system read-only reconciliation. Device PIN is NOT a membership ID.
+ * Name matches are candidates, never automatic authorization to check in.
+ * Paid membership and one-off booking are independently observable.
+ */
+router.get("/admin/gym-x904/cross-system-reconciliation", adminMiddleware, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const serial = process.env.GYM_X904_DEVICE_SERIAL ?? "";
+  if (serial.length < 4) return res.status(503).json({error:"Device not configured"});
+  try {
+    const result = await db.execute(sql`
+      WITH local_day AS (
+        SELECT to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD') AS today
+      ),
+      candidate AS (
+        SELECT u.user_pin, u.display_name, u.device_uid, u.device_role,
+          matches.match_count, matches.membership_id, matches.membership_status,
+          matches.start_date, matches.end_date,
+          COALESCE(paid.has_confirmed_payment,false) AS has_confirmed_payment,
+          COALESCE(bookings.booking_count,0) AS booking_count,
+          COALESCE(bookings.today_booking_count,0) AS today_booking_count,
+          verified_map.status AS verified_mapping_status,
+          verified_map.membership_id AS mapped_membership_id
+        FROM sport_center.gym_x904_lan_users u
+        CROSS JOIN local_day d
+        LEFT JOIN LATERAL (
+          SELECT count(*)::int AS match_count, min(m.id)::int AS membership_id,
+            min(m.status) AS membership_status, min(m.start_date) AS start_date, min(m.end_date) AS end_date
+          FROM sport_center.sport_memberships m
+          WHERE lower(trim(m.name))=lower(trim(u.display_name))
+        ) matches ON true
+        LEFT JOIN LATERAL (
+          SELECT true AS has_confirmed_payment
+          FROM sport_center.sport_membership_payments p
+          WHERE p.membership_id=matches.membership_id
+            AND p.status='confirmed' AND p.period_start<=d.today AND p.period_end>=d.today
+          LIMIT 1
+        ) paid ON true
+        LEFT JOIN LATERAL (
+          SELECT count(*)::int AS booking_count,
+            count(*) FILTER (WHERE b.booking_date=d.today AND b.status::text NOT IN ('cancelled','rejected'))::int AS today_booking_count
+          FROM sport_center.sport_bookings b
+          WHERE lower(trim(b.customer_name))=lower(trim(u.display_name))
+            OR lower(trim(coalesce(b.booked_for_name,'')))=lower(trim(u.display_name))
+        ) bookings ON true
+        LEFT JOIN sport_center.gym_x904_member_mapping verified_map
+          ON verified_map.device_serial=u.device_serial AND verified_map.user_pin=u.user_pin
+        WHERE u.device_serial=${serial}
+      )
+      SELECT user_pin, display_name,device_uid,device_role,match_count,membership_id,
+        membership_status,start_date,end_date,has_confirmed_payment,booking_count,today_booking_count,
+        verified_mapping_status,mapped_membership_id,
+        CASE
+          WHEN device_role <> 0 THEN 'device_admin_not_member'
+          WHEN match_count > 1 THEN 'ambiguous_identity_review'
+          WHEN match_count = 1 AND membership_status='active'
+            AND start_date<=to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD')
+            AND end_date>=to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD')
+            AND has_confirmed_payment THEN 'paid_member_candidate'
+          WHEN today_booking_count>0 THEN 'today_booking_candidate'
+          WHEN match_count>0 THEN 'inactive_or_unpaid_member'
+          WHEN booking_count>0 THEN 'historical_booking_candidate'
+          ELSE 'unmatched_review'
+        END AS reconciliation_category
+      FROM candidate ORDER BY device_role DESC,display_name,user_pin LIMIT 1000
+    `);
+    return res.json({readOnly:true,autoApproved:false,source:"x904_lan_users+sport_memberships+sport_membership_payments+sport_bookings",asOf:new Date().toISOString(),rows:result.rows});
+  } catch (error) {
+    console.error("[gym-x904] cross-system reconciliation unavailable",error instanceof Error?error.message:String(error));
+    return res.status(503).json({error:"Cross-system reconciliation unavailable"});
+  }
+});
+
 export default router;
