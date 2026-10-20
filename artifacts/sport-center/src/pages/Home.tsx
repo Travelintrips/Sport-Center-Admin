@@ -296,7 +296,7 @@ function ScheduleCalendar() {
                   <p><strong>Nama pemesan:</strong> {adminDetail.customerName || "-"}</p>
                   <p><strong>Nomor booking:</strong> {adminDetail.orderNumber || "-"}</p>
                   <p><strong>Telepon:</strong> {adminDetail.customerPhone || "-"}</p>
-                  <Link href="/admin/bookings" className="inline-block rounded-lg bg-orange-600 px-4 py-2 font-semibold text-white">
+                  <Link href={`/admin/bookings?search=${encodeURIComponent(adminDetail.orderNumber ?? "")}`} className="inline-block rounded-lg bg-orange-600 px-4 py-2 font-semibold text-white">
                     Kelola booking / Edit & reschedule
                   </Link>
                   <p className="text-xs text-muted-foreground">Cari nomor booking di halaman admin untuk mengubah tanggal atau jam. Pemeriksaan bentrok dilakukan melalui proses penyimpanan booking.</p>
