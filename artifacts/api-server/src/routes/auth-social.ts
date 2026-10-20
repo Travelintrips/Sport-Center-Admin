@@ -198,7 +198,28 @@ router.post("/auth/admin-google", async (req, res) => {
         }
       }
     }
-    if (!user || !["owner", "admin", "super_admin", "admin_booking"].includes(user.role) ||
+    // Link existing, approved staff/admin accounts by verified Google email.
+    // Never create an admin here or change an existing user's role.
+    const adminRoles = ["owner", "admin", "super_admin", "admin_booking", "finance", "staff"];
+    if (!user) {
+      const [existing] = await db.select().from(usersTable)
+        .where(eq(usersTable.email, verifiedEmail)).limit(1);
+      if (existing && adminRoles.includes(existing.role) &&
+          (!existing.accountStatus || existing.accountStatus === "active") &&
+          !existing.googleId) {
+        const [linked] = await db.update(usersTable)
+          .set({ googleId: payload.sub, updatedAt: new Date() })
+          .where(and(eq(usersTable.id, existing.id), eq(usersTable.email, verifiedEmail),
+            isNull(usersTable.googleId), eq(usersTable.role, existing.role),
+            existing.accountStatus === null ? isNull(usersTable.accountStatus) : eq(usersTable.accountStatus, "active")))
+          .returning();
+        if (linked) {
+          user = linked;
+          req.log.info({ route: "admin-google", userId: linked.id }, "Existing admin Google identity linked");
+        }
+      }
+    }
+    if (!user || !adminRoles.includes(user.role) ||
         (user.accountStatus && user.accountStatus !== "active")) {
       res.status(403).json({ error: "Akun Google tidak memiliki akses administrator." });
       return;
