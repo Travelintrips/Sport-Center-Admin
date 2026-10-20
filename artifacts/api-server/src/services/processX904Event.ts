@@ -37,11 +37,21 @@ export async function processX904Event(event: X904EventInput,
       const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
         FROM sport_center.sport_memberships WHERE id=${membershipId} FOR UPDATE`);
       const m = member.rows[0];
-      const day = String(raw.rows[0]?.device_time ?? "").slice(0,10);
+      const deviceTimestamp = String(raw.rows[0]?.device_time ?? "");
+      const day = deviceTimestamp.slice(0,10);
+      // X904 stores local wall-clock time. Interpret it explicitly as WIB
+      // instead of using the later server processing time as arrival time.
+      // Do not accept impossible timestamps or clocks in the future.
+      const scanOccurredAt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(deviceTimestamp)
+        ? new Date(deviceTimestamp.replace(" ", "T") + "+07:00")
+        : new Date(NaN);
+      const timestampTrusted = Number.isFinite(scanOccurredAt.getTime()) &&
+        scanOccurredAt.getTime() <= Date.now() + 120000 &&
+        new Date(scanOccurredAt.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0,10) === day;
       const parts = new Intl.DateTimeFormat("en-US", {timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
       const part = (type: string) => parts.find(p => p.type === type)?.value ?? "";
       const todayWib = `${part("year")}-${part("month")}-${part("day")}`;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
+      if (!timestampTrusted || !/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
       } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
         // A member row lock serializes concurrent X904 events for this membership.
@@ -66,8 +76,8 @@ export async function processX904Event(event: X904EventInput,
               const seq = await tx.execute(sql`SELECT nextval('sport_center.booking_order_no_seq') AS n`);
               const orderNumber = `SC-${String(seq.rows[0]?.n).padStart(4,"0")}`;
               await tx.execute(sql`INSERT INTO sport_center.gym_checkins
-                (membership_id,checkin_date,notes,x904_event_id)
-                VALUES (${membershipId},${day}::date,${`X904 event ${event.eventId}`},${event.eventId})`);
+                (membership_id,checkin_date,checked_in_at,notes,x904_event_id)
+                VALUES (${membershipId},${day}::date,${scanOccurredAt},${`X904 event ${event.eventId}`},${event.eventId})`);
               const [booking] = await tx.insert(bookingsTable).values({
                 orderNumber, customerName:String(m.name), customerEmail:String(m.email),
                 customerPhone:String(m.phone), facilityId:Number(gym.id), bookingDate:day,
@@ -77,7 +87,7 @@ export async function processX904Event(event: X904EventInput,
                 membershipId, status:"confirmed", source:"gym_membership",
                 numberOfPeople:1, notes:`X904 event ${event.eventId}`, paymentRequiredNow:false,
                 payerType:"personal", billingStatus:"paid", dpp:"0",
-                ppnAmount:"0", grandTotal:"0", checkedInAt:new Date(),
+                ppnAmount:"0", grandTotal:"0", checkedInAt:scanOccurredAt,
               }).returning({id:bookingsTable.id});
               if (!booking) throw new Error("X904 booking insertion failed");
               await tx.insert(bookingHistoryTable).values({
