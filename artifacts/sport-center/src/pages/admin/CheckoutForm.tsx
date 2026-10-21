@@ -45,6 +45,13 @@ export default function AdminCheckoutForm() {
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
+  const [createdBookingId, setCreatedBookingId] = useState<number | null>(null);
+  const [createdBookingAmount, setCreatedBookingAmount] = useState<number>(0);
+  const [paymentChoice, setPaymentChoice] = useState<"paid" | "unpaid" | null>(null);
+  const [paymentProof, setPaymentProof] = useState<File | null>(null);
+  const [paidMethod, setPaidMethod] = useState("Transfer Bank");
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentSubmitted, setPaymentSubmitted] = useState(false);
 
   const { data: facilitiesData } = useListFacilities();
   const { data: customersData } = useListCustomers();
@@ -131,6 +138,38 @@ export default function AdminCheckoutForm() {
       toast({title:"Berhasil",description:"Periksa detail pada modul Membership."});
     } catch(e) {toast({title:"Membership gagal",description:e instanceof Error ? e.message : "Terjadi kesalahan",variant:"destructive"});}
     finally {setIsSubmitting(false);}
+  }
+
+  async function submitBookingPayment() {
+    if (!createdBookingId || !paymentProof || paymentBusy || paymentSubmitted) return;
+    setPaymentBusy(true);
+    try {
+      const fileForm = new FormData();
+      fileForm.append("proof", paymentProof);
+      const headers = {Authorization: "Bearer " + (getToken() ?? "")};
+      const uploaded = await fetch("/api/payments/proof-upload", {method:"POST",headers,body:fileForm});
+      const fileResult = await uploaded.json();
+      if (!uploaded.ok) throw Error(fileResult.error || "Upload bukti gagal");
+      const detected = String(fileResult.ocrScan?.paymentMethod ?? "").toLowerCase();
+      if (fileResult.ocrScan?.confidence === "high" && detected &&
+          ((detected === "qris") !== (paidMethod === "QRIS"))) {
+        throw Error("Metode terpilih tidak sesuai OCR. Periksa bukti lalu pilih metode yang benar sebelum mengirim ulang.");
+      }
+      const payload = {
+        bookingId:createdBookingId, amount:createdBookingAmount, paymentType:"full_payment",
+        paymentMethod:paidMethod,
+        ...(paidMethod === "QRIS" ? {paymentProvider:"mandiri_direct"} : {}),
+        proofUrl:fileResult.objectPath ?? fileResult.url,
+        ocrScanToken:fileResult.ocrScanToken,
+      };
+      const saved = await fetch("/api/payments", {method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(payload)});
+      const result = await saved.json();
+      if (!saved.ok) throw Error(result.error || "Gagal mencatat pembayaran");
+      setPaymentSubmitted(true);
+      toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi; booking belum otomatis lunas."});
+    } catch(err) {
+      toast({title:"Pembayaran belum tercatat",description:err instanceof Error ? err.message : "Silakan periksa bukti",variant:"destructive"});
+    } finally {setPaymentBusy(false);}
   }
 
   // Auto-compute endTime whenever startTime or duration changes
@@ -223,6 +262,11 @@ export default function AdminCheckoutForm() {
       }
 
       setCreatedOrder(data.booking?.orderNumber ?? null);
+      setCreatedBookingId(Number(data.booking?.id) || null);
+      setCreatedBookingAmount(Number(data.booking?.grandTotal ?? data.booking?.totalPrice ?? 0));
+      setPaymentChoice(null);
+      setPaymentProof(null);
+      setPaymentSubmitted(false);
       toast({ title: "Booking berhasil dibuat!", description: `Order: ${data.booking?.orderNumber}` });
 
       // Reset form
@@ -254,7 +298,34 @@ export default function AdminCheckoutForm() {
           <h2 className="text-2xl font-black mb-1">Booking Berhasil!</h2>
           <p className="text-muted-foreground">Order <span className="font-semibold text-foreground">{createdOrder}</span> telah dibuat.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="w-full max-w-xl rounded-xl border p-4 space-y-3">
+          <p className="font-semibold">Status pembayaran pelanggan</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" variant={paymentChoice === "paid" ? "default" : "outline"} onClick={() => setPaymentChoice("paid")}>Sudah Dibayar</Button>
+            <Button type="button" variant={paymentChoice === "unpaid" ? "default" : "outline"} onClick={() => setPaymentChoice("unpaid")}>Belum Dibayar</Button>
+          </div>
+          {paymentChoice === "unpaid" && <p className="text-sm text-muted-foreground">Booking tetap menunggu pembayaran. Tidak ada pembayaran baru yang dicatat.</p>}
+          {paymentChoice === "paid" && (paymentSubmitted ?
+            <p className="text-sm font-medium text-green-700">Bukti diterima untuk verifikasi. Status lunas belum ditetapkan.</p>
+            : <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">Unggah bukti pembayaran. OCR membantu pengecekan metode, tetapi tidak otomatis mengonfirmasi uang diterima.</p>
+                <Label>Metode Pembayaran</Label>
+                <Select value={paidMethod} onValueChange={setPaidMethod}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Transfer Bank">Transfer Bank</SelectItem>
+                    <SelectItem value="QRIS">QRIS Mandiri Direct</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Label htmlFor="booking-payment-proof">Bukti pembayaran *</Label>
+                <Input id="booking-payment-proof" type="file" accept="image/*,.pdf" onChange={e => setPaymentProof(e.target.files?.[0] ?? null)} />
+                <p className="text-sm">Nominal booking: <strong>{formatRupiah(createdBookingAmount)}</strong></p>
+                <Button type="button" className="w-full" disabled={paymentBusy || !paymentProof || !createdBookingId || !(createdBookingAmount > 0)} onClick={submitBookingPayment}>
+                  {paymentBusy ? "Memproses bukti..." : "Kirim Bukti untuk Verifikasi"}
+                </Button>
+              </div>)}
+        </div>
+        <div className="flex gap-3 flex-wrap justify-center">
           <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>Lihat Detail & Kelola Pembayaran</Button>
           <Button variant="outline" onClick={() => setLocation("/admin/bookings")}>Lihat Semua Booking</Button>
           <Button variant="outline" onClick={() => setCreatedOrder(null)}>Buat Booking Lagi</Button>
