@@ -70,6 +70,7 @@ import minaWebRouter from "./minaWeb";
 import gymX904IntegrationRouter from "./gymX904Integration";
 import gymX904EventsRouter from "./gymX904Events";
 import gymX904LanRouter from "./gymX904Lan";
+import gymX904AttestedRouter from "./gymX904Attested";
 
 const router: IRouter = Router();
 
@@ -143,5 +144,6 @@ router.use(minaWebRouter);
 router.use(gymX904IntegrationRouter);
 router.use(gymX904EventsRouter);
 router.use(gymX904LanRouter);
+router.use(gymX904AttestedRouter);
 
 export default router;
