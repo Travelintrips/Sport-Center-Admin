@@ -134,6 +134,12 @@ app.use("/iclock", (_req, res) => {
   res.type("text/plain").status(404).send("NOT FOUND\n");
 });
 app.use("/api", router);
+// Never serve the frontend shell for unknown API endpoints. This also exposes
+// missing deployment routes as 404 JSON instead of a misleading HTML 200.
+app.use("/api", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(404).json({ error: "API route not found", code: "API_ROUTE_NOT_FOUND" });
+});
 
 if (process.env.NODE_ENV === "production") {
   // Resolve frontend dist relative to process.cwd() — the server's working
