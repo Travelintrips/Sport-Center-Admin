@@ -22,6 +22,7 @@ export default function AdminCheckoutForm() {
   const [, setLocation] = useLocation();
 
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
@@ -44,6 +45,9 @@ export default function AdminCheckoutForm() {
   const customers = Array.isArray(customersData) ? customersData : [];
   const isGuest = selectedCustomerId === "__guest__";
   const selectedCustomer: any = customers.find((c: any) => String(c.id) === selectedCustomerId);
+  const filteredCustomers = customers.filter((c: any) =>
+    [c.name, c.phone, c.email].some((field) => String(field ?? "").toLocaleLowerCase("id-ID").includes(customerSearch.trim().toLocaleLowerCase("id-ID")))
+  );
   const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = startTime.slice(0, 10);
@@ -224,6 +228,7 @@ export default function AdminCheckoutForm() {
             {/* Customer */}
             <div className="space-y-2">
               <Label htmlFor="customer">Nama Pemesan <span className="text-destructive">*</span></Label>
+              <Input aria-label="Cari nama atau nomor telepon pemesan" placeholder="Cari nama atau nomor telepon..." value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} />
               <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
                 <SelectTrigger id="customer">
                   <SelectValue placeholder="Pilih customer..." />
@@ -233,7 +238,10 @@ export default function AdminCheckoutForm() {
                     <SelectItem value="__empty__" disabled>Tidak ada customer terdaftar</SelectItem>
                   )}
                   <SelectItem value="__guest__">+ Pemesan belum terdaftar (Tamu)</SelectItem>
-                  {customers.map((c: any) => (
+                  {filteredCustomers.length === 0 && customers.length > 0 && (
+                    <SelectItem value="__no_matches__" disabled>Tidak ada pemesan yang cocok</SelectItem>
+                  )}
+                  {filteredCustomers.map((c: any) => (
                     <SelectItem key={c.id} value={String(c.id)}>
                       {c.name}{c.phone ? ` (${c.phone})` : ""}
                     </SelectItem>
