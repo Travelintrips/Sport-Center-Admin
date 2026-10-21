@@ -264,6 +264,12 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                       <div className="text-xs text-muted-foreground">{user.email}</div>
                     </div>
                   </div>
+                  {(["owner", "admin", "super_admin", "admin_booking", "finance", "staff"] as string[]).includes(user.role) && (
+                    <Link href="/admin/dashboard" onClick={() => setIsMobileMenuOpen(false)}
+                      className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-foreground/80 hover:bg-muted/60">
+                      <ShieldCheck size={16} /> Admin Portal
+                    </Link>
+                  )}
                   <Link href="/my-bookings" onClick={() => setIsMobileMenuOpen(false)}
                     className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-foreground/80 hover:bg-muted/60">
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><CalendarDays size={14} /></div>
