@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useListFacilities, useListCustomers } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
@@ -22,6 +22,11 @@ export default function AdminCheckoutForm() {
   const [, setLocation] = useLocation();
 
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+  const [slotOptions, setSlotOptions] = useState<Array<{time: string; available: boolean; reason: string | null}>>([]);
+  const [slotState, setSlotState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -37,7 +42,38 @@ export default function AdminCheckoutForm() {
 
   const facilities = Array.isArray(facilitiesData) ? facilitiesData : [];
   const customers = Array.isArray(customersData) ? customersData : [];
+  const isGuest = selectedCustomerId === "__guest__";
   const selectedCustomer: any = customers.find((c: any) => String(c.id) === selectedCustomerId);
+  const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
+  const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
+  const selectedDate = startTime.slice(0, 10);
+  const slotValid = isWalkIn || (slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16)));
+
+  useEffect(() => {
+    if (!selectedFacilityId || !selectedDate || isWalkIn || !Number.isInteger(Number(duration)) || Number(duration) < 1) {
+      setSlotOptions([]);
+      setSlotState("idle");
+      return;
+    }
+    const controller = new AbortController();
+    setSlotState("loading");
+    const q = new URLSearchParams({ facilityId: selectedFacilityId, date: selectedDate, durationHours: duration });
+    fetch("/api/availability?" + q.toString(), {
+      headers: { Authorization: "Bearer " + (getToken() ?? "") },
+      signal: controller.signal,
+    }).then(async (r) => {
+      if (!r.ok) throw Error("Slot tidak dapat diperiksa");
+      return r.json();
+    }).then((rows) => {
+      if (!controller.signal.aborted) {
+        setSlotOptions(Array.isArray(rows) ? rows : []);
+        setSlotState("ready");
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) setSlotState("error");
+    });
+    return () => controller.abort();
+  }, [selectedFacilityId, selectedDate, duration, isWalkIn]);
 
   // Auto-compute endTime whenever startTime or duration changes
   const computedEndTime = (() => {
@@ -63,6 +99,10 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih customer terlebih dahulu", variant: "destructive" });
       return;
     }
+    if (isGuest && (!guestName.trim() || !/^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))) {
+      toast({ title: "Nama dan nomor WhatsApp tamu wajib valid", variant: "destructive" });
+      return;
+    }
     if (!selectedFacilityId) {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
       return;
@@ -72,20 +112,24 @@ export default function AdminCheckoutForm() {
       return;
     }
 
+    if (!slotValid) {
+      toast({ title: "Slot tidak tersedia atau belum diperiksa", variant: "destructive" });
+      return;
+    }
     const corporate = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
     if (!corporate && selectedCustomer?.accountType === "company") {
       toast({ title: "Untuk akun perusahaan, pilih jenis Corporate atau pembayar perusahaan", variant: "destructive" });
       return;
     }
-    if (corporate && selectedCustomer?.accountType !== "company") {
+    if (corporate && (isGuest || selectedCustomer?.accountType !== "company")) {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
     }
-    if (Number(selectedCustomerId) <= 0) {
+    if (!isGuest && Number(selectedCustomerId) <= 0) {
       toast({ title: "Pilih customer yang terdaftar; data tamu perlu didaftarkan terlebih dahulu", variant: "destructive" });
       return;
     }
-    if (!selectedCustomer?.name || !selectedCustomer?.phone) {
+    if (!isGuest && (!selectedCustomer?.name || !selectedCustomer?.phone)) {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
@@ -98,10 +142,10 @@ export default function AdminCheckoutForm() {
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
         body: JSON.stringify({
-          customerId: Number(selectedCustomerId),
-          customerName: selectedCustomer.name,
-          customerPhone: selectedCustomer.phone,
-          customerEmail: selectedCustomer.email ?? "",
+          customerId: isGuest ? null : Number(selectedCustomerId),
+          customerName: isGuest ? guestName.trim() : selectedCustomer.name,
+          customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
+          customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
           facilityId: Number(selectedFacilityId),
           bookingDate: startTime.slice(0, 10),
           startTime: startTime.slice(11, 16),
@@ -126,6 +170,9 @@ export default function AdminCheckoutForm() {
 
       // Reset form
       setSelectedCustomerId("");
+      setGuestName("");
+      setGuestPhone("");
+      setGuestEmail("");
       setSelectedFacilityId("");
       setStartTime("");
       setEndTime("");
@@ -185,6 +232,7 @@ export default function AdminCheckoutForm() {
                   {customers.length === 0 && (
                     <SelectItem value="__empty__" disabled>Tidak ada customer terdaftar</SelectItem>
                   )}
+                  <SelectItem value="__guest__">+ Pemesan belum terdaftar (Tamu)</SelectItem>
                   {customers.map((c: any) => (
                     <SelectItem key={c.id} value={String(c.id)}>
                       {c.name}{c.phone ? ` (${c.phone})` : ""}
@@ -194,6 +242,19 @@ export default function AdminCheckoutForm() {
               </Select>
             </div>
 
+            {isGuest && <div className="space-y-3 rounded-lg border p-3">
+              <Label htmlFor="guestName">Nama Pemesan Baru *</Label>
+              <Input id="guestName" value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
+              <Label htmlFor="guestPhone">Nomor WhatsApp *</Label>
+              <Input id="guestPhone" type="tel" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} required />
+              <Label htmlFor="guestEmail">Email (opsional)</Label>
+              <Input id="guestEmail" type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Pemesan tamu disimpan di booking; akun tidak otomatis dibuat.</p>
+            </div>}
+            {!isGuest && selectedCustomer && <div className="space-y-2">
+              <Label>Nomor Telepon / WhatsApp</Label>
+              <Input value={selectedCustomer.phone ?? ""} readOnly />
+            </div>}
             {/* Facility */}
             <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
@@ -270,6 +331,22 @@ export default function AdminCheckoutForm() {
               {bookingKind === "membership" && <p className="text-xs text-amber-700">Membership wajib dibuat melalui modul Membership untuk mencegah duplikasi pembayaran.</p>}
             </div>
 
+            {!isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-2">
+              <Label>Periksa Slot Tersedia</Label>
+              {slotState === "loading" && <p className="text-xs">Memeriksa slot...</p>}
+              {slotState === "error" && <p className="text-xs text-destructive">Pemeriksaan slot gagal; penyimpanan diblokir.</p>}
+              {slotState === "ready" && <div className="flex flex-wrap gap-2">
+                {slotOptions.map((slot) => <Button key={slot.time} type="button" size="sm"
+                  disabled={!slot.available}
+                  title={slot.reason ?? ""}
+                  variant={startTime.slice(11, 16) === slot.time.slice(0, 5) ? "default" : "outline"}
+                  onClick={() => setStartTime(selectedDate + "T" + slot.time.slice(0, 5))}>
+                  {slot.time.slice(0, 5)}{slot.available ? "" : " · Terisi"}
+                </Button>)}
+                {slotOptions.length === 0 && <p className="text-xs">Tidak ada slot pada tanggal ini.</p>}
+              </div>}
+              <p className="text-xs text-muted-foreground">Slot diperiksa kembali oleh server saat menyimpan.</p>
+            </div>}
             {/* Notes */}
             <div className="space-y-2">
               <Label htmlFor="notes">Catatan (Opsional)</Label>
@@ -297,7 +374,7 @@ export default function AdminCheckoutForm() {
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting}>
+            <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting || (bookingKind !== "membership" && !slotValid)}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : bookingKind === "membership" ? "Buka Modul Membership" : "Buat Booking (Menunggu Pembayaran)"
