@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
 
 const API=import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -18,6 +18,7 @@ async function request(path:string,options?:RequestInit){
   return body;
 }
 export default function GymX904UserControl({users,initialSelection}:{users:DeviceUser[];initialSelection?:{user:DeviceUser;action:"UPDATE_USER"|"DELETE_USER"}}){
+  const queryClient=useQueryClient();
   const [action,setAction]=useState<Action>(initialSelection?.action ?? "CREATE_USER");
   const [pin,setPin]=useState(initialSelection?.user.user_pin ?? "");
   const [name,setName]=useState(initialSelection?.user.display_name ?? "");
@@ -38,6 +39,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     refetchInterval:(q)=>["completed","failed","cancelled"].includes(q.state.data?.command.state ?? "")?false:4000,
     retry:false
   });
+  useEffect(()=>{ if(receipt?.command.state==="completed") void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]}); },[receipt?.command.state,queryClient]);
   if(!capabilities?.allowed)return null;
   if(!capabilities.enabled)return <section className="rounded-xl border bg-card p-5 space-y-2">
     <h3 className="font-semibold">Pengelolaan pengguna X904</h3>
