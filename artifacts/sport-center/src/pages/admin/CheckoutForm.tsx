@@ -73,6 +73,10 @@ export default function AdminCheckoutForm() {
     }
 
     const corporate = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
+    if (!corporate && selectedCustomer?.accountType === "company") {
+      toast({ title: "Untuk akun perusahaan, pilih jenis Corporate atau pembayar perusahaan", variant: "destructive" });
+      return;
+    }
     if (corporate && selectedCustomer?.accountType !== "company") {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
@@ -232,12 +236,12 @@ export default function AdminCheckoutForm() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="endTime">Waktu Selesai</Label>
+                <Label htmlFor="endTime">Waktu Selesai (otomatis)</Label>
                 <Input
                   id="endTime"
                   type="datetime-local"
                   value={endTime || computedEndTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  readOnly
                   placeholder="Auto dari durasi"
                 />
               </div>
@@ -281,7 +285,7 @@ export default function AdminCheckoutForm() {
             {/* Price preview */}
             {selectedFacilityId && duration && (
               <div className="bg-primary/5 border border-primary/20 rounded-lg px-4 py-3 text-sm flex justify-between items-center">
-                <span className="text-muted-foreground">Estimasi total</span>
+                <span className="text-muted-foreground">Estimasi harga dasar (final dihitung sistem)</span>
                 <span className="font-bold text-primary text-base">
                   Rp {(
                     Number(facilities.find((f: any) => String(f.id) === selectedFacilityId)?.pricePerHour ?? 0) *
