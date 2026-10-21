@@ -176,6 +176,7 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
   if (!actor || !["owner", "super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
   if (process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return res.status(503).json({error:"USER_WRITE_DISABLED"});
   const {commandType, userPin, expectedSerial, confirmPin, idempotencyKey, name, expectedUid, expectedName} = req.body ?? {};
+  if (process.env.GYM_X904_USER_WRITE_TEST_PIN && (userPin !== process.env.GYM_X904_USER_WRITE_TEST_PIN || expectedUid !== 335 || !["UPDATE_USER","DELETE_USER"].includes(commandType))) return res.status(403).json({error:"TEST_USER_ONLY"});
   const isCreate=commandType==="CREATE_USER";
   const requiresExisting=commandType==="UPDATE_USER" || commandType==="DELETE_USER";
   const safeDisplay=(v:unknown)=>typeof v==="string" && /^[A-Za-z0-9 ._-]{2,24}$/.test(v);
@@ -206,7 +207,7 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)
   const role=(req as any).user?.role;
   const allowed=role==="owner" || role==="super_admin";
   return res.json({allowed,enabled:allowed && process.env.GYM_X904_USER_WRITE_ENABLED==="true",
-    deviceSerial:"TDBD234200545",operations:["CREATE_USER","UPDATE_USER","DELETE_USER"]});
+    deviceSerial:"TDBD234200545",operations:process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"],testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
 });
 
 // VMSC claims and receipts use scoped database SECURITY DEFINER functions.
