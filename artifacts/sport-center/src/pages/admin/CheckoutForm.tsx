@@ -142,7 +142,7 @@ export default function AdminCheckoutForm() {
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
         body: JSON.stringify({
-          ...(!isGuest ? { customerId: Number(selectedCustomerId) } : {}),
+          customerId: isGuest ? null : Number(selectedCustomerId),
           customerName: isGuest ? guestName.trim() : selectedCustomer.name,
           customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
           customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
