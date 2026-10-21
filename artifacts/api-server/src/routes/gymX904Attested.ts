@@ -35,14 +35,13 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
     return res.status(404).json({error:"Not found"});
   const b=req.body;
   if(!b || typeof b!=="object" ||
-     Object.keys(b).sort().join(",")!=="index,issuedAt,occurred,pin,rawHex,readAuthenticated,serial,snapshotId")
+     Object.keys(b).sort().join(",")!=="index,issuedAt,occurred,pin,rawHex,readAuthenticated,serial")
     return res.status(400).json({error:"Invalid attestation"});
-  const {index,issuedAt,occurred,pin,rawHex,readAuthenticated,serial,snapshotId}=b;
+  const {index,issuedAt,occurred,pin,rawHex,readAuthenticated,serial}=b;
   if(serial!==process.env.GYM_X904_DEVICE_SERIAL ||
      typeof pin!=="string" || !/^\d{1,9}$/.test(pin) ||
      !Number.isSafeInteger(index) || index<0 || index>999999 ||
      typeof rawHex!=="string" || !/^[a-f0-9]{80}$/.test(rawHex) ||
-     typeof snapshotId!=="string" || !/^[a-f0-9-]{36}$/.test(snapshotId) ||
      typeof occurred!=="string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(occurred) ||
      typeof issuedAt!=="string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(issuedAt) ||
      readAuthenticated!==true) return res.status(400).json({error:"Invalid attendance proof"});
@@ -50,7 +49,7 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
   if(!Number.isFinite(issued) || Math.abs(Date.now()-issued)>120000 ||
      occurred.slice(0,10)!==localDay())
     return res.status(409).json({error:"Stale attestation"});
-  const canonical=[serial,snapshotId,index,pin,occurred,rawHex,issuedAt,"true"].join("|");
+  const canonical=[serial,index,pin,occurred,rawHex,issuedAt,"true"].join("|");
   const signature=req.headers["x-gym-vmsc-signature"];
   const expected=createHmac("sha256",secret).update(canonical).digest("hex");
   if(typeof signature!=="string" || !/^[a-f0-9]{64}$/.test(signature) ||
@@ -76,8 +75,7 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
         JOIN sport_center.gym_x904_lan_state s ON s.device_serial=l.device_serial
         WHERE l.device_serial=${serial} AND l.event_index=${index}
           AND l.user_pin=${pin} AND l.device_time=${occurred}
-          AND l.last_seen_snapshot=${snapshotId}::uuid
-          AND s.last_snapshot_id=${snapshotId}::uuid
+          AND l.last_seen_snapshot=s.last_snapshot_id
           AND s.last_complete_at>now()-interval '90 minutes'
         FOR UPDATE OF l`);
       if(matched.rows.length!==1) throw Error("X904_LAN_SNAPSHOT_NOT_MATCHED");
