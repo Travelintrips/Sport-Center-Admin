@@ -52,7 +52,13 @@ export default function AdminCheckoutForm() {
   const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = bookingDay;
-  const slotValid = isWalkIn ? Boolean(selectedDate) : slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16));
+  const isMembership = bookingKind === "membership";
+  const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
+  const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
+  const estimatedEventDiscount = bookingKind === "event" ? Math.round(estimatedBase * 0.214) : 0;
+  const estimatedBeforeTax = Math.max(0, estimatedBase - estimatedEventDiscount);
+  const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
+  const slotValid = isMembership || (isWalkIn ? Boolean(selectedDate) : slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16)));
 
   useEffect(() => {
     if (!selectedFacilityId || !selectedDate || isWalkIn || !Number.isInteger(Number(duration)) || Number(duration) < 1) {
@@ -321,9 +327,9 @@ export default function AdminCheckoutForm() {
                   <SelectItem value="corporate">Dibayar perusahaan</SelectItem>
                 </SelectContent>
               </Select>}
-              <p className="text-xs text-muted-foreground">Booking tidak langsung dianggap lunas. Unggah bukti pada detail pembayaran setelah booking dibuat; metode dapat dibantu OCR dan tetap memerlukan verifikasi.</p>
+              {!isMembership && <p className="text-xs text-muted-foreground">{isCompanyPayer ? "Penagihan mengikuti status approval dan konfigurasi invoice perusahaan; bukan otomatis menunggu pembayaran." : "Booking belum dianggap lunas. Bukti pembayaran perlu diverifikasi sebelum konfirmasi."}</p>}
               {bookingKind === "event" && <p className="text-xs text-amber-700">Alur ini untuk satu sesi event. Booking grup multi-sesi harus menggunakan alur grup khusus.</p>}
-              {bookingKind === "membership" && <p className="text-xs text-amber-700">Membership wajib dibuat melalui modul Membership untuk mencegah duplikasi pembayaran.</p>}
+              {isMembership && <p className="text-xs text-amber-700">Pilih member aktif dan catat kunjungan melalui modul Membership. Kunjungan member tidak dikenakan tagihan Rp30.000.</p>}
             </div>
 
             {!isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
@@ -357,10 +363,16 @@ export default function AdminCheckoutForm() {
               </div>}
               <p className="text-xs text-muted-foreground">Status slot dihitung untuk seluruh durasi. Server memeriksa ulang saat menyimpan.</p>
             </div>}
-            {selectedFacilityId && selectedDate && (isWalkIn || slotValid) && <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+            {!isMembership && selectedFacilityId && selectedDate && (isWalkIn || slotValid) && <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
               <p className="font-semibold">Ringkasan Jadwal</p>
               <p>{selectedDate} · {isWalkIn ? "Gym per kunjungan (tanpa durasi)" : startTime.slice(11,16) + " – " + computedEndTime.slice(11,16) + " (" + duration + " jam)"}</p>
-              <p>Estimasi harga dasar: Rp {(Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration))).toLocaleString("id-ID")}</p>
+              <div className="flex justify-between gap-3"><span>Harga fasilitas</span><strong>{formatRupiah(estimatedBase)}</strong></div>
+              {bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
+              <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Estimasi total booking"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
+              {isCompanyPayer ? <>
+                <p className="text-muted-foreground">DPP, PPN, dan PPh mengikuti konfigurasi perusahaan serta kalkulasi backend; jumlah ini bukan angka invoice final.</p>
+                <p className="text-muted-foreground">Status setelah dibuat: menunggu approval perusahaan atau belum ditagihkan, sesuai akun.</p>
+              </> : <p className="text-muted-foreground">Personal: PPN Rp0, DPP pajak Rp0, PPh Rp0. Nilai akhir divalidasi backend.</p>}
             </div>}
             {/* Notes */}
             <div className="space-y-2">
@@ -374,25 +386,18 @@ export default function AdminCheckoutForm() {
               />
             </div>
 
-            {/* Price preview */}
-            {selectedFacilityId && duration && (
-              <div className="bg-primary/5 border border-primary/20 rounded-lg px-4 py-3 text-sm flex justify-between items-center">
-                <span className="text-muted-foreground">Estimasi harga dasar (final dihitung sistem)</span>
-                <span className="font-bold text-primary text-base">
-                  Rp {(
-                    Number(facilities.find((f: any) => String(f.id) === selectedFacilityId)?.pricePerHour ?? 0) *
-                    (isWalkIn ? 1 : Number(duration))
-                  ).toLocaleString("id-ID")}
-                </span>
-              </div>
-            )}
+            {isMembership && <div className="rounded-lg border p-3 text-sm space-y-2">
+              <p className="font-semibold">Kunjungan Member Gym</p>
+              <p>Gunakan pencarian member pada modul Membership untuk memeriksa status dan masa aktif keanggotaan.</p>
+              <p>Biaya kunjungan member aktif: <strong>Rp0</strong> (sudah termasuk membership). Tidak ada pembayaran baru dari form ini.</p>
+            </div>}
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting || (bookingKind !== "membership" && !slotValid)}>
+            <Button type={isMembership ? "button" : "submit"} onClick={isMembership ? () => setLocation("/admin/memberships") : undefined} className="w-full h-11 text-base font-bold" disabled={isSubmitting || (!isMembership && !slotValid)}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
-                : bookingKind === "membership" ? "Buka Modul Membership" : "Buat Booking (Menunggu Pembayaran)"
+                : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking (Menunggu Pembayaran)"
               }
             </Button>
           </CardFooter>
