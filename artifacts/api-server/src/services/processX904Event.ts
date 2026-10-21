@@ -35,7 +35,7 @@ export async function processX904Event(event: X904EventInput,
     // Only separately attested evidence explicitly verified by the trusted ingress can authorize check-in.
     const attestation = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_verification_evidence
       WHERE source_event_id=${event.eventId} AND device_serial=${event.deviceSerial}
-        AND user_pin=${event.userPin} AND evidence_status='verified'
+        AND user_pin=${event.userPin} AND evidence_status='protocol_verified'
         AND capture_source='trusted_adms_ingress'
         AND verification_code=CAST(${raw.rows[0]?.verification_type ?? -1} AS integer)
         AND verification_method=CASE CAST(${raw.rows[0]?.verification_type ?? -1} AS integer)
