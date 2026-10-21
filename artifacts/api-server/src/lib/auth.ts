@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import * as bcrypt from "bcryptjs";
+import { db, usersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 /**
  * requireEnv — reads a required env var and throws a safe startup error if missing.
@@ -108,8 +110,23 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     res.status(401).json({ error: "Invalid or expired token" });
     return;
   }
-  (req as any).user = payload;
-  next();
+  // Tokens contain a role snapshot. Fail closed if the database role or
+  // account status has changed (including demotions and disabled accounts).
+  // This prevents previously issued admin tokens retaining elevated rights.
+  db.select({ role: usersTable.role, status: usersTable.accountStatus })
+    .from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
+    .then(([account]) => {
+      if (!account || account.status !== "active" || account.role !== payload.role) {
+        res.status(401).json({ error: "Hak akses akun berubah. Silakan login kembali." });
+        return;
+      }
+      (req as any).user = payload;
+      next();
+    })
+    .catch((error) => {
+      req.log?.error?.({ error }, "Auth account verification failed");
+      res.status(503).json({ error: "Verifikasi akun sementara tidak tersedia." });
+    });
 }
 
 /**
@@ -130,8 +147,23 @@ export function authMiddlewareWithQueryToken(req: Request, res: Response, next: 
     res.status(401).json({ error: "Invalid or expired token" });
     return;
   }
-  (req as any).user = payload;
-  next();
+  // Tokens contain a role snapshot. Fail closed if the database role or
+  // account status has changed (including demotions and disabled accounts).
+  // This prevents previously issued admin tokens retaining elevated rights.
+  db.select({ role: usersTable.role, status: usersTable.accountStatus })
+    .from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
+    .then(([account]) => {
+      if (!account || account.status !== "active" || account.role !== payload.role) {
+        res.status(401).json({ error: "Hak akses akun berubah. Silakan login kembali." });
+        return;
+      }
+      (req as any).user = payload;
+      next();
+    })
+    .catch((error) => {
+      req.log?.error?.({ error }, "Auth account verification failed");
+      res.status(503).json({ error: "Verifikasi akun sementara tidak tersedia." });
+    });
 }
 
 const ADMIN_ROLES = ["owner", "admin", "super_admin", "admin_booking", "finance", "staff"];
