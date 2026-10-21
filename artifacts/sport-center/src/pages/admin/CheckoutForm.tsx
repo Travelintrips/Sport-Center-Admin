@@ -30,6 +30,7 @@ export default function AdminCheckoutForm() {
   const [slotState, setSlotState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [startTime, setStartTime] = useState("");
+  const [bookingDay, setBookingDay] = useState("");
   const [endTime, setEndTime] = useState("");
   const [duration, setDuration] = useState("1");
   const [bookingKind, setBookingKind] = useState("personal");
@@ -50,8 +51,8 @@ export default function AdminCheckoutForm() {
   );
   const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
-  const selectedDate = startTime.slice(0, 10);
-  const slotValid = isWalkIn || (slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16)));
+  const selectedDate = bookingDay;
+  const slotValid = isWalkIn ? Boolean(selectedDate) : slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16));
 
   useEffect(() => {
     if (!selectedFacilityId || !selectedDate || isWalkIn || !Number.isInteger(Number(duration)) || Number(duration) < 1) {
@@ -111,8 +112,8 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
       return;
     }
-    if (!startTime) {
-      toast({ title: "Masukkan waktu mulai", variant: "destructive" });
+    if (!selectedDate || (!isWalkIn && !startTime)) {
+      toast({ title: "Pilih tanggal dan jam booking", variant: "destructive" });
       return;
     }
 
@@ -151,9 +152,8 @@ export default function AdminCheckoutForm() {
           customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
           customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
           facilityId: Number(selectedFacilityId),
-          bookingDate: startTime.slice(0, 10),
-          startTime: startTime.slice(11, 16),
-          durationHours: Number(duration),
+          bookingDate: selectedDate,
+          ...(!isWalkIn ? { startTime: startTime.slice(11, 16), durationHours: Number(duration) } : { numberOfPeople: 1 }),
           bookingType: bookingKind === "event" ? "event" : "regular",
           payerType: corporate ? "company" : "personal",
           ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
@@ -179,6 +179,7 @@ export default function AdminCheckoutForm() {
       setGuestEmail("");
       setSelectedFacilityId("");
       setStartTime("");
+      setBookingDay("");
       setEndTime("");
       setDuration("1");
 
@@ -268,56 +269,40 @@ export default function AdminCheckoutForm() {
             {/* Facility */}
             <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
-              <Select value={selectedFacilityId} onValueChange={setSelectedFacilityId}>
+              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setStartTime(""); }}>
                 <SelectTrigger id="facility">
                   <SelectValue placeholder="Pilih fasilitas..." />
                 </SelectTrigger>
                 <SelectContent>
                   {facilities.map((f: any) => (
                     <SelectItem key={f.id} value={String(f.id)}>
-                      {f.name} — Rp {Number(f.pricePerHour).toLocaleString("id-ID")}/jam
+                      {f.name} — Rp {Number(f.pricePerHour).toLocaleString("id-ID")}{/gym|fitness/i.test(String(f.name ?? "") + " " + String(f.category ?? "")) || f.bookingMode === "walk_in" ? "/kunjungan" : "/jam"}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Time row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Booking date and duration: Gym is per visit, not hourly. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="startTime">Waktu Mulai <span className="text-destructive">*</span></Label>
-                <Input
-                  id="startTime"
-                  type="datetime-local"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  required
-                />
+                <Label htmlFor="bookingDate">Tanggal Booking *</Label>
+                <Input id="bookingDate" type="date" value={bookingDay}
+                  onChange={(e) => { setBookingDay(e.target.value); setStartTime(""); }} required={bookingKind !== "membership"} />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="duration">Durasi (jam) <span className="text-destructive">*</span></Label>
-                <Input
-                  id="duration"
-                  type="number"
-                  min={1}
-                  max={12}
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="endTime">Waktu Selesai (otomatis)</Label>
-                <Input
-                  id="endTime"
-                  type="datetime-local"
-                  value={endTime || computedEndTime}
-                  readOnly
-                  placeholder="Auto dari durasi"
-                />
-              </div>
+              {!isWalkIn && <div className="space-y-2">
+                <Label htmlFor="duration">Durasi (jam) *</Label>
+                <Select value={duration} onValueChange={(v) => { setDuration(v); setStartTime(""); }}>
+                  <SelectTrigger id="duration"><SelectValue /></SelectTrigger>
+                  <SelectContent>{Array.from({length: 12}, (_, i) => i + 1).map((n) =>
+                    <SelectItem key={n} value={String(n)}>{n} jam</SelectItem>)}</SelectContent>
+                </Select>
+              </div>}
             </div>
-
+            {isWalkIn && <p className="text-sm text-muted-foreground rounded-lg border p-3">
+              Gym reguler menggunakan tarif per kunjungan, tanpa durasi atau pilihan slot jam.
+              Member Gym menggunakan alur Membership terpisah agar kunjungan tidak ditagih ulang.
+            </p>}
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
               <Select value={bookingKind} onValueChange={setBookingKind}>
@@ -341,21 +326,41 @@ export default function AdminCheckoutForm() {
               {bookingKind === "membership" && <p className="text-xs text-amber-700">Membership wajib dibuat melalui modul Membership untuk mencegah duplikasi pembayaran.</p>}
             </div>
 
-            {!isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-2">
-              <Label>Periksa Slot Tersedia</Label>
-              {slotState === "loading" && <p className="text-xs">Memeriksa slot...</p>}
-              {slotState === "error" && <p className="text-xs text-destructive">Pemeriksaan slot gagal; penyimpanan diblokir.</p>}
-              {slotState === "ready" && <div className="flex flex-wrap gap-2">
-                {slotOptions.map((slot) => <Button key={slot.time} type="button" size="sm"
-                  disabled={!slot.available}
-                  title={slot.reason ?? ""}
-                  variant={startTime.slice(11, 16) === slot.time.slice(0, 5) ? "default" : "outline"}
-                  onClick={() => setStartTime(selectedDate + "T" + slot.time.slice(0, 5))}>
-                  {slot.time.slice(0, 5)}{slot.available ? "" : " · Terisi"}
-                </Button>)}
-                {slotOptions.length === 0 && <p className="text-xs">Tidak ada slot pada tanggal ini.</p>}
+            {!isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Pilih Jam Mulai</Label>
+                <span className="text-xs text-muted-foreground">Durasi {duration} jam</span>
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                <span>● Tersedia</span><span>◯ Tidak tersedia</span><span className="text-orange-600">● Dipilih</span>
+              </div>
+              {slotState === "loading" && <p className="text-sm">Memeriksa ketersediaan...</p>}
+              {slotState === "error" && <p className="text-sm text-destructive">Pemeriksaan gagal; booking tidak dapat disimpan.</p>}
+              {slotState === "ready" && <div className="space-y-3">
+                {[
+                  { label: "Pagi", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) < 12) },
+                  { label: "Siang", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) >= 12 && Number(x.time.slice(0,2)) < 17) },
+                  { label: "Sore & Malam", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) >= 17) },
+                ].filter((section) => section.rows.length > 0).map((section) => <div key={section.label}>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">{section.label}</p>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {section.rows.map((slot) => <Button key={slot.time} type="button" size="sm"
+                      disabled={!slot.available} title={slot.reason ?? (slot.available ? "Tersedia" : "Tidak tersedia")}
+                      className={startTime.slice(11,16) === slot.time.slice(0,5) ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}
+                      variant={startTime.slice(11,16) === slot.time.slice(0,5) ? "default" : "outline"}
+                      onClick={() => setStartTime(selectedDate + "T" + slot.time.slice(0,5))}>
+                      {slot.time.slice(0,5)}
+                    </Button>)}
+                  </div>
+                </div>)}
+                {slotOptions.length === 0 && <p className="text-sm">Tidak ada slot dalam jam operasional.</p>}
               </div>}
-              <p className="text-xs text-muted-foreground">Slot diperiksa kembali oleh server saat menyimpan.</p>
+              <p className="text-xs text-muted-foreground">Status slot dihitung untuk seluruh durasi. Server memeriksa ulang saat menyimpan.</p>
+            </div>}
+            {selectedFacilityId && selectedDate && (isWalkIn || slotValid) && <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+              <p className="font-semibold">Ringkasan Jadwal</p>
+              <p>{selectedDate} · {isWalkIn ? "Gym per kunjungan (tanpa durasi)" : startTime.slice(11,16) + " – " + computedEndTime.slice(11,16) + " (" + duration + " jam)"}</p>
+              <p>Estimasi harga dasar: Rp {(Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration))).toLocaleString("id-ID")}</p>
             </div>}
             {/* Notes */}
             <div className="space-y-2">
@@ -376,7 +381,7 @@ export default function AdminCheckoutForm() {
                 <span className="font-bold text-primary text-base">
                   Rp {(
                     Number(facilities.find((f: any) => String(f.id) === selectedFacilityId)?.pricePerHour ?? 0) *
-                    Number(duration)
+                    (isWalkIn ? 1 : Number(duration))
                   ).toLocaleString("id-ID")}
                 </span>
               </div>
