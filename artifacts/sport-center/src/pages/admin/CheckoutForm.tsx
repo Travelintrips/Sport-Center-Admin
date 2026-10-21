@@ -35,6 +35,12 @@ export default function AdminCheckoutForm() {
   const [duration, setDuration] = useState("1");
   const [bookingKind, setBookingKind] = useState("personal");
   const [eventPayer, setEventPayer] = useState("personal");
+  const [memberAction, setMemberAction] = useState("new");
+  const [memberId, setMemberId] = useState("");
+  const [memberMonths, setMemberMonths] = useState("1");
+  const [members, setMembers] = useState<Array<{id:number; name:string; phone:string; status:string; endDate:string}>>([]);
+  const [memberLoadError, setMemberLoadError] = useState("");
+  const [membershipResult, setMembershipResult] = useState("");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
@@ -85,6 +91,46 @@ export default function AdminCheckoutForm() {
     });
     return () => controller.abort();
   }, [selectedFacilityId, selectedDate, duration, isWalkIn]);
+
+  useEffect(() => {
+    if (!isMembership) return;
+    let active = true;
+    fetch("/api/memberships", {headers:{Authorization: "Bearer " + (getToken() ?? "")}})
+      .then(async r => { if (!r.ok) throw Error("Tidak dapat membaca daftar membership"); return r.json(); })
+      .then(rows => { if(active) {setMembers(Array.isArray(rows) ? rows : []); setMemberLoadError("");} })
+      .catch(e => {if(active) setMemberLoadError(String(e.message || e));});
+    return () => {active = false;};
+  }, [isMembership]);
+  const matchedMember = members.find(m => String(m.id) === memberId);
+  const membershipReady = memberAction === "new"
+    ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
+      && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId)
+    : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
+  async function submitMembership() {
+    if (!membershipReady || isSubmitting) return;
+    const actionLabel = memberAction === "new" ? "pendaftaran" : memberAction === "renew" ? "perpanjangan" : "check-in";
+    if (!window.confirm("Konfirmasi " + actionLabel + " membership? Proses ini akan dicatat di sistem.")) return;
+    setIsSubmitting(true);
+    setMembershipResult("");
+    try {
+      const endpoint = memberAction === "new" ? "/api/memberships"
+        : "/api/memberships/" + memberId + (memberAction === "renew" ? "/renew" : "/checkin");
+      const payload = memberAction === "new"
+        ? {name:isGuest ? guestName.trim() : selectedCustomer.name,
+           phone:isGuest ? guestPhone.trim() : selectedCustomer.phone,
+           email:isGuest ? guestEmail.trim() : selectedCustomer.email,
+           startDate:selectedDate, months:Number(memberMonths), notes}
+        : memberAction === "renew" ? {months:Number(memberMonths)}
+          : {checkinDate:selectedDate, notes};
+      const response = await fetch(endpoint, {method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer " + (getToken() ?? "")},body:JSON.stringify(payload)});
+      const data = await response.json();
+      if(!response.ok) throw Error(data.error || "Proses membership gagal");
+      setMembershipResult(memberAction === "checkin" ? "Kunjungan berhasil dicatat tanpa tagihan baru."
+        : "Permintaan membership tercatat. Selesaikan pembayaran melalui alur verifikasi Membership; belum dianggap lunas.");
+      toast({title:"Berhasil",description:"Periksa detail pada modul Membership."});
+    } catch(e) {toast({title:"Membership gagal",description:e instanceof Error ? e.message : "Terjadi kesalahan",variant:"destructive"});}
+    finally {setIsSubmitting(false);}
+  }
 
   // Auto-compute endTime whenever startTime or duration changes
   const computedEndTime = (() => {
@@ -386,20 +432,58 @@ export default function AdminCheckoutForm() {
               />
             </div>
 
-            {isMembership && <div className="rounded-lg border p-3 text-sm space-y-2">
-              <p className="font-semibold">Kunjungan Member Gym</p>
-              <p>Gunakan pencarian member pada modul Membership untuk memeriksa status dan masa aktif keanggotaan.</p>
-              <p>Biaya kunjungan member aktif: <strong>Rp0</strong> (sudah termasuk membership). Tidak ada pembayaran baru dari form ini.</p>
+            {isMembership && <div className="rounded-lg border p-4 space-y-3">
+              <p className="font-semibold">Pengelolaan Member Gym</p>
+              <Label>Tindakan Membership</Label>
+              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setMemberId("");setMembershipResult("");}}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="new">Daftar Member Baru</SelectItem>
+                  <SelectItem value="renew">Perpanjang Membership</SelectItem>
+                  <SelectItem value="checkin">Catat Kunjungan Member Aktif (Rp0)</SelectItem>
+                </SelectContent>
+              </Select>
+              {memberAction === "new" ? <>
+                <p className="text-xs text-muted-foreground">Gunakan Nama Pemesan dan nomor WhatsApp di atas. Email wajib diisi untuk pendaftaran. Pendaftaran tidak otomatis lunas.</p>
+                <Label>Paket membership</Label>
+                <Select value={memberMonths} onValueChange={setMemberMonths}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{[1,2,3,6,12].map(n => <SelectItem key={n} value={String(n)}>{n} bulan</SelectItem>)}</SelectContent>
+                </Select>
+                <p className="text-sm">Estimasi biaya membership: <strong>{formatRupiah(Number(memberMonths) * 300000)}</strong>. Verifikasi pembayaran dilakukan terpisah.</p>
+              </> : <>
+                <Label>Cari Member Gym</Label>
+                <Select value={memberId} onValueChange={setMemberId}>
+                  <SelectTrigger><SelectValue placeholder="Pilih member berdasarkan nama / telepon" /></SelectTrigger>
+                  <SelectContent>{members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(customerSearch.toLowerCase()))).map(m =>
+                    <SelectItem key={m.id} value={String(m.id)}>{m.name} · {m.phone} · {m.status}</SelectItem>)}</SelectContent>
+                </Select>
+                {matchedMember && <p className="text-sm">Status: <strong>{matchedMember.status}</strong> · Berlaku hingga {matchedMember.endDate}</p>}
+                {memberAction === "renew" && <>
+                  <Label>Perpanjangan</Label>
+                  <Select value={memberMonths} onValueChange={setMemberMonths}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{[1,2,3,6,12].map(n => <SelectItem key={n} value={String(n)}>{n} bulan</SelectItem>)}</SelectContent>
+                  </Select>
+                </>}
+                {memberAction === "checkin" && <p className="text-sm">Kunjungan member aktif tidak memerlukan durasi dan tidak menimbulkan tagihan baru.</p>}
+              </>}
+              {memberLoadError && <p className="text-xs text-destructive">{memberLoadError}</p>}
+              {membershipResult && <p className="text-sm font-medium text-green-700">{membershipResult}</p>}
+              <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={submitMembership}>
+                {isSubmitting ? "Memproses..." : memberAction === "new" ? "Daftarkan Member" : memberAction === "renew" ? "Perpanjang Membership" : "Catat Kunjungan (Rp0)"}
+              </Button>
+              <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>
             </div>}
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            <Button type={isMembership ? "button" : "submit"} onClick={isMembership ? () => setLocation("/admin/memberships") : undefined} className="w-full h-11 text-base font-bold" disabled={isSubmitting || (!isMembership && !slotValid)}>
+            {!isMembership && <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting || !slotValid}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking (Menunggu Pembayaran)"
               }
-            </Button>
+            </Button>}
           </CardFooter>
         </Card>
       </form>
