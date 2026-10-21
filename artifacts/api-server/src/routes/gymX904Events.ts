@@ -151,6 +151,47 @@ router.get("/admin/gym-x904/lan-reconciliation", adminMiddleware, async (req,res
   }
 });
 
+// Read-only daily scan audit: each physical scan remains separate; never infer
+// membership identity from a name or backfill attendance/payment records.
+router.get("/admin/gym-x904/daily-scan-audit", adminMiddleware, async (req,res) => {
+  res.setHeader("Cache-Control","no-store");
+  const date=String(req.query.date??"");
+  const serial=process.env.GYM_X904_DEVICE_SERIAL??"";
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||serial.length<4)
+    return res.status(400).json({error:"Invalid date/device"});
+  try {
+    const result=await db.execute(sql`SELECT l.user_pin, max(u.display_name) AS device_name,
+      max(u.device_role)::integer AS device_role,
+      count(*)::integer AS scan_count,
+      min(l.device_time) AS first_scan, max(l.device_time) AS last_scan,
+      max(m.membership_id)::integer AS membership_id,
+      max(m.status) AS mapping_status,
+      max(sm.status) AS membership_status,
+      bool_or(coalesce(sm.status='active' AND sm.start_date<=${date} AND sm.end_date>=${date},false)) AS active_on_date,
+      bool_or(EXISTS(SELECT 1 FROM sport_center.sport_membership_payments p
+        WHERE p.membership_id=m.membership_id AND p.status='confirmed'
+          AND p.period_start<=${date} AND p.period_end>=${date})) AS payment_confirmed,
+      max(coalesce((SELECT count(*)::integer FROM sport_center.gym_checkins c
+       WHERE c.membership_id=m.membership_id AND c.checkin_date=${date}::date),0))::integer AS daily_checkins
+      FROM sport_center.gym_x904_lan_logs l
+      LEFT JOIN sport_center.gym_x904_lan_users u ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
+      LEFT JOIN sport_center.gym_x904_member_mapping m ON m.device_serial=l.device_serial AND m.user_pin=l.user_pin
+      LEFT JOIN sport_center.sport_memberships sm ON sm.id=m.membership_id
+      WHERE l.device_serial=${serial} AND LEFT(l.device_time,10)=${date}
+      GROUP BY l.user_pin ORDER BY scan_count DESC,l.user_pin LIMIT 500`);
+    const rows=result.rows.map(r=>({...r, review_category:Number(r.device_role)!==0?"device_admin_or_unknown":
+      r.mapping_status!=="verified"?"identity_verification_required":
+      r.active_on_date!==true?"membership_not_active":
+      r.payment_confirmed!==true?"payment_not_confirmed":"eligible_if_trusted_evidence"}));
+    return res.json({readOnly:true,date,scanCount:result.rows.reduce((n,r)=>n+Number(r.scan_count),0),
+      distinctPins:rows.length,repeatPins:result.rows.filter(r=>Number(r.scan_count)>1).length,
+      rows});
+  } catch(error) {
+    console.error("[x904] daily scan audit unavailable",error instanceof Error?error.message:"UNKNOWN");
+    return res.status(503).json({error:"Daily scan audit unavailable"});
+  }
+});
+
 // Explicit read-only review queue. Historical events are never replayed into bookings.
 router.get("/admin/gym-x904/event-review", adminMiddleware, async (req,res) => {
   res.setHeader("Cache-Control","no-store");
