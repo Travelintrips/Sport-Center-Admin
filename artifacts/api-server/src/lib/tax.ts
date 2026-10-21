@@ -188,9 +188,8 @@ export function calculateTaxFromTreatment(
  * the amount. The global tax setting remains the source for the active rate.
  *
  * Harga fasilitas sudah termasuk PPN ketika customer mengaktifkan PPN.
- * Personal/company checked = inclusive PPN.
- * Personal/company unchecked = no PPN breakdown, tetapi harga jual tetap
- * tidak ditambah PPN lagi.
+ * Personal, including guest/event personal, always has no PPN.
+ * Corporate follows the stored company PPN setting; selling price unchanged.
  */
 export async function resolveCustomerTax(
   subtotal: number,
@@ -209,8 +208,10 @@ export async function resolveCustomerTax(
         .where(eq(usersTable.id, sourceId))
         .limit(1);
 
-  const accountType = customer?.accountType === "company" ? "company" : "personal";
-  const enabled = customer?.ppnEnabled ?? true;
+  // Personal bookings (including unregistered guests and personal-paid events)
+  // are never subject to PPN. Preserve the gross selling price as the total.
+  // Only an explicitly resolved company account may opt into PPN treatment.
+  const enabled = customer?.accountType === "company" && customer.ppnEnabled === true;
   const treatment: PpnTreatment = enabled ? "inclusive" : "none";
 
   return calculateTaxForTreatment(subtotal, treatment, options.bookingDate);
