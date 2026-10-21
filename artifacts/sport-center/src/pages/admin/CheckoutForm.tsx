@@ -37,6 +37,7 @@ export default function AdminCheckoutForm() {
   const [eventPayer, setEventPayer] = useState("personal");
   const [memberAction, setMemberAction] = useState("new");
   const [memberId, setMemberId] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
   const [memberMonths, setMemberMonths] = useState("1");
   const [members, setMembers] = useState<Array<{id:number; name:string; phone:string; status:string; endDate:string}>>([]);
   const [memberLoadError, setMemberLoadError] = useState("");
@@ -455,7 +456,9 @@ export default function AdminCheckoutForm() {
                 <Label>Cari Member Gym</Label>
                 <Select value={memberId} onValueChange={setMemberId}>
                   <SelectTrigger><SelectValue placeholder="Pilih member berdasarkan nama / telepon" /></SelectTrigger>
-                  <SelectContent>{members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(customerSearch.toLowerCase()))).map(m =>
+                  <SelectContent>
+                    <div className="sticky top-0 z-10 bg-popover p-2" onKeyDown={e => e.stopPropagation()}><Input placeholder="Cari nama / telepon member..." value={memberSearch} onChange={e => setMemberSearch(e.target.value)} /></div>
+                    {members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.toLowerCase()))).map(m =>
                     <SelectItem key={m.id} value={String(m.id)}>{m.name} · {m.phone} · {m.status}</SelectItem>)}</SelectContent>
                 </Select>
                 {matchedMember && <p className="text-sm">Status: <strong>{matchedMember.status}</strong> · Berlaku hingga {matchedMember.endDate}</p>}
