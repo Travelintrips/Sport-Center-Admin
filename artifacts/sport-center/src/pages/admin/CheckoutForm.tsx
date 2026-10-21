@@ -255,7 +255,8 @@ export default function AdminCheckoutForm() {
           <p className="text-muted-foreground">Order <span className="font-semibold text-foreground">{createdOrder}</span> telah dibuat.</p>
         </div>
         <div className="flex gap-3">
-          <Button onClick={() => setLocation(`/admin/bookings`)}>Lihat Semua Booking</Button>
+          <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>Lihat Detail & Kelola Pembayaran</Button>
+          <Button variant="outline" onClick={() => setLocation("/admin/bookings")}>Lihat Semua Booking</Button>
           <Button variant="outline" onClick={() => setCreatedOrder(null)}>Buat Booking Lagi</Button>
         </div>
       </div>
