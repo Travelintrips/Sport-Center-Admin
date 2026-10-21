@@ -171,8 +171,8 @@ router.get("/admin/gym-x904/daily-scan-audit", adminMiddleware, async (req,res) 
       bool_or(EXISTS(SELECT 1 FROM sport_center.sport_membership_payments p
         WHERE p.membership_id=m.membership_id AND p.status='confirmed'
           AND p.period_start<=${date} AND p.period_end>=${date})) AS payment_confirmed,
-      (SELECT count(*)::integer FROM sport_center.gym_checkins c
-       WHERE c.membership_id=max(m.membership_id) AND c.checkin_date=${date}::date) AS daily_checkins
+      max(coalesce((SELECT count(*)::integer FROM sport_center.gym_checkins c
+       WHERE c.membership_id=m.membership_id AND c.checkin_date=${date}::date),0))::integer AS daily_checkins
       FROM sport_center.gym_x904_lan_logs l
       LEFT JOIN sport_center.gym_x904_lan_users u ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
       LEFT JOIN sport_center.gym_x904_member_mapping m ON m.device_serial=l.device_serial AND m.user_pin=l.user_pin
