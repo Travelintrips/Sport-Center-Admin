@@ -26,7 +26,8 @@ export default function AdminCheckoutForm() {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [duration, setDuration] = useState("1");
-  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [bookingKind, setBookingKind] = useState("personal");
+  const [eventPayer, setEventPayer] = useState("personal");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
@@ -36,6 +37,7 @@ export default function AdminCheckoutForm() {
 
   const facilities = Array.isArray(facilitiesData) ? facilitiesData : [];
   const customers = Array.isArray(customersData) ? customersData : [];
+  const selectedCustomer: any = customers.find((c: any) => String(c.id) === selectedCustomerId);
 
   // Auto-compute endTime whenever startTime or duration changes
   const computedEndTime = (() => {
@@ -53,6 +55,10 @@ export default function AdminCheckoutForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (bookingKind === "membership") {
+      setLocation("/admin/memberships");
+      return;
+    }
     if (!selectedCustomerId) {
       toast({ title: "Pilih customer terlebih dahulu", variant: "destructive" });
       return;
@@ -66,21 +72,36 @@ export default function AdminCheckoutForm() {
       return;
     }
 
+    const corporate = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
+    if (corporate && selectedCustomer?.accountType !== "company") {
+      toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
+      return;
+    }
+    if (!selectedCustomer?.name || !selectedCustomer?.phone) {
+      toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/sport-center/bookings", {
+      const res = await fetch("/api/bookings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
         body: JSON.stringify({
-          customerId: selectedCustomerId,
-          facilityId: selectedFacilityId,
-          startTime,
-          endTime: endTime || computedEndTime,
-          duration: Number(duration),
-          paymentMethod,
+          customerId: Number(selectedCustomerId),
+          customerName: selectedCustomer.name,
+          customerPhone: selectedCustomer.phone,
+          customerEmail: selectedCustomer.email ?? "",
+          facilityId: Number(selectedFacilityId),
+          bookingDate: startTime.slice(0, 10),
+          startTime: startTime.slice(11, 16),
+          durationHours: Number(duration),
+          bookingType: bookingKind === "event" ? "event" : "regular",
+          payerType: corporate ? "company" : "personal",
+          ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
+          source: "admin",
           notes: notes || undefined,
         }),
       });
@@ -101,7 +122,7 @@ export default function AdminCheckoutForm() {
       setStartTime("");
       setEndTime("");
       setDuration("1");
-      setPaymentMethod("bank_transfer");
+
       setNotes("");
     } catch {
       toast({ title: "Gagal menghubungi server", variant: "destructive" });
@@ -135,7 +156,7 @@ export default function AdminCheckoutForm() {
           <ShoppingCart className="text-primary w-8 h-8" />
           Buat Booking (Admin)
         </h1>
-        <p className="text-muted-foreground mt-1">Booking langsung atas nama customer terdaftar.</p>
+        <p className="text-muted-foreground mt-1">Booking melalui validasi jadwal, harga, pajak dan status pembayaran pada layanan utama.</p>
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -218,19 +239,27 @@ export default function AdminCheckoutForm() {
               </div>
             </div>
 
-            {/* Payment method */}
             <div className="space-y-2">
-              <Label htmlFor="paymentMethod">Metode Pembayaran <span className="text-destructive">*</span></Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                <SelectTrigger id="paymentMethod">
-                  <SelectValue />
-                </SelectTrigger>
+              <Label>Jenis pemesanan</Label>
+              <Select value={bookingKind} onValueChange={setBookingKind}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Tunai</SelectItem>
-                  <SelectItem value="bank_transfer">Transfer Bank</SelectItem>
-                  <SelectItem value="qris">QRIS</SelectItem>
+                  <SelectItem value="personal">Personal / Umum</SelectItem>
+                  <SelectItem value="corporate">Perusahaan / Corporate</SelectItem>
+                  <SelectItem value="membership">Membership Gym (kelola di Membership)</SelectItem>
+                  <SelectItem value="event">Event / Grup</SelectItem>
                 </SelectContent>
               </Select>
+              {bookingKind === "event" && <Select value={eventPayer} onValueChange={setEventPayer}>
+                <SelectTrigger><SelectValue placeholder="Pihak pembayar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Dibayar personal</SelectItem>
+                  <SelectItem value="corporate">Dibayar perusahaan</SelectItem>
+                </SelectContent>
+              </Select>}
+              <p className="text-xs text-muted-foreground">Booking tidak langsung dianggap lunas. Unggah bukti pada detail pembayaran setelah booking dibuat; metode dapat dibantu OCR dan tetap memerlukan verifikasi.</p>
+              {bookingKind === "event" && <p className="text-xs text-amber-700">Alur ini untuk satu sesi event. Booking grup multi-sesi harus menggunakan alur grup khusus.</p>}
+              {bookingKind === "membership" && <p className="text-xs text-amber-700">Membership wajib dibuat melalui modul Membership untuk mencegah duplikasi pembayaran.</p>}
             </div>
 
             {/* Notes */}
@@ -263,7 +292,7 @@ export default function AdminCheckoutForm() {
             <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
-                : "Konfirmasi Booking"
+                : bookingKind === "membership" ? "Buka Modul Membership" : "Buat Booking (Menunggu Pembayaran)"
               }
             </Button>
           </CardFooter>
@@ -272,3 +301,5 @@ export default function AdminCheckoutForm() {
     </div>
   );
 }
+
+[executed on device: srv1792369 (0891e23a-6a6b-4f8c-a16a-962e888e2014)]
