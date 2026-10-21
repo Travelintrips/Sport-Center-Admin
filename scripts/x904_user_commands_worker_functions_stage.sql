@@ -1,6 +1,6 @@
 -- Run after x904_user_commands_stage.sql. No write commands are sent by this migration.
 -- SECURITY DEFINER is intentionally restricted to the existing VMSC evidence DB role.
-CREATE OR REPLACE FUNCTION sport_center.x904_claim_user_command()
+CREATE OR REPLACE FUNCTION sport_center.x904_claim_user_command(p_user_pin text DEFAULT NULL, p_expected_uid integer DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,sport_center
 AS $x904$
@@ -12,6 +12,7 @@ BEGIN
   WITH candidate AS (
     SELECT command_id FROM sport_center.x904_user_commands
     WHERE device_serial='TDBD234200545' AND state='queued' AND attempts=0
+      AND (p_user_pin IS NULL OR (user_pin=p_user_pin AND (payload->>'expectedUid')::integer=p_expected_uid))
     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
   )
   UPDATE sport_center.x904_user_commands q SET state='claimed',
@@ -63,7 +64,7 @@ BEGIN
   RETURN true;
 END $x904$;
 
-REVOKE ALL ON FUNCTION sport_center.x904_claim_user_command() FROM PUBLIC;
+REVOKE ALL ON FUNCTION sport_center.x904_claim_user_command(text,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sport_center.x904_complete_user_command(uuid,uuid,boolean,integer,integer,integer,text) FROM PUBLIC;
 REVOKE ALL ON TABLE sport_center.x904_user_commands FROM PUBLIC;
 
@@ -71,7 +72,7 @@ DO $x904$
 BEGIN
  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='x904_vmsc_evidence_login') THEN
    EXECUTE 'GRANT USAGE ON SCHEMA sport_center TO x904_vmsc_evidence_login';
-   EXECUTE 'GRANT EXECUTE ON FUNCTION sport_center.x904_claim_user_command() TO x904_vmsc_evidence_login';
+   EXECUTE 'GRANT EXECUTE ON FUNCTION sport_center.x904_claim_user_command(text,integer) TO x904_vmsc_evidence_login';
    EXECUTE 'GRANT EXECUTE ON FUNCTION sport_center.x904_complete_user_command(uuid,uuid,boolean,integer,integer,integer,text) TO x904_vmsc_evidence_login';
  END IF;
 END $x904$;
