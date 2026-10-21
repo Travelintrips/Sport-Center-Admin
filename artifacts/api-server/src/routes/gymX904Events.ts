@@ -183,8 +183,8 @@ router.get("/admin/gym-x904/daily-scan-audit", adminMiddleware, async (req,res) 
       r.mapping_status!=="verified"?"identity_verification_required":
       r.active_on_date!==true?"membership_not_active":
       r.payment_confirmed!==true?"payment_not_confirmed":"eligible_if_trusted_evidence"}));
-    return res.json({readOnly:true,date,scanCount:rows.reduce((n,r)=>n+Number(r.scan_count),0),
-      distinctPins:rows.length,repeatPins:rows.filter(r=>Number(r.scan_count)>1).length,
+    return res.json({readOnly:true,date,scanCount:result.rows.reduce((n,r)=>n+Number(r.scan_count),0),
+      distinctPins:rows.length,repeatPins:result.rows.filter(r=>Number(r.scan_count)>1).length,
       rows});
   } catch(error) {
     console.error("[x904] daily scan audit unavailable",error instanceof Error?error.message:"UNKNOWN");
