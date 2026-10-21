@@ -394,7 +394,7 @@ export default function AdminCheckoutForm() {
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting || (!isMembership && !slotValid)}>
+            <Button type={isMembership ? "button" : "submit"} onClick={isMembership ? () => setLocation("/admin/memberships") : undefined} className="w-full h-11 text-base font-bold" disabled={isSubmitting || (!isMembership && !slotValid)}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking (Menunggu Pembayaran)"
