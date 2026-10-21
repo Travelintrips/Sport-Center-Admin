@@ -211,7 +211,11 @@ export async function resolveCustomerTax(
   // Personal bookings (including unregistered guests and personal-paid events)
   // are never subject to PPN. Preserve the gross selling price as the total.
   // Only an explicitly resolved company account may opt into PPN treatment.
-  const enabled = customer?.accountType === "company" && customer.ppnEnabled === true;
+  if (customer?.accountType !== "company") {
+    // Personal bookings do not have a taxable DPP snapshot, either.
+    return { ...noTax(subtotal), dpp: 0 };
+  }
+  const enabled = customer.ppnEnabled === true;
   const treatment: PpnTreatment = enabled ? "inclusive" : "none";
 
   return calculateTaxForTreatment(subtotal, treatment, options.bookingDate);
