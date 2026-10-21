@@ -90,6 +90,7 @@ const AdminCompanyVerifications = lazy(() => import("@/pages/admin/CompanyVerifi
 const AdminTaxReport = lazy(() => import("@/pages/admin/TaxReport"));
 const AdminCheckoutForm = lazy(() => import("@/pages/admin/CheckoutForm"));
 const AdminOperatorAccounts = lazy(() => import("@/pages/admin/OperatorAccounts"));
+const AdminUserRoles = lazy(() => import("@/pages/admin/UserRoles"));
 const AdminBankReconciliation = lazy(() => import("@/pages/admin/BankReconciliation"));
 const AdminWaBookings = lazy(() => import("@/pages/admin/WaBookings"));
 const AdminWaAiAssistant = lazy(() => import("@/pages/admin/WaAiAssistant"));
@@ -170,6 +171,7 @@ function AdminRouter() {
     if (location === "/admin/tax-report") return <AdminTaxReport />;
     if (location === "/admin/checkout") return <AdminCheckoutForm />;
     if (location === "/admin/operator-accounts") return <AdminOperatorAccounts />;
+    if (location === "/admin/user-roles") return <AdminUserRoles />;
     if (location === "/admin/bank-reconciliation") return <AdminBankReconciliation />;
     if (location === "/admin/wa-bookings") return <AdminWaBookings />;
     if (location === "/admin/wa-ai") return <AdminWaAiAssistant />;
@@ -225,6 +227,7 @@ function Router() {
       <Route path="/admin/tax-report" component={AdminRouter} />
       <Route path="/admin/checkout" component={AdminRouter} />
       <Route path="/admin/operator-accounts" component={AdminRouter} />
+      <Route path="/admin/user-roles" component={AdminRouter} />
       <Route path="/admin/bank-reconciliation" component={AdminRouter} />
       <Route path="/admin/wa-bookings" component={AdminRouter} />
       <Route path="/admin/wa-ai" component={AdminRouter} />
