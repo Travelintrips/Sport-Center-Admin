@@ -79,7 +79,11 @@ export async function processX904Event(event: X904EventInput,
         const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_checkins
           WHERE membership_id=${membershipId} AND checkin_date=${day}::date LIMIT 1`);
         if (existing.rows.length) {
-          // Preserve the existing attendance; record this distinct event for review.
+          // Every independently verified physical scan is a valid entry event,
+          // even when this member has already checked in today. Keep the original
+          // check-in (including manual ones), but acknowledge this distinct scan
+          // in the per-event ledger without inserting a second attendance.
+          status = "success";
         } else {
           // A membership attendance is not a new sale or booking. Keep existing bookings and payments intact.
           // The membership row lock protects against concurrent events for the same member/day.
@@ -91,7 +95,7 @@ export async function processX904Event(event: X904EventInput,
         }
       }
     }
-    // Existing check-in is not a success for this new event; record review for audit.
+    // Every accepted event has its own ledger row; only the first scan inserts a check-in.
     await tx.execute(sql`INSERT INTO sport_center.gym_x904_processed_events
       (event_id,device_serial,user_pin,status)
       VALUES (${event.eventId},${event.deviceSerial},${event.userPin},${status})`);
