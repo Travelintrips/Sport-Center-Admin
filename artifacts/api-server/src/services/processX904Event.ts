@@ -31,14 +31,14 @@ export async function processX904Event(event: X904EventInput,
     // Approved after controlled X904 tests: fingerprint=1, card=4, face=15.
     // The trusted ADMS ingress and verified membership mapping remain mandatory.
     const approvedCodes = [1, 4, 15];
-    const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
+    // Raw verification codes alone do not prove that a LAN read is authorized.\n    // Only separately attested evidence explicitly verified by the trusted ingress can authorize check-in.\n    const attestation = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_verification_evidence\n      WHERE source_event_id=${event.eventId} AND device_serial=${event.deviceSerial}\n        AND user_pin=${event.userPin} AND evidence_status='verified'\n        AND capture_source='trusted_adms_ingress' LIMIT 1`);\n    const hasIndependentTrustedEvidence = attestation.rows.length === 1;\n    const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
       raw.rows[0]?.attendance_status !== null &&
       raw.rows[0]?.verification_type !== null &&
       raw.rows[0]?.verification_type !== undefined &&
       approvedCodes.includes(Number(raw.rows[0]?.verification_type));
     let status: "success" | "review_required" = "review_required";
     // A different event on the same day is a review case, not a replay of this event ID.
-    if (ordinaryDeviceUser && hasVerifiedAdmsPayload && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
+    if (ordinaryDeviceUser && hasVerifiedAdmsPayload && hasIndependentTrustedEvidence && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
       const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
         FROM sport_center.sport_memberships WHERE id=${membershipId} FOR UPDATE`);
       const m = member.rows[0];
