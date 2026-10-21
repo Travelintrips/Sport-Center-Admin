@@ -22,6 +22,9 @@ export default function AdminCheckoutForm() {
   const [, setLocation] = useLocation();
 
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -37,6 +40,7 @@ export default function AdminCheckoutForm() {
 
   const facilities = Array.isArray(facilitiesData) ? facilitiesData : [];
   const customers = Array.isArray(customersData) ? customersData : [];
+  const isGuest = selectedCustomerId === "__guest__";
   const selectedCustomer: any = customers.find((c: any) => String(c.id) === selectedCustomerId);
 
   // Auto-compute endTime whenever startTime or duration changes
@@ -63,6 +67,10 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih customer terlebih dahulu", variant: "destructive" });
       return;
     }
+    if (isGuest && (!guestName.trim() || !/^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))) {
+      toast({ title: "Nama dan nomor WhatsApp tamu wajib valid", variant: "destructive" });
+      return;
+    }
     if (!selectedFacilityId) {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
       return;
@@ -77,15 +85,15 @@ export default function AdminCheckoutForm() {
       toast({ title: "Untuk akun perusahaan, pilih jenis Corporate atau pembayar perusahaan", variant: "destructive" });
       return;
     }
-    if (corporate && selectedCustomer?.accountType !== "company") {
+    if (corporate && (isGuest || selectedCustomer?.accountType !== "company")) {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
     }
-    if (Number(selectedCustomerId) <= 0) {
+    if (!isGuest && Number(selectedCustomerId) <= 0) {
       toast({ title: "Pilih customer yang terdaftar; data tamu perlu didaftarkan terlebih dahulu", variant: "destructive" });
       return;
     }
-    if (!selectedCustomer?.name || !selectedCustomer?.phone) {
+    if (!isGuest && (!selectedCustomer?.name || !selectedCustomer?.phone)) {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
@@ -98,10 +106,10 @@ export default function AdminCheckoutForm() {
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
         body: JSON.stringify({
-          customerId: Number(selectedCustomerId),
-          customerName: selectedCustomer.name,
-          customerPhone: selectedCustomer.phone,
-          customerEmail: selectedCustomer.email ?? "",
+          ...(!isGuest ? { customerId: Number(selectedCustomerId) } : {}),
+          customerName: isGuest ? guestName.trim() : selectedCustomer.name,
+          customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
+          customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
           facilityId: Number(selectedFacilityId),
           bookingDate: startTime.slice(0, 10),
           startTime: startTime.slice(11, 16),
@@ -126,6 +134,9 @@ export default function AdminCheckoutForm() {
 
       // Reset form
       setSelectedCustomerId("");
+      setGuestName("");
+      setGuestPhone("");
+      setGuestEmail("");
       setSelectedFacilityId("");
       setStartTime("");
       setEndTime("");
@@ -185,6 +196,7 @@ export default function AdminCheckoutForm() {
                   {customers.length === 0 && (
                     <SelectItem value="__empty__" disabled>Tidak ada customer terdaftar</SelectItem>
                   )}
+                  <SelectItem value="__guest__">+ Pemesan belum terdaftar (Tamu)</SelectItem>
                   {customers.map((c: any) => (
                     <SelectItem key={c.id} value={String(c.id)}>
                       {c.name}{c.phone ? ` (${c.phone})` : ""}
@@ -194,6 +206,19 @@ export default function AdminCheckoutForm() {
               </Select>
             </div>
 
+            {isGuest && <div className="space-y-3 rounded-lg border p-3">
+              <Label htmlFor="guestName">Nama Pemesan Baru *</Label>
+              <Input id="guestName" value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
+              <Label htmlFor="guestPhone">Nomor WhatsApp *</Label>
+              <Input id="guestPhone" type="tel" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} required />
+              <Label htmlFor="guestEmail">Email (opsional)</Label>
+              <Input id="guestEmail" type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Pemesan tamu disimpan di booking; akun tidak otomatis dibuat.</p>
+            </div>}
+            {!isGuest && selectedCustomer && <div className="space-y-2">
+              <Label>Nomor Telepon / WhatsApp</Label>
+              <Input value={selectedCustomer.phone ?? ""} readOnly />
+            </div>}
             {/* Facility */}
             <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
