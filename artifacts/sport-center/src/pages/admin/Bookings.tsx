@@ -544,7 +544,10 @@ function PaymentMethodSelect({
       option.providerCode?.trim().toLowerCase() === storedCode &&
       (payment.paymentProvider === "paylabs" || !option.providerCode),
   );
-  const currentValue = configuredOption?.value ?? storedValue;
+  const standardOption = options.find(
+    (option) => !option.providerCode && option.value.trim().toLowerCase() === storedCode,
+  );
+  const currentValue = configuredOption?.value ?? standardOption?.value ?? storedValue;
   // A QRIS Direct payment must not be changed back to a Paylabs display
   // option. That would change the provider/settlement identity of an already
   // classified payment and is correctly rejected by the accounting guard.
