@@ -228,12 +228,14 @@ export default function AdminCheckoutForm() {
             {/* Customer */}
             <div className="space-y-2">
               <Label htmlFor="customer">Nama Pemesan <span className="text-destructive">*</span></Label>
-              <Input aria-label="Cari nama atau nomor telepon pemesan" placeholder="Cari nama atau nomor telepon..." value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} />
-              <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+              <Select value={selectedCustomerId} onValueChange={(value) => { setSelectedCustomerId(value); setCustomerSearch(""); }}>
                 <SelectTrigger id="customer">
                   <SelectValue placeholder="Pilih customer..." />
                 </SelectTrigger>
                 <SelectContent>
+                  <div className="sticky top-0 z-10 bg-popover px-2 pb-2 pt-2" onKeyDown={(e) => e.stopPropagation()}>
+                    <Input autoFocus aria-label="Cari nama atau nomor telepon pemesan" placeholder="Cari nama / nomor telepon..." value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} />
+                  </div>
                   {customers.length === 0 && (
                     <SelectItem value="__empty__" disabled>Tidak ada customer terdaftar</SelectItem>
                   )}
