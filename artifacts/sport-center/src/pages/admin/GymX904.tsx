@@ -48,7 +48,17 @@ export default function GymX904() {
   const [date, setDate] = useState(localDate);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<GymTab>("dashboard");
+  const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
   const queryClient = useQueryClient();
+  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean}>({
+    queryKey:["gym-x904-user-capabilities"],
+    queryFn:async()=>{
+      const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(`${API}/admin/gym-x904/user-command/capabilities`,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
+      if(!response.ok)throw new Error("Hak kontrol X904 tidak tersedia");
+      return response.json();
+    },enabled:tab==="users",retry:false,staleTime:30000
+  });
   const [commandMessage, setCommandMessage] = useState("");
   const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;created_at:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
     queryKey: ["gym-x904-read-command"],
@@ -456,14 +466,21 @@ export default function GymX904() {
         {lanUsersError ? <p role="alert" className="text-sm">Daftar LAN belum tersedia atau backend belum aktif.</p> :
           lanUsersLoading ? <p className="text-sm">Memuat pengguna dari snapshot LAN...</p> :
           <div className="overflow-x-auto"><table className="w-full text-sm text-left">
-            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th></tr></thead>
+            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
               <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
+              {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
+                <button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>
+                <button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"DELETE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Hapus</button>
+              </div></td>}
             </tr>)}</tbody>
           </table>{(lanUsers?.users ?? []).length === 0 && <p className="p-3 text-sm">Belum ada roster terverifikasi tersimpan.</p>}</div>}
       </section>}
-      {tab === "users" && <GymX904UserControl users={lanUsers?.users ?? []}/>}
+      {tab === "users" && <><div className="mb-3 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={()=>void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]})} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"><RefreshCw size={14}/> Muat ulang daftar tersimpan</button>
+        <span className="text-xs text-muted-foreground">Memuat data database, bukan memerintahkan mesin untuk sinkronisasi baru.</span>
+      </div><GymX904UserControl key={selectedMachineUser?`${selectedMachineUser.user.device_uid}-${selectedMachineUser.action}-${selectedMachineUser.request}`:"default"} users={lanUsers?.users ?? []} initialSelection={selectedMachineUser?{user:selectedMachineUser.user,action:selectedMachineUser.action}:undefined}/></>}
       {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />PIN yang tercatat pada log ADMS X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Data nyata dari log yang sudah tersimpan di database, bukan daftar lengkap user terdaftar, bukan bukti identitas mesin. Nama, kartu, dan status enrollment memerlukan pembacaan master user dari perangkat.</p></div>
