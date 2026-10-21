@@ -1347,7 +1347,10 @@ router.post("/bookings", async (req, res) => {
     const isPendingCompany = !isCompanyBilling && !!pendingCompanyUser;
     const effectiveCompanyCustomerId = companyBillingUser?.id ?? pendingCompanyUser?.id ?? null;
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
-    const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
+    // Admin-created guest bookings have no registered customer identity. Never
+    // implicitly attach them to the logged-in operator (including super_admin).
+    const isAdminGuestBooking = isAdminRequest && bookingSource === "admin" && req.body.customerId === null;
+    const effectiveCustomerId = isAdminGuestBooking ? null : bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
     const activityType = req.body.activityType || null;
     let numberOfPeople = req.body.numberOfPeople == null ? null : Number(req.body.numberOfPeople);
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
