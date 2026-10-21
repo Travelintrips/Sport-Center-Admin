@@ -169,4 +169,62 @@ router.post("/admin/gym-x904/read-command", adminMiddleware, async (_req, res) =
   } catch { res.status(503).json({ error: "COMMAND_QUEUE_UNAVAILABLE" }); }
 });
 
+// Staged administrative user mutations. Fail-closed until VMSC write executor is independently tested.
+router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const actor = (req as any).user;
+  if (!actor || !["owner", "super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  if (process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return res.status(503).json({error:"USER_WRITE_DISABLED"});
+  const {commandType, userPin, expectedSerial, confirmPin, idempotencyKey, name, expectedUid, expectedName} = req.body ?? {};
+  const isCreate=commandType==="CREATE_USER";
+  const requiresExisting=commandType==="UPDATE_USER" || commandType==="DELETE_USER";
+  const safeDisplay=(v:unknown)=>typeof v==="string" && /^[A-Za-z0-9 ._-]{2,24}$/.test(v);
+  if (!(["CREATE_USER","UPDATE_USER","DELETE_USER"].includes(commandType)) ||
+      typeof userPin !== "string" || !/^[0-9]{1,8}$/.test(userPin) ||
+      expectedSerial !== "TDBD234200545" || confirmPin !== userPin ||
+      typeof idempotencyKey !== "string" || !/^[a-zA-Z0-9_-]{16,96}$/.test(idempotencyKey) ||
+      (commandType !== "DELETE_USER" && !safeDisplay(name)) ||
+      (requiresExisting && (!Number.isSafeInteger(expectedUid) || expectedUid < 1 || expectedUid >= 65535 ||
+        !safeDisplay(expectedName))) ||
+      (isCreate && (expectedUid != null || expectedName != null))) {
+    return res.status(400).json({error:"INVALID_USER_COMMAND"});
+  }
+  try {
+    const r=await db.execute(sql`INSERT INTO sport_center.x904_user_commands
+      (device_serial, command_type, user_pin, payload, requested_by, idempotency_key)
+      VALUES (${expectedSerial}, ${commandType}, ${userPin}, ${JSON.stringify({name:commandType==='DELETE_USER'?null:name.trim(),expectedUid:requiresExisting?expectedUid:null,expectedName:requiresExisting?expectedName:null})}::jsonb,
+              ${actor.userId}, ${idempotencyKey})
+      ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
+    if (!r.rows.length) return res.status(409).json({error:"DUPLICATE_COMMAND"});
+    return res.status(202).json({command_id:r.rows[0].command_id,state:"queued"});
+  } catch { return res.status(503).json({error:"USER_COMMAND_QUEUE_UNAVAILABLE"}); }
+});
+
+// Expose feature readiness without exposing connector credentials or permitting writes.
+router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const role=(req as any).user?.role;
+  const allowed=role==="owner" || role==="super_admin";
+  return res.json({allowed,enabled:allowed && process.env.GYM_X904_USER_WRITE_ENABLED==="true",
+    deviceSerial:"TDBD234200545",operations:["CREATE_USER","UPDATE_USER","DELETE_USER"]});
+});
+
+// VMSC claims and receipts use scoped database SECURITY DEFINER functions.
+// No public HTTP path can claim or complete a machine mutation.
+router.get("/admin/gym-x904/user-command/:commandId",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor||!["owner","super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  const commandId=String(req.params.commandId ?? "");
+  if(!/^[0-9a-f-]{36}$/i.test(commandId)) return res.status(400).json({error:"INVALID_COMMAND_ID"});
+  try {
+    const r=await db.execute(sql`SELECT command_id,command_type,user_pin,state,created_at,
+      completed_at,result FROM sport_center.x904_user_commands
+      WHERE command_id=${commandId}::uuid AND requested_by=${actor.userId}
+        AND device_serial='TDBD234200545'`);
+    if(!r.rows.length) return res.status(404).json({error:"COMMAND_NOT_FOUND"});
+    return res.json({command:r.rows[0]});
+  } catch {return res.status(503).json({error:"COMMAND_STATUS_UNAVAILABLE"});}
+});
+
 export default router;

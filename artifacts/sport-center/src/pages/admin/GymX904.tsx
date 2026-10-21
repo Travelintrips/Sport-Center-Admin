@@ -4,6 +4,7 @@ import { useListMemberships } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck, Users, Link2, DoorOpen, ScrollText, LayoutDashboard, Cpu } from "lucide-react";
 import { getToken } from "@/lib/auth";
+import GymX904UserControl from "./GymX904UserControl";
 
 interface IntegrationStatus { stored_logs?:number|null; processed_events?:number|null; pending_events?:number|null; processingLedgerReady?:boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; connectionTestedAt?: string | null; lastDurableSyncAt?: string | null; }
 interface LanStatus { synchronized: boolean; users: number; logs: number; deviceLogs?: number; lastCompleteAt?: string; }
@@ -462,6 +463,7 @@ export default function GymX904() {
             </tr>)}</tbody>
           </table>{(lanUsers?.users ?? []).length === 0 && <p className="p-3 text-sm">Belum ada roster terverifikasi tersimpan.</p>}</div>}
       </section>}
+      {tab === "users" && <GymX904UserControl users={lanUsers?.users ?? []}/>}
       {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />PIN yang tercatat pada log ADMS X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Data nyata dari log yang sudah tersimpan di database, bukan daftar lengkap user terdaftar, bukan bukti identitas mesin. Nama, kartu, dan status enrollment memerlukan pembacaan master user dari perangkat.</p></div>
