@@ -4150,6 +4150,7 @@ export default function AdminBookings() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button type="button" onClick={() => window.location.assign("/admin/checkout")} className="h-9 text-xs">+ Buat Booking</Button>
           {pendingVerification > 0 && (
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
