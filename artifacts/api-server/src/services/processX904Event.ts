@@ -36,7 +36,12 @@ export async function processX904Event(event: X904EventInput,
     const attestation = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_verification_evidence
       WHERE source_event_id=${event.eventId} AND device_serial=${event.deviceSerial}
         AND user_pin=${event.userPin} AND evidence_status='verified'
-        AND capture_source='trusted_adms_ingress' LIMIT 1`);
+        AND capture_source='trusted_adms_ingress'
+        AND verification_code=CAST(${raw.rows[0]?.verification_type ?? -1} AS integer)
+        AND verification_method=CASE CAST(${raw.rows[0]?.verification_type ?? -1} AS integer)
+          WHEN 1 THEN 'fingerprint' WHEN 4 THEN 'card' WHEN 15 THEN 'face'
+          ELSE 'invalid' END
+        LIMIT 1`);
     const hasIndependentTrustedEvidence = attestation.rows.length === 1;
     const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
       raw.rows[0]?.attendance_status !== null &&
