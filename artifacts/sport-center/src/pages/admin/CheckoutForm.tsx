@@ -456,10 +456,15 @@ export default function AdminCheckoutForm() {
                 <Label>Cari Member Gym</Label>
                 <Select value={memberId} onValueChange={setMemberId}>
                   <SelectTrigger><SelectValue placeholder="Pilih member berdasarkan nama / telepon" /></SelectTrigger>
-                  <SelectContent>
-                    <div className="sticky top-0 z-10 bg-popover p-2" onKeyDown={e => e.stopPropagation()}><Input placeholder="Cari nama / telepon member..." value={memberSearch} onChange={e => setMemberSearch(e.target.value)} /></div>
-                    {members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.toLowerCase()))).map(m =>
-                    <SelectItem key={m.id} value={String(m.id)}>{m.name} · {m.phone} · {m.status}</SelectItem>)}</SelectContent>
+                  <SelectContent position="popper" side="bottom" sideOffset={4} className="max-h-[min(360px,60vh)] overflow-y-auto">
+                    <div className="sticky top-0 z-20 bg-popover px-2 py-2" onKeyDown={e => e.stopPropagation()}>
+                      <Input aria-label="Cari nama atau nomor telepon member Gym" placeholder="Cari nama / telepon member..." value={memberSearch} onChange={e => setMemberSearch(e.target.value)} onKeyDown={e => e.stopPropagation()} />
+                    </div>
+                    {members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.trim().toLowerCase()))).map(m =>
+                      <SelectItem key={m.id} value={String(m.id)}>{m.name} · {m.phone} · {m.status}</SelectItem>)}
+                    {members.length > 0 && !members.some(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.trim().toLowerCase()))) &&
+                      <div className="px-3 py-2 text-sm text-muted-foreground">Member tidak ditemukan</div>}
+                  </SelectContent>
                 </Select>
                 {matchedMember && <p className="text-sm">Status: <strong>{matchedMember.status}</strong> · Berlaku hingga {matchedMember.endDate}</p>}
                 {memberAction === "renew" && <>
