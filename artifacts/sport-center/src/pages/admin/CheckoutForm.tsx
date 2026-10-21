@@ -77,7 +77,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
     }
-    if (!selectedCustomer?.name || !selectedCustomer?.phone) {
+    if (Number(selectedCustomerId) <= 0) {\n      toast({ title: "Pilih customer yang terdaftar; data tamu perlu didaftarkan terlebih dahulu", variant: "destructive" });\n      return;\n    }\n    if (!selectedCustomer?.name || !selectedCustomer?.phone) {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
