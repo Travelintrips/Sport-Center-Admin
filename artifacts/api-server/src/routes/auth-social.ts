@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable } from "@workspace/db";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import { createToken, authMiddleware, hashPassword, isValidPasswordHash, verifyPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
@@ -34,6 +34,14 @@ function isValidResetEmail(email: string): boolean {
 function resetOtpHash(email: string, otp: string): string {
   return crypto.createHmac("sha256", process.env.SESSION_SECRET!)
     .update(JSON.stringify(["wa-password-reset", email, otp])).digest("hex");
+}
+
+// Case-insensitive lookup for legacy account emails; refuse ambiguous matches
+// rather than creating a duplicate account or granting another user's role.
+async function findVerifiedEmailAccount(email: string) {
+  const matches = await db.select().from(usersTable)
+    .where(sql`lower(trim(${usersTable.email})) = ${email}`).limit(2);
+  return { account: matches.length === 1 ? matches[0] : null, ambiguous: matches.length > 1 };
 }
 
 function cleanPhone(raw: string): string {
@@ -80,8 +88,11 @@ router.post("/auth/google", async (req, res) => {
 
     let user = byGoogleId ?? null;
     if (!user) {
-      const [byEmail] = await db.select().from(usersTable)
-        .where(eq(usersTable.email, verifiedEmail)).limit(1);
+      const { account: byEmail, ambiguous } = await findVerifiedEmailAccount(verifiedEmail);
+      if (ambiguous) {
+        res.status(409).json({ error: "Terdapat akun dengan email duplikat. Hubungi administrator." });
+        return;
+      }
       if (byEmail) {
         // Pending admin invitations must be accepted through the verified
         // admin invitation flow; a public customer login cannot consume them.
@@ -97,7 +108,7 @@ router.post("/auth/google", async (req, res) => {
           const [linked] = await db.update(usersTable)
             .set({ googleId: payload.sub, updatedAt: new Date() })
             .where(and(eq(usersTable.id, byEmail.id),
-              eq(usersTable.email, verifiedEmail), isNull(usersTable.googleId)))
+              sql`lower(trim(${usersTable.email})) = ${verifiedEmail}`, isNull(usersTable.googleId)))
             .returning();
           user = linked ?? null;
         } else {
@@ -183,12 +194,18 @@ router.post("/auth/admin-google", async (req, res) => {
     // the email and subject. A normal Google sign-in can never elevate privileges.
     const verifiedEmail = payload.email.trim().toLowerCase();
     let [user] = await db.select().from(usersTable)
-      .where(and(eq(usersTable.googleId, payload.sub), eq(usersTable.email, verifiedEmail)))
-      .limit(1);
+      .where(eq(usersTable.googleId, payload.sub)).limit(1);
+    if (user && user.email?.trim().toLowerCase() !== verifiedEmail) {
+      res.status(403).json({ error: "Identitas Google tidak cocok dengan akun administrator." });
+      return;
+    }
 
     if (!user) {
-      const [invitation] = await db.select().from(usersTable)
-        .where(eq(usersTable.email, verifiedEmail)).limit(1);
+      const { account: invitation, ambiguous } = await findVerifiedEmailAccount(verifiedEmail);
+      if (ambiguous) {
+        res.status(409).json({ error: "Email terdaftar lebih dari sekali. Hubungi administrator." });
+        return;
+      }
       if (invitation?.registrationSource === "admin_invitation" &&
           invitation.accountStatus === "pending_verification" &&
           invitation.role === "customer" && !invitation.googleId) {
@@ -196,7 +213,7 @@ router.post("/auth/admin-google", async (req, res) => {
         const [activated] = await db.update(usersTable)
           .set({ googleId: payload.sub, role: "super_admin", accountStatus: "active",
             registrationSource: "admin_invitation_accepted", updatedAt: new Date() })
-          .where(and(eq(usersTable.id, invitation.id), eq(usersTable.email, verifiedEmail),
+          .where(and(eq(usersTable.id, invitation.id), sql`lower(trim(${usersTable.email})) = ${verifiedEmail}`,
             eq(usersTable.accountStatus, "pending_verification"),
             eq(usersTable.registrationSource, "admin_invitation"),
             eq(usersTable.role, "customer"), isNull(usersTable.googleId)))
@@ -212,14 +229,17 @@ router.post("/auth/admin-google", async (req, res) => {
     // Never create an admin here or change an existing user's role.
     const adminRoles = ["owner", "admin", "super_admin", "admin_booking", "finance", "staff"];
     if (!user) {
-      const [existing] = await db.select().from(usersTable)
-        .where(eq(usersTable.email, verifiedEmail)).limit(1);
+      const { account: existing, ambiguous } = await findVerifiedEmailAccount(verifiedEmail);
+      if (ambiguous) {
+        res.status(409).json({ error: "Email terdaftar lebih dari sekali. Hubungi administrator." });
+        return;
+      }
       if (existing && adminRoles.includes(existing.role) &&
           (!existing.accountStatus || existing.accountStatus === "active") &&
           !existing.googleId) {
         const [linked] = await db.update(usersTable)
           .set({ googleId: payload.sub, updatedAt: new Date() })
-          .where(and(eq(usersTable.id, existing.id), eq(usersTable.email, verifiedEmail),
+          .where(and(eq(usersTable.id, existing.id), sql`lower(trim(${usersTable.email})) = ${verifiedEmail}`,
             isNull(usersTable.googleId), eq(usersTable.role, existing.role),
             existing.accountStatus === null ? isNull(usersTable.accountStatus) : eq(usersTable.accountStatus, "active")))
           .returning();
