@@ -3,6 +3,7 @@ import crypto from "crypto";
 import * as bcrypt from "bcryptjs";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { isSessionCurrent } from "./roleAuthorization";
 
 /**
  * requireEnv — reads a required env var and throws a safe startup error if missing.
@@ -116,7 +117,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   db.select({ role: usersTable.role, status: usersTable.accountStatus })
     .from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
     .then(([account]) => {
-      if (!account || account.status !== "active" || account.role !== payload.role) {
+      if (!isSessionCurrent(payload.role, account)) {
         res.status(401).json({ error: "Hak akses akun berubah. Silakan login kembali." });
         return;
       }
@@ -153,7 +154,7 @@ export function authMiddlewareWithQueryToken(req: Request, res: Response, next: 
   db.select({ role: usersTable.role, status: usersTable.accountStatus })
     .from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
     .then(([account]) => {
-      if (!account || account.status !== "active" || account.role !== payload.role) {
+      if (!isSessionCurrent(payload.role, account)) {
         res.status(401).json({ error: "Hak akses akun berubah. Silakan login kembali." });
         return;
       }

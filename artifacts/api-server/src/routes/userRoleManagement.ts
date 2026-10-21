@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, usersTable, auditLogsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { authMiddleware } from "../lib/auth";
+import { canEditRole } from "../lib/roleAuthorization";
 
 const router = Router();
 const roles = ["customer", "staff", "admin_booking", "admin", "finance", "super_admin"] as const;
@@ -41,9 +42,8 @@ router.patch("/admin/user-roles/:id", authMiddleware, async (req, res) => {
       }
       const [target] = await tx.select().from(usersTable).where(eq(usersTable.id, targetId)).for("update").limit(1);
       if (!target) return { status: 404, error: "Pengguna tidak ditemukan" };
-      if (target.role === "owner") return { status: 403, error: "Role Owner dilindungi" };
-      if (actor.role === "super_admin" && (target.role === "super_admin" || role === "super_admin")) {
-        return { status: 403, error: "Perubahan Super Admin hanya oleh Owner" };
+      if (!canEditRole({ id: actor.id, role: actor.role, status: actor.accountStatus ?? "" }, { id: target.id, role: target.role }, role)) {
+        return { status: 403, error: "Perubahan jabatan ini tidak diizinkan" };
       }
       if (target.role === role) return { status: 200, role, changed: false };
       const [updated] = await tx.update(usersTable)
