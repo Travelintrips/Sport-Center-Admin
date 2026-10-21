@@ -27,7 +27,7 @@ function unpackTime(packed:number): string {
       d.getUTCMonth()!==month || d.getUTCDate()!==dd) throw Error("X904_INVALID_CLOCK");
   return `${year}-${digits(month+1)}-${digits(dd)} ${digits(hh)}:${digits(mm)}:${digits(ss)}`;
 }
-const localDay=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+const localDay=()=>{const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const val=(t:string)=>parts.find(p=>p.type===t)?.value??"";return `${val("year")}-${val("month")}-${val("day")}`;};
 router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
   res.setHeader("Cache-Control","no-store");
   const secret=process.env.GYM_X904_VMSC_ATTEST_KEY || "";
