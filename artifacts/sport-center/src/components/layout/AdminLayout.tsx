@@ -97,6 +97,7 @@ const NAV_GROUPS = [
       { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },
       { href: "/admin/bank-reconciliation", label: "Rekonsiliasi Bank", icon: Landmark },
       { href: "/admin/operator-accounts", label: "Akun Operator", icon: UserCog },
+      { href: "/admin/user-roles", label: "Pengguna & Hak Akses", icon: ShieldCheck },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
       { href: "/admin/data-connections", label: "Data Connections", icon: Activity },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },
@@ -279,7 +280,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   {group.label}
                 </div>
                 <div className="space-y-0.5">
-                  {group.items.map((item) => {
+                  {group.items.filter((item) => item.href !== "/admin/user-roles" || user?.role === "owner" || user?.role === "super_admin").map((item) => {
                     const isActive = location === item.href || (location === "/admin" && item.href === "/admin/dashboard");
                     const Icon = item.icon;
                     const isDataConn = item.href === "/admin/data-connections";
