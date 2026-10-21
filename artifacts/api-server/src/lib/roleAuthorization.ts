@@ -6,6 +6,6 @@ export function canEditRole(actor: {id:number;role:string;status:string}, target
   if (actor.role === "owner") return true;
   return actor.role === "super_admin" && target.role !== "super_admin" && proposed !== "super_admin";
 }
-export function isSessionCurrent(tokenRole:string, account: {role:string;status:string} | null): boolean {
+export function isSessionCurrent(tokenRole:string, account: {role:string;status:string|null} | null): boolean {
   return Boolean(account && account.status === "active" && account.role === tokenRole);
 }
