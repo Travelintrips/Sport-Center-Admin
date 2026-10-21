@@ -1,4 +1,4 @@
-import { db, bookingsTable, bookingHistoryTable } from "@workspace/db";
+import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
 /** X904 automatic attendance is gated at ingress; only trusted, verified, current-day ADMS events qualify. */
@@ -31,7 +31,14 @@ export async function processX904Event(event: X904EventInput,
     // Approved after controlled X904 tests: fingerprint=1, card=4, face=15.
     // The trusted ADMS ingress and verified membership mapping remain mandatory.
     const approvedCodes = [1, 4, 15];
-    // Raw verification codes alone do not prove that a LAN read is authorized.\n    // Only separately attested evidence explicitly verified by the trusted ingress can authorize check-in.\n    const attestation = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_verification_evidence\n      WHERE source_event_id=${event.eventId} AND device_serial=${event.deviceSerial}\n        AND user_pin=${event.userPin} AND evidence_status='verified'\n        AND capture_source='trusted_adms_ingress' LIMIT 1`);\n    const hasIndependentTrustedEvidence = attestation.rows.length === 1;\n    const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
+    // Raw verification codes alone do not prove that a LAN read is authorized.
+    // Only separately attested evidence explicitly verified by the trusted ingress can authorize check-in.
+    const attestation = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_verification_evidence
+      WHERE source_event_id=${event.eventId} AND device_serial=${event.deviceSerial}
+        AND user_pin=${event.userPin} AND evidence_status='verified'
+        AND capture_source='trusted_adms_ingress' LIMIT 1`);
+    const hasIndependentTrustedEvidence = attestation.rows.length === 1;
+    const hasVerifiedAdmsPayload = Number(raw.rows[0]?.attendance_status) === 0 &&
       raw.rows[0]?.attendance_status !== null &&
       raw.rows[0]?.verification_type !== null &&
       raw.rows[0]?.verification_type !== undefined &&
@@ -74,42 +81,12 @@ export async function processX904Event(event: X904EventInput,
         if (existing.rows.length) {
           // Preserve the existing attendance; record this distinct event for review.
         } else {
-          const gyms = await tx.execute(sql`SELECT id,open_time FROM sport_center.sport_facilities
-            WHERE is_active=true AND (booking_mode='walk_in' OR name ILIKE '%gym%' OR category ILIKE '%gym%' OR name ILIKE '%fitness%')
-            ORDER BY id LIMIT 1`);
-          const gym = gyms.rows[0];
-          if (gym) {
-            const start = String(gym.open_time);
-            const [h,minutes] = start.split(":").map(Number);
-            if (Number.isInteger(h) && Number.isInteger(minutes)) {
-              const end = `${String((h+1)%24).padStart(2,"0")}:${String(minutes).padStart(2,"0")}`;
-              // nextval is transaction-safe for uniqueness (gaps after rollback are acceptable).
-              await tx.execute(sql`SELECT pg_advisory_xact_lock(42003)`);
-              await tx.execute(sql`SELECT setval('sport_center.booking_order_no_seq', GREATEST(COALESCE((SELECT MAX(substring(order_number FROM 4)::bigint) FROM sport_center.sport_bookings WHERE order_number ~ '^SC-[0-9]+$'),0),(SELECT last_value FROM sport_center.booking_order_no_seq)),true)`);
-              const seq = await tx.execute(sql`SELECT nextval('sport_center.booking_order_no_seq') AS n`);
-              const orderNumber = `SC-${String(seq.rows[0]?.n).padStart(4,"0")}`;
-              await tx.execute(sql`INSERT INTO sport_center.gym_checkins
-                (membership_id,checkin_date,checked_in_at,notes,x904_event_id)
-                VALUES (${membershipId},${day}::date,${scanOccurredAt},${`X904 event ${event.eventId}`},${event.eventId})`);
-              const [booking] = await tx.insert(bookingsTable).values({
-                orderNumber, customerName:String(m.name), customerEmail:String(m.email),
-                customerPhone:String(m.phone), facilityId:Number(gym.id), bookingDate:day,
-                startTime:start, endTime:end, durationHours:1, totalPrice:"0",
-                basePrice:"0", discountAmount:"0", apDiscountAmount:"0",
-                customerType:"umum", verificationStatus:"not_required", bookingType:"regular",
-                membershipId, status:"confirmed", source:"gym_membership",
-                numberOfPeople:1, notes:`X904 event ${event.eventId}`, paymentRequiredNow:false,
-                payerType:"personal", billingStatus:"paid", dpp:"0",
-                ppnAmount:"0", grandTotal:"0", checkedInAt:scanOccurredAt,
-              }).returning({id:bookingsTable.id});
-              if (!booking) throw new Error("X904 booking insertion failed");
-              await tx.insert(bookingHistoryTable).values({
-                bookingId:booking.id, fromStatus:null, toStatus:"confirmed",
-                changedByName:String(m.name), note:`X904 event ${event.eventId}`
-              });
-              status = "success";
-            }
-          }
+          // A membership attendance is not a new sale or booking. Keep existing bookings and payments intact.
+          // The membership row lock protects against concurrent events for the same member/day.
+          await tx.execute(sql`INSERT INTO sport_center.gym_checkins
+            (membership_id,checkin_date,checked_in_at,notes,x904_event_id)
+            VALUES (${membershipId},${day}::date,${scanOccurredAt},${`X904 event ${event.eventId}`},${event.eventId})`);
+          status = "success";
         }
         }
       }
