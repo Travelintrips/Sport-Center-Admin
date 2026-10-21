@@ -17,10 +17,10 @@ async function request(path:string,options?:RequestInit){
   if(!response.ok)throw new Error(body.error ?? `HTTP ${response.status}`);
   return body;
 }
-export default function GymX904UserControl({users}:{users:DeviceUser[]}){
-  const [action,setAction]=useState<Action>("CREATE_USER");
-  const [pin,setPin]=useState("");
-  const [name,setName]=useState("");
+export default function GymX904UserControl({users,initialSelection}:{users:DeviceUser[];initialSelection?:{user:DeviceUser;action:"UPDATE_USER"|"DELETE_USER"}}){
+  const [action,setAction]=useState<Action>(initialSelection?.action ?? "CREATE_USER");
+  const [pin,setPin]=useState(initialSelection?.user.user_pin ?? "");
+  const [name,setName]=useState(initialSelection?.user.display_name ?? "");
   const [confirmPin,setConfirmPin]=useState("");
   const [busy,setBusy]=useState(false);
   const [commandId,setCommandId]=useState<string|null>(null);
