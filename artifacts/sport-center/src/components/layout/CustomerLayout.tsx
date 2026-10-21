@@ -62,7 +62,7 @@ function UserMenu() {
     },
   });
 
-  if (!user || user.role === "admin") {
+  if (!user) {
     return (
       <div className="flex items-center gap-2">
         <LangToggle className="hidden md:inline-flex" />
@@ -82,6 +82,11 @@ function UserMenu() {
   return (
     <div className="relative flex items-center gap-2">
       <LangToggle className="hidden md:inline-flex" />
+      {(["owner", "admin", "super_admin", "admin_booking", "finance", "staff"] as string[]).includes(user.role) && (
+        <Link href="/admin/dashboard" className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-foreground/70 hover:text-foreground px-2">
+          <ShieldCheck size={13} /> Admin
+        </Link>
+      )}
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 hover:bg-accent/60 transition-colors text-sm font-semibold border border-border/50 bg-background/60 backdrop-blur-sm"
@@ -248,7 +253,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
 
               <div className="h-px bg-border/40 my-3" />
 
-              {user && user.role !== "admin" ? (
+              {user ? (
                 <>
                   <div className="flex items-center gap-3 px-4 py-3 bg-muted/40 rounded-2xl mb-2">
                     <div className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center font-black">
