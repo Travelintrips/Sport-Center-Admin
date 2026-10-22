@@ -1,5 +1,5 @@
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
-import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport } from "../services/x904LanWaNotifications";
+import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport, dispatchX904AuthorizedRealScanTest } from "../services/x904LanWaNotifications";
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
@@ -486,6 +486,7 @@ export function startScheduler(): void {
       logger.error({err}, "[scheduler] X904 WhatsApp outbox dispatch failed"));
     dispatchX904LanScanNotifications().catch(err =>
       logger.error({err}, "[scheduler] X904 LAN observation WhatsApp failed"));
+    dispatchX904AuthorizedRealScanTest().catch(err => logger.error({err}, "[scheduler] X904 real scans WhatsApp failed"));
     dispatchX904OneTimeReport().catch(err =>
       logger.error({err}, "[scheduler] X904 one-time report WhatsApp failed"));
   }, 15 * 1000);
