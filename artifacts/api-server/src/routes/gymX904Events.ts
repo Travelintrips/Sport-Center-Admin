@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { processX904Event } from "../services/processX904Event";
+import { verifyCstGatewayWebhookSignature } from "../lib/cstGatewayWebhookSignature";
 
 const router = Router();
 const equal = (a: string, b: string) => {
@@ -344,6 +345,38 @@ router.get("/admin/gym-x904/cross-system-reconciliation", adminMiddleware, async
   } catch (error) {
     console.error("[gym-x904] cross-system reconciliation unavailable",error instanceof Error?error.message:String(error));
     return res.status(503).json({error:"Cross-system reconciliation unavailable"});
+  }
+});
+
+
+/** Dedicated signed final-delivery callback. Acknowledgement never triggers a new send. */
+router.post("/internal/gym-x904/wa-delivery-ack", async (req, res) => {
+  const keyId = String(req.header("x-cst-wa-key-id") ?? "");
+  const signatureB64 = String(req.header("x-cst-wa-signature-ed25519") ?? "");
+  if (!keyId || !signatureB64 || !verifyCstGatewayWebhookSignature({body:req.body,keyId,signatureB64})) {
+    return res.status(401).json({error:"INVALID_GATEWAY_SIGNATURE"});
+  }
+  const messageId = String(req.body?.messageId ?? "");
+  const status = String(req.body?.status ?? "").toLowerCase();
+  if (!/^[a-zA-Z0-9_:.@-]{8,180}$/.test(messageId) || !["delivered","read"].includes(status)) {
+    return res.status(400).json({error:"INVALID_FINAL_ACK"});
+  }
+  try {
+    const updated = await db.transaction(async tx => {
+      const batch = await tx.execute(sql`UPDATE sport_center.gym_x904_wa_batches
+        SET status='sent',sent_at=coalesce(sent_at,now())
+        WHERE gateway_message_id=${messageId} AND status='pending_ack'
+        RETURNING batch_id`);
+      if (!batch.rows.length) return 0;
+      const batchId = String(batch.rows[0].batch_id);
+      await tx.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
+        SET status='sent',sent_at=coalesce(sent_at,now()),locked_until=NULL,last_error=NULL
+        WHERE batch_id=${batchId} AND gateway_message_id=${messageId} AND status='pending_ack'`);
+      return 1;
+    });
+    return res.json({ok:true,updated});
+  } catch {
+    return res.status(503).json({error:"ACK_STORAGE_UNAVAILABLE"});
   }
 });
 
