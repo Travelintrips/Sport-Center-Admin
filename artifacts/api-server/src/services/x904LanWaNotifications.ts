@@ -30,7 +30,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       ON s.device_serial=l.device_serial AND s.last_snapshot_id=l.last_seen_snapshot
     JOIN sport_center.gym_x904_lan_users u
       ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
-       AND u.device_role=0
+      -- Every authenticated machine scan is an observation, including operator roles.
+      -- Role does not imply member check-in or verification.
     WHERE l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
       AND (l.device_time::timestamp AT TIME ZONE 'Asia/Jakarta') >= ${activation}::timestamptz
       AND (l.device_time::timestamp AT TIME ZONE 'Asia/Jakarta') <= now()+interval '2 minutes'
