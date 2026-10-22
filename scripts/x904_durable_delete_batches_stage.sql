@@ -79,3 +79,48 @@ DO $grant$ BEGIN
  END IF;
 END $grant$;
 -- Fail-closed: failed/expired ACK blocks subsequent batch items; never replay writes automatically.
+
+-- Batch-specific final receipt binds the exact leased command, expected UID, readback and count.
+-- Do not accept a bare device ACK without physical post-delete readback.
+CREATE OR REPLACE FUNCTION sport_center.x904_complete_batch_delete_command(
+ p_command_id uuid,p_lease_token uuid,p_readback boolean,p_device_uid integer,
+ p_count_before integer,p_count_after integer,p_error_code text DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,sport_center
+AS $ack$
+DECLARE target record; verified boolean;
+BEGIN
+ IF session_user NOT IN ('x904_vmsc_evidence_login','postgres') THEN
+  RAISE EXCEPTION 'X904_WORKER_UNAUTHORIZED';
+ END IF;
+ IF p_error_code IS NOT NULL AND p_error_code !~ '^[A-Z0-9_]{1,64}$' THEN
+  RAISE EXCEPTION 'INVALID_ERROR_CODE';
+ END IF;
+ SELECT q.command_id,q.payload,q.state INTO target
+ FROM sport_center.x904_user_commands q
+ WHERE q.command_id=p_command_id AND q.lease_token=p_lease_token
+   AND q.device_serial='TDBD234200545' AND q.command_type='DELETE_USER'
+   AND q.batch_id IS NOT NULL AND q.state='claimed'
+   AND q.leased_until>now() FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ verified:=p_readback IS TRUE
+   AND (target.payload->>'expectedUid') ~ '^[0-9]{1,5}$'
+   AND p_device_uid=(target.payload->>'expectedUid')::integer
+   AND p_count_before BETWEEN 1 AND 10000
+   AND p_count_after=p_count_before-1;
+ UPDATE sport_center.x904_user_commands SET
+   state=CASE WHEN verified THEN 'completed' ELSE 'failed' END,
+   result=jsonb_build_object('readBackConfirmed',verified,'deviceUid',p_device_uid,
+    'beforeCount',p_count_before,'afterCount',p_count_after,
+    'errorCode',CASE WHEN verified THEN NULL ELSE coalesce(p_error_code,'READBACK_MISMATCH') END),
+   completed_at=now(),leased_until=NULL
+ WHERE command_id=p_command_id AND lease_token=p_lease_token;
+ RETURN true;
+END $ack$;
+REVOKE ALL ON FUNCTION sport_center.x904_complete_batch_delete_command(uuid,uuid,boolean,integer,integer,integer,text) FROM PUBLIC,anon,authenticated;
+DO $grant$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='x904_vmsc_evidence_login') THEN
+  GRANT EXECUTE ON FUNCTION sport_center.x904_complete_batch_delete_command(uuid,uuid,boolean,integer,integer,integer,text) TO x904_vmsc_evidence_login;
+ END IF;
+END $grant$;
