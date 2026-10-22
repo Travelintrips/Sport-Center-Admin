@@ -265,13 +265,22 @@ export default function AdminCheckoutForm() {
         return;
       }
 
-      setCreatedOrder(data.booking?.orderNumber ?? null);
-      setCreatedBookingId(Number(data.booking?.id) || null);
-      setCreatedBookingAmount(Number(data.booking?.grandTotal ?? data.booking?.totalPrice ?? 0));
+      // POST /api/bookings returns the created booking at the response root.
+      // Support nested responses for compatibility, but never show Order: undefined.
+      const created = data.booking ?? data;
+      const order = typeof created.orderNumber === "string" ? created.orderNumber.trim() : "";
+      const bookingId = Number(created.id);
+      if (!order || !Number.isInteger(bookingId) || bookingId <= 0) {
+        toast({ title: "Booking tersimpan, respons nomor order tidak lengkap", description: "Periksa menu Pemesanan sebelum mencoba lagi agar tidak membuat booking ganda.", variant: "destructive" });
+        return;
+      }
+      setCreatedOrder(order);
+      setCreatedBookingId(bookingId);
+      setCreatedBookingAmount(Number(created.grandTotal ?? created.totalPrice ?? 0));
       setPaymentChoice(null);
       setPaymentProof(null);
       setPaymentSubmitted(false);
-      toast({ title: "Booking berhasil dibuat!", description: `Order: ${data.booking?.orderNumber}` });
+      toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}` });
 
       // Reset form
       setSelectedCustomerId("");
