@@ -13,6 +13,10 @@ ALTER TABLE sport_center.x904_user_commands
 CREATE UNIQUE INDEX IF NOT EXISTS x904_batch_command_order_uq
   ON sport_center.x904_user_commands(batch_id,batch_order)
   WHERE batch_id IS NOT NULL;
+-- Prevent two pending mutations targeting the same physical PIN (including single-user commands).
+CREATE UNIQUE INDEX IF NOT EXISTS x904_one_pending_command_per_pin
+  ON sport_center.x904_user_commands(device_serial,user_pin)
+  WHERE state IN ('queued','claimed');
 CREATE INDEX IF NOT EXISTS x904_batch_command_status_idx
   ON sport_center.x904_user_commands(batch_id,state,created_at)
   WHERE batch_id IS NOT NULL;
