@@ -24,6 +24,9 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const [name,setName]=useState(initialSelection?.user.display_name ?? "");
   const [confirmPin,setConfirmPin]=useState("");
   const [busy,setBusy]=useState(false);
+  const [bulkPins,setBulkPins]=useState<string[]>([]);
+  const [bulkResults,setBulkResults]=useState<string[]>([]);
+  const [bulkRunning,setBulkRunning]=useState(false);
   const [commandId,setCommandId]=useState<string|null>(null);
   const [message,setMessage]=useState("");
   const {data:capabilities}=useQuery<Capabilities>({
@@ -53,8 +56,44 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const permitted=capabilities.operations.includes(action)&&validPin&&confirmPin===pin&&!protectedUser&&
     (isExisting ? !!chosen&&Number.isInteger(chosen.device_uid)&&
       (action==="DELETE_USER"||validName) : !chosen&&validName);
+  const eligibleUsers=users.filter(u=>u.device_role===0 && /^[0-9]{1,8}$/.test(u.user_pin) && Number.isInteger(u.device_uid));
+  const bulkReady=capabilities.operations.includes("DELETE_USER") && !busy && !bulkRunning && bulkPins.length>0;
+  async function submitBulk(){
+    if(!bulkReady)return;
+    const targets=eligibleUsers.filter(u=>bulkPins.includes(u.user_pin));
+    if(targets.length!==bulkPins.length)return;
+    if(!window.confirm(`Hapus ${targets.length} pengguna biasa dari mesin X904 secara BERURUTAN? Setiap perintah menunggu ACK sukses sebelum perintah berikutnya. Administrator dan histori absensi tidak diubah.`))return;
+    setBulkRunning(true);setBulkResults([]);
+    try{
+      for(const user of targets){
+        let commandId="";
+        try{
+          const result=await request("/admin/gym-x904/user-command",{method:"POST",body:JSON.stringify({
+            commandType:"DELETE_USER",userPin:user.user_pin,expectedSerial:SERIAL,confirmPin:user.user_pin,
+            expectedUid:user.device_uid,expectedName:user.display_name,idempotencyKey:crypto.randomUUID().replace(/-/g,"")
+          })});
+          commandId=result.command_id;
+          if(!commandId)throw new Error("Tidak menerima ID perintah");
+          setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: antrean ${commandId.slice(0,8)}`]);
+          let state="queued";
+          for(let attempt=0;attempt<45;attempt++){
+            await new Promise(resolve=>setTimeout(resolve,4000));
+            const receipt=await request(`/admin/gym-x904/user-command/${commandId}`) as Receipt;
+            state=receipt.command.state;
+            if(["completed","failed","cancelled"].includes(state))break;
+          }
+          if(state!=="completed")throw new Error(`ACK belum sukses (status ${state}); antrean dihentikan untuk menghindari perintah tumpang tindih`);
+          setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: berhasil, ACK mesin diterima`]);
+          await queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});
+        }catch(error){
+          setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: ${error instanceof Error?error.message:"Gagal"} — proses dihentikan`]);
+          break;
+        }
+      }
+    }finally{setBulkRunning(false);setBulkPins([]);void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});}
+  }
   async function submit(){
-    if(busy||!permitted)return;
+    if(busy||bulkRunning||!permitted)return;
     const subject=isExisting?chosen:undefined;
     if(action==="DELETE_USER"&&!window.confirm(`Hapus PIN ${pin} (${subject?.display_name}) dari X904? Riwayat absensi tetap ada.`))return;
     setBusy(true);setMessage("");setCommandId(null);
@@ -102,10 +141,18 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     </div>
     {protectedUser&&<p role="alert" className="text-sm text-destructive">Akun dengan hak administrator perangkat dilindungi dari perubahan otomatis.</p>}
     {action==="CREATE_USER"&&!!chosen&&<p role="alert" className="text-sm text-destructive">PIN sudah terdaftar pada perangkat.</p>}
-    <button type="button" disabled={!permitted||busy} onClick={()=>void submit()}
-      className="rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50">
+    <button type="button" disabled={!permitted||busy||bulkRunning} onClick={()=>void submit()}
+      className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${permitted&&!busy&&!bulkRunning&&action==="DELETE_USER"?"bg-blue-600 text-white border-blue-600 hover:bg-blue-700":"bg-gray-100 text-gray-500 border-gray-200"} disabled:opacity-50`}>
       {busy?"Mengirim...":action==="CREATE_USER"?"Tambah pengguna":action==="UPDATE_USER"?"Simpan perubahan":"Hapus pengguna"}
     </button>
+    {capabilities.operations.includes("DELETE_USER")&&<div className="rounded-lg border p-3 space-y-3">
+      <h4 className="text-sm font-semibold">Hapus beberapa pengguna biasa</h4>
+      <p className="text-xs text-muted-foreground">Centang pengguna biasa. Perintah dikirim satu per satu; proses berhenti jika ACK gagal atau belum diterima. Akun administrator tidak dapat dipilih.</p>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={busy||bulkRunning||eligibleUsers.length===0} checked={eligibleUsers.length>0&&bulkPins.length===eligibleUsers.length} onChange={e=>setBulkPins(e.target.checked?eligibleUsers.map(u=>u.user_pin):[])}/> Pilih semua pengguna biasa ({eligibleUsers.length})</label>
+      <div className="max-h-48 overflow-y-auto grid gap-2 sm:grid-cols-2">{users.map(u=><label key={u.user_pin} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={busy||bulkRunning||u.device_role!==0} checked={bulkPins.includes(u.user_pin)} onChange={e=>setBulkPins(prev=>e.target.checked?[...prev,u.user_pin]:prev.filter(p=>p!==u.user_pin))}/><span>{u.user_pin} — {u.display_name} {u.device_role!==0?"(administrator dilindungi)":""}</span></label>)}</div>
+      <button type="button" disabled={!bulkReady} onClick={()=>void submitBulk()} className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${bulkReady?"bg-blue-600 border-blue-600 text-white hover:bg-blue-700":"bg-gray-100 border-gray-200 text-gray-500"}`}>{bulkRunning?"Memproses berurutan...":`Hapus ${bulkPins.length} pengguna terpilih`}</button>
+      {bulkResults.length>0&&<div role="status" aria-live="polite" className="text-xs space-y-1">{bulkResults.map((line,i)=><p key={i}>{line}</p>)}</div>}
+    </div>}
     {message&&<p role="status" className="text-sm">{message}</p>}
     {receipt?.command&&<p role="status" className="text-sm">
       Perintah {receipt.command.command_id.slice(0,8)}: <strong>{receipt.command.state}</strong>.
