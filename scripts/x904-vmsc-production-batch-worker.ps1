@@ -29,11 +29,6 @@ try {
   if ($e['X904_DEVICE_IP'] -ne '192.168.100.185' -or
       $e['X904_DEVICE_SERIAL'] -ne 'TDBD234200545' -or
       $e['X904_SEND_ENABLED'] -ne 'false') { throw 'LOCAL_GUARD_FAILED' }
-  if ($e['X904_USER_WRITE_ENABLED'] -ne 'true' -or
-      $e['X904_BULK_DELETE_ENABLED'] -ne 'true') {
-    Report 'BULK_DELETE_DISABLED'
-    exit 0
-  }
   $credentialFile = Join-Path $base 'secrets\x904-evidence-machine.dpapi'
   if (-not (Test-Path -LiteralPath $credentialFile)) { throw 'CREDENTIAL_NOT_CONFIGURED' }
   Add-Type -AssemblyName System.Security
@@ -49,6 +44,13 @@ try {
   $who = & $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c 'SELECT current_user;' 2>&1
   if ($LASTEXITCODE -ne 0 -or ($who | Out-String).Trim() -ne 'x904_vmsc_evidence_login') {
     throw 'DB_ROLE_GUARD_FAILED'
+  }
+  # Verify the production DB connection even while physical deletion remains disabled.
+  # This read-only preflight does not claim a command or contact the X904 device.
+  if ($e['X904_USER_WRITE_ENABLED'] -ne 'true' -or
+      $e['X904_BULK_DELETE_ENABLED'] -ne 'true') {
+    Report 'DB_AUTH_PASS_BULK_DELETE_DISABLED'
+    exit 0
   }
   $claim = & $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c "SELECT coalesce(sport_center.x904_claim_batch_delete_command()::text,'null');" 2>&1
   if ($LASTEXITCODE -ne 0) { throw 'DB_CLAIM_UNAVAILABLE' }
