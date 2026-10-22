@@ -5,7 +5,7 @@ import { sendCstWaGatewayGroupMessage, listCstWaGatewayGroups } from "../lib/cst
 /**
  * Send observed LAN scans from the EXISTING authenticated VMSC -> PROD
  * snapshot. These are observations, not verified membership check-ins.
- * Feature is off by default; activation cutoff forbids historic backfill.
+ * Durable database digest configuration is the opt-in; explicit env false disables dispatch.\n * Activation cutoff forbids historic backfill.
  */
 /**
  * X904 LAN digest: one message for new scans collected over two minutes.
@@ -13,8 +13,8 @@ import { sendCstWaGatewayGroupMessage, listCstWaGatewayGroups } from "../lib/cst
  * Requires sport_center.gym_x904_lan_wa_batches and _batch_events migration.
  */
 export async function dispatchX904LanScanNotifications(): Promise<void> {
-  if (process.env.GYM_X904_LAN_WA_ENABLED !== "true") return;
-  const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
+  if (process.env.GYM_X904_LAN_WA_ENABLED === "false") return;
+  const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "95862c59-6b11-4d86-bea0-e69546c827d6").trim();
   const serial = String(process.env.GYM_X904_DEVICE_SERIAL ?? "TDBD234200545");
   if (!groupId) throw new Error("X904 LAN digest requires group ID");
   // A durable activation watermark, recorded once in the database, prevents
