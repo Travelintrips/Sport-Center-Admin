@@ -26,6 +26,9 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const [busy,setBusy]=useState(false);
   const [bulkPins,setBulkPins]=useState<string[]>([]);
   const [bulkResults,setBulkResults]=useState<string[]>([]);
+  const [bulkSearch,setBulkSearch]=useState("");
+  const [bulkConfirm,setBulkConfirm]=useState(false);
+  const [bulkProgress,setBulkProgress]=useState<Record<string,string>>({});
   const [bulkRunning,setBulkRunning]=useState(false);
   const [commandId,setCommandId]=useState<string|null>(null);
   const [message,setMessage]=useState("");
@@ -57,13 +60,16 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     (isExisting ? !!chosen&&Number.isInteger(chosen.device_uid)&&
       (action==="DELETE_USER"||validName) : !chosen&&validName);
   const eligibleUsers=users.filter(u=>u.device_role===0 && /^[0-9]{1,8}$/.test(u.user_pin) && Number.isInteger(u.device_uid));
-  const bulkReady=capabilities.operations.includes("DELETE_USER") && !busy && !bulkRunning && bulkPins.length>0;
+  const filteredUsers=eligibleUsers.filter(u=>(u.user_pin+" "+u.display_name).toLowerCase().includes(bulkSearch.trim().toLowerCase()));
+  const selectedUsers=bulkPins.map(p=>eligibleUsers.find(u=>u.user_pin===p)).filter((u):u is DeviceUser=>!!u);
+  const filteredSelected=filteredUsers.filter(u=>bulkPins.includes(u.user_pin));
+  const bulkReady=capabilities.operations.includes("DELETE_USER") && !busy && !bulkRunning && selectedUsers.length>0 && selectedUsers.length===bulkPins.length;
   async function submitBulk(){
     if(!bulkReady)return;
     const targets=eligibleUsers.filter(u=>bulkPins.includes(u.user_pin));
     if(targets.length!==bulkPins.length)return;
-    if(!window.confirm(`Hapus ${targets.length} pengguna biasa dari mesin X904 secara BERURUTAN? Setiap perintah menunggu ACK sukses sebelum perintah berikutnya. Administrator dan histori absensi tidak diubah.`))return;
-    setBulkRunning(true);setBulkResults([]);
+    setBulkConfirm(false);setBulkRunning(true);setBulkResults([]);
+    setBulkProgress(Object.fromEntries(targets.map(u=>[u.user_pin,"Menunggu giliran"])));
     try{
       for(const user of targets){
         let commandId="";
@@ -74,7 +80,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
           })});
           commandId=result.command_id;
           if(!commandId)throw new Error("Tidak menerima ID perintah");
-          setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: antrean ${commandId.slice(0,8)}`]);
+          setBulkProgress(prev=>({...prev,[user.user_pin]:"Antrean "+commandId.slice(0,8)+" · menunggu ACK"}));
           let state="queued";
           for(let attempt=0;attempt<45;attempt++){
             await new Promise(resolve=>setTimeout(resolve,4000));
@@ -83,14 +89,16 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
             if(["completed","failed","cancelled"].includes(state))break;
           }
           if(state!=="completed")throw new Error(`ACK belum sukses (status ${state}); antrean dihentikan untuk menghindari perintah tumpang tindih`);
+          setBulkProgress(prev=>({...prev,[user.user_pin]:"Berhasil · ACK mesin diterima"}));
           setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: berhasil, ACK mesin diterima`]);
           await queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});
         }catch(error){
+          setBulkProgress(prev=>({...prev,[user.user_pin]:"Gagal · "+(error instanceof Error?error.message:"Tidak diketahui")}));
           setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: ${error instanceof Error?error.message:"Gagal"} — proses dihentikan`]);
           break;
         }
       }
-    }finally{setBulkRunning(false);setBulkPins([]);void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});}
+    }finally{setBulkRunning(false);void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});}
   }
   async function submit(){
     if(busy||bulkRunning||!permitted)return;
@@ -145,13 +153,67 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${permitted&&!busy&&!bulkRunning&&action==="DELETE_USER"?"bg-blue-600 text-white border-blue-600 hover:bg-blue-700":"bg-gray-100 text-gray-500 border-gray-200"} disabled:opacity-50`}>
       {busy?"Mengirim...":action==="CREATE_USER"?"Tambah pengguna":action==="UPDATE_USER"?"Simpan perubahan":"Hapus pengguna"}
     </button>
-    {capabilities.operations.includes("DELETE_USER")&&<div className="rounded-lg border p-3 space-y-3">
-      <h4 className="text-sm font-semibold">Hapus beberapa pengguna biasa</h4>
-      <p className="text-xs text-muted-foreground">Centang pengguna biasa. Perintah dikirim satu per satu; proses berhenti jika ACK gagal atau belum diterima. Akun administrator tidak dapat dipilih.</p>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={busy||bulkRunning||eligibleUsers.length===0} checked={eligibleUsers.length>0&&bulkPins.length===eligibleUsers.length} onChange={e=>setBulkPins(e.target.checked?eligibleUsers.map(u=>u.user_pin):[])}/> Pilih semua pengguna biasa ({eligibleUsers.length})</label>
-      <div className="max-h-48 overflow-y-auto grid gap-2 sm:grid-cols-2">{users.map(u=><label key={u.user_pin} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={busy||bulkRunning||u.device_role!==0} checked={bulkPins.includes(u.user_pin)} onChange={e=>setBulkPins(prev=>e.target.checked?[...prev,u.user_pin]:prev.filter(p=>p!==u.user_pin))}/><span>{u.user_pin} — {u.display_name} {u.device_role!==0?"(administrator dilindungi)":""}</span></label>)}</div>
-      <button type="button" disabled={!bulkReady} onClick={()=>void submitBulk()} className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${bulkReady?"bg-blue-600 border-blue-600 text-white hover:bg-blue-700":"bg-gray-100 border-gray-200 text-gray-500"}`}>{bulkRunning?"Memproses berurutan...":`Hapus ${bulkPins.length} pengguna terpilih`}</button>
+
+    {capabilities.operations.includes("DELETE_USER")&&<div className="rounded-xl border p-4 space-y-4">
+      <div>
+        <h4 className="text-sm font-semibold">Hapus beberapa pengguna biasa</h4>
+        <p className="text-xs text-muted-foreground">Cari nama atau PIN, periksa pilihan, lalu konfirmasi. Perintah dikirim berurutan dan berhenti jika ACK gagal atau belum diterima.</p>
+      </div>
+      <label className="block text-sm font-medium">Cari nama atau PIN
+        <input type="search" value={bulkSearch} disabled={busy||bulkRunning} onChange={e=>setBulkSearch(e.target.value)}
+          placeholder="Contoh: EKO atau 45" className="mt-1 block w-full rounded-lg border bg-background px-3 py-2 text-sm"/>
+      </label>
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{filteredUsers.length} dari {eligibleUsers.length} pengguna biasa</span>
+        {bulkSearch&&<button type="button" className="underline" disabled={busy||bulkRunning} onClick={()=>setBulkSearch("")}>Bersihkan pencarian</button>}
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" disabled={busy||bulkRunning||filteredUsers.length===0}
+          checked={filteredUsers.length>0&&filteredSelected.length===filteredUsers.length}
+          onChange={e=>{const visible=new Set(filteredUsers.map(u=>u.user_pin));setBulkPins(prev=>e.target.checked?[...new Set([...prev,...visible])]:prev.filter(p=>!visible.has(p)));setBulkProgress({});setBulkResults([]);}}/>
+        Pilih semua hasil pencarian ({filteredUsers.length})
+      </label>
+      <div className="max-h-52 overflow-y-auto rounded-lg border p-3 grid gap-2 sm:grid-cols-2" aria-label="Daftar pengguna biasa">
+        {filteredUsers.length===0&&<p className="text-sm text-muted-foreground">Tidak ada pengguna yang cocok.</p>}
+        {filteredUsers.map(u=><label key={u.user_pin} className="flex items-center gap-2 rounded-md p-1 text-sm hover:bg-muted/50">
+          <input type="checkbox" disabled={busy||bulkRunning} checked={bulkPins.includes(u.user_pin)}
+            onChange={e=>{setBulkPins(prev=>e.target.checked?[...prev,u.user_pin]:prev.filter(p=>p!==u.user_pin));setBulkProgress({});setBulkResults([]);}}/>
+          <span className="font-medium">{u.display_name}</span><span className="text-muted-foreground">PIN {u.user_pin}</span>
+        </label>)}
+      </div>
+      <div className="rounded-lg border bg-muted/20 p-3 space-y-2" aria-label="Daftar pengguna yang akan dihapus">
+        <div className="flex items-center justify-between gap-2">
+          <h5 className="text-sm font-semibold">Pengguna yang akan dihapus ({selectedUsers.length})</h5>
+          {selectedUsers.length>0&&!bulkRunning&&<button type="button" className="text-xs underline" onClick={()=>{setBulkPins([]);setBulkProgress({});setBulkResults([]);}}>Kosongkan pilihan</button>}
+        </div>
+        {selectedUsers.length===0?<p className="text-xs text-muted-foreground">Belum ada pengguna dipilih.</p>:
+          <ul className="space-y-1.5">{selectedUsers.map(u=><li key={u.user_pin} className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-sm">
+            <span><strong>{u.display_name}</strong> · PIN {u.user_pin} <span className="text-xs text-muted-foreground">(UID {u.device_uid})</span></span>
+            <span className="flex items-center gap-2">
+              {bulkProgress[u.user_pin]&&<span className="text-xs text-muted-foreground">{bulkProgress[u.user_pin]}</span>}
+              {!bulkRunning&&<button type="button" aria-label={"Batalkan pilihan PIN "+u.user_pin} className="rounded px-1 text-muted-foreground hover:text-destructive" onClick={()=>{setBulkPins(prev=>prev.filter(p=>p!==u.user_pin));setBulkProgress({});setBulkResults([]);}}>×</button>}
+            </span>
+          </li>)}</ul>}
+      </div>
+      <button type="button" disabled={!bulkReady} onClick={()=>setBulkConfirm(true)}
+        className={"rounded-lg border px-4 py-2 text-sm font-semibold "+(bulkReady?"bg-blue-600 border-blue-600 text-white hover:bg-blue-700":"bg-gray-100 border-gray-200 text-gray-500")}>
+        {bulkRunning?"Memproses berurutan...":"Tinjau penghapusan "+selectedUsers.length+" pengguna"}
+      </button>
       {bulkResults.length>0&&<div role="status" aria-live="polite" className="text-xs space-y-1">{bulkResults.map((line,i)=><p key={i}>{line}</p>)}</div>}
+      {bulkConfirm&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <div role="dialog" aria-modal="true" aria-labelledby="x904-bulk-confirm-title" className="w-full max-w-lg rounded-xl border bg-background p-5 shadow-xl space-y-4">
+          <h4 id="x904-bulk-confirm-title" className="font-semibold">Konfirmasi penghapusan pengguna X904</h4>
+          <p className="text-sm">Pastikan nama dan PIN benar. Menghapus akun mesin dapat menghilangkan sidik jari dan wajah yang terdaftar. Riwayat absensi database tidak ikut dihapus.</p>
+          <ul className="max-h-52 overflow-y-auto space-y-2 text-sm">
+            {selectedUsers.map(u=><li key={u.user_pin} className="flex justify-between rounded-md border px-3 py-2"><strong>{u.display_name}</strong><span>PIN {u.user_pin} · UID {u.device_uid}</span></li>)}
+          </ul>
+          <p className="text-xs text-muted-foreground">Perintah berjalan satu per satu dan berhenti jika ACK tidak diterima. Jangan menutup halaman selama proses berlangsung.</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>setBulkConfirm(false)}>Kembali</button>
+            <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={!bulkReady} onClick={()=>void submitBulk()}>Ya, hapus {selectedUsers.length} pengguna</button>
+          </div>
+        </div>
+      </div>}
     </div>}
     {message&&<p role="status" className="text-sm">{message}</p>}
     {receipt?.command&&<p role="status" className="text-sm">
