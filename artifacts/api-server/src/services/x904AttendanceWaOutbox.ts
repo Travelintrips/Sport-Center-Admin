@@ -39,7 +39,8 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
         attempts=attempts+1
     WHERE o.event_id IN (
       SELECT event_id FROM sport_center.gym_x904_wa_outbox
-      WHERE batch_id IS NULL AND ((status='pending' AND next_attempt_at<=now())\n        OR (status='sending' AND locked_until<now()))
+      WHERE batch_id IS NULL AND ((status='pending' AND next_attempt_at<=now()) 
+        OR (status='sending' AND locked_until<now()))
       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
     ) RETURNING event_id,member_name,user_pin,device_time,verification_method
   `);
