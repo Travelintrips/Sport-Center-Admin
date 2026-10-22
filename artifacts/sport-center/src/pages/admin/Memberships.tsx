@@ -917,8 +917,9 @@ export default function AdminMemberships() {
                 </div>
               )}
 
+              {viewMember.status === "pending_payment" && <p className="text-xs text-muted-foreground">Aktivasi tersedia setelah bukti dikirim dan diverifikasi oleh petugas berwenang.</p>}
               {/* Tombol konfirmasi menonjol untuk status yang butuh tindakan */}
-              {(viewMember.status === "pending_payment" || viewMember.status === "waiting_confirmation") && (
+              {viewMember.status === "waiting_confirmation" && viewMember.paymentProofUrl && (
                 <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-2">
                   <p className="text-sm font-semibold text-green-800">
                     {viewMember.status === "waiting_confirmation"
@@ -940,7 +941,7 @@ export default function AdminMemberships() {
                 <p className="text-sm text-muted-foreground mb-3">Ubah Status Manual</p>
                 <div className="flex gap-2 flex-wrap">
                   {[
-                    { value: "active", label: "Aktif" },
+                    ...(viewMember.status === "waiting_confirmation" && viewMember.paymentProofUrl ? [{ value: "active", label: "Aktif" }] : []),
                     { value: "waiting_confirmation", label: "Menunggu Konfirmasi" },
                     { value: "pending_payment", label: "Menunggu Bayar" },
                     { value: "expired", label: "Kadaluarsa" },
