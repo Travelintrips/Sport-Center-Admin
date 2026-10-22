@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_outbox (
   user_pin text NOT NULL,
   member_name text NOT NULL,
   device_time text NOT NULL,
+  attendance_date date NOT NULL,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','sent','failed')),
   attempts integer NOT NULL DEFAULT 0,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
@@ -14,5 +15,7 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_outbox (
   created_at timestamptz NOT NULL DEFAULT now(),
   sent_at timestamptz
 );
+CREATE UNIQUE INDEX IF NOT EXISTS gym_x904_wa_one_per_user_day_idx
+  ON sport_center.gym_x904_wa_outbox(device_serial,user_pin,attendance_date);
 CREATE INDEX IF NOT EXISTS gym_x904_wa_outbox_due_idx
   ON sport_center.gym_x904_wa_outbox(status,next_attempt_at);
