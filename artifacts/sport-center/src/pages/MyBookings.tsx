@@ -458,7 +458,7 @@ export default function MyBookings() {
   if (user.role === "tenant") return null;
 
   // Filter berdasarkan nama customer (untuk akun operator)
-  const isOperator = user.role === "owner" || user.role === "admin" || user.role === "super_admin" || user.role === "admin_booking" || user.role === "staff";
+  const isOperator = String(user.role) === "owner" || user.role === "admin" || user.role === "super_admin" || user.role === "admin_booking" || user.role === "staff";
   const searchQuery = customerSearch.trim().toLowerCase();
 
   // Pisahkan booking individual dan grup

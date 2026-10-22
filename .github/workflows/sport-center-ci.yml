@@ -148,6 +148,20 @@ jobs:
           node --test scripts/test-x904-almano-prod-snapshot.mjs
           node --test scripts/test-x904-almano-prod-autosync.mjs
 
+      - name: Parse staged X904 durable-delete worker (no execution)
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/x904-vmsc-durable-delete-worker-stage.ps1').Path,
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Output 'X904_DURABLE_WORKER_POWERSHELL_PARSE_PASS'
+
       - name: Typecheck
         run: pnpm typecheck
 

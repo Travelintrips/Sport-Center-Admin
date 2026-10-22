@@ -6,7 +6,8 @@ const API=import.meta.env.VITE_API_BASE_URL ?? "/api";
 const SERIAL="TDBD234200545";
 type Action="CREATE_USER"|"UPDATE_USER"|"DELETE_USER";
 type DeviceUser={user_pin:string;display_name:string;device_uid:number;device_role:number;last_seen_at:string};
-type Capabilities={allowed:boolean;enabled:boolean;deviceSerial:string;operations:Action[]};
+type Capabilities={allowed:boolean;enabled:boolean;deviceSerial:string;operations:Action[];durableBulkEnabled?:boolean};
+type BatchHistory={batches:Array<{batchId:string;createdAt:string;commands:Array<{userPin:string;name:string;uid:string;order:number;state:string;result:unknown}>}>};
 type Receipt={command:{command_id:string;state:string;created_at:string;completed_at:string|null;result:Record<string,unknown>|null}};
 async function request(path:string,options?:RequestInit){
   const token=getToken();
@@ -38,6 +39,13 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     retry:false,
     staleTime:30000
   });
+  const {data:batchHistory}=useQuery<BatchHistory>({
+    queryKey:["gym-x904-delete-batches"],
+    queryFn:()=>request("/admin/gym-x904/delete-batches"),
+    enabled:capabilities?.allowed===true,
+    refetchInterval:capabilities?.durableBulkEnabled===true?5000:false,
+    retry:false
+  });
   const {data:receipt}=useQuery<Receipt>({
     queryKey:["gym-x904-user-command",commandId],
     queryFn:()=>request(`/admin/gym-x904/user-command/${commandId}`),
@@ -63,42 +71,35 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const filteredUsers=eligibleUsers.filter(u=>(u.user_pin+" "+u.display_name).toLowerCase().includes(bulkSearch.trim().toLowerCase()));
   const selectedUsers=bulkPins.map(p=>eligibleUsers.find(u=>u.user_pin===p)).filter((u):u is DeviceUser=>!!u);
   const filteredSelected=filteredUsers.filter(u=>bulkPins.includes(u.user_pin));
-  const bulkReady=capabilities.operations.includes("DELETE_USER") && !busy && !bulkRunning && selectedUsers.length>0 && selectedUsers.length===bulkPins.length;
+  const bulkReady=capabilities.durableBulkEnabled===true && capabilities.operations.includes("DELETE_USER") && !busy && !bulkRunning && selectedUsers.length>0 && selectedUsers.length===bulkPins.length;
   async function submitBulk(){
     if(!bulkReady)return;
-    const targets=eligibleUsers.filter(u=>bulkPins.includes(u.user_pin));
+    const targets=selectedUsers.map(u=>({userPin:u.user_pin,expectedUid:u.device_uid,expectedName:u.display_name}));
     if(targets.length!==bulkPins.length)return;
     setBulkConfirm(false);setBulkRunning(true);setBulkResults([]);
-    setBulkProgress(Object.fromEntries(targets.map(u=>[u.user_pin,"Menunggu giliran"])));
     try{
-      for(const user of targets){
-        let commandId="";
-        try{
-          const result=await request("/admin/gym-x904/user-command",{method:"POST",body:JSON.stringify({
-            commandType:"DELETE_USER",userPin:user.user_pin,expectedSerial:SERIAL,confirmPin:user.user_pin,
-            expectedUid:user.device_uid,expectedName:user.display_name,idempotencyKey:crypto.randomUUID().replace(/-/g,"")
-          })});
-          commandId=result.command_id;
-          if(!commandId)throw new Error("Tidak menerima ID perintah");
-          setBulkProgress(prev=>({...prev,[user.user_pin]:"Antrean "+commandId.slice(0,8)+" · menunggu ACK"}));
-          let state="queued";
-          for(let attempt=0;attempt<45;attempt++){
-            await new Promise(resolve=>setTimeout(resolve,4000));
-            const receipt=await request(`/admin/gym-x904/user-command/${commandId}`) as Receipt;
-            state=receipt.command.state;
-            if(["completed","failed","cancelled"].includes(state))break;
-          }
-          if(state!=="completed")throw new Error(`ACK belum sukses (status ${state}); antrean dihentikan untuk menghindari perintah tumpang tindih`);
-          setBulkProgress(prev=>({...prev,[user.user_pin]:"Berhasil · ACK mesin diterima"}));
-          setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: berhasil, ACK mesin diterima`]);
-          await queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});
-        }catch(error){
-          setBulkProgress(prev=>({...prev,[user.user_pin]:"Gagal · "+(error instanceof Error?error.message:"Tidak diketahui")}));
-          setBulkResults(prev=>[...prev,`PIN ${user.user_pin}: ${error instanceof Error?error.message:"Gagal"} — proses dihentikan`]);
-          break;
-        }
-      }
-    }finally{setBulkRunning(false);void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]});}
+      // Retain the same request key if a network timeout occurs after DB commit.
+      // Only the idempotency key and PIN/UID fingerprint are stored, never names or biometrics.
+      const fingerprint=targets.map(t=>t.userPin+":"+t.expectedUid).join("|");
+      const storageKey="x904-pending-bulk-submit";
+      let idempotencyKey=crypto.randomUUID().replace(/-/g,"");
+      try {
+        const saved=JSON.parse(sessionStorage.getItem(storageKey)??"null");
+        if(saved?.fingerprint===fingerprint && typeof saved?.key==="string" &&
+          /^[a-zA-Z0-9_-]{16,96}$/.test(saved.key)) idempotencyKey=saved.key;
+        else sessionStorage.setItem(storageKey,JSON.stringify({fingerprint,key:idempotencyKey}));
+      } catch { /* session storage unavailable: server still enforces unique queued PINs */ }
+      const result=await request("/admin/gym-x904/delete-batches",{method:"POST",body:JSON.stringify({
+        targets,expectedSerial:SERIAL,idempotencyKey
+      })});
+      if(!result.batchId)throw new Error("ID pekerjaan tidak diterima");
+      try { sessionStorage.removeItem(storageKey); } catch { /* storage disabled */ }
+      setBulkResults(["Pekerjaan "+String(result.batchId).slice(0,8)+" tersimpan di server. Anda boleh pindah tab atau menutup browser."]);
+      setBulkPins([]);
+      await queryClient.invalidateQueries({queryKey:["gym-x904-delete-batches"]});
+    }catch(error){
+      setBulkResults([error instanceof Error?error.message:"Gagal menyimpan antrean"]);
+    }finally{setBulkRunning(false);}
   }
   async function submit(){
     if(busy||bulkRunning||!permitted)return;
@@ -197,9 +198,24 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       </div>
       <button type="button" disabled={!bulkReady} onClick={()=>setBulkConfirm(true)}
         className={"rounded-lg border px-4 py-2 text-sm font-semibold "+(bulkReady?"bg-blue-600 border-blue-600 text-white hover:bg-blue-700":"bg-gray-100 border-gray-200 text-gray-500")}>
-        {bulkRunning?"Memproses berurutan...":"Tinjau penghapusan "+selectedUsers.length+" pengguna"}
+        {bulkRunning?"Menyimpan antrean...":"Tinjau penghapusan "+selectedUsers.length+" pengguna"}
       </button>
       {bulkResults.length>0&&<div role="status" aria-live="polite" className="text-xs space-y-1">{bulkResults.map((line,i)=><p key={i}>{line}</p>)}</div>}
+      {capabilities.durableBulkEnabled!==true&&<p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">Penghapusan massal berbasis server belum diaktifkan. Jangan gunakan antrean browser lama; tunggu verifikasi worker VMSC dan ACK.</p>}
+      {!!batchHistory?.batches?.length&&<div className="rounded-lg border p-3 space-y-3" aria-label="Riwayat pekerjaan penghapusan">
+        <h5 className="text-sm font-semibold">Pekerjaan penghapusan tersimpan di server</h5>
+        <p className="text-xs text-muted-foreground">Status dapat diperiksa kembali meskipun browser ditutup. Berhasil hanya jika ACK mesin terverifikasi.</p>
+        {batchHistory?.batches?.map(b=><div key={b.batchId} className="rounded-md border p-3 space-y-1.5 text-xs">
+          <p className="font-semibold">Pekerjaan {b.batchId.slice(0,8)} · {b.commands.length} pengguna</p>
+          {b.commands.map(c=><div key={c.userPin} className="flex flex-wrap justify-between gap-2">
+            <span>{c.name} · PIN {c.userPin}</span>
+            <span className={c.state==="completed"?"text-green-700":c.state==="failed"||c.state==="cancelled"||c.state==="needs_review"?"text-red-600":"text-muted-foreground"}>
+              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"&&b.commands.some(x=>x.state==="failed"||x.state==="cancelled"||x.state==="needs_review")?"Dihentikan · tidak dikirim":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":c.state==="needs_review"?"ACK kedaluwarsa · perlu pemeriksaan":"Dibatalkan"}
+            </span>
+          </div>)}
+          {b.commands.some(c=>c.state==="failed"||c.state==="cancelled"||c.state==="needs_review")&&<p role="alert" className="text-red-600">Pekerjaan berhenti; periksa hasil sebelum mengirim ulang.</p>}
+        </div>)}
+      </div>}
       {bulkConfirm&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
         <div role="dialog" aria-modal="true" aria-labelledby="x904-bulk-confirm-title" className="w-full max-w-lg rounded-xl border bg-background p-5 shadow-xl space-y-4">
           <h4 id="x904-bulk-confirm-title" className="font-semibold">Konfirmasi penghapusan pengguna X904</h4>
@@ -207,7 +223,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
           <ul className="max-h-52 overflow-y-auto space-y-2 text-sm">
             {selectedUsers.map(u=><li key={u.user_pin} className="flex justify-between rounded-md border px-3 py-2"><strong>{u.display_name}</strong><span>PIN {u.user_pin} · UID {u.device_uid}</span></li>)}
           </ul>
-          <p className="text-xs text-muted-foreground">Perintah berjalan satu per satu dan berhenti jika ACK tidak diterima. Jangan menutup halaman selama proses berlangsung.</p>
+          <p className="text-xs text-muted-foreground">Perintah berjalan satu per satu dan berhenti jika ACK tidak diterima. Anda boleh berpindah tab atau menutup browser setelah pekerjaan berhasil disimpan di server.</p>
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>setBulkConfirm(false)}>Kembali</button>
             <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={!bulkReady} onClick={()=>void submitBulk()}>Ya, hapus {selectedUsers.length} pengguna</button>
