@@ -124,3 +124,46 @@ export async function dispatchX904OneTimeReport(): Promise<void> {
     `);
   }
 }
+
+/** Drain only the two user-authorized real-world test scans, independent of opt-in env.
+ * The durable statuses and Gateway idempotency prevent repeated WhatsApp sends.
+ */
+export async function dispatchX904AuthorizedRealScanTest(): Promise<void> {
+  const ids = [
+    "6a05144da0af12c8f05111e9e74aa7d96aafed5a2647e4b30558010ec7ebad46",
+    "957668a2de43315b1f941cc89a5e139dd0edeb49fdbf48242878286206b97b40",
+  ];
+  for (const eventId of ids) {
+    const claim=await db.execute(sql`
+      UPDATE sport_center.gym_x904_lan_wa_outbox
+      SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
+      WHERE event_id=${eventId} AND group_id='120363428216180040@g.us'
+        AND ((status IN ('pending','failed') AND next_attempt_at<=now())
+          OR (status='sending' AND locked_until<now()))
+      RETURNING body
+    `);
+    if (!claim.rows.length) continue;
+    try {
+      const result=await sendCstWaGatewayGroupMessage({
+        groupId:"95862c59-6b11-4d86-bea0-e69546c827d6",
+        text:String(claim.rows[0].body),idempotencyKey:`x904-lan-event-${eventId}`
+      });
+      const delivered=["delivered","read"].includes(result.status.toLowerCase());
+      await db.execute(sql`
+        UPDATE sport_center.gym_x904_lan_wa_outbox
+        SET status=${delivered?"sent":"pending_ack"},
+          gateway_message_id=${result.messageId}, locked_until=NULL,last_error=NULL,
+          sent_at=CASE WHEN ${delivered} THEN now() ELSE sent_at END
+        WHERE event_id=${eventId} AND status='sending'
+      `);
+    } catch(err) {
+      const reason=err instanceof Error?err.message:"gateway_failed";
+      await db.execute(sql`
+        UPDATE sport_center.gym_x904_lan_wa_outbox
+        SET status='failed', locked_until=NULL,next_attempt_at=now()+interval '1 minute',
+          last_error=${reason.slice(0,250)}
+        WHERE event_id=${eventId} AND status='sending'
+      `);
+    }
+  }
+}
