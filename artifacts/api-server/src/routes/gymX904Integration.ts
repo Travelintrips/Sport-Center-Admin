@@ -177,7 +177,7 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
   if (process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return res.status(503).json({error:"USER_WRITE_DISABLED"});
   const {commandType, userPin, expectedSerial, confirmPin, idempotencyKey, name, expectedUid, expectedName} = req.body ?? {};
   if (process.env.GYM_X904_NAME_EDIT_ALL_ENABLED!=="true" && process.env.GYM_X904_USER_WRITE_TEST_PIN && (userPin !== process.env.GYM_X904_USER_WRITE_TEST_PIN || expectedUid !== 335 || !["UPDATE_USER","DELETE_USER"].includes(commandType))) return res.status(403).json({error:"TEST_USER_ONLY"});
-  if(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" && commandType!=="UPDATE_USER") return res.status(403).json({error:"NAME_EDIT_ONLY"});
+  if(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" && commandType!=="UPDATE_USER" && !(commandType==="DELETE_USER" && process.env.GYM_X904_USER_DELETE_ENABLED==="true")) return res.status(403).json({error:"OPERATION_NOT_ENABLED"});
   const isCreate=commandType==="CREATE_USER";
   const requiresExisting=commandType==="UPDATE_USER" || commandType==="DELETE_USER";
   const safeDisplay=(v:unknown)=>typeof v==="string" && /^[A-Za-z0-9 ._-]{2,24}$/.test(v);
@@ -208,7 +208,7 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)
   const role=(req as any).user?.role;
   const allowed=role==="owner" || role==="super_admin";
   return res.json({allowed,enabled:allowed && process.env.GYM_X904_USER_WRITE_ENABLED==="true",
-    deviceSerial:"TDBD234200545",operations:process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? ["UPDATE_USER"] : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"],testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
+    deviceSerial:"TDBD234200545",operations:process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? (process.env.GYM_X904_USER_DELETE_ENABLED==="true" ? ["UPDATE_USER","DELETE_USER"] : ["UPDATE_USER"]) : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"],testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
 });
 
 // VMSC claims and receipts use scoped database SECURITY DEFINER functions.
