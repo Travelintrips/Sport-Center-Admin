@@ -252,6 +252,32 @@ router.post("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
   return res.status(202).json({batchId:row.batch_id,state:"queued",count:targets.length});
  }catch{return res.status(409).json({error:"BATCH_NOT_ACCEPTED_OR_DUPLICATE"});}
 });
+
+router.get("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
+ res.setHeader("Cache-Control","no-store");
+ const actor=(req as any).user;
+ if(!actor||!["owner","super_admin"].includes(actor.role))return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+ try{
+  const batches=await db.execute(sql`SELECT batch_id AS "batchId",created_at AS "createdAt"
+    FROM sport_center.x904_delete_batches
+    WHERE requested_by=${actor.userId} AND device_serial='TDBD234200545'
+    ORDER BY created_at DESC LIMIT 5`);
+  const ids=batches.rows.map((r:any)=>r.batchId);
+  if(!ids.length)return res.json({batches:[]});
+  const commands=await db.execute(sql`SELECT batch_id AS "batchId",user_pin AS "userPin",
+    payload->>'expectedName' AS "name",payload->>'expectedUid' AS "uid",
+    batch_order AS "order",state,result
+    FROM sport_center.x904_user_commands
+    WHERE batch_id IN (SELECT batch_id FROM sport_center.x904_delete_batches
+      WHERE requested_by=${actor.userId} AND device_serial='TDBD234200545'
+      ORDER BY created_at DESC LIMIT 5)
+    ORDER BY batch_id,batch_order`);
+  return res.json({batches:batches.rows.map((b:any)=>({
+    ...b,commands:commands.rows.filter((c:any)=>c.batchId===b.batchId)
+  }))});
+ }catch{return res.status(503).json({error:"BATCH_HISTORY_UNAVAILABLE"});}
+});
+
 router.get("/admin/gym-x904/delete-batches/:batchId",adminMiddleware,async(req,res)=>{
  res.setHeader("Cache-Control","no-store");
  const actor=(req as any).user;
@@ -282,7 +308,7 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)
   const role=(req as any).user?.role;
   const allowed=role==="owner" || role==="super_admin";
   return res.json({allowed,enabled:allowed && process.env.GYM_X904_USER_WRITE_ENABLED==="true",
-    deviceSerial:"TDBD234200545",operations:process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? (process.env.GYM_X904_USER_DELETE_ENABLED==="true" ? ["UPDATE_USER","DELETE_USER"] : ["UPDATE_USER"]) : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"],testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
+    deviceSerial:"TDBD234200545",durableBulkEnabled:process.env.GYM_X904_DURABLE_BULK_ENABLED==="true",operations:process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? (process.env.GYM_X904_USER_DELETE_ENABLED==="true" ? ["UPDATE_USER","DELETE_USER"] : ["UPDATE_USER"]) : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"],testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
 });
 
 // VMSC claims and receipts use scoped database SECURITY DEFINER functions.
