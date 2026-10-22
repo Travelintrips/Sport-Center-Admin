@@ -6,6 +6,9 @@ import { sendCstWaGatewayGroupMessage } from "../lib/cstWaGateway";
 export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
   if (process.env.GYM_X904_WA_NOTIFY_ENABLED !== "true" || !groupId) return;
+  // Batch digest only at the top of each two-hour WIB window; avoid per-scan group spam.
+  const wibHour = (new Date().getUTCHours() + 7) % 24;
+  if (wibHour % 2 !== 0 || new Date().getUTCMinutes() >= 5) return;
   // Atomic claim: concurrent scheduler instances cannot claim the same pending event.
   const claimed = await db.execute(sql`
     UPDATE sport_center.gym_x904_wa_outbox o SET status='sending',
@@ -17,24 +20,34 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
       ORDER BY created_at ASC LIMIT 10 FOR UPDATE SKIP LOCKED
     ) RETURNING event_id,member_name,user_pin,device_time,attempts
   `);
-  for (const row of claimed.rows) {
-    const eventId = String(row.event_id);
-    const name = String(row.member_name).slice(0,80);
-    const pin = String(row.user_pin);
-    const when = String(row.device_time);
-    const text = `Absensi Gym X904\nNama: ${name}\nPIN: ${pin}\nWaktu: ${when} WIB\nEvent: ${eventId.slice(0,12)}`;
-    try {
-      const sent = await sendCstWaGatewayGroupMessage({
-        groupId, text, idempotencyKey: `x904-attendance-${eventId}`,
-      });
+  if (claimed.rows.length === 0) return;
+  const rows = claimed.rows;
+  const lines = rows.map((row,index) => {
+    const time = String(row.device_time).slice(11,16);
+    const name = String(row.member_name).slice(0,35);
+    return `${index+1}. ${name} ${time} ✅`;
+  });
+  const day = String(rows[0].device_time).slice(0,10);
+  const text = `ABSENSI GYM X904\n${day}\n\n${lines.join("\n")}\n\nTotal: ${rows.length} absensi terverifikasi`;
+  const ids = rows.map(row=>String(row.event_id));
+  // Digest key is stable across retries for this claimed batch.
+  const { createHash } = await import("node:crypto");
+  const digestKey = createHash("sha256").update(ids.slice().sort().join("|")).digest("hex");
+  try {
+    const sent = await sendCstWaGatewayGroupMessage({
+      groupId, text, idempotencyKey: `x904-digest-${digestKey}`,
+    });
+    for (const eventId of ids) {
       await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
         SET status='sent',sent_at=now(),locked_until=NULL,gateway_message_id=${sent.messageId},last_error=NULL
         WHERE event_id=${eventId} AND status='sending'`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Gateway delivery failed";
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Gateway delivery failed";
+    for (const eventId of ids) {
       await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
         SET status='failed',locked_until=NULL,last_error=${message.slice(0,300)},
-          next_attempt_at=now()+(least(60,power(2,least(attempts,6))::integer)*interval '1 minute')
+          next_attempt_at=now()+interval '5 minutes'
         WHERE event_id=${eventId} AND status='sending'`);
     }
   }
