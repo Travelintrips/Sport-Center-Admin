@@ -487,15 +487,17 @@ export default function AdminCheckoutForm() {
               <p className="text-xs text-muted-foreground">Status slot dihitung untuk seluruh durasi. Server memeriksa ulang saat menyimpan.</p>
             </div>}
             {!isMembership && selectedFacilityId && selectedDate && (isWalkIn || slotValid) && <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
-              <p className="font-semibold">Ringkasan Jadwal</p>
+              <p className="font-semibold">Ringkasan Booking</p>
               <p>{selectedDate} · {isWalkIn ? "Gym per kunjungan (tanpa durasi)" : startTime.slice(11,16) + " – " + computedEndTime.slice(11,16) + " (" + duration + " jam)"}</p>
-              <div className="flex justify-between gap-3"><span>Harga fasilitas</span><strong>{formatRupiah(estimatedBase)}</strong></div>
+              <div className="flex justify-between gap-3"><span>{isWalkIn ? "Tarif per kunjungan" : "Tarif per jam"}</span><strong>{formatRupiah(Number(facility?.pricePerHour ?? 0))}</strong></div>
+              {!isWalkIn && <div className="flex justify-between gap-3"><span>Durasi</span><span>{duration} jam</span></div>}
+              <div className="flex justify-between gap-3"><span>Subtotal</span><strong>{formatRupiah(estimatedBase)}</strong></div>
               {bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
-              <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Estimasi total booking"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
+              <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Total Pembayaran"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
               {isCompanyPayer ? <>
                 <p className="text-muted-foreground">DPP, PPN, dan PPh mengikuti konfigurasi perusahaan serta kalkulasi backend; jumlah ini bukan angka invoice final.</p>
                 <p className="text-muted-foreground">Status setelah dibuat: menunggu approval perusahaan atau belum ditagihkan, sesuai akun.</p>
-              </> : <p className="text-muted-foreground">Personal: PPN Rp0, DPP pajak Rp0, PPh Rp0. Nilai akhir divalidasi backend.</p>}
+              </> : <p className="text-muted-foreground">Pajak (Personal / Umum): Rp0</p>}
             </div>}
             {/* Notes */}
             <div className="space-y-2">
@@ -565,7 +567,7 @@ export default function AdminCheckoutForm() {
             {!isMembership && <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting || !slotValid}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
-                : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking (Menunggu Pembayaran)"
+                : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking"
               }
             </Button>}
           </CardFooter>
