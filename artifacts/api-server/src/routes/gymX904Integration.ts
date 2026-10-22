@@ -235,7 +235,8 @@ router.post("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
     GROUP BY b.batch_id`);
   if(existing.rows.length){
     const prior=existing.rows[0] as {batchId:string;targets:unknown};
-    if(JSON.stringify(prior.targets)!==JSON.stringify(targets))
+    if(!Array.isArray(prior.targets) ||
+       JSON.stringify(prior.targets.map((t:any)=>({userPin:t.userPin,expectedUid:t.expectedUid,expectedName:t.expectedName})))!==JSON.stringify(targets))
       return res.status(409).json({error:"IDEMPOTENCY_KEY_TARGET_MISMATCH"});
     return res.status(200).json({batchId:prior.batchId,state:"accepted",count:targets.length,replayed:true});
   }
