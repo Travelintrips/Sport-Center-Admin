@@ -1,4 +1,5 @@
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
+import { dispatchX904LanScanNotifications } from "../services/x904LanWaNotifications";
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
@@ -483,6 +484,8 @@ export function startScheduler(): void {
   setInterval(() => {
     dispatchX904AttendanceWhatsApp().catch(err =>
       logger.error({err}, "[scheduler] X904 WhatsApp outbox dispatch failed"));
+    dispatchX904LanScanNotifications().catch(err =>
+      logger.error({err}, "[scheduler] X904 LAN observation WhatsApp failed"));
   }, 15 * 1000);
 
   // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
