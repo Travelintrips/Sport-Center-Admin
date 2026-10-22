@@ -74,6 +74,34 @@ export default function AdminMemberships() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewMember, setViewMember] = useState<any>(null);
+  const [paymentDecision,setPaymentDecision] = useState<"unpaid"|"paid">("unpaid");
+  const [paymentMethodDraft,setPaymentMethodDraft] = useState("qris");
+  const [paymentFile,setPaymentFile] = useState<File|null>(null);
+  const [paymentUploading,setPaymentUploading] = useState(false);
+  const [paymentError,setPaymentError] = useState("");
+  async function submitAdminMembershipProof() {
+    if(!viewMember?.id || !paymentFile || paymentUploading) return;
+    setPaymentError("");
+    setPaymentUploading(true);
+    try {
+      const form = new FormData();
+      form.append("proof",paymentFile);
+      form.append("paymentMethod",paymentMethodDraft);
+      const response = await fetch(`${API}/memberships/${viewMember.id}/admin-payment-proof-upload`,{
+        method:"POST",headers:{Authorization:`Bearer ${getToken()}`},body:form,
+      });
+      const data = await response.json();
+      if(!response.ok) throw Error(data.error || "Upload gagal");
+      setViewMember(data);
+      setPaymentFile(null);
+      setPaymentDecision("unpaid");
+      queryClient.invalidateQueries({queryKey:getListMembershipsQueryKey()});
+      queryClient.invalidateQueries({queryKey:["membership-payments",data.id]});
+      toast({title:"Bukti pembayaran dikirim",description:"Menunggu verifikasi, belum otomatis aktif."});
+    }catch(err){setPaymentError(err instanceof Error?err.message:"Upload gagal");}
+    finally{setPaymentUploading(false);}
+  }
+
   const [editingDates, setEditingDates] = useState(false);
   const [editStartDate, setEditStartDate] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
@@ -859,6 +887,30 @@ export default function AdminMemberships() {
                 </div>
               )}
 
+              {viewMember.status === "pending_payment" && (
+                <div className="rounded-xl border p-3 space-y-3">
+                  <p className="font-semibold text-sm">Pembayaran Membership</p>
+                  <p className="text-sm">Tagihan: <strong>{formatCurrency(viewMember.totalPrice)}</strong></p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button type="button" size="sm" variant={paymentDecision==="unpaid"?"default":"outline"} onClick={()=>setPaymentDecision("unpaid")}>Belum Dibayar</Button>
+                    <Button type="button" size="sm" variant={paymentDecision==="paid"?"default":"outline"} onClick={()=>setPaymentDecision("paid")}>Sudah Dibayar</Button>
+                  </div>
+                  {paymentDecision==="unpaid" ? <p className="text-xs text-muted-foreground">Tagihan tetap menunggu pembayaran. Tidak ada transaksi baru.</p> : (
+                    <div className="space-y-2">
+                      <Label>Metode pembayaran</Label>
+                      <Select value={paymentMethodDraft} onValueChange={setPaymentMethodDraft}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="qris">QRIS</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
+                      </Select>
+                      <Label htmlFor="member-proof">Bukti pembayaran (gambar, maks. 10 MB)</Label>
+                      <Input id="member-proof" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={e=>setPaymentFile(e.target.files?.[0]??null)}/>
+                      <p className="text-xs text-muted-foreground">Bukti akan masuk antrean verifikasi; tidak langsung mengaktifkan membership.</p>
+                      {paymentError && <p className="text-sm text-destructive">{paymentError}</p>}
+                      <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading} onClick={submitAdminMembershipProof}>{paymentUploading?"Mengirim bukti...":"Kirim untuk Verifikasi"}</Button>
+                    </div>
+                  )}
+                </div>
+              )}
               {!viewMember.paymentProofUrl && viewMember.status === "pending_payment" && (
                 <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
                   Customer belum melakukan pembayaran / upload bukti.
