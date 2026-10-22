@@ -107,8 +107,9 @@ export async function processX904Event(event: X904EventInput,
     // The event ID is the primary key, preventing duplicate notifications on ingress replay.
     if (status === "success" && process.env.GYM_X904_WA_NOTIFY_ENABLED === "true") {
       await tx.execute(sql`INSERT INTO sport_center.gym_x904_wa_outbox
-        (event_id,device_serial,user_pin,member_name,device_time,attendance_date)
-        SELECT ${event.eventId},${event.deviceSerial},${event.userPin},m.name,r.device_time,substring(r.device_time from 1 for 10)::date
+        (event_id,device_serial,user_pin,member_name,device_time,attendance_date,verification_method)
+        SELECT ${event.eventId},${event.deviceSerial},${event.userPin},m.name,r.device_time,substring(r.device_time from 1 for 10)::date,
+          CASE r.verification_type WHEN 1 THEN 'fingerprint' WHEN 4 THEN 'card' WHEN 15 THEN 'face' END
         FROM sport_center.gym_x904_member_mapping mm
         JOIN sport_center.sport_memberships m ON m.id=mm.membership_id
         JOIN sport_center.gym_x904_raw_events r ON r.event_id=${event.eventId}
