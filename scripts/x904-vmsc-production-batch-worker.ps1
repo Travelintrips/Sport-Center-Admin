@@ -16,6 +16,7 @@ if ($SelfTest) {
     exit $LASTEXITCODE
   } finally { Pop-Location }
 }
+if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -ne 'NT AUTHORITY\SYSTEM') { throw 'WORKER_MUST_RUN_AS_SYSTEM' }
 $mutex = [System.Threading.Mutex]::new($false,'Global\SportCenterX904UserCommandWorker')
 $locked = $false
 try {
