@@ -1386,6 +1386,50 @@ function BookingDetailDrawer({
     editablePayment?.submittedAt ??
     booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
+  const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
+  const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
+  const [savingNewPayment, setSavingNewPayment] = useState(false);
+  const [newPaymentError, setNewPaymentError] = useState("");
+  const paymentToast = useToast();
+  const paymentQueryClient = useQueryClient();
+  async function submitNewPaymentProof() {
+    if (!newPaymentProof || savingNewPayment || !booking.id) return;
+    setSavingNewPayment(true);
+    setNewPaymentError("");
+    try {
+      const auth = { Authorization: `Bearer ${getToken() ?? ""}` };
+      const proofForm = new FormData();
+      proofForm.append("proof", newPaymentProof);
+      const uploaded = await fetch(`${API_BASE}/payments/proof-upload`, {method:"POST",headers:auth,body:proofForm});
+      const proofData = await uploaded.json();
+      if (!uploaded.ok) throw new Error(proofData.error ?? "Bukti gagal diunggah");
+      const detected = String(proofData.ocrScan?.paymentMethod ?? "").toLowerCase();
+      if (proofData.ocrScan?.confidence === "high" && detected &&
+          ((detected === "qris") !== (newPaymentMethod === "QRIS"))) {
+        throw new Error("Metode pembayaran berbeda dari hasil pemeriksaan bukti. Periksa dan pilih metode yang benar.");
+      }
+      const amount = Number(booking.grandTotal ?? booking.totalPrice);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Nominal booking tidak valid");
+      const saved = await fetch(`${API_BASE}/payments`, {
+        method:"POST",headers:{"Content-Type":"application/json",...auth},
+        body:JSON.stringify({
+          bookingId:booking.id, amount, paymentType:"full_payment",
+          paymentMethod:newPaymentMethod,
+          ...(newPaymentMethod==="QRIS"?{paymentProvider:"mandiri_direct"}:{}),
+          proofUrl:proofData.objectPath ?? proofData.url,
+          ocrScanToken:proofData.ocrScanToken,
+        }),
+      });
+      const savedData = await saved.json();
+      if (!saved.ok) throw new Error(savedData.error ?? "Pembayaran gagal dicatat");
+      setNewPaymentProof(null);
+      paymentQueryClient.invalidateQueries({queryKey:getListBookingsQueryKey()});
+      paymentToast.toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi. Booking belum otomatis lunas."});
+    } catch (error) {
+      setNewPaymentError(error instanceof Error ? error.message : "Gagal mencatat pembayaran");
+    } finally { setSavingNewPayment(false); }
+  }
+
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [bookingDate, setBookingDate] = useState(String(booking.bookingDate ?? ""));
@@ -1899,6 +1943,26 @@ function BookingDetailDrawer({
                   </span>
                 )}
               </div>
+              {!membershipPaymentBooking && !membershipUsageBooking &&
+                ["pending_payment","expired"].includes(booking.status) &&
+                !allPayments.some(p=>["pending","confirmed"].includes(p.status)) && (
+                <div className="rounded-lg border p-3 space-y-3 mb-3">
+                  <div className="font-semibold text-sm">Catat Pembayaran Pelanggan</div>
+                  <p className="text-xs text-muted-foreground">Order {booking.orderNumber} · Tagihan {Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0})}</p>
+                  <Label>Metode pembayaran</Label>
+                  <Select value={newPaymentMethod} onValueChange={(v)=>setNewPaymentMethod(v as "QRIS"|"Transfer Bank")}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="QRIS">QRIS</SelectItem><SelectItem value="Transfer Bank">Transfer Bank</SelectItem></SelectContent>
+                  </Select>
+                  <Label htmlFor="new-booking-proof">Bukti pembayaran</Label>
+                  <Input id="new-booking-proof" type="file" accept="image/*,.pdf" onChange={e=>setNewPaymentProof(e.target.files?.[0]??null)} />
+                  {newPaymentError && <p className="text-xs text-destructive">{newPaymentError}</p>}
+                  <Button type="button" className="w-full" disabled={!newPaymentProof||savingNewPayment} onClick={submitNewPaymentProof}>
+                    {savingNewPayment?"Menyimpan...":"Unggah Bukti & Kirim Verifikasi"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">Tidak langsung menandai lunas. Pembayaran diverifikasi melalui detail booking.</p>
+                </div>
+              )}
               {/* Group Booking banner */}
               {booking.groupRef && (
                 <div className="px-4 py-2.5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-100 dark:border-violet-800">
