@@ -17,7 +17,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
   const activation = String(process.env.GYM_X904_LAN_WA_ACTIVATED_AT ?? "").trim();
   const serial = String(process.env.GYM_X904_DEVICE_SERIAL ?? "TDBD234200545");
-  if (!groupId || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/.test(activation) ||
+  if (!groupId || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(activation) ||
       !Number.isFinite(Date.parse(activation))) {
     throw new Error("X904 LAN digest requires group ID and explicit UTC activation time");
   }
@@ -64,8 +64,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     const lines = sorted.map((person,i) => {
       const repeats = person.times.slice(1).map(t=>t.slice(11)+" WIB").join(", ");
       return `${i+1}. ${person.name} — ${person.times[0].slice(11)} WIB` +
-        (repeats ? `\\n   Scan ulang: ${repeats}` : "") +
-        "\\n   Kartu: Belum tersedia\\n   Status: Tercatat di mesin, belum diverifikasi";
+        (repeats ? `\n   Scan ulang: ${repeats}` : "") +
+        "\n   Kartu: Belum tersedia\n   Status: Tercatat di mesin, belum diverifikasi";
     });
     const body = [
       "✅ *REKAP ABSENSI GYM SPORT CENTER*",
@@ -81,7 +81,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       "📋 Total scan: "+eligible.length,
       "⏳ Status: Observasi mesin, menunggu verifikasi",
       "🏋️ SELAMAT BEROLAHRAGA 🏆",
-    ].join("\\n");
+    ].join("\n");
     const batchId = "x904-lan-digest-" + String(eligible[0].event_id);
     await tx.execute(sql`INSERT INTO sport_center.gym_x904_lan_wa_batches
       (batch_id,group_id,body) VALUES (${batchId},${groupId},${body})
