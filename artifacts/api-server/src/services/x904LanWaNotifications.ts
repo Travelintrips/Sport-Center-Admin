@@ -15,7 +15,8 @@ import { sendCstWaGatewayGroupMessage, listCstWaGatewayGroups } from "../lib/cst
 export async function dispatchX904LanScanNotifications(): Promise<void> {
   if (process.env.GYM_X904_LAN_WA_ENABLED !== "true") return;
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
-  // Dedicated rollout cutoff prevents replay of scans captured before digest activation.\n  const activation = String(process.env.GYM_X904_LAN_WA_DIGEST_ACTIVATED_AT ?? "").trim();
+  // Dedicated rollout cutoff prevents replay of scans captured before digest activation.
+  const activation = String(process.env.GYM_X904_LAN_WA_DIGEST_ACTIVATED_AT ?? "").trim();
   const serial = String(process.env.GYM_X904_DEVICE_SERIAL ?? "TDBD234200545");
   if (!groupId || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(activation) ||
       !Number.isFinite(Date.parse(activation))) {
