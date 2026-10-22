@@ -9,6 +9,17 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
   // Batch digest only at the top of each two-hour WIB window; avoid per-scan group spam.
   const wibHour = (new Date().getUTCHours() + 7) % 24;
   if (wibHour % 2 !== 0 || new Date().getUTCMinutes() >= 5) return;
+  // Resume an immutable, previously persisted batch before claiming fresh events.
+  const existing = await db.execute(sql`SELECT batch_id,body FROM sport_center.gym_x904_wa_batches WHERE status='failed' ORDER BY created_at LIMIT 1`);
+  if (existing.rows.length) {
+    const batchId = String(existing.rows[0].batch_id);
+    try {
+      const result = await sendCstWaGatewayGroupMessage({groupId,text:String(existing.rows[0].body),idempotencyKey:`x904-digest-${batchId}`});
+      await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status=${['sent','delivered','read'].includes(result.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${result.messageId} WHERE batch_id=${batchId}`);
+      await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox SET status=${['sent','delivered','read'].includes(result.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${result.messageId} WHERE batch_id=${batchId}`);
+    } catch { return; }
+    return;
+  }
   // Atomic claim: concurrent scheduler instances cannot claim the same pending event.
   const claimed = await db.execute(sql`
     UPDATE sport_center.gym_x904_wa_outbox o SET status='sending',
@@ -34,10 +45,15 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
   // Digest key is stable across retries for this claimed batch.
   const { createHash } = await import("node:crypto");
   const digestKey = createHash("sha256").update(ids.slice().sort().join("|")).digest("hex");
+  await db.transaction(async tx => {
+    await tx.execute(sql`INSERT INTO sport_center.gym_x904_wa_batches(batch_id,group_id,body,status) VALUES (${digestKey},${groupId},${text},'sending') ON CONFLICT DO NOTHING`);
+    await tx.execute(sql`UPDATE sport_center.gym_x904_wa_outbox SET batch_id=${digestKey} WHERE event_id IN (${sql.join(ids.map(id=>sql`${id}`),sql`,`)}) AND status='sending'`);
+  });
   try {
     const sent = await sendCstWaGatewayGroupMessage({
       groupId, text, idempotencyKey: `x904-digest-${digestKey}`,
     });
+    await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status=${['sent','delivered','read'].includes(sent.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${sent.messageId} WHERE batch_id=${digestKey}`);
     if (!['sent','delivered','read'].includes(sent.status.toLowerCase())) {
       for (const eventId of ids) {
         await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
@@ -53,6 +69,7 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gateway delivery failed";
+    await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status='failed' WHERE batch_id=${digestKey}`);
     for (const eventId of ids) {
       await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
         SET status='failed',locked_until=NULL,last_error=${message.slice(0,300)},
