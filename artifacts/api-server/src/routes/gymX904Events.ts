@@ -367,7 +367,15 @@ router.post("/internal/gym-x904/wa-delivery-ack", async (req, res) => {
         SET status='sent',sent_at=coalesce(sent_at,now())
         WHERE gateway_message_id=${messageId} AND status='pending_ack'
         RETURNING batch_id`);
-      if (!batch.rows.length) return 0;
+      if (!batch.rows.length) {
+        if (process.env.GYM_X904_LAN_WA_ENABLED !== "true") return 0;
+        // Valid signed gateway ACK; repeated callbacks cannot update twice.
+        const lan = await tx.execute(sql`UPDATE sport_center.gym_x904_lan_wa_outbox
+          SET status='sent',sent_at=coalesce(sent_at,now()),locked_until=NULL,last_error=NULL
+          WHERE gateway_message_id=${messageId} AND status='pending_ack'
+          RETURNING event_id`);
+        return lan.rows.length;
+      }
       const batchId = String(batch.rows[0].batch_id);
       await tx.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
         SET status='sent',sent_at=coalesce(sent_at,now()),locked_until=NULL,last_error=NULL
