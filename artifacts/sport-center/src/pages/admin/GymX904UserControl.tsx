@@ -190,15 +190,15 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       </button>
       {bulkResults.length>0&&<div role="status" aria-live="polite" className="text-xs space-y-1">{bulkResults.map((line,i)=><p key={i}>{line}</p>)}</div>}
       {capabilities.durableBulkEnabled!==true&&<p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">Penghapusan massal berbasis server belum diaktifkan. Jangan gunakan antrean browser lama; tunggu verifikasi worker VMSC dan ACK.</p>}
-      {batchHistory?.batches?.length>0&&<div className="rounded-lg border p-3 space-y-3" aria-label="Riwayat pekerjaan penghapusan">
+      {!!batchHistory?.batches?.length&&<div className="rounded-lg border p-3 space-y-3" aria-label="Riwayat pekerjaan penghapusan">
         <h5 className="text-sm font-semibold">Pekerjaan penghapusan tersimpan di server</h5>
         <p className="text-xs text-muted-foreground">Status dapat diperiksa kembali meskipun browser ditutup. Berhasil hanya jika ACK mesin terverifikasi.</p>
-        {batchHistory.batches.map(b=><div key={b.batchId} className="rounded-md border p-3 space-y-1.5 text-xs">
+        {batchHistory?.batches?.map(b=><div key={b.batchId} className="rounded-md border p-3 space-y-1.5 text-xs">
           <p className="font-semibold">Pekerjaan {b.batchId.slice(0,8)} · {b.commands.length} pengguna</p>
           {b.commands.map(c=><div key={c.userPin} className="flex flex-wrap justify-between gap-2">
             <span>{c.name} · PIN {c.userPin}</span>
             <span className={c.state==="completed"?"text-green-700":c.state==="failed"||c.state==="cancelled"?"text-red-600":"text-muted-foreground"}>
-              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":"Dibatalkan"}
+              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"&&b.commands.some(x=>x.state==="failed"||x.state==="cancelled")?"Dihentikan · tidak dikirim":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":"Dibatalkan"}
             </span>
           </div>)}
           {b.commands.some(c=>c.state==="failed"||c.state==="cancelled")&&<p role="alert" className="text-red-600">Pekerjaan berhenti; periksa hasil sebelum mengirim ulang.</p>}
