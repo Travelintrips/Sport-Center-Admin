@@ -1157,6 +1157,20 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       updatedAt: Date;
     } = { updatedAt: new Date() };
 
+    if (status === "active" && existing.status !== "active") {
+      const role = String((req as any).user?.role ?? "");
+      if (!["owner", "admin", "super_admin", "finance"].includes(role)) {
+        res.status(403).json({error:"Hanya penanggung jawab keuangan yang dapat mengonfirmasi aktivasi membership"});
+        return;
+      }
+      const [pending] = await db.select().from(membershipPaymentsTable)
+        .where(and(eq(membershipPaymentsTable.membershipId,id),eq(membershipPaymentsTable.status,"waiting_confirmation")))
+        .orderBy(desc(membershipPaymentsTable.id)).limit(1);
+      if (!pending?.paymentProofUrl || !pending.paymentMethod || !["qris","transfer"].includes(pending.paymentMethod)) {
+        res.status(409).json({error:"Aktivasi memerlukan bukti dan metode pembayaran yang telah dikirim untuk verifikasi"});
+        return;
+      }
+    }
     if (status !== undefined) data.status = status;
     if (notes !== undefined) data.notes = notes;
     if (startDate !== undefined || endDate !== undefined) {
