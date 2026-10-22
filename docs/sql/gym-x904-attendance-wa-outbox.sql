@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_outbox (
   device_time text NOT NULL,
   attendance_date date NOT NULL,
   verification_method text NOT NULL,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','sent','failed')),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','pending_ack','sent','failed')),
   attempts integer NOT NULL DEFAULT 0,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   locked_until timestamptz,
