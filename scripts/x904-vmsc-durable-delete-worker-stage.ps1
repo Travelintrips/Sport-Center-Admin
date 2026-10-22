@@ -41,13 +41,24 @@ try {
     $cipher,$null,[System.Security.Cryptography.DataProtectionScope]::LocalMachine)
   try { $env:PGPASSWORD = [Text.Encoding]::UTF8.GetString($clear) }
   finally { [Array]::Clear($clear,0,$clear.Length) }
+  # Explicit DEV-only database target. Never reuse the existing production worker's connection.
+  if ($e['X904_BATCH_DB_TARGET'] -ne 'DEV') { throw 'BATCH_DB_TARGET_MUST_BE_DEV' }
+  foreach ($required in @('X904_BATCH_DEV_PGHOST','X904_BATCH_DEV_PGUSER','X904_BATCH_DEV_PGSSLCERT')) {
+    if ([string]::IsNullOrWhiteSpace($e[$required])) { throw 'DEV_DATABASE_CONFIG_MISSING' }
+  }
   $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
-  $conn = 'host=aws-1-ap-southeast-2.pooler.supabase.com port=5432 dbname=postgres user=x904_vmsc_evidence_login.nzdweipzckfszczzqtuw sslmode=verify-full sslrootcert=C:/Users/Admin/Downloads/prod-ca-2021.crt connect_timeout=15'
-  $who = & $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c 'SELECT current_user;' 2>&1
+  $env:PGHOST = $e['X904_BATCH_DEV_PGHOST']
+  $env:PGPORT = '5432'
+  $env:PGDATABASE = 'postgres'
+  $env:PGUSER = $e['X904_BATCH_DEV_PGUSER']
+  $env:PGSSLMODE = 'verify-full'
+  $env:PGSSLROOTCERT = $e['X904_BATCH_DEV_PGSSLCERT']
+  $env:PGCONNECT_TIMEOUT = '15'
+  $who = & $psql -X -w -t -A -v ON_ERROR_STOP=1 -c 'SELECT current_user;' 2>&1
   if ($LASTEXITCODE -ne 0 -or ($who | Out-String).Trim() -ne 'x904_vmsc_evidence_login') {
     throw 'DB_ROLE_GUARD_FAILED'
   }
-  $claim = & $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c "SELECT coalesce(sport_center.x904_claim_batch_delete_command()::text,'null');" 2>&1
+  $claim = & $psql -X -w -t -A -v ON_ERROR_STOP=1 -c "SELECT coalesce(sport_center.x904_claim_batch_delete_command()::text,'null');" 2>&1
   if ($LASTEXITCODE -ne 0) { throw 'DB_CLAIM_UNAVAILABLE' }
   $claimText = ($claim | Out-String).Trim()
   if ($claimText -eq 'null' -or $claimText -eq '') { Report 'IDLE'; exit 0 }
@@ -95,7 +106,7 @@ try {
   $success=if($ok){'true'}else{'false'}
   $err=if($ok){'NULL'}else{"'$errorCode'"}
   $ackSql="SELECT sport_center.x904_complete_batch_delete_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
-  $ack = & $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c $ackSql 2>&1
+  $ack = & $psql -X -w -t -A -v ON_ERROR_STOP=1 -c $ackSql 2>&1
   if ($LASTEXITCODE -eq 0 -and ($ack | Out-String).Trim() -eq 't') {
     Report ('COMMAND_ACK command='+$id+' readback='+$success)
   } else {
@@ -107,6 +118,7 @@ try {
   exit 1
 } finally {
   $env:PGPASSWORD=$null
+  $env:PGHOST=$null; $env:PGUSER=$null; $env:PGSSLMODE=$null; $env:PGSSLROOTCERT=$null
   if ($locked) { $mutex.ReleaseMutex() }
   $mutex.Dispose()
 }
