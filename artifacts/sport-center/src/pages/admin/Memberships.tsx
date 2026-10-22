@@ -185,6 +185,18 @@ export default function AdminMemberships() {
 
   const { data: memberships, isLoading } = useListMemberships({});
 
+  // A successful admin registration/renewal opens its exact Member Details record.
+  // Do not infer identity from name/phone: those may be duplicated.
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get("memberId");
+    if (!raw || !/^\\d+$/.test(raw) || isLoading || !Array.isArray(memberships)) return;
+    const member = memberships.find((m: any) => Number(m.id) === Number(raw));
+    if (!member) return;
+    setViewMember(member);
+    setEditingDates(false);
+    window.history.replaceState(window.history.state, "", window.location.pathname);
+  }, [memberships, isLoading]);
+
   // Check-in hari ini
   const { data: rawCheckins } = useQuery<Checkin[]>({
     queryKey: ["gym-checkins", today],
