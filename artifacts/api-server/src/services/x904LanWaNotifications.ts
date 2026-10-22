@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { sendCstWaGatewayGroupMessage } from "../lib/cstWaGateway";
+import { sendCstWaGatewayGroupMessage, listCstWaGatewayGroups } from "../lib/cstWaGateway";
 
 /**
  * Send observed LAN scans from the EXISTING authenticated VMSC -> PROD
@@ -30,7 +30,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       ON s.device_serial=l.device_serial AND s.last_snapshot_id=l.last_seen_snapshot
     JOIN sport_center.gym_x904_lan_users u
       ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
-       AND u.device_role=0
+      -- Every authenticated machine scan is an observation, including operator roles.
+      -- Role does not imply member check-in or verification.
     WHERE l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
       AND (l.device_time::timestamp AT TIME ZONE 'Asia/Jakarta') >= ${activation}::timestamptz
       AND (l.device_time::timestamp AT TIME ZONE 'Asia/Jakarta') <= now()+interval '2 minutes'
@@ -52,8 +53,12 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   if (!claimed.rows.length) return;
   const eventId=String(claimed.rows[0].event_id);
   try {
+    const registeredGroupId = groupId.endsWith("@g.us")
+      ? (await listCstWaGatewayGroups("sport-center-report")).find(g => g.jid === groupId && g.isActive)?.id
+      : groupId;
+    if (!registeredGroupId) throw new Error("X904 target group not registered on sport-center-report");
     const result=await sendCstWaGatewayGroupMessage({
-      groupId, text:String(claimed.rows[0].body),
+      groupId: registeredGroupId, text:String(claimed.rows[0].body),
       idempotencyKey:`x904-lan-event-${eventId}`,
     });
     const delivered=["delivered","read"].includes(result.status.toLowerCase());
