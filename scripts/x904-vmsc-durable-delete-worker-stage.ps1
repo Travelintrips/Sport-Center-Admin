@@ -62,7 +62,7 @@ try {
   if($null -ne $result -and [string]$result.errorCode -match '^[A-Z0-9_]{1,64}$'){$errorCode=[string]$result.errorCode}
   $success=if($ok){'true'}else{'false'}
   $err=if($ok){'NULL'}else{"'$errorCode'"}
-  $ackSql="SELECT sport_center.x904_complete_user_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
+  $ackSql="SELECT sport_center.x904_complete_batch_delete_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
   $ack=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c $ackSql 2>&1
   if($LASTEXITCODE -eq 0 -and (($ack|Out-String).Trim() -eq 't')){
     Report ('COMMAND_ACK command='+$id+' readback='+$success)
