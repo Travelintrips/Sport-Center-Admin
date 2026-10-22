@@ -84,7 +84,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
  */
 export async function dispatchX904OneTimeReport(): Promise<void> {
   const eventId = "x904-report-20261022-0500-2300-v1";
-  const groupId = "120363428216180040@g.us";
+  // WhatsApp Gateway requires the UUID of the registered group, not its JID.
+  const groupId = "95862c59-6b11-4d86-bea0-e69546c827d6";
   const claimed = await db.execute(sql`
     UPDATE sport_center.gym_x904_wa_one_time_reports o
     SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
