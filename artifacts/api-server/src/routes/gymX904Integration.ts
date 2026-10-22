@@ -307,7 +307,9 @@ router.get("/admin/gym-x904/delete-batches/:batchId",adminMiddleware,async(req,r
    return res.status(400).json({error:"INVALID_BATCH_ID"});
  try{
   const r=await db.execute(sql`SELECT q.user_pin AS "userPin",q.payload->>'expectedName' AS "name",
-    q.payload->>'expectedUid' AS "uid",q.batch_order AS "order",q.state,q.created_at AS "createdAt",
+    q.payload->>'expectedUid' AS "uid",q.batch_order AS "order",
+    CASE WHEN q.state='claimed' AND q.leased_until<=now() THEN 'needs_review' ELSE q.state END AS state,
+    q.created_at AS "createdAt",
     q.completed_at AS "completedAt",q.result
     FROM sport_center.x904_delete_batches b
     JOIN sport_center.x904_user_commands q ON q.batch_id=b.batch_id
