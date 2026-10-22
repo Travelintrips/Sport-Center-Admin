@@ -39,7 +39,12 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
       groupId, text, idempotencyKey: `x904-digest-${digestKey}`,
     });
     if (!['sent','delivered','read'].includes(sent.status.toLowerCase())) {
-      throw new Error(`Gateway accepted message but final delivery ACK is pending: ${sent.status}`);
+      for (const eventId of ids) {
+        await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
+          SET status='pending_ack',locked_until=NULL,gateway_message_id=${sent.messageId},last_error=${`Awaiting delivery ACK: ${sent.status}`}
+          WHERE event_id=${eventId} AND status='sending'`);
+      }
+      return;
     }
     for (const eventId of ids) {
       await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
