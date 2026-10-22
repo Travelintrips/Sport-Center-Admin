@@ -114,7 +114,7 @@ export async function processX904Event(event: X904EventInput,
         JOIN sport_center.gym_x904_raw_events r ON r.event_id=${event.eventId}
         WHERE mm.device_serial=${event.deviceSerial} AND mm.user_pin=${event.userPin}
           AND mm.status='verified'
-        ON CONFLICT (event_id) DO NOTHING`);
+        ON CONFLICT DO NOTHING`);
     }
     if (options.failBeforeCommit) throw new Error("X904_TEST_ROLLBACK_BEFORE_COMMIT");
     return status === "success" ? "processed" : "review_required";
