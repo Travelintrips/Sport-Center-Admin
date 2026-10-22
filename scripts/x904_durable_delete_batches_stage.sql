@@ -1,4 +1,4 @@
--- Staged only: apply to DEV first; do not enable production workers until end-to-end ACK is verified.
+-- Production-compatible schema; no device commands are executed by this migration. Keep the worker disabled until verified.
 -- A batch and all its commands are durable in Postgres, independent of browser lifetime.
 CREATE TABLE IF NOT EXISTS sport_center.x904_delete_batches (
   batch_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -14,9 +14,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS x904_batch_command_order_uq
   ON sport_center.x904_user_commands(batch_id,batch_order)
   WHERE batch_id IS NOT NULL;
 -- Prevent two pending mutations targeting the same physical PIN (including single-user commands).
-CREATE UNIQUE INDEX IF NOT EXISTS x904_one_pending_command_per_pin
+-- Existing legacy commands can contain duplicate pending PINs. Preserve those rows;
+-- enforce uniqueness for new batch jobs without changing historical queue state.
+CREATE UNIQUE INDEX IF NOT EXISTS x904_one_pending_batch_command_per_pin
   ON sport_center.x904_user_commands(device_serial,user_pin)
-  WHERE state IN ('queued','claimed');
+  WHERE state IN ('queued','claimed') AND batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS x904_batch_command_status_idx
   ON sport_center.x904_user_commands(batch_id,state,created_at)
   WHERE batch_id IS NOT NULL;
