@@ -22,3 +22,12 @@ CREATE INDEX IF NOT EXISTS gym_x904_lan_wa_batches_ready_idx
  ON sport_center.gym_x904_lan_wa_batches(status,next_attempt_at,created_at);
 CREATE INDEX IF NOT EXISTS gym_x904_lan_wa_batch_events_batch_idx
  ON sport_center.gym_x904_lan_wa_batch_events(batch_id);
+
+-- Activation is explicit and disabled until PROD deployment is verified.
+CREATE TABLE IF NOT EXISTS sport_center.gym_x904_lan_wa_digest_config (
+  config_key text PRIMARY KEY,
+  activated_at timestamptz NOT NULL DEFAULT now(),
+  enabled boolean NOT NULL DEFAULT false
+);
+INSERT INTO sport_center.gym_x904_lan_wa_digest_config(config_key,enabled)
+ VALUES ('main',false) ON CONFLICT (config_key) DO NOTHING;
