@@ -55,7 +55,7 @@ try {
   $env:PGSSLROOTCERT = $e['X904_BATCH_DEV_PGSSLCERT']
   $env:PGCONNECT_TIMEOUT = '15'
   $who = & $psql -X -w -t -A -v ON_ERROR_STOP=1 -c 'SELECT current_user;' 2>&1
-  if ($LASTEXITCODE -ne 0 -or ($who | Out-String).Trim() -ne 'x904_vmsc_evidence_login') {
+  if ($LASTEXITCODE -ne 0 -or ($who | Out-String).Trim() -ne $e['X904_BATCH_DEV_PGUSER']) {
     throw 'DB_ROLE_GUARD_FAILED'
   }
   $claim = & $psql -X -w -t -A -v ON_ERROR_STOP=1 -c "SELECT coalesce(sport_center.x904_claim_batch_delete_command()::text,'null');" 2>&1
