@@ -50,7 +50,7 @@ export default function GymX904() {
   const [tab, setTab] = useState<GymTab>("dashboard");
   const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
   const queryClient = useQueryClient();
-  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean}>({
+  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER">}>({
     queryKey:["gym-x904-user-capabilities"],
     queryFn:async()=>{
       const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
@@ -471,8 +471,8 @@ export default function GymX904() {
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
               <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
-                <button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>
-                <button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"DELETE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Hapus</button>
+                {userCommandCapabilities.operations?.includes("UPDATE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>}
+                {userCommandCapabilities.operations?.includes("DELETE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"DELETE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Hapus</button>}
               </div></td>}
             </tr>)}</tbody>
           </table>{(lanUsers?.users ?? []).length === 0 && <p className="p-3 text-sm">Belum ada roster terverifikasi tersimpan.</p>}</div>}
