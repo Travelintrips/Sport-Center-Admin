@@ -15,13 +15,14 @@ import { sendCstWaGatewayGroupMessage, listCstWaGatewayGroups } from "../lib/cst
 export async function dispatchX904LanScanNotifications(): Promise<void> {
   if (process.env.GYM_X904_LAN_WA_ENABLED !== "true") return;
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
-  // Dedicated rollout cutoff prevents replay of scans captured before digest activation.
-  const activation = String(process.env.GYM_X904_LAN_WA_DIGEST_ACTIVATED_AT ?? "").trim();
   const serial = String(process.env.GYM_X904_DEVICE_SERIAL ?? "TDBD234200545");
-  if (!groupId || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(activation) ||
-      !Number.isFinite(Date.parse(activation))) {
-    throw new Error("X904 LAN digest requires group ID and explicit new digest UTC activation time");
-  }
+  if (!groupId) throw new Error("X904 LAN digest requires group ID");
+  // A durable activation watermark, recorded once in the database, prevents
+  // replay after deployments or restarts without adding Hostinger secrets.
+  const config = await db.execute(sql`SELECT activated_at FROM sport_center.gym_x904_lan_wa_digest_config
+    WHERE config_key='main' AND enabled=true`);
+  if (!config.rows.length) return;
+  const activation = String(config.rows[0].activated_at);
 
   // A transaction-scoped advisory lock serializes batch creation across Hostinger replicas.
   // Use received_at, not the machine's editable clock, to delimit the quiet collection window.
