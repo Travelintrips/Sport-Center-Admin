@@ -31,3 +31,8 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_lan_wa_digest_config (
 );
 INSERT INTO sport_center.gym_x904_lan_wa_digest_config(config_key,enabled)
  VALUES ('main',false) ON CONFLICT (config_key) DO NOTHING;
+
+-- Defense in depth: these queues are server-only; no anon/authenticated policies.
+ALTER TABLE sport_center.gym_x904_lan_wa_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sport_center.gym_x904_lan_wa_batch_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sport_center.gym_x904_lan_wa_digest_config ENABLE ROW LEVEL SECURITY;
