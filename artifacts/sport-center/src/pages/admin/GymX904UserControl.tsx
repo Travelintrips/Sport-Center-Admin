@@ -19,7 +19,7 @@ async function request(path:string,options?:RequestInit){
 }
 export default function GymX904UserControl({users,initialSelection}:{users:DeviceUser[];initialSelection?:{user:DeviceUser;action:"UPDATE_USER"|"DELETE_USER"}}){
   const queryClient=useQueryClient();
-  const [action,setAction]=useState<Action>(initialSelection?.action ?? "CREATE_USER");
+  const [action,setAction]=useState<Action>(initialSelection?.action ?? "UPDATE_USER");
   const [pin,setPin]=useState(initialSelection?.user.user_pin ?? "");
   const [name,setName]=useState(initialSelection?.user.display_name ?? "");
   const [confirmPin,setConfirmPin]=useState("");
@@ -50,7 +50,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const protectedUser=isExisting&&chosen?.device_role!==0;
   const validPin=/^[0-9]{1,8}$/.test(pin);
   const validName=/^[A-Za-z0-9 ._-]{2,24}$/.test(name.trim());
-  const permitted=validPin&&confirmPin===pin&&!protectedUser&&
+  const permitted=capabilities.operations.includes(action)&&validPin&&confirmPin===pin&&!protectedUser&&
     (isExisting ? !!chosen&&Number.isInteger(chosen.device_uid)&&
       (action==="DELETE_USER"||validName) : !chosen&&validName);
   async function submit(){
@@ -78,7 +78,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       <label className="text-sm">Operasi
         <select value={action} onChange={e=>{setAction(e.target.value as Action);setPin("");setConfirmPin("");setName("");setCommandId(null);}}
           className="mt-1 block w-full rounded-md border bg-background p-2">
-          <option value="CREATE_USER">Tambah</option><option value="UPDATE_USER">Ubah nama</option><option value="DELETE_USER">Hapus</option>
+          {capabilities.operations.includes("CREATE_USER")&&<option value="CREATE_USER">Tambah</option>}{capabilities.operations.includes("UPDATE_USER")&&<option value="UPDATE_USER">Ubah nama</option>}{capabilities.operations.includes("DELETE_USER")&&<option value="DELETE_USER">Hapus</option>}
         </select>
       </label>
       {isExisting?<label className="text-sm">Pengguna mesin
