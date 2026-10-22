@@ -16,8 +16,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS x904_batch_command_order_uq
 CREATE INDEX IF NOT EXISTS x904_batch_command_status_idx
   ON sport_center.x904_user_commands(batch_id,state,created_at)
   WHERE batch_id IS NOT NULL;
-ALTER TABLE sport_center.x904_user_commands
-  ADD CONSTRAINT x904_batch_order_positive CHECK (batch_id IS NULL OR batch_order BETWEEN 1 AND 100);
+DO $guard$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='x904_batch_order_positive'
+   AND conrelid='sport_center.x904_user_commands'::regclass) THEN
+  ALTER TABLE sport_center.x904_user_commands
+    ADD CONSTRAINT x904_batch_order_positive CHECK (
+      (batch_id IS NULL AND batch_order IS NULL) OR
+      (batch_id IS NOT NULL AND batch_order BETWEEN 1 AND 100)
+    );
+ END IF;
+END $guard$;
 REVOKE ALL ON sport_center.x904_delete_batches FROM PUBLIC,anon,authenticated;
 
 -- Separate claim function: existing single-user test claims are not widened by this migration.
@@ -64,5 +72,10 @@ BEGIN
     'deviceSerial','TDBD234200545');
 END $claim$;
 REVOKE ALL ON FUNCTION sport_center.x904_claim_batch_delete_command() FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION sport_center.x904_claim_batch_delete_command() TO x904_vmsc_evidence_login;
+DO $grant$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='x904_vmsc_evidence_login') THEN
+  GRANT USAGE ON SCHEMA sport_center TO x904_vmsc_evidence_login;
+  GRANT EXECUTE ON FUNCTION sport_center.x904_claim_batch_delete_command() TO x904_vmsc_evidence_login;
+ END IF;
+END $grant$;
 -- Fail-closed: failed/expired ACK blocks subsequent batch items; never replay writes automatically.
