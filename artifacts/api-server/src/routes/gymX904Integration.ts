@@ -221,6 +221,24 @@ router.post("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
    return res.status(400).json({error:"INVALID_BATCH_TARGETS"});
  const batchId=randomUUID();
  try{
+  // Idempotent replay after a browser timeout: return the original job only when
+  // the authenticated owner and exact ordered PIN/UID/name list match.
+  const existing=await db.execute(sql`SELECT b.batch_id AS "batchId",
+    COALESCE(jsonb_agg(jsonb_build_object('userPin',q.user_pin,
+      'expectedUid',(q.payload->>'expectedUid')::integer,
+      'expectedName',q.payload->>'expectedName') ORDER BY q.batch_order)
+      FILTER (WHERE q.command_id IS NOT NULL),'[]'::jsonb) AS targets
+    FROM sport_center.x904_delete_batches b
+    LEFT JOIN sport_center.x904_user_commands q ON q.batch_id=b.batch_id
+    WHERE b.idempotency_key=${idempotencyKey}
+      AND b.requested_by=${actor.userId} AND b.device_serial='TDBD234200545'
+    GROUP BY b.batch_id`);
+  if(existing.rows.length){
+    const prior=existing.rows[0] as {batchId:string;targets:unknown};
+    if(JSON.stringify(prior.targets)!==JSON.stringify(targets))
+      return res.status(409).json({error:"IDEMPOTENCY_KEY_TARGET_MISMATCH"});
+    return res.status(200).json({batchId:prior.batchId,state:"accepted",count:targets.length,replayed:true});
+  }
   const result=await db.execute(sql`
    WITH supplied AS (
     SELECT value->>'userPin' AS pin,(value->>'expectedUid')::integer AS uid,
