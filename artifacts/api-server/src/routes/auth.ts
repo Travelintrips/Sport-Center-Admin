@@ -154,7 +154,7 @@ router.post("/auth/admin-login", async (req, res) => {
       const newHash = await hashPassword(password);
       await db.update(usersTable).set({ passwordHash: newHash }).where(eq(usersTable.id, user.id));
     }
-    if (user.role !== "owner" && user.role !== "admin" && user.role !== "super_admin" && user.role !== "admin_booking") {
+    if (!["owner", "admin", "super_admin", "admin_booking"].includes(String(user.role))) {
       res.status(403).json({ error: "Akses ditolak. Akun ini bukan akun admin/operator." });
       return;
     }
