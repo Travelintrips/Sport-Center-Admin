@@ -133,6 +133,10 @@ export default function AdminCheckoutForm() {
       const response = await fetch(endpoint, {method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer " + (getToken() ?? "")},body:JSON.stringify(payload)});
       const data = await response.json();
       if(!response.ok) throw Error(data.error || "Proses membership gagal");
+      if (memberAction !== "checkin" && Number.isInteger(Number(data.id)) && Number(data.id) > 0) {
+        setLocation("/admin/memberships?memberId=" + encodeURIComponent(String(data.id)));
+        return;
+      }
       setMembershipResult(memberAction === "checkin" ? "Kunjungan berhasil dicatat tanpa tagihan baru."
         : "Permintaan membership tercatat. Selesaikan pembayaran melalui alur verifikasi Membership; belum dianggap lunas.");
       toast({title:"Berhasil",description:"Periksa detail pada modul Membership."});
