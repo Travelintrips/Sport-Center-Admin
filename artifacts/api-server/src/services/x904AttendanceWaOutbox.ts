@@ -10,14 +10,14 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
   const wibHour = (new Date().getUTCHours() + 7) % 24;
   if (wibHour % 2 !== 0 || new Date().getUTCMinutes() >= 5) return;
   // Resume an immutable, previously persisted batch before claiming fresh events.
-  const existing = await db.execute(sql`SELECT batch_id,body FROM sport_center.gym_x904_wa_batches WHERE status='failed' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`);
+  const existing = await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status='sending' WHERE batch_id IN (SELECT batch_id FROM sport_center.gym_x904_wa_batches WHERE status='failed' AND group_id=${groupId} ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING batch_id,body`);
   if (existing.rows.length) {
     const batchId = String(existing.rows[0].batch_id);
     try {
       const result = await sendCstWaGatewayGroupMessage({groupId,text:String(existing.rows[0].body),idempotencyKey:`x904-digest-${batchId}`});
       await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status=${['sent','delivered','read'].includes(result.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${result.messageId} WHERE batch_id=${batchId}`);
       await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox SET status=${['sent','delivered','read'].includes(result.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${result.messageId} WHERE batch_id=${batchId}`);
-    } catch { return; }
+    } catch { await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status='failed' WHERE batch_id=${batchId} AND status='sending'`); return; }
     return;
   }
   // Atomic claim: concurrent scheduler instances cannot claim the same pending event.
@@ -26,7 +26,7 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
       locked_until=now()+interval '2 minutes', attempts=attempts+1
     WHERE o.event_id IN (
       SELECT event_id FROM sport_center.gym_x904_wa_outbox
-      WHERE (status='pending' AND next_attempt_at<=now())
+      WHERE (status='pending' AND batch_id IS NULL AND next_attempt_at<=now())
          OR (status='sending' AND locked_until<now() AND batch_id IS NULL)
       ORDER BY created_at ASC LIMIT 80 FOR UPDATE SKIP LOCKED
     ) RETURNING event_id,member_name,user_pin,device_time,verification_method,attempts
