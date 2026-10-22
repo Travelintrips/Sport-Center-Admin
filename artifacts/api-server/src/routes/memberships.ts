@@ -1023,6 +1023,31 @@ router.post("/memberships/:id/renew", async (req, res) => {
   }
 });
 
+// Admin-only proof submission resolves the current pending payment by membership ID.
+// It never confirms or activates membership; existing verification controls remain authoritative.
+router.post("/memberships/:id/admin-payment-proof-upload", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) { res.status(400).json({error:"ID tidak valid"}); return; }
+    if (!req.file || !["image/jpeg","image/png","image/webp","image/heic","image/heif"].includes(req.file.mimetype.toLowerCase())) {
+      res.status(400).json({error:"Bukti pembayaran wajib berupa gambar yang didukung"}); return;
+    }
+    const [pending] = await db.select().from(membershipPaymentsTable).where(
+      and(eq(membershipPaymentsTable.membershipId,id),eq(membershipPaymentsTable.status,"pending_payment"))
+    ).orderBy(desc(membershipPaymentsTable.id)).limit(1);
+    if (!pending) {res.status(409).json({error:"Tidak ada tagihan membership yang menunggu pembayaran"});return;}
+    const safeExt: Record<string,string> = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp","image/heic":".heic","image/heif":".heif"};
+    const objectName = `membership-${id}-payment-${pending.id}-${randomUUID()}${safeExt[req.file.mimetype.toLowerCase()]}`;
+    const proofUrl = await uploadFile(BUCKETS.proof,objectName,req.file.buffer,req.file.mimetype);
+    const membership = await applyMembershipPaymentProof(id,pending.id,String(req.body?.paymentMethod ?? ""),proofUrl,req.log);
+    res.json({...membership,totalPrice:Number(membership.totalPrice)});
+  } catch(err) {
+    if(err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
+    req.log.error({err},"Admin membership payment proof upload failed");
+    res.status(500).json({error:"Gagal mengunggah bukti pembayaran"});
+  }
+});
+
 router.post(
   "/memberships/:id/payment-proof-upload",
   membershipProofUpload.single("proof"),
