@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_outbox (
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   locked_until timestamptz,
   gateway_message_id text,
+  batch_id text,
   last_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
   sent_at timestamptz
@@ -21,3 +22,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS gym_x904_wa_one_per_user_day_idx
   WHERE verification_method IN ('fingerprint','face');
 CREATE INDEX IF NOT EXISTS gym_x904_wa_outbox_due_idx
   ON sport_center.gym_x904_wa_outbox(status,next_attempt_at);
+
+CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_batches (
+  batch_id text PRIMARY KEY,
+  group_id text NOT NULL,
+  body text NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  gateway_message_id text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS gym_x904_wa_outbox_batch_idx ON sport_center.gym_x904_wa_outbox(batch_id);
