@@ -32,3 +32,6 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_batches (
  next_attempt_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS gym_x904_wa_outbox_batch_idx ON sport_center.gym_x904_wa_outbox(batch_id);
+
+-- Remove legacy one-per-member/day restriction: distinct verified scans are allowed.
+DROP INDEX IF EXISTS sport_center.gym_x904_wa_one_per_user_day_idx;
