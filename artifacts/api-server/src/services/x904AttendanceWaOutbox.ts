@@ -1,80 +1,119 @@
+import { createHash } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendCstWaGatewayGroupMessage } from "../lib/cstWaGateway";
 
-/** Opt-in, database-backed delivery. Gateway idempotency key is the immutable X904 event ID. */
+/**
+ * One independently verified event -> one durable WhatsApp delivery.
+ * All leasing and retry state is on the server; browser tabs are irrelevant.
+ * Gateway responses other than delivered/read are NOT final acknowledgements.
+ */
 export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
   if (process.env.GYM_X904_WA_NOTIFY_ENABLED !== "true" || !groupId) return;
-  // Batch digest only at the top of each two-hour WIB window; avoid per-scan group spam.
-  const wibHour = (new Date().getUTCHours() + 7) % 24;
-  if (wibHour % 2 !== 0 || new Date().getUTCMinutes() >= 5) return;
-  // Resume an immutable, previously persisted batch before claiming fresh events.
-  const existing = await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status='sending' WHERE batch_id IN (SELECT batch_id FROM sport_center.gym_x904_wa_batches WHERE status='failed' AND group_id=${groupId} ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING batch_id,body`);
-  if (existing.rows.length) {
-    const batchId = String(existing.rows[0].batch_id);
-    try {
-      const result = await sendCstWaGatewayGroupMessage({groupId,text:String(existing.rows[0].body),idempotencyKey:`x904-digest-${batchId}`});
-      await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status=${['sent','delivered','read'].includes(result.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${result.messageId} WHERE batch_id=${batchId}`);
-      await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox SET status=${['sent','delivered','read'].includes(result.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${result.messageId} WHERE batch_id=${batchId}`);
-    } catch { await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status='failed' WHERE batch_id=${batchId} AND status='sending'`); return; }
+
+  // Recover persisted batches first, including interrupted sends. A stable
+  // idempotency key is reused even when the HTTP response was lost.
+  const recovered = await db.execute(sql`
+    UPDATE sport_center.gym_x904_wa_batches b
+    SET status='sending', locked_until=now()+interval '2 minutes',
+        attempts=b.attempts+1
+    WHERE b.batch_id IN (
+      SELECT batch_id FROM sport_center.gym_x904_wa_batches
+      WHERE group_id=${groupId} AND
+        ((status='failed' AND next_attempt_at<=now())
+         OR (status='sending' AND locked_until<now()))
+      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+    ) RETURNING batch_id,body
+  `);
+  if (recovered.rows.length) {
+    await sendBatch(String(recovered.rows[0].batch_id), groupId, String(recovered.rows[0].body));
     return;
   }
-  // Atomic claim: concurrent scheduler instances cannot claim the same pending event.
+
+  // Claim only a single event at a time; atomic row locks prevent competing
+  // schedulers from enqueuing a second group message for the same event.
   const claimed = await db.execute(sql`
-    UPDATE sport_center.gym_x904_wa_outbox o SET status='sending',
-      locked_until=now()+interval '2 minutes', attempts=attempts+1
+    UPDATE sport_center.gym_x904_wa_outbox o
+    SET status='sending',locked_until=now()+interval '2 minutes',
+        attempts=attempts+1
     WHERE o.event_id IN (
       SELECT event_id FROM sport_center.gym_x904_wa_outbox
-      WHERE (status='pending' AND batch_id IS NULL AND next_attempt_at<=now())
-         OR (status='sending' AND locked_until<now() AND batch_id IS NULL)
-      ORDER BY created_at ASC LIMIT 80 FOR UPDATE SKIP LOCKED
-    ) RETURNING event_id,member_name,user_pin,device_time,verification_method,attempts
+      WHERE status='pending' AND batch_id IS NULL AND next_attempt_at<=now()
+      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+    ) RETURNING event_id,member_name,user_pin,device_time,verification_method
   `);
-  if (claimed.rows.length === 0) return;
-  const rows = claimed.rows;
-  const lines = rows.map((row,index) => {
-    const time = String(row.device_time).slice(11,16);
-    const isCard = String(row.verification_method) === 'card';
-    const name = isCard ? `Kartu (PIN ${String(row.user_pin)})` : String(row.member_name).slice(0,35);
-    return `${index+1}. ${name} ${time} ${isCard ? '💳' : '✅'}`;
-  });
-  const day = String(rows[0].device_time).slice(0,10);
-  const text = `ABSENSI GYM X904\n${day}\n\n${lines.join("\n")}\n\nTotal: ${rows.length} absensi terverifikasi`;
-  const ids = rows.map(row=>String(row.event_id));
-  // Digest key is stable across retries for this claimed batch.
-  const { createHash } = await import("node:crypto");
-  const digestKey = createHash("sha256").update(ids.slice().sort().join("|")).digest("hex");
-  await db.transaction(async tx => {
-    await tx.execute(sql`INSERT INTO sport_center.gym_x904_wa_batches(batch_id,group_id,body,status) VALUES (${digestKey},${groupId},${text},'sending') ON CONFLICT DO NOTHING`);
-    await tx.execute(sql`UPDATE sport_center.gym_x904_wa_outbox SET batch_id=${digestKey} WHERE event_id IN (${sql.join(ids.map(id=>sql`${id}`),sql`,`)}) AND status='sending'`);
-  });
+  if (!claimed.rows.length) return;
+  const event = claimed.rows[0];
+  const eventId = String(event.event_id);
+  const batchId = createHash("sha256").update(eventId).digest("hex");
+  const timestamp = String(event.device_time).replace("T", " ").slice(0,16);
+  const name = String(event.member_name).slice(0,80);
+  const method = String(event.verification_method);
+  const body = `ABSENSI SPORT CENTER X904\nNama: ${name}\nTanggal dan jam (WIB): ${timestamp}\nMetode: ${method}\nEvent: ${eventId}`;
   try {
-    const sent = await sendCstWaGatewayGroupMessage({
-      groupId, text, idempotencyKey: `x904-digest-${digestKey}`,
+    await db.transaction(async tx => {
+      await tx.execute(sql`
+        INSERT INTO sport_center.gym_x904_wa_batches
+          (batch_id,group_id,body,status,locked_until,attempts)
+        VALUES (${batchId},${groupId},${body},'sending',now()+interval '2 minutes',1)
+        ON CONFLICT (batch_id) DO NOTHING
+      `);
+      await tx.execute(sql`
+        UPDATE sport_center.gym_x904_wa_outbox
+        SET batch_id=${batchId} WHERE event_id=${eventId}
+          AND status='sending' AND batch_id IS NULL
+      `);
     });
-    await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status=${['sent','delivered','read'].includes(sent.status.toLowerCase())?'sent':'pending_ack'},gateway_message_id=${sent.messageId} WHERE batch_id=${digestKey}`);
-    if (!['sent','delivered','read'].includes(sent.status.toLowerCase())) {
-      for (const eventId of ids) {
-        await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
-          SET status='pending_ack',locked_until=NULL,gateway_message_id=${sent.messageId},last_error=${`Awaiting delivery ACK: ${sent.status}`}
-          WHERE event_id=${eventId} AND status='sending'`);
-      }
-      return;
-    }
-    for (const eventId of ids) {
-      await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
-        SET status='sent',sent_at=now(),locked_until=NULL,gateway_message_id=${sent.messageId},last_error=NULL
-        WHERE event_id=${eventId} AND status='sending'`);
-    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Gateway delivery failed";
-    await db.execute(sql`UPDATE sport_center.gym_x904_wa_batches SET status='failed' WHERE batch_id=${digestKey}`);
-    for (const eventId of ids) {
-      await db.execute(sql`UPDATE sport_center.gym_x904_wa_outbox
-        SET status='failed',locked_until=NULL,last_error=${message.slice(0,300)},
-          next_attempt_at=now()+interval '5 minutes'
-        WHERE event_id=${eventId} AND status='sending'`);
-    }
+    await db.execute(sql`
+      UPDATE sport_center.gym_x904_wa_outbox
+      SET status='pending',locked_until=NULL,
+          next_attempt_at=now()+interval '1 minute'
+      WHERE event_id=${eventId} AND batch_id IS NULL AND status='sending'
+    `);
+    throw error;
+  }
+  await sendBatch(batchId, groupId, body);
+}
+
+async function sendBatch(batchId: string, groupId: string, body: string): Promise<void> {
+  try {
+    const result = await sendCstWaGatewayGroupMessage({
+      groupId, text: body, idempotencyKey: `x904-event-${batchId}`,
+    });
+    const final = ["delivered", "read"].includes(result.status.toLowerCase());
+    await db.transaction(async tx => {
+      await tx.execute(sql`
+        UPDATE sport_center.gym_x904_wa_batches
+        SET status=${final ? "sent" : "pending_ack"},
+            gateway_message_id=${result.messageId},locked_until=NULL,
+            sent_at=CASE WHEN ${final} THEN now() ELSE sent_at END
+        WHERE batch_id=${batchId} AND status='sending'
+      `);
+      await tx.execute(sql`
+        UPDATE sport_center.gym_x904_wa_outbox
+        SET status=${final ? "sent" : "pending_ack"},
+            gateway_message_id=${result.messageId},locked_until=NULL,
+            sent_at=CASE WHEN ${final} THEN now() ELSE sent_at END
+        WHERE batch_id=${batchId} AND status='sending'
+      `);
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Gateway request failed";
+    await db.transaction(async tx => {
+      await tx.execute(sql`
+        UPDATE sport_center.gym_x904_wa_batches
+        SET status='failed',locked_until=NULL,
+            next_attempt_at=now()+interval '1 minute'
+        WHERE batch_id=${batchId} AND status='sending'
+      `);
+      await tx.execute(sql`
+        UPDATE sport_center.gym_x904_wa_outbox
+        SET status='failed',locked_until=NULL,last_error=${reason.slice(0,300)},
+            next_attempt_at=now()+interval '1 minute'
+        WHERE batch_id=${batchId} AND status='sending'
+      `);
+    });
   }
 }
