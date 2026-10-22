@@ -33,7 +33,7 @@ try {
     Report 'BULK_DELETE_DISABLED'
     exit 0
   }
-  $credentialFile = Join-Path $base 'secrets\x904-evidence-machine.dpapi'
+  $credentialFile = Join-Path $base 'secrets\x904-dev-batch-worker.dpapi'
   if (-not (Test-Path -LiteralPath $credentialFile)) { throw 'CREDENTIAL_NOT_CONFIGURED' }
   Add-Type -AssemblyName System.Security
   $cipher = [Convert]::FromBase64String((Get-Content -LiteralPath $credentialFile -Raw).Trim())
