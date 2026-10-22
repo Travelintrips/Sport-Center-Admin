@@ -10,7 +10,7 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
   const wibHour = (new Date().getUTCHours() + 7) % 24;
   if (wibHour % 2 !== 0 || new Date().getUTCMinutes() >= 5) return;
   // Resume an immutable, previously persisted batch before claiming fresh events.
-  const existing = await db.execute(sql`SELECT batch_id,body FROM sport_center.gym_x904_wa_batches WHERE status='failed' ORDER BY created_at LIMIT 1`);
+  const existing = await db.execute(sql`SELECT batch_id,body FROM sport_center.gym_x904_wa_batches WHERE status='failed' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`);
   if (existing.rows.length) {
     const batchId = String(existing.rows[0].batch_id);
     try {
@@ -26,8 +26,8 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
       locked_until=now()+interval '2 minutes', attempts=attempts+1
     WHERE o.event_id IN (
       SELECT event_id FROM sport_center.gym_x904_wa_outbox
-      WHERE (status IN ('pending','failed') AND next_attempt_at<=now())
-         OR (status='sending' AND locked_until<now())
+      WHERE (status='pending' AND next_attempt_at<=now())
+         OR (status='sending' AND locked_until<now() AND batch_id IS NULL)
       ORDER BY created_at ASC LIMIT 80 FOR UPDATE SKIP LOCKED
     ) RETURNING event_id,member_name,user_pin,device_time,verification_method,attempts
   `);
