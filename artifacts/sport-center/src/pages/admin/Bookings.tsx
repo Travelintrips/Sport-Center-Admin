@@ -1932,17 +1932,7 @@ function BookingDetailDrawer({
             </div>
           )}
 
-          {/* Payment Proof Section — multi-payment (DP + Pelunasan) */}
-          {allPayments.length > 0 && (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Riwayat Pembayaran</span>
-                {booking.groupRef && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
-                    🏷️ Group Booking
-                  </span>
-                )}
-              </div>
+          {/* Accept first payment even when there are no prior payments. */}
               {!membershipPaymentBooking && !membershipUsageBooking &&
                 ["pending_payment","expired"].includes(booking.status) &&
                 !allPayments.some(p=>["pending","confirmed"].includes(p.status)) && (
@@ -1963,6 +1953,18 @@ function BookingDetailDrawer({
                   <p className="text-xs text-muted-foreground">Tidak langsung menandai lunas. Pembayaran diverifikasi melalui detail booking.</p>
                 </div>
               )}
+
+          {/* Payment Proof Section — multi-payment (DP + Pelunasan) */}
+          {allPayments.length > 0 && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Riwayat Pembayaran</span>
+                {booking.groupRef && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                    🏷️ Group Booking
+                  </span>
+                )}
+              </div>
               {/* Group Booking banner */}
               {booking.groupRef && (
                 <div className="px-4 py-2.5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-100 dark:border-violet-800">
