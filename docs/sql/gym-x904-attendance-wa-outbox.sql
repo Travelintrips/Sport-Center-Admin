@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_outbox (
   batch_id text,
   last_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  sent_at timestamptz
+  sent_at timestamptz,
+  locked_until timestamptz,
+  attempts integer NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS gym_x904_wa_one_per_user_day_idx
   ON sport_center.gym_x904_wa_outbox(device_serial,user_pin,attendance_date)
