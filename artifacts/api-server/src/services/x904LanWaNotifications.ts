@@ -26,7 +26,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
 
   // A transaction-scoped advisory lock serializes batch creation across Hostinger replicas.
   // Use received_at, not the machine's editable clock, to delimit the quiet collection window.
-  try {\n  await db.transaction(async (tx) => {
+  try {
+    await db.transaction(async (tx) => {
     const lock = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(90420261023::bigint) AS acquired`);
     if (lock.rows[0]?.acquired !== true) return;
     const pending = await tx.execute(sql`
@@ -93,7 +94,13 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
         (event_id,batch_id) VALUES (${String(row.event_id)},${batchId})
         ON CONFLICT (event_id) DO NOTHING`);
     }
-  });\n  } catch (err) {\n    // A batch already committed must still be delivered if later scan collection fails.\n    console.error("[x904-digest] batch collection failed; continuing to drain pending batches", err);\n  }\n\n  // Only one dispatcher can claim a batch; Gateway idempotency is stable across retries.
+  });
+  } catch (err) {
+    // A batch already committed must still be delivered if later scan collection fails.
+    console.error("[x904-digest] batch collection failed; continuing to drain pending batches", err);
+  }
+
+  // Only one dispatcher can claim a batch; Gateway idempotency is stable across retries.
   const claim = await db.execute(sql`
     UPDATE sport_center.gym_x904_lan_wa_batches b
     SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
