@@ -57,6 +57,7 @@ export default function AdminCheckoutForm() {
   const { data: customersData } = useListCustomers();
 
   const facilities = Array.isArray(facilitiesData) ? facilitiesData : [];
+  const activeFacilities = facilities.filter((f: any) => f.isActive === true);
   const customers = Array.isArray(customersData) ? customersData : [];
   const isGuest = selectedCustomerId === "__guest__";
   const selectedCustomer: any = customers.find((c: any) => String(c.id) === selectedCustomerId);
@@ -206,6 +207,10 @@ export default function AdminCheckoutForm() {
     }
     if (!selectedFacilityId) {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
+      return;
+    }
+    if (!activeFacilities.some((f: any) => String(f.id) === selectedFacilityId)) {
+      toast({ title: "Fasilitas sedang maintenance atau tidak tersedia untuk booking", variant: "destructive" });
       return;
     }
     if (!selectedDate || (!isWalkIn && !startTime)) {
@@ -412,7 +417,7 @@ export default function AdminCheckoutForm() {
                   <SelectValue placeholder="Pilih fasilitas..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {facilities.map((f: any) => (
+                  {activeFacilities.map((f: any) => (
                     <SelectItem key={f.id} value={String(f.id)}>
                       {f.name} — Rp {Number(f.pricePerHour).toLocaleString("id-ID")}{/gym|fitness/i.test(String(f.name ?? "") + " " + String(f.category ?? "")) || f.bookingMode === "walk_in" ? "/kunjungan" : "/jam"}
                     </SelectItem>
