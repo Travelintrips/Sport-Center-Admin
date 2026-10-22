@@ -103,6 +103,19 @@ export async function processX904Event(event: X904EventInput,
     await tx.execute(sql`INSERT INTO sport_center.gym_x904_processed_events
       (event_id,device_serial,user_pin,status)
       VALUES (${event.eventId},${event.deviceSerial},${event.userPin},${status})`);
+    // Enqueue only independently attested, eligible attendance. Never send WhatsApp inside the DB transaction.
+    // The event ID is the primary key, preventing duplicate notifications on ingress replay.
+    if (status === "success" && process.env.GYM_X904_WA_NOTIFY_ENABLED === "true") {
+      await tx.execute(sql`INSERT INTO sport_center.gym_x904_wa_outbox
+        (event_id,device_serial,user_pin,member_name,device_time)
+        SELECT ${event.eventId},${event.deviceSerial},${event.userPin},m.name,r.device_time
+        FROM sport_center.gym_x904_member_mapping mm
+        JOIN sport_center.sport_memberships m ON m.id=mm.membership_id
+        JOIN sport_center.gym_x904_raw_events r ON r.event_id=${event.eventId}
+        WHERE mm.device_serial=${event.deviceSerial} AND mm.user_pin=${event.userPin}
+          AND mm.status='verified'
+        ON CONFLICT (event_id) DO NOTHING`);
+    }
     if (options.failBeforeCommit) throw new Error("X904_TEST_ROLLBACK_BEFORE_COMMIT");
     return status === "success" ? "processed" : "review_required";
   });
