@@ -78,10 +78,22 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     if(targets.length!==bulkPins.length)return;
     setBulkConfirm(false);setBulkRunning(true);setBulkResults([]);
     try{
+      // Retain the same request key if a network timeout occurs after DB commit.
+      // Only the non-sensitive idempotency key and target fingerprint are stored.
+      const fingerprint=JSON.stringify(targets);
+      const storageKey="x904-pending-bulk-submit";
+      let idempotencyKey=crypto.randomUUID().replace(/-/g,"");
+      try {
+        const saved=JSON.parse(sessionStorage.getItem(storageKey)??"null");
+        if(saved?.fingerprint===fingerprint && typeof saved?.key==="string" &&
+          /^[a-zA-Z0-9_-]{16,96}$/.test(saved.key)) idempotencyKey=saved.key;
+        else sessionStorage.setItem(storageKey,JSON.stringify({fingerprint,key:idempotencyKey}));
+      } catch { /* session storage unavailable: server still enforces unique queued PINs */ }
       const result=await request("/admin/gym-x904/delete-batches",{method:"POST",body:JSON.stringify({
-        targets,expectedSerial:SERIAL,idempotencyKey:crypto.randomUUID().replace(/-/g,"")
+        targets,expectedSerial:SERIAL,idempotencyKey
       })});
       if(!result.batchId)throw new Error("ID pekerjaan tidak diterima");
+      try { sessionStorage.removeItem(storageKey); } catch { /* storage disabled */ }
       setBulkResults(["Pekerjaan "+String(result.batchId).slice(0,8)+" tersimpan di server. Anda boleh pindah tab atau menutup browser."]);
       setBulkPins([]);
       await queryClient.invalidateQueries({queryKey:["gym-x904-delete-batches"]});
@@ -186,7 +198,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       </div>
       <button type="button" disabled={!bulkReady} onClick={()=>setBulkConfirm(true)}
         className={"rounded-lg border px-4 py-2 text-sm font-semibold "+(bulkReady?"bg-blue-600 border-blue-600 text-white hover:bg-blue-700":"bg-gray-100 border-gray-200 text-gray-500")}>
-        {bulkRunning?"Memproses berurutan...":"Tinjau penghapusan "+selectedUsers.length+" pengguna"}
+        {bulkRunning?"Menyimpan antrean...":"Tinjau penghapusan "+selectedUsers.length+" pengguna"}
       </button>
       {bulkResults.length>0&&<div role="status" aria-live="polite" className="text-xs space-y-1">{bulkResults.map((line,i)=><p key={i}>{line}</p>)}</div>}
       {capabilities.durableBulkEnabled!==true&&<p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">Penghapusan massal berbasis server belum diaktifkan. Jangan gunakan antrean browser lama; tunggu verifikasi worker VMSC dan ACK.</p>}
@@ -198,10 +210,10 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
           {b.commands.map(c=><div key={c.userPin} className="flex flex-wrap justify-between gap-2">
             <span>{c.name} · PIN {c.userPin}</span>
             <span className={c.state==="completed"?"text-green-700":c.state==="failed"||c.state==="cancelled"||c.state==="needs_review"?"text-red-600":"text-muted-foreground"}>
-              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"&&b.commands.some(x=>x.state==="failed"||x.state==="cancelled")?"Dihentikan · tidak dikirim":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":c.state==="needs_review"?"ACK kedaluwarsa · perlu pemeriksaan":"Dibatalkan"}
+              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"&&b.commands.some(x=>x.state==="failed"||x.state==="cancelled"||x.state==="needs_review")?"Dihentikan · tidak dikirim":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":c.state==="needs_review"?"ACK kedaluwarsa · perlu pemeriksaan":"Dibatalkan"}
             </span>
           </div>)}
-          {b.commands.some(c=>c.state==="failed"||c.state==="cancelled")&&<p role="alert" className="text-red-600">Pekerjaan berhenti; periksa hasil sebelum mengirim ulang.</p>}
+          {b.commands.some(c=>c.state==="failed"||c.state==="cancelled"||c.state==="needs_review")&&<p role="alert" className="text-red-600">Pekerjaan berhenti; periksa hasil sebelum mengirim ulang.</p>}
         </div>)}
       </div>}
       {bulkConfirm&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
