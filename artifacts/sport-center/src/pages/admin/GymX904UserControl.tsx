@@ -42,8 +42,8 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const {data:batchHistory}=useQuery<BatchHistory>({
     queryKey:["gym-x904-delete-batches"],
     queryFn:()=>request("/admin/gym-x904/delete-batches"),
-    enabled:capabilities?.allowed===true && capabilities?.durableBulkEnabled===true,
-    refetchInterval:5000,
+    enabled:capabilities?.allowed===true,
+    refetchInterval:capabilities?.durableBulkEnabled===true?5000:false,
     retry:false
   });
   const {data:receipt}=useQuery<Receipt>({
