@@ -75,3 +75,46 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     `);
   }
 }
+
+
+/**
+ * One-off 22 Oct 2026 X904 report delivery. Uses the existing gateway token
+ * inside the Sport Center production server; no secret is exposed to operators.
+ * Only the explicitly approved, fixed report ID is processed here.
+ */
+export async function dispatchX904OneTimeReport(): Promise<void> {
+  const eventId = "x904-report-20261022-0500-2300-v1";
+  const groupId = "120363428216180040@g.us";
+  const claimed = await db.execute(sql`
+    UPDATE sport_center.gym_x904_lan_wa_outbox o
+    SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
+    WHERE o.event_id=${eventId} AND o.group_id=${groupId}
+      AND ((o.status IN ('pending','failed') AND o.next_attempt_at<=now())
+        OR (o.status='sending' AND o.locked_until<now()))
+    RETURNING o.body
+  `);
+  if (claimed.rows.length === 0) return;
+  try {
+    const result = await sendCstWaGatewayGroupMessage({
+      groupId, text: String(claimed.rows[0].body),
+      idempotencyKey: eventId,
+    });
+    const delivered = ["delivered","read"].includes(result.status.toLowerCase());
+    await db.execute(sql`
+      UPDATE sport_center.gym_x904_lan_wa_outbox
+      SET status=${delivered ? "sent" : "pending_ack"},
+          gateway_message_id=${result.messageId},
+          sent_at=CASE WHEN ${delivered} THEN now() ELSE sent_at END,
+          locked_until=NULL,last_error=NULL
+      WHERE event_id=${eventId} AND status='sending'
+    `);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "gateway_failed";
+    await db.execute(sql`
+      UPDATE sport_center.gym_x904_lan_wa_outbox
+      SET status='failed',locked_until=NULL,next_attempt_at=now()+interval '1 minute',
+          last_error=${reason.slice(0,250)}
+      WHERE event_id=${eventId} AND status='sending'
+    `);
+  }
+}
