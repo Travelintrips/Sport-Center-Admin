@@ -197,8 +197,8 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
           <p className="font-semibold">Pekerjaan {b.batchId.slice(0,8)} · {b.commands.length} pengguna</p>
           {b.commands.map(c=><div key={c.userPin} className="flex flex-wrap justify-between gap-2">
             <span>{c.name} · PIN {c.userPin}</span>
-            <span className={c.state==="completed"?"text-green-700":c.state==="failed"||c.state==="cancelled"?"text-red-600":"text-muted-foreground"}>
-              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"&&b.commands.some(x=>x.state==="failed"||x.state==="cancelled")?"Dihentikan · tidak dikirim":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":"Dibatalkan"}
+            <span className={c.state==="completed"?"text-green-700":c.state==="failed"||c.state==="cancelled"||c.state==="needs_review"?"text-red-600":"text-muted-foreground"}>
+              {c.state==="completed"?"Berhasil (ACK)":c.state==="claimed"?"Diproses":c.state==="queued"&&b.commands.some(x=>x.state==="failed"||x.state==="cancelled")?"Dihentikan · tidak dikirim":c.state==="queued"?"Menunggu":c.state==="failed"?"Gagal · berhenti":c.state==="needs_review"?"ACK kedaluwarsa · perlu pemeriksaan":"Dibatalkan"}
             </span>
           </div>)}
           {b.commands.some(c=>c.state==="failed"||c.state==="cancelled")&&<p role="alert" className="text-red-600">Pekerjaan berhenti; periksa hasil sebelum mengirim ulang.</p>}
