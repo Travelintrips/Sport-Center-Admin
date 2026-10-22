@@ -480,6 +480,8 @@ export function startScheduler(): void {
     logger.error({ err }, "[scheduler] Initial central finance processing failed"),
   );
 
+  // Diagnose digest scheduler activation once per process without exposing secrets.
+  logger.info({ x904DigestEnv: process.env.GYM_X904_LAN_WA_ENABLED ?? "unset", x904GroupConfigured: Boolean(process.env.GYM_X904_WA_GROUP_ID) }, "[scheduler] X904 LAN digest configuration");
   // Attendance notifications: short cadence, guarded by opt-in env and durable claim.
   setInterval(() => {
     dispatchX904AttendanceWhatsApp().catch(err =>
