@@ -22,7 +22,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   const config = await db.execute(sql`SELECT activated_at FROM sport_center.gym_x904_lan_wa_digest_config
     WHERE config_key='main' AND enabled=true`);
   if (!config.rows.length) return;
-  const activation = String(config.rows[0].activated_at);
+  const activation = new Date(String(config.rows[0].activated_at)).toISOString();
 
   // A transaction-scoped advisory lock serializes batch creation across Hostinger replicas.
   // Use received_at, not the machine's editable clock, to delimit the quiet collection window.
