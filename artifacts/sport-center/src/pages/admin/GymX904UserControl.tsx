@@ -79,8 +79,8 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     setBulkConfirm(false);setBulkRunning(true);setBulkResults([]);
     try{
       // Retain the same request key if a network timeout occurs after DB commit.
-      // Only the non-sensitive idempotency key and target fingerprint are stored.
-      const fingerprint=JSON.stringify(targets);
+      // Only the idempotency key and PIN/UID fingerprint are stored, never names or biometrics.
+      const fingerprint=targets.map(t=>t.userPin+":"+t.expectedUid).join("|");
       const storageKey="x904-pending-bulk-submit";
       let idempotencyKey=crypto.randomUUID().replace(/-/g,"");
       try {
