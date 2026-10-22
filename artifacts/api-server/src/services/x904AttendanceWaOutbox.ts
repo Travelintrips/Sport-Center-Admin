@@ -17,15 +17,16 @@ export async function dispatchX904AttendanceWhatsApp(): Promise<void> {
       SELECT event_id FROM sport_center.gym_x904_wa_outbox
       WHERE (status IN ('pending','failed') AND next_attempt_at<=now())
          OR (status='sending' AND locked_until<now())
-      ORDER BY created_at ASC LIMIT 10 FOR UPDATE SKIP LOCKED
-    ) RETURNING event_id,member_name,user_pin,device_time,attempts
+      ORDER BY created_at ASC LIMIT 80 FOR UPDATE SKIP LOCKED
+    ) RETURNING event_id,member_name,user_pin,device_time,verification_method,attempts
   `);
   if (claimed.rows.length === 0) return;
   const rows = claimed.rows;
   const lines = rows.map((row,index) => {
     const time = String(row.device_time).slice(11,16);
-    const name = String(row.member_name).slice(0,35);
-    return `${index+1}. ${name} ${time} ✅`;
+    const isCard = String(row.verification_method) === 'card';
+    const name = isCard ? `Kartu (PIN ${String(row.user_pin)})` : String(row.member_name).slice(0,35);
+    return `${index+1}. ${name} ${time} ${isCard ? '💳' : '✅'}`;
   });
   const day = String(rows[0].device_time).slice(0,10);
   const text = `ABSENSI GYM X904\n${day}\n\n${lines.join("\n")}\n\nTotal: ${rows.length} absensi terverifikasi`;
