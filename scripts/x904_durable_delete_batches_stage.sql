@@ -40,6 +40,9 @@ BEGIN
   IF session_user NOT IN ('x904_vmsc_evidence_login','postgres') THEN
     RAISE EXCEPTION 'X904_WORKER_UNAUTHORIZED';
   END IF;
+  -- Serialize all batch claims, including different batches, to avoid two active
+  -- physical mutations when workers poll concurrently. No waiting or auto-replay.
+  IF NOT pg_try_advisory_xact_lock(904, 20261022) THEN RETURN NULL; END IF;
   WITH candidate AS (
     SELECT q.command_id FROM sport_center.x904_user_commands q
     JOIN sport_center.x904_delete_batches b ON b.batch_id=q.batch_id
