@@ -47,6 +47,8 @@ const csvCell = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""'
 export default function GymX904() {
   const [date, setDate] = useState(localDate);
   const [search, setSearch] = useState("");
+  const [machineUserSearch, setMachineUserSearch] = useState("");
+  const [machineRoleFilter, setMachineRoleFilter] = useState("all");
   const [tab, setTab] = useState<GymTab>("dashboard");
   const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
   const queryClient = useQueryClient();
@@ -463,11 +465,22 @@ export default function GymX904() {
       </section>}      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <h2 className="font-semibold">User yang terdaftar langsung pada Solution X904 (LAN)</h2>
         <p className="text-xs text-muted-foreground">Hanya snapshot terautentikasi yang selesai disimpan. Status aktivasi akun dan template biometrik tidak dibaca. PIN mesin belum otomatis dipetakan ke member Gym.</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm">Cari nama atau PIN mesin
+            <input aria-label="Cari nama atau PIN mesin" className="rounded-lg border bg-background px-3 py-2" value={machineUserSearch} onChange={e=>setMachineUserSearch(e.target.value)} placeholder="Cari pengguna..." />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">Filter peran
+            <select aria-label="Filter peran mesin" className="rounded-lg border bg-background px-3 py-2" value={machineRoleFilter} onChange={e=>setMachineRoleFilter(e.target.value)}>
+              <option value="all">Semua pengguna</option><option value="regular">Pengguna biasa</option><option value="admin">Administrator mesin</option>
+            </select>
+          </label>
+          <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>{setMachineUserSearch("");setMachineRoleFilter("all")}}>Reset filter</button>
+        </div>
         {lanUsersError ? <p role="alert" className="text-sm">Daftar LAN belum tersedia atau backend belum aktif.</p> :
           lanUsersLoading ? <p className="text-sm">Memuat pengguna dari snapshot LAN...</p> :
           <div className="overflow-x-auto"><table className="w-full text-sm text-left">
             <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
-            <tbody>{(lanUsers?.users ?? []).map((u) => <tr key={u.user_pin} className="border-b">
+            <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0))).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
               <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
