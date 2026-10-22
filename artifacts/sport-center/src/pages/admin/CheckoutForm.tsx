@@ -60,6 +60,8 @@ export default function AdminCheckoutForm() {
   const activeFacilities = facilities.filter((f: any) => f.isActive === true);
   const customers = Array.isArray(customersData) ? customersData : [];
   const isGuest = selectedCustomerId === "__guest__";
+  const isPastGuest = selectedCustomerId !== "" && selectedCustomerId !== "__guest__" && Number(selectedCustomerId) < 0;
+  const guestBooking = isGuest || isPastGuest;
   const selectedCustomer: any = customers.find((c: any) => String(c.id) === selectedCustomerId);
   const filteredCustomers = customers.filter((c: any) =>
     [c.name, c.phone, c.email].some((field) => String(field ?? "").toLocaleLowerCase("id-ID").includes(customerSearch.trim().toLocaleLowerCase("id-ID")))
@@ -231,7 +233,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
     }
-    if (!isGuest && Number(selectedCustomerId) <= 0) {
+    if (!guestBooking && Number(selectedCustomerId) <= 0) {
       toast({ title: "Pilih customer yang terdaftar; data tamu perlu didaftarkan terlebih dahulu", variant: "destructive" });
       return;
     }
@@ -248,7 +250,7 @@ export default function AdminCheckoutForm() {
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
         body: JSON.stringify({
-          customerId: isGuest ? null : Number(selectedCustomerId),
+          customerId: guestBooking ? null : Number(selectedCustomerId),
           customerName: isGuest ? guestName.trim() : selectedCustomer.name,
           customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
           customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
