@@ -27,7 +27,20 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   // replay after deployments or restarts without adding Hostinger secrets.
   const config = await db.execute(sql`SELECT activated_at FROM sport_center.gym_x904_lan_wa_digest_config
     WHERE config_key='main' AND enabled=true`);
-  if (!config.rows.length) { console.warn('[x904-digest] config disabled or missing'); return; }
+  if (!config.rows.length) {
+    // The database may be reachable but point to another PROD instance.
+    // Log non-secret database identity and config presence; never bypass opt-in.
+    const identity = await db.execute(sql`SELECT current_database() AS database_name,
+      current_schema() AS schema_name,
+      inet_server_port() AS server_port,
+      (SELECT count(*)::int FROM sport_center.gym_x904_lan_wa_digest_config) AS config_rows,
+      (SELECT count(*)::int FROM sport_center.gym_x904_lan_wa_batches) AS batch_rows,
+      (SELECT count(*)::int FROM sport_center.gym_x904_lan_logs) AS scan_rows`);
+    console.error("[x904-digest] config missing in runtime database; dispatch blocked", {
+      database: identity.rows[0], expectedConfig: "main/enabled",
+    });
+    return;
+  }
   const activation = new Date(String(config.rows[0].activated_at)).toISOString();
 
   // A transaction-scoped advisory lock serializes batch creation across Hostinger replicas.
