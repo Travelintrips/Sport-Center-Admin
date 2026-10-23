@@ -70,8 +70,191 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     const cutoff = first + 120000;
     const eligible = pending.rows.filter(r => new Date(String(r.received_at)).getTime() < cutoff);
     if (!eligible.length) return;
+    // New scans trigger dispatch; the message covers all scans since midnight WIB.
+    const latest = eligible.map(r => String(r.device_time)).sort().at(-1)!;
+    const day = latest.slice(0, 10);
+    const daily = await tx.execute(sql`
+      SELECT l.event_id,l.device_serial,l.user_pin,l.device_time,
+        COALESCE(NULLIF(trim(u.display_name),''),'Pengguna X904') AS display_name
+      FROM sport_center.gym_x904_lan_logs l
+      LEFT JOIN sport_center.gym_x904_lan_users u
+        ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
+      WHERE l.device_serial=${serial}
+        AND l.device_time >= ${day + " 00:00:00"}
+        AND l.device_time <= ${latest}
+        AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}
+      const pin = String(r.user_pin);
+      const key = String(r.device_serial) + ":" + pin;
+      const entry = people.get(key) ?? {name:String(r.display_name).slice(0,80),times:[]};
+      entry.times.push(String(r.device_time));
+      people.set(key,entry);
+    }
+    const sorted = [...people.values()].map(person => {
+      person.times.sort();
+      return person;
+    }).sort((a,b)=>a.times[0].localeCompare(b.times[0]));
+    const times = dailyRows.map(r=>String(r.device_time)).sort();
+    // Keep the group digest compact and readable on narrow WhatsApp screens.
+    // Never invent card identifiers or verification results.
+    const lines = sorted.map((person,i) => {
+      const scanTimes = person.times.map(t => t.slice(11,16)).join(", ");
+      return `${i+1}. *${person.name}* — ${scanTimes} WIB`;
+    });
+    const body = [
+      "✅ *REKAP ABSENSI GYM*",
+      "📅 " + times[0].slice(0,10),
+      "🕒 " + times[0].slice(11,16) + "–" + times[times.length-1].slice(11,16) + " WIB",
+      "📍 X904 | Sport Center",
+      "",
+      ...lines,
+      "",
+      "👥 *" + people.size + " orang* | 📋 *" + dailyRows.length + " scan*",
+    ].join("\n");
+    const batchId = "x904-lan-digest-" + String(eligible[0].event_id);
+    await tx.execute(sql`INSERT INTO sport_center.gym_x904_lan_wa_batches
+      (batch_id,group_id,body) VALUES (${batchId},${groupId},${body})
+      ON CONFLICT (batch_id) DO NOTHING`);
+    for (const row of eligible) {
+      await tx.execute(sql`INSERT INTO sport_center.gym_x904_lan_wa_batch_events
+        (event_id,batch_id) VALUES (${String(row.event_id)},${batchId})
+        ON CONFLICT (event_id) DO NOTHING`);
+    }
+  });
+  } catch (err) {
+    // A batch already committed must still be delivered if later scan collection fails.
+    console.error("[x904-digest] batch collection failed; continuing to drain pending batches", err);
+  }
+
+  // Only one dispatcher can claim a batch; Gateway idempotency is stable across retries.
+  const claim = await db.execute(sql`
+    UPDATE sport_center.gym_x904_lan_wa_batches b
+    SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
+    WHERE b.batch_id IN (
+      SELECT batch_id FROM sport_center.gym_x904_lan_wa_batches
+      WHERE group_id IN (${sql.join(groupAliases.map(alias => sql`${alias}`), sql`, `)}) AND
+        ((status IN ('pending','failed') AND next_attempt_at<=now())
+         OR (status='sending' AND locked_until<now()))
+      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+    ) RETURNING batch_id,body`);
+  if (!claim.rows.length) {
+    const backlog = await db.execute(sql`SELECT group_id,status,COUNT(*)::int AS count FROM sport_center.gym_x904_lan_wa_batches WHERE status IN ('pending','failed') AND next_attempt_at<=now() GROUP BY group_id,status`);
+    console.warn("[x904-digest] no batch claimed", { configuredGroup: groupId, aliases: groupAliases, backlog: backlog.rows });
+    return;
+  }
+  console.info("[x904-digest] batch claimed", { batchId: String(claim.rows[0].batch_id) });
+  const batchId = String(claim.rows[0].batch_id);
+  try {
+    const registeredGroupId = groupId === approvedGroupUuid ? approvedGroupUuid : groupId.endsWith("@g.us")
+      ? (await listCstWaGatewayGroups("sport-center-report")).find(g=>g.jid===groupId && g.isActive)?.id
+      : groupId;
+    if (!registeredGroupId) throw new Error("X904 target group not registered on sport-center-report");
+    const result = await sendCstWaGatewayGroupMessage({
+      groupId:registeredGroupId,text:String(claim.rows[0].body),idempotencyKey:batchId,
+    });
+    const delivered = ["delivered","read"].includes(result.status.toLowerCase());
+    await db.execute(sql`UPDATE sport_center.gym_x904_lan_wa_batches
+      SET status=${delivered?"sent":"pending_ack"},gateway_message_id=${result.messageId},
+        locked_until=NULL,sent_at=CASE WHEN ${delivered} THEN now() ELSE sent_at END,last_error=NULL
+      WHERE batch_id=${batchId} AND status='sending'`);
+  } catch(err) {
+    const reason=err instanceof Error?err.message:"gateway_failed";
+    await db.execute(sql`UPDATE sport_center.gym_x904_lan_wa_batches
+      SET status='failed',locked_until=NULL,next_attempt_at=now()+interval '1 minute',
+        last_error=${reason.slice(0,250)}
+      WHERE batch_id=${batchId} AND status='sending'`);
+  }
+}
+/**
+ * One-off 22 Oct 2026 X904 report delivery. Uses the existing gateway token
+ * inside the Sport Center production server; no secret is exposed to operators.
+ * Only the explicitly approved, fixed report ID is processed here.
+ */
+export async function dispatchX904OneTimeReport(): Promise<void> {
+  const eventId = "x904-report-20261022-0500-2300-v1";
+  // WhatsApp Gateway requires the UUID of the registered group, not its JID.
+  const groupId = "95862c59-6b11-4d86-bea0-e69546c827d6";
+  const claimed = await db.execute(sql`
+    UPDATE sport_center.gym_x904_wa_one_time_reports o
+    SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
+    WHERE o.report_id=${eventId} AND o.group_id=${groupId}
+      AND ((o.status IN ('pending','failed') AND o.next_attempt_at<=now())
+        OR (o.status='sending' AND o.locked_until<now()))
+    RETURNING o.body
+  `);
+  if (claimed.rows.length === 0) return;
+  try {
+    const result = await sendCstWaGatewayGroupMessage({
+      groupId, text: String(claimed.rows[0].body),
+      idempotencyKey: eventId,
+    });
+    const delivered = ["delivered","read"].includes(result.status.toLowerCase());
+    await db.execute(sql`
+      UPDATE sport_center.gym_x904_wa_one_time_reports
+      SET status=${delivered ? "sent" : "pending_ack"},
+          gateway_message_id=${result.messageId},
+          sent_at=CASE WHEN ${delivered} THEN now() ELSE sent_at END,
+          locked_until=NULL,last_error=NULL
+      WHERE report_id=${eventId} AND status='sending'
+    `);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "gateway_failed";
+    await db.execute(sql`
+      UPDATE sport_center.gym_x904_wa_one_time_reports
+      SET status='failed',locked_until=NULL,next_attempt_at=now()+interval '1 minute',
+          last_error=${reason.slice(0,250)}
+      WHERE report_id=${eventId} AND status='sending'
+    `);
+  }
+}
+
+/** Drain only the two user-authorized real-world test scans, independent of opt-in env.
+ * The durable statuses and Gateway idempotency prevent repeated WhatsApp sends.
+ */
+export async function dispatchX904AuthorizedRealScanTest(): Promise<void> {
+  const ids = [
+    "6a05144da0af12c8f05111e9e74aa7d96aafed5a2647e4b30558010ec7ebad46",
+    "957668a2de43315b1f941cc89a5e139dd0edeb49fdbf48242878286206b97b40",
+  ];
+  for (const eventId of ids) {
+    const claim=await db.execute(sql`
+      UPDATE sport_center.gym_x904_lan_wa_outbox
+      SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
+      WHERE event_id=${eventId} AND group_id='120363428216180040@g.us'
+        AND ((status IN ('pending','failed') AND next_attempt_at<=now())
+          OR (status='sending' AND locked_until<now()))
+      RETURNING body
+    `);
+    if (!claim.rows.length) continue;
+    try {
+      const result=await sendCstWaGatewayGroupMessage({
+        groupId:"95862c59-6b11-4d86-bea0-e69546c827d6",
+        text:String(claim.rows[0].body),idempotencyKey:`x904-lan-event-${eventId}`
+      });
+      const delivered=["delivered","read"].includes(result.status.toLowerCase());
+      await db.execute(sql`
+        UPDATE sport_center.gym_x904_lan_wa_outbox
+        SET status=${delivered?"sent":"pending_ack"},
+          gateway_message_id=${result.messageId}, locked_until=NULL,last_error=NULL,
+          sent_at=CASE WHEN ${delivered} THEN now() ELSE sent_at END
+        WHERE event_id=${eventId} AND status='sending'
+      `);
+    } catch(err) {
+      const reason=err instanceof Error?err.message:"gateway_failed";
+      await db.execute(sql`
+        UPDATE sport_center.gym_x904_lan_wa_outbox
+        SET status='failed', locked_until=NULL,next_attempt_at=now()+interval '1 minute',
+          last_error=${reason.slice(0,250)}
+        WHERE event_id=${eventId} AND status='sending'
+      `);
+    }
+  }
+}
+
+      ORDER BY l.device_time,l.event_id LIMIT 10000`);
+    const dailyRows = daily.rows;
+    if (!dailyRows.length) throw new Error("X904_DAILY_RECAP_EMPTY");
     const people = new Map<string,{name:string;times:string[]}>();
-    for (const r of eligible) {
+    for (const r of dailyRows) {
       const pin = String(r.user_pin);
       const key = String(r.device_serial) + ":" + pin;
       const entry = people.get(key) ?? {name:String(r.display_name).slice(0,80),times:[]};
