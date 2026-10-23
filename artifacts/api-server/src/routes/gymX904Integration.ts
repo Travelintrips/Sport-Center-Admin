@@ -149,6 +149,26 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   });
 });
 
+// Only the last completed, authenticated device snapshot is eligible for active-user UI.
+router.get("/admin/gym-x904/users", adminMiddleware, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const result = await db.execute(sql`
+      SELECT u.user_pin AS "userPin", u.device_uid AS "deviceUid",
+             u.display_name AS "displayName", u.device_role AS "deviceRole"
+      FROM sport_center.gym_x904_lan_users u
+      JOIN sport_center.gym_x904_lan_state s
+        ON s.device_serial = u.device_serial
+       AND s.last_snapshot_id = u.last_seen_snapshot
+      WHERE u.device_serial = 'TDBD234200545'
+      ORDER BY u.user_pin
+    `);
+    return res.json({users: result.rows, count: result.rows.length, source: "completed-device-snapshot"});
+  } catch {
+    return res.status(503).json({error: "ACTIVE_USERS_UNAVAILABLE"});
+  }
+});
+
 router.get("/admin/gym-x904/read-command", adminMiddleware, async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
