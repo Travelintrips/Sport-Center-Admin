@@ -67,7 +67,7 @@ import {
   Lock as LockIcon,
   Dumbbell,
 } from "lucide-react";
-import { getToken } from "@/lib/auth";
+import { getToken, getCurrentRole } from "@/lib/auth";
 import {
   calculateBookingWithholdingTax,
   calculateInclusiveInvoiceTax,
@@ -1422,9 +1422,25 @@ function BookingDetailDrawer({
       });
       const savedData = await saved.json();
       if (!saved.ok) throw new Error(savedData.error ?? "Pembayaran gagal dicatat");
+
+      const currentRole = getCurrentRole();
+      if (currentRole && currentRole !== "staff") {
+        const confirmed = await fetch(`${API_BASE}/payments/${savedData.id}`, {
+          method: "PATCH",
+          headers: {"Content-Type":"application/json", ...auth},
+          body: JSON.stringify({ status: "confirmed" }),
+        });
+        const confirmedData = await confirmed.json();
+        if (!confirmed.ok) {
+          throw new Error(confirmedData.error ?? "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
+        }
+        paymentToast.toast({title:"Pembayaran dikonfirmasi",description:"Bukti tersimpan dan booking telah dikonfirmasi."});
+      } else {
+        paymentToast.toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi oleh admin/finance."});
+      }
+
       setNewPaymentProof(null);
       paymentQueryClient.invalidateQueries({queryKey:getListBookingsQueryKey()});
-      paymentToast.toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi. Booking belum otomatis lunas."});
     } catch (error) {
       setNewPaymentError(error instanceof Error ? error.message : "Gagal mencatat pembayaran");
     } finally { setSavingNewPayment(false); }
@@ -1948,9 +1964,9 @@ function BookingDetailDrawer({
                   <Input id="new-booking-proof" type="file" accept="image/*,.pdf" onChange={e=>setNewPaymentProof(e.target.files?.[0]??null)} />
                   {newPaymentError && <p className="text-xs text-destructive">{newPaymentError}</p>}
                   <Button type="button" className="w-full" disabled={!newPaymentProof||savingNewPayment} onClick={submitNewPaymentProof}>
-                    {savingNewPayment?"Menyimpan...":"Unggah Bukti & Kirim Verifikasi"}
+                    {savingNewPayment?"Menyimpan...":(getCurrentRole()==="staff"?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}
                   </Button>
-                  <p className="text-xs text-muted-foreground">Tidak langsung menandai lunas. Pembayaran diverifikasi melalui detail booking.</p>
+                  <p className="text-xs text-muted-foreground">{getCurrentRole()==="staff" ? "Bukti dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan pembayaran langsung dikonfirmasi setelah validasi berhasil."}</p>
                 </div>
               )}
 
