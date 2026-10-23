@@ -482,6 +482,10 @@ export function startScheduler(): void {
 
   // Diagnose digest scheduler activation once per process without exposing secrets.
   logger.info({ x904DigestEnv: process.env.GYM_X904_LAN_WA_ENABLED ?? "unset", x904GroupConfigured: Boolean(process.env.GYM_X904_WA_GROUP_ID) }, "[scheduler] X904 LAN digest configuration");
+  // Drain already-durable X904 batches immediately after a deploy/restart.
+  // This does not replay scans: the DB claim and Gateway idempotency remain authoritative.
+  console.info("[x904-digest] scheduler initialized", { enabled: process.env.GYM_X904_LAN_WA_ENABLED ?? "unset", groupConfigured: Boolean(process.env.GYM_X904_WA_GROUP_ID) });
+  dispatchX904LanScanNotifications().then(() => console.info("[x904-digest] startup dispatch completed")).catch(err => console.error("[x904-digest] startup dispatch failed", err));
   // Attendance notifications: short cadence, guarded by opt-in env and durable claim.
   setInterval(() => {
     dispatchX904AttendanceWhatsApp().catch(err =>
