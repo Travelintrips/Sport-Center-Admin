@@ -83,26 +83,22 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       return person;
     }).sort((a,b)=>a.times[0].localeCompare(b.times[0]));
     const times = eligible.map(r=>String(r.device_time)).sort();
+    // Keep the group digest compact and readable on narrow WhatsApp screens.
+    // Never invent card identifiers or verification results.
     const lines = sorted.map((person,i) => {
-      const repeats = person.times.slice(1).map(t=>t.slice(11)+" WIB").join(", ");
-      return `${i+1}. ${person.name} — ${person.times[0].slice(11)} WIB` +
-        (repeats ? `\n   Scan ulang: ${repeats}` : "") +
-        "\n   Kartu: Belum tersedia\n   Status: Tercatat di mesin, belum diverifikasi";
+      const scanTimes = person.times.map(t => t.slice(11,16)).join(", ");
+      return `${i+1}. *${person.name}* — ${scanTimes} WIB`;
     });
     const body = [
-      "✅ *REKAP ABSENSI GYM SPORT CENTER*",
-      "📅 Tanggal: "+times[0].slice(0,10),
-      "🕒 Periode: "+times[0].slice(11)+"–"+times[times.length-1].slice(11)+" WIB",
-      "📍 Perangkat: X904",
+      "✅ *REKAP ABSENSI GYM*",
+      "📅 " + times[0].slice(0,10),
+      "🕒 " + times[0].slice(11,16) + "–" + times[times.length-1].slice(11,16) + " WIB",
+      "📍 X904 | Sport Center",
       "",
-      "*DAFTAR ABSENSI*",
       ...lines,
       "",
-      "*RINGKASAN*",
-      "👥 Total orang: "+people.size,
-      "📋 Total scan: "+eligible.length,
-      "⏳ Status: Observasi mesin, menunggu verifikasi",
-      "🏋️ SELAMAT BEROLAHRAGA 🏆",
+      "👥 *" + people.size + " orang* | 📋 *" + eligible.length + " scan*",
+      "ℹ️ Data mesin; belum diverifikasi",
     ].join("\n");
     const batchId = "x904-lan-digest-" + String(eligible[0].event_id);
     await tx.execute(sql`INSERT INTO sport_center.gym_x904_lan_wa_batches
