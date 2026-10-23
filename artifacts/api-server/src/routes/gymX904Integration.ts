@@ -249,6 +249,9 @@ router.post("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
     SELECT s.* FROM supplied s JOIN sport_center.gym_x904_lan_users u
      ON u.device_serial='TDBD234200545' AND u.user_pin=s.pin AND u.device_uid=s.uid
        AND u.display_name=s.display_name AND u.device_role=0
+     JOIN sport_center.gym_x904_lan_state active_snapshot
+       ON active_snapshot.device_serial=u.device_serial
+       AND u.last_seen_snapshot=active_snapshot.last_snapshot_id
     WHERE NOT EXISTS (SELECT 1 FROM sport_center.x904_user_commands q
       WHERE q.device_serial='TDBD234200545' AND q.user_pin=s.pin AND q.state IN ('queued','claimed'))
    ), batch AS (
