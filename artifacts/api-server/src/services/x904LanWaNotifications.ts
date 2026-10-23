@@ -16,6 +16,12 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   if (process.env.GYM_X904_LAN_WA_ENABLED === "false") return;
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "95862c59-6b11-4d86-bea0-e69546c827d6").trim();
   const serial = String(process.env.GYM_X904_DEVICE_SERIAL ?? "TDBD234200545");
+  // Historical batches used the JID while some deployments use the registered UUID.
+  // Both identify the same approved Sport Center group; never strand durable batches.
+  const approvedGroupJid = "120363428216180040@g.us";
+  const approvedGroupUuid = "95862c59-6b11-4d86-bea0-e69546c827d6";
+  const groupAliases = groupId === approvedGroupJid || groupId === approvedGroupUuid
+    ? [approvedGroupJid, approvedGroupUuid] : [groupId];
   if (!groupId) throw new Error("X904 LAN digest requires group ID");
   // A durable activation watermark, recorded once in the database, prevents
   // replay after deployments or restarts without adding Hostinger secrets.
@@ -106,7 +112,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     SET status='sending',locked_until=now()+interval '2 minutes',attempts=attempts+1
     WHERE b.batch_id IN (
       SELECT batch_id FROM sport_center.gym_x904_lan_wa_batches
-      WHERE group_id=${groupId} AND
+      WHERE group_id IN (${sql.join(groupAliases.map(alias => sql`${alias}`), sql`, `)}) AND
         ((status IN ('pending','failed') AND next_attempt_at<=now())
          OR (status='sending' AND locked_until<now()))
       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -114,7 +120,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   if (!claim.rows.length) return;
   const batchId = String(claim.rows[0].batch_id);
   try {
-    const registeredGroupId = groupId.endsWith("@g.us")
+    const registeredGroupId = groupId === approvedGroupUuid ? approvedGroupUuid : groupId.endsWith("@g.us")
       ? (await listCstWaGatewayGroups("sport-center-report")).find(g=>g.jid===groupId && g.isActive)?.id
       : groupId;
     if (!registeredGroupId) throw new Error("X904 target group not registered on sport-center-report");
