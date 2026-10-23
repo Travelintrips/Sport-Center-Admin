@@ -1658,6 +1658,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     let { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
+    const requesterRole = String((req as any).user?.role ?? "");
+    if (status === "confirmed" && requesterRole === "staff") {
+      res.status(403).json({ error: "Staff hanya dapat mengirim bukti untuk verifikasi." });
+      return;
+    }
     if (
       status !== undefined &&
       status !== "confirmed" &&
