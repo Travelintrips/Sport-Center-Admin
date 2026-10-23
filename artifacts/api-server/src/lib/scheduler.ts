@@ -98,6 +98,12 @@ async function expireOverdueMemberships(): Promise<void> {
       }
 
       if (member.status !== "active" || member.endDate >= todayWIB) continue;
+      // Seven full WIB calendar days after the inclusive membership end date.
+      // Invalid legacy dates are never auto-suspended.
+      const parsedEnd = /^\d{4}-\d{2}-\d{2}$/.test(member.endDate)
+        ? Date.parse(member.endDate + "T00:00:00Z") : NaN;
+      const parsedToday = Date.parse(todayWIB + "T00:00:00Z");
+      if (!Number.isFinite(parsedEnd) || parsedToday <= parsedEnd + 7 * 86400000) continue;
       // If any financial booking has a confirmed status inconsistent with the
       // canonical payment, stop and require review instead of suspending.
       if (financialBookings.some(b => b.status === "confirmed" &&

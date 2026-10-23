@@ -16,7 +16,15 @@ export type GymPaymentPeriod = {
   amount: number;
 };
 
-export type GymEntitlement = "active" | "suspended" | "review_required";
+export type GymEntitlement = "active" | "grace_period" | "suspended" | "review_required";
+
+/** End date is inclusive; seven full calendar days follow before suspension. */
+export function isWithinGymGracePeriod(endDate: string, today: string): boolean {
+  if (!validDay(endDate) || !validDay(today)) return false;
+  const end = Date.parse(endDate + "T00:00:00Z");
+  const current = Date.parse(today + "T00:00:00Z");
+  return current <= end + 7 * 86400000;
+}
 
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -49,6 +57,7 @@ export function resolveGymEntitlement(input: {
     p.periodStart <= today && p.periodEnd >= today
   );
   if (covered) return "active";
+  if (isWithinGymGracePeriod(membershipEnd, today)) return membershipEnd < today ? "grace_period" : "active";
   // Unreconciled active membership records may be legacy imports. Never
   // suspend them solely because their end_date is old until sources are complete.
   return "suspended";

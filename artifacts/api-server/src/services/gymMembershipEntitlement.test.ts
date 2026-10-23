@@ -11,6 +11,16 @@ const base = {
 };
 
 describe("GYM membership payment entitlement", () => {
+  it("allows all seven grace days and suspends on day eight", () => {
+    const member = { ...base, membershipEnd: "2026-10-23" };
+    expect(resolveGymEntitlement({ ...member, today: "2026-10-23" })).toBe("active");
+    expect(resolveGymEntitlement({ ...member, today: "2026-10-24" })).toBe("grace_period");
+    expect(resolveGymEntitlement({ ...member, today: "2026-10-30" })).toBe("grace_period");
+    expect(resolveGymEntitlement({ ...member, today: "2026-10-31" })).toBe("suspended");
+  });
+  it("does not suspend during grace if payment is pending verification", () => {
+    expect(resolveGymEntitlement({ ...base, membershipEnd: "2026-10-20", payments: [{ id: 6, periodStart: "2026-10-21", periodEnd: "2026-11-20", status: "waiting_confirmation", amount: 300000 }] })).toBe("grace_period");
+  });
   it("suspends an overdue member without confirmed coverage", () => {
     expect(resolveGymEntitlement(base)).toBe("suspended");
   });
