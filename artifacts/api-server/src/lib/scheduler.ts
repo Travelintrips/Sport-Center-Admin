@@ -1,6 +1,6 @@
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport } from "../services/x904LanWaNotifications";
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
@@ -32,21 +32,64 @@ function getTodayWIB(): string {
 async function expireOverdueMemberships(): Promise<void> {
   try {
     const todayWIB = getTodayWIB();
-    // Find active memberships whose endDate is before today (WIB)
     const expired = await db
       .select({ id: gymMembershipsTable.id, name: gymMembershipsTable.name, endDate: gymMembershipsTable.endDate })
       .from(gymMembershipsTable)
       .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
 
-    if (expired.length === 0) return;
+    if (!expired.length) return;
 
-    await db
-      .update(gymMembershipsTable)
-      .set({ status: "expired", updatedAt: new Date() })
-      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+    // Membership renewal payments and financial bookings are not interchangeable.
+    // Until all sources have been reconciled, never bulk-expire legacy members.
+    // The explicit flag allows a controlled rollout only after reconciliation.
+    if (process.env.GYM_MEMBERSHIP_AUTO_SUSPEND_ENABLED !== "true") {
+      logger.warn({ overdueCount: expired.length },
+        "[scheduler] GYM overdue members detected; auto-suspend disabled pending payment reconciliation");
+      return;
+    }
 
-    logger.info({ count: expired.length, members: expired.map(m => `${m.name} (s/d ${m.endDate})`) },
-      "[scheduler] expireOverdueMemberships: set expired");
+    let suspended = 0;
+    let protectedCount = 0;
+    for (const member of expired) {
+      const payments = await db.select({
+        id: membershipPaymentsTable.id,
+        status: membershipPaymentsTable.status,
+        periodEnd: membershipPaymentsTable.periodEnd,
+      }).from(membershipPaymentsTable)
+        .where(eq(membershipPaymentsTable.membershipId, member.id));
+
+      // Preserve access when there is a confirmed renewal covering today.
+      // Any unresolved financial booking is a manual-review hold, not proof of nonpayment.
+      const [financialBooking] = await db.select({ id: bookingsTable.id })
+        .from(bookingsTable)
+        .where(and(
+          eq(bookingsTable.membershipId, member.id),
+          eq(bookingsTable.source, "gym_membership_payment"),
+          inArray(bookingsTable.status, ["confirmed", "waiting_confirmation"]),
+        )).limit(1);
+
+      if (financialBooking || payments.some(p =>
+        p.status === "confirmed" && p.periodEnd >= todayWIB
+      ) || payments.some(p => p.status === "waiting_confirmation")) {
+        protectedCount++;
+        continue;
+      }
+
+      // No automatic write for legacy records with no canonical payment history:
+      // they may have been paid through an earlier booking flow.
+      if (!payments.length) {
+        protectedCount++;
+        continue;
+      }
+
+      const updated = await db.update(gymMembershipsTable)
+        .set({ status: "expired", updatedAt: new Date() })
+        .where(and(eq(gymMembershipsTable.id, member.id), eq(gymMembershipsTable.status, "active"),
+          lt(gymMembershipsTable.endDate, todayWIB))).returning({ id: gymMembershipsTable.id });
+      suspended += updated.length;
+    }
+    logger.info({ overdueCount: expired.length, suspended, protectedCount },
+      "[scheduler] GYM overdue payment suspension reconciliation");
   } catch (err) {
     logger.error({ err }, "[scheduler] expireOverdueMemberships error");
   }
