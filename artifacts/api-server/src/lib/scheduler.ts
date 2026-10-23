@@ -85,14 +85,14 @@ async function expireOverdueMemberships(): Promise<void> {
       if (coveredPayments.length) {
         // Never shorten membership endDate when reactivating a paid renewal.
         const coveredUntil = coveredPayments.map(p => p.periodEnd).sort().at(-1)!;
-        if (member.status === "expired") {
+        if (member.status === "expired" || member.endDate < coveredUntil) {
           const updated = await db.update(gymMembershipsTable)
             .set({ status: "active", endDate: coveredUntil > member.endDate ? coveredUntil : member.endDate,
               updatedAt: new Date() })
             .where(and(eq(gymMembershipsTable.id, member.id),
-              eq(gymMembershipsTable.status, "expired")))
+              inArray(gymMembershipsTable.status, ["active", "expired"])))
             .returning({ id: gymMembershipsTable.id });
-          reactivated += updated.length;
+          if (member.status === "expired") reactivated += updated.length;
         }
         continue;
       }
