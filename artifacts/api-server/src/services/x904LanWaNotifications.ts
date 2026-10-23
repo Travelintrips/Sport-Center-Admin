@@ -98,7 +98,6 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       ...lines,
       "",
       "👥 *" + people.size + " orang* | 📋 *" + eligible.length + " scan*",
-      "ℹ️ Data mesin; belum diverifikasi",
     ].join("\n");
     const batchId = "x904-lan-digest-" + String(eligible[0].event_id);
     await tx.execute(sql`INSERT INTO sport_center.gym_x904_lan_wa_batches
