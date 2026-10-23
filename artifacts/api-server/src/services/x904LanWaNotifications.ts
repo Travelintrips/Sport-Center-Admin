@@ -66,8 +66,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       ORDER BY l.received_at,l.event_id LIMIT 100`);
     if (!pending.rows.length) return;
     const first = new Date(String(pending.rows[0].received_at)).getTime();
-    if (Date.now() < first + 120000) return;
-    const cutoff = first + 120000;
+    if (Date.now() < first + 30000) return;
+    const cutoff = first + 30000;
     const eligible = pending.rows.filter(r => new Date(String(r.received_at)).getTime() < cutoff);
     if (!eligible.length) return;
     // New scans trigger dispatch; the message covers all scans since midnight WIB.
