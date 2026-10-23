@@ -1,6 +1,6 @@
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport } from "../services/x904LanWaNotifications";
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
@@ -32,23 +32,91 @@ function getTodayWIB(): string {
 async function expireOverdueMemberships(): Promise<void> {
   try {
     const todayWIB = getTodayWIB();
-    // Find active memberships whose endDate is before today (WIB)
-    const expired = await db
-      .select({ id: gymMembershipsTable.id, name: gymMembershipsTable.name, endDate: gymMembershipsTable.endDate })
-      .from(gymMembershipsTable)
-      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+    // Roll out only after canonical membership/booking payments have been reconciled.
+    if (process.env.GYM_MEMBERSHIP_AUTO_SUSPEND_ENABLED !== "true") {
+      return;
+    }
 
-    if (expired.length === 0) return;
+    const memberships = await db.select({
+      id: gymMembershipsTable.id,
+      status: gymMembershipsTable.status,
+      endDate: gymMembershipsTable.endDate,
+    }).from(gymMembershipsTable)
+      .where(inArray(gymMembershipsTable.status, ["active", "expired"]));
 
-    await db
-      .update(gymMembershipsTable)
-      .set({ status: "expired", updatedAt: new Date() })
-      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+    let suspended = 0;
+    let reactivated = 0;
+    let heldForReview = 0;
+    for (const member of memberships) {
+      const payments = await db.select({
+        id: membershipPaymentsTable.id,
+        status: membershipPaymentsTable.status,
+        periodStart: membershipPaymentsTable.periodStart,
+        periodEnd: membershipPaymentsTable.periodEnd,
+        amount: membershipPaymentsTable.amount,
+      }).from(membershipPaymentsTable)
+        .where(eq(membershipPaymentsTable.membershipId, member.id));
 
-    logger.info({ count: expired.length, members: expired.map(m => `${m.name} (s/d ${m.endDate})`) },
-      "[scheduler] expireOverdueMemberships: set expired");
+      // All financial booking paths must be reconciled before automatic changes.
+      // Legacy records without canonical payments are held for review.
+      const financialBookings = await db.select({
+        id: bookingsTable.id,
+        membershipPaymentId: bookingsTable.membershipPaymentId,
+        status: bookingsTable.status,
+      }).from(bookingsTable)
+        .where(and(eq(bookingsTable.membershipId, member.id),
+          eq(bookingsTable.source, "gym_membership_payment")));
+
+      const canonicalIds = new Set(payments.map(p => p.id));
+      const hasUnlinkedFinancialBooking = financialBookings.some(b =>
+        !b.membershipPaymentId || !canonicalIds.has(b.membershipPaymentId));
+      const hasPendingReview = payments.some(p => p.status === "waiting_confirmation") ||
+        financialBookings.some(b => b.status === "waiting_confirmation");
+      if (!payments.length || hasUnlinkedFinancialBooking || hasPendingReview) {
+        heldForReview++;
+        continue;
+      }
+
+      const coveredPayments = payments.filter(p =>
+        p.status === "confirmed" && Number(p.amount) > 0 &&
+        /^\\d{4}-\\d{2}-\\d{2}$/.test(p.periodStart) &&
+        /^\\d{4}-\\d{2}-\\d{2}$/.test(p.periodEnd) &&
+        p.periodStart <= todayWIB && p.periodEnd >= todayWIB);
+      if (coveredPayments.length) {
+        // Never shorten membership endDate when reactivating a paid renewal.
+        const coveredUntil = coveredPayments.map(p => p.periodEnd).sort().at(-1)!;
+        if (member.status === "expired" || member.endDate < coveredUntil) {
+          const updated = await db.update(gymMembershipsTable)
+            .set({ status: "active", endDate: coveredUntil > member.endDate ? coveredUntil : member.endDate,
+              updatedAt: new Date() })
+            .where(and(eq(gymMembershipsTable.id, member.id),
+              inArray(gymMembershipsTable.status, ["active", "expired"])))
+            .returning({ id: gymMembershipsTable.id });
+          if (member.status === "expired") reactivated += updated.length;
+        }
+        continue;
+      }
+
+      if (member.status !== "active" || member.endDate >= todayWIB) continue;
+      // If any financial booking has a confirmed status inconsistent with the
+      // canonical payment, stop and require review instead of suspending.
+      if (financialBookings.some(b => b.status === "confirmed" &&
+        !payments.some(p => p.id === b.membershipPaymentId && p.status === "confirmed"))) {
+        heldForReview++;
+        continue;
+      }
+
+      const updated = await db.update(gymMembershipsTable)
+        .set({ status: "expired", updatedAt: new Date() })
+        .where(and(eq(gymMembershipsTable.id, member.id),
+          eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)))
+        .returning({ id: gymMembershipsTable.id });
+      suspended += updated.length;
+    }
+    logger.info({ examined: memberships.length, suspended, reactivated, heldForReview },
+      "[scheduler] GYM payment entitlement reconciliation");
   } catch (err) {
-    logger.error({ err }, "[scheduler] expireOverdueMemberships error");
+    logger.error({ err }, "[scheduler] GYM payment entitlement reconciliation error");
   }
 }
 
