@@ -27,6 +27,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
+import { isWithinGymGracePeriod } from "../services/gymMembershipEntitlement";
 
 const router = Router();
 
@@ -586,11 +587,23 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
     if (!member) { res.status(404).json({ error: "Member tidak ditemukan" }); return; }
     if (member.status !== "active") { res.status(400).json({ error: "Member tidak aktif" }); return; }
 
-    // Safety guard: endDate sudah lewat → otomatis expire dan tolak check-in
+    // Respect the seven-day grace period. Check-in must never mutate membership
+    // status; only the guarded payment reconciliation scheduler may do that.
     const todayStr = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().split("T")[0]!;
-    if (member.endDate < todayStr) {
-      await db.update(gymMembershipsTable).set({ status: "expired", updatedAt: new Date() }).where(eq(gymMembershipsTable.id, id));
-      res.status(400).json({ error: "Membership sudah kadaluarsa, tidak bisa check-in" }); return;
+    const paidPeriods = await db.select({
+      id: membershipPaymentsTable.id,
+      periodStart: membershipPaymentsTable.periodStart,
+      periodEnd: membershipPaymentsTable.periodEnd,
+      status: membershipPaymentsTable.status,
+      amount: membershipPaymentsTable.amount,
+    }).from(membershipPaymentsTable).where(eq(membershipPaymentsTable.membershipId, id));
+    const hasConfirmedCoverage = paidPeriods.some(p =>
+      p.status === "confirmed" && Number(p.amount) > 0 &&
+      /^\\d{4}-\\d{2}-\\d{2}$/.test(p.periodStart) &&
+      /^\\d{4}-\\d{2}-\\d{2}$/.test(p.periodEnd) &&
+      p.periodStart <= todayStr && p.periodEnd >= todayStr);
+    if (!hasConfirmedCoverage && !isWithinGymGracePeriod(member.endDate, todayStr)) {
+      res.status(400).json({ error: "Masa membership dan tenggang 7 hari sudah berakhir; periksa pembayaran perpanjangan" }); return;
     }
 
     const [existing] = await db.select().from(gymCheckinsTable)
