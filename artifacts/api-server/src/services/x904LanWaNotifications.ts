@@ -27,7 +27,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
   // replay after deployments or restarts without adding Hostinger secrets.
   const config = await db.execute(sql`SELECT activated_at FROM sport_center.gym_x904_lan_wa_digest_config
     WHERE config_key='main' AND enabled=true`);
-  if (!config.rows.length) return;
+  if (!config.rows.length) { console.warn('[x904-digest] config disabled or missing'); return; }
   const activation = new Date(String(config.rows[0].activated_at)).toISOString();
 
   // A transaction-scoped advisory lock serializes batch creation across Hostinger replicas.
@@ -117,7 +117,12 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
          OR (status='sending' AND locked_until<now()))
       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
     ) RETURNING batch_id,body`);
-  if (!claim.rows.length) return;
+  if (!claim.rows.length) {
+    const backlog = await db.execute(sql`SELECT group_id,status,COUNT(*)::int AS count FROM sport_center.gym_x904_lan_wa_batches WHERE status IN ('pending','failed') AND next_attempt_at<=now() GROUP BY group_id,status`);
+    console.warn("[x904-digest] no batch claimed", { configuredGroup: groupId, aliases: groupAliases, backlog: backlog.rows });
+    return;
+  }
+  console.info("[x904-digest] batch claimed", { batchId: String(claim.rows[0].batch_id) });
   const batchId = String(claim.rows[0].batch_id);
   try {
     const registeredGroupId = groupId === approvedGroupUuid ? approvedGroupUuid : groupId.endsWith("@g.us")
