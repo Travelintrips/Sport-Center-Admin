@@ -260,7 +260,7 @@ export default function AiAsistenWidget() {
     setInput(""); setMessages(v => [...v, { role: "admin", text: question }]);
     setBusy(true);
     try {
-      const localAudit = /catatan pajak|simulasi|dengan dan tanpa|masuk dalam total|(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
+      const localAudit = /catatan pajak|simulasi|dengan dan tanpa|masuk dalam total|(?:pembayaran|payment)\s*(?:#|nomor|no\.?|id)?\s*\d+|SCPAY-SC-\d+|SC-\d+|audit|rekap|total ppn|laporan ppn|hitung\s+(?:pajak|ppn)|(?:pajak|ppn)\s+(?:bulan\s+)?(?:ini|berjalan|lalu|sebelumnya|januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|20\d{2}[-/]?(?:0?[1-9]|1[0-2]))|transaksi personal|transaksi perorangan|44 transaksi|tampilkan.*transaksi|rincian.*transaksi|detail.*transaksi|urutkan.*transaksi|siap lapor/i.test(question) && !/pph|vendor|bizportal|coretax/i.test(question);
       const answer = localAudit || identifyAuditIntent(resolvedQuestion).reference ? await queryTax(resolvedQuestion) : await queryAiCore(resolvedQuestion);
       setMessages(v => [...v, { role: "assistant", text: answer }]);
     } catch (err) {
