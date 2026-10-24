@@ -54,6 +54,7 @@ export default function AdminTaxReport() {
   const [facilityId, setFacilityId] = useState("all");
   const [customerType, setCustomerType] = useState("all");
   const [paymentStatus, setPaymentStatus] = useState("all");
+  const [taxStatus, setTaxStatus] = useState("all");
   const [companyOnly, setCompanyOnly] = useState(false);
   const [expandedMasa, setExpandedMasa] = useState<string | null>(null);
 
@@ -69,11 +70,12 @@ export default function AdminTaxReport() {
     ...(facilityId !== "all" && { facilityId }),
     ...(customerType !== "all" && { customerType }),
     ...(paymentStatus !== "all" && { paymentStatus }),
+    ...(taxStatus !== "all" && { taxStatus }),
     ...(companyOnly && { company: "true" }),
   });
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["tax-report-v2", startDate, endDate, facilityId, customerType, paymentStatus, companyOnly],
+    queryKey: ["tax-report-v2", startDate, endDate, facilityId, customerType, paymentStatus, taxStatus, companyOnly],
     queryFn: () =>
       fetch(`${API}/admin/tax-report?${params}`, { headers: authHeaders() }).then((r) => r.json()),
     staleTime: 30000,
@@ -323,6 +325,18 @@ export default function AdminTaxReport() {
                     {PAYMENT_STATUSES.map((s) => (
                       <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Status Pajak</Label>
+                <Select value={taxStatus} onValueChange={setTaxStatus}>
+                  <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua Status Pajak</SelectItem>
+                    <SelectItem value="taxable">Terutang</SelectItem>
+                    <SelectItem value="reversed">Dibatalkan</SelectItem>
+                    <SelectItem value="reversal">Reversal</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
