@@ -169,7 +169,7 @@ router.get("/admin/tax-report", adminMiddleware, async (req, res) => {
   try {
     const {
       startDate, endDate,
-      facilityId, customerType, paymentStatus, company,
+      facilityId, customerType, paymentStatus, taxStatus, company,
       groupBy = "month",
     } = req.query;
 
@@ -238,6 +238,13 @@ router.get("/admin/tax-report", adminMiddleware, async (req, res) => {
     }
     if (paymentStatus && paymentStatus !== "all") {
       enriched = enriched.filter((t) => t.paymentStatus === paymentStatus);
+    }
+    if (taxStatus === "taxable") {
+      enriched = enriched.filter((t) => t.status !== "reversed" && t.transactionType !== "reversal");
+    } else if (taxStatus === "reversed") {
+      enriched = enriched.filter((t) => t.status === "reversed");
+    } else if (taxStatus === "reversal") {
+      enriched = enriched.filter((t) => t.transactionType === "reversal");
     }
     if (company === "true") {
       enriched = enriched.filter((t) => t.payerType === "company");
@@ -315,7 +322,7 @@ router.get("/admin/tax-report", adminMiddleware, async (req, res) => {
 // CSV export for tax report
 router.get("/admin/tax-report/export/csv", adminMiddleware, async (req, res) => {
   try {
-    const { startDate, endDate, facilityId, customerType, paymentStatus, company } = req.query;
+    const { startDate, endDate, facilityId, customerType, paymentStatus, taxStatus, company } = req.query;
 
     const [allTransactions, allBookings, facilities] = await Promise.all([
       db.select().from(taxTransactionsTable),
@@ -346,6 +353,9 @@ router.get("/admin/tax-report/export/csv", adminMiddleware, async (req, res) => 
     if (facilityId && facilityId !== "all") enriched = enriched.filter((t) => t.booking?.facilityId === Number(facilityId));
     if (customerType && customerType !== "all") enriched = enriched.filter((t) => t.booking?.customerType === customerType);
     if (paymentStatus && paymentStatus !== "all") enriched = enriched.filter((t) => t.booking?.status === paymentStatus);
+    if (taxStatus === "taxable") enriched = enriched.filter((t) => (t.status ?? "posted") !== "reversed" && (t.transactionType ?? "original") !== "reversal");
+    else if (taxStatus === "reversed") enriched = enriched.filter((t) => (t.status ?? "posted") === "reversed");
+    else if (taxStatus === "reversal") enriched = enriched.filter((t) => (t.transactionType ?? "original") === "reversal");
     if (company === "true") enriched = enriched.filter((t) => t.booking?.payerType === "company");
 
     const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -391,7 +401,7 @@ router.get("/admin/tax-report/export/csv", adminMiddleware, async (req, res) => 
 // CSV export for SPT Masa PPN
 router.get("/admin/tax-report/export/spt-masa", adminMiddleware, async (req, res) => {
   try {
-    const { startDate, endDate, facilityId, customerType, paymentStatus, company } = req.query;
+    const { startDate, endDate, facilityId, customerType, paymentStatus, taxStatus, company } = req.query;
 
     const [allTransactions, allBookings, facilities] = await Promise.all([
       db.select().from(taxTransactionsTable),
@@ -418,6 +428,7 @@ router.get("/admin/tax-report/export/spt-masa", adminMiddleware, async (req, res
     if (facilityId && facilityId !== "all") enriched = enriched.filter((t) => t.booking?.facilityId === Number(facilityId));
     if (customerType && customerType !== "all") enriched = enriched.filter((t) => t.booking?.customerType === customerType);
     if (paymentStatus && paymentStatus !== "all") enriched = enriched.filter((t) => t.booking?.status === paymentStatus);
+    if (taxStatus === "reversed" || taxStatus === "reversal") enriched = [];
     if (company === "true") enriched = enriched.filter((t) => t.booking?.payerType === "company");
 
     const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
