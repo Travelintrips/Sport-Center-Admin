@@ -17,13 +17,14 @@ function parseFilters(query: Record<string, any>) {
     facilityId,
     customerType,
     paymentStatus,
+    taxStatus,
     company,
   } = query;
-  return { startDate, endDate, facilityId, customerType, paymentStatus, companyOnly: company === "true" };
+  return { startDate, endDate, facilityId, customerType, paymentStatus, taxStatus, companyOnly: company === "true" };
 }
 
 async function fetchTaxRows(filters: ReturnType<typeof parseFilters>) {
-  const { startDate, endDate, facilityId, customerType, paymentStatus, companyOnly } = filters;
+  const { startDate, endDate, facilityId, customerType, paymentStatus, taxStatus, companyOnly } = filters;
 
   const conditions = [];
   if (startDate) conditions.push(gte(taxTransactionsTable.transactionDate, startDate as string));
@@ -66,6 +67,9 @@ async function fetchTaxRows(filters: ReturnType<typeof parseFilters>) {
     if (facilityId && r.facilityId !== Number(facilityId)) return false;
     if (customerType && r.customerType !== customerType) return false;
     if (paymentStatus && r.paymentStatus !== paymentStatus) return false;
+    if (taxStatus === "taxable" && (r.status === "reversed" || r.transactionType === "reversal")) return false;
+    if (taxStatus === "reversed" && r.status !== "reversed") return false;
+    if (taxStatus === "reversal" && r.transactionType !== "reversal") return false;
     if (companyOnly && r.payerType !== "company") return false;
     return true;
   });
