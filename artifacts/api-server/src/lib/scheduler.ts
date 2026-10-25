@@ -83,8 +83,8 @@ async function expireOverdueMemberships(): Promise<void> {
 
       const coveredPayments = payments.filter(p =>
         p.status === "confirmed" && Number(p.amount) > 0 &&
-        /^\\d{4}-\\d{2}-\\d{2}$/.test(p.periodStart) &&
-        /^\\d{4}-\\d{2}-\\d{2}$/.test(p.periodEnd) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(p.periodStart) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(p.periodEnd) &&
         p.periodStart <= todayWIB && p.periodEnd >= todayWIB);
       if (coveredPayments.length) {
         // Never shorten membership endDate when reactivating a paid renewal.
