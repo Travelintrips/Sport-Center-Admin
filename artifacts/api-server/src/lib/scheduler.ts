@@ -32,7 +32,7 @@ function getTodayWIB(): string {
 async function expireOverdueMemberships(): Promise<void> {
   try {
     const todayWIB = getTodayWIB();
-    // Roll out only after canonical membership/booking payments have been reconciled.
+    // Selective reconciliation: never change members with ambiguous renewal evidence.
     if (process.env.GYM_MEMBERSHIP_AUTO_SUSPEND_ENABLED !== "true") {
       return;
     }
@@ -57,8 +57,7 @@ async function expireOverdueMemberships(): Promise<void> {
       }).from(membershipPaymentsTable)
         .where(eq(membershipPaymentsTable.membershipId, member.id));
 
-      // All financial booking paths must be reconciled before automatic changes.
-      // Legacy records without canonical payments are held for review.
+      // Reconcile renewal bookings per member, not by global payment completeness.
       const financialBookings = await db.select({
         id: bookingsTable.id,
         membershipPaymentId: bookingsTable.membershipPaymentId,
@@ -72,7 +71,12 @@ async function expireOverdueMemberships(): Promise<void> {
         !b.membershipPaymentId || !canonicalIds.has(b.membershipPaymentId));
       const hasPendingReview = payments.some(p => p.status === "waiting_confirmation") ||
         financialBookings.some(b => b.status === "waiting_confirmation");
-      if (!payments.length || hasUnlinkedFinancialBooking || hasPendingReview) {
+      // A booking marked confirmed but missing a confirmed canonical payment
+      // is inconsistent and must be investigated before any state change.
+      const hasInconsistentConfirmedBooking = financialBookings.some(b =>
+        b.status === "confirmed" && !payments.some(p =>
+          p.id === b.membershipPaymentId && p.status === "confirmed"));
+      if (hasUnlinkedFinancialBooking || hasPendingReview || hasInconsistentConfirmedBooking) {
         heldForReview++;
         continue;
       }
@@ -104,6 +108,19 @@ async function expireOverdueMemberships(): Promise<void> {
         ? Date.parse(member.endDate + "T00:00:00Z") : NaN;
       const parsedToday = Date.parse(todayWIB + "T00:00:00Z");
       if (!Number.isFinite(parsedEnd) || parsedToday <= parsedEnd + 7 * 86400000) continue;
+      // Legacy memberships without a canonical renewal record and without
+      // any renewal booking are candidates, not proof of non-payment. Keep
+      // these in review until an authoritative payment-source audit exists.
+      if (!payments.length && !financialBookings.length) {
+        heldForReview++;
+        continue;
+      }
+      // A pending renewal must not trigger suspension even after grace ends.
+      if (payments.some(p => p.status === "pending_payment") ||
+          financialBookings.some(b => b.status === "pending_payment")) {
+        heldForReview++;
+        continue;
+      }
       // If any financial booking has a confirmed status inconsistent with the
       // canonical payment, stop and require review instead of suspending.
       if (financialBookings.some(b => b.status === "confirmed" &&
