@@ -1028,11 +1028,6 @@ export default function AdminCustomers() {
             <Plus size={16} /> Buat Akun Customer
           </Button>
         )}
-        {tab === "company" && (
-          <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
-            <Plus size={16} /> Tambah Perusahaan
-          </Button>
-        )}
       </div>
 
       <Dialog open={showPersonalCreateForm} onOpenChange={setShowPersonalCreateForm}>
