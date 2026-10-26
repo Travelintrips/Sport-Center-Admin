@@ -563,6 +563,39 @@ export default function AdminSettings() {
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
   const [qrisDeleting, setQrisDeleting] = useState(false);
+  const [aiAssistantWidgetEnabled, setAiAssistantWidgetEnabled] = useState(true);
+
+  const aiAssistantWidgetMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const token = getToken();
+      const response = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/settings/ai-assistant-widget`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ enabled }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error ?? "Gagal mengubah status Widget AI Asisten");
+      return body;
+    },
+    onSuccess: async (data) => {
+      const enabled = data?.aiAssistantWidgetEnabled !== false;
+      setAiAssistantWidgetEnabled(enabled);
+      await queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+      await queryClient.invalidateQueries({ queryKey: ["admin-portal-settings"] });
+      toast({
+        title: enabled ? "Widget AI Asisten diaktifkan" : "Widget AI Asisten dinonaktifkan",
+        description: enabled
+          ? "Tombol AI Asisten akan tampil di seluruh portal admin."
+          : "Tombol AI Asisten disembunyikan dari seluruh portal admin.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Gagal mengubah Widget AI Asisten", description: error.message, variant: "destructive" });
+    },
+  });
 
   useEffect(() => {
     if (settings) {
@@ -590,6 +623,7 @@ export default function AdminSettings() {
       });
       setPaymentDomain((settings as any).paymentDomain ?? "");
       setQrisPreview((settings as any).qrisImageUrl ?? null);
+      setAiAssistantWidgetEnabled((settings as any).aiAssistantWidgetEnabled !== false);
     }
   }, [settings]);
 
@@ -774,6 +808,42 @@ export default function AdminSettings() {
           </Button>
         </div>
       </form>
+
+      <Card id="ai-assistant-widget">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-bold flex items-center gap-2">
+            <MessageCircle size={18} className="text-orange-500" />
+            Widget AI Asisten
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Atur apakah tombol AI Asisten mengambang ditampilkan di portal admin Sport Center.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-semibold">Tampilkan Widget AI Asisten</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Jika nonaktif, widget disembunyikan untuk seluruh pengguna admin. Data dan riwayat sesi tidak dihapus.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge className={aiAssistantWidgetEnabled ? "bg-green-100 text-green-700 border-green-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
+                {aiAssistantWidgetEnabled ? "Aktif" : "Nonaktif"}
+              </Badge>
+              <Switch
+                checked={aiAssistantWidgetEnabled}
+                disabled={aiAssistantWidgetMutation.isPending}
+                onCheckedChange={(enabled) => {
+                  setAiAssistantWidgetEnabled(enabled);
+                  aiAssistantWidgetMutation.mutate(enabled);
+                }}
+                aria-label="Aktifkan atau nonaktifkan Widget AI Asisten"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <ApDiscountCard />
 
