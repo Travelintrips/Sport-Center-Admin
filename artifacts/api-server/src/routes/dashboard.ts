@@ -121,25 +121,37 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
 
     // Keep non-revenue member usage out of every CSV export.
     bookings = bookings.filter((b) => Number(b.totalPrice) > 0);
-    const dateWib = (d: Date | string | null | undefined) =>
-      d ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(d)) : "";
+    const dateWib = (d: Date | string | null | undefined) => {
+      if (!d) return "";
+      const date = new Date(d);
+      if (Number.isNaN(date.getTime())) return "";
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+      }).formatToParts(date);
+      const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+      return `${part("year")}-${part("month")}-${part("day")}`;
+    };
     const invoiceIds = new Set(bookings.map((b) => b.companyInvoiceId).filter((id): id is number => id != null));
     const [payments, invoices] = paymentBasis
       ? await Promise.all([db.select().from(paymentsTable), db.select().from(companyInvoicesTable)])
       : [[], []];
     const invoiceById = new Map(invoices.filter((i) => invoiceIds.has(i.id)).map((i) => [i.id, i]));
     const paymentDateByBooking = new Map<number, string>();
+    const bookingGroupById = new Map(bookings.filter((b) => !!b.groupRef).map((b) => [b.id, b.groupRef!]));
+    const paymentDateByGroup = new Map<string, string>();
     for (const p of payments) {
       if (p.status !== "confirmed") continue;
       const day = dateWib(p.paidAt ?? p.confirmedAt);
       if (day && day > (paymentDateByBooking.get(p.bookingId) ?? "")) paymentDateByBooking.set(p.bookingId, day);
+      const groupRef = bookingGroupById.get(p.bookingId);
+      if (groupRef && day && day > (paymentDateByGroup.get(groupRef) ?? "")) paymentDateByGroup.set(groupRef, day);
     }
     const paymentDate = (b: typeof bookings[number]) => {
       if (b.payerType === "company") {
         const invoice = b.companyInvoiceId ? invoiceById.get(b.companyInvoiceId) : undefined;
         return invoice?.status === "paid" ? dateWib(invoice.paidAt ?? b.paidAt) : "";
       }
-      return dateWib(b.paidAt) || paymentDateByBooking.get(b.id) || "";
+      return (b.groupRef ? paymentDateByGroup.get(b.groupRef) : undefined) || dateWib(b.paidAt) || paymentDateByBooking.get(b.id) || "";
     };
     if (paymentBasis) {
       bookings = bookings.filter((b) => {
@@ -151,7 +163,7 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
       if (endDate) bookings = bookings.filter((b) => b.bookingDate <= String(endDate));
     }
 
-    const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At\n";
+    const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At,Payment Date\n";
     const rows = bookings.map((b) => {
       const fac = facilities.find((f) => f.id === b.facilityId);
       return [
