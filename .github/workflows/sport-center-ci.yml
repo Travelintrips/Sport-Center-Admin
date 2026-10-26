@@ -168,6 +168,9 @@ jobs:
       - name: Test (isolated CI suite; no live database writes)
         run: pnpm --filter @workspace/api-server run test:ci
 
+      - name: Booking CSV regression contracts (no production access)
+        run: node --test scripts/booking-csv-regression.test.mjs
+
       - name: X904 DEV E2E (synthetic fixtures, cleanup mandatory)
         env:
           NODE_ENV: development
