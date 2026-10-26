@@ -76,7 +76,9 @@ async function expireOverdueMemberships(): Promise<void> {
       const hasInconsistentConfirmedBooking = financialBookings.some(b =>
         b.status === "confirmed" && !payments.some(p =>
           p.id === b.membershipPaymentId && p.status === "confirmed"));
-      if (hasUnlinkedFinancialBooking || hasPendingReview || hasInconsistentConfirmedBooking) {
+      // Unlinked or inconsistent financial records require manual review.
+      // A separate pending renewal must not block an already-confirmed paid period.
+      if (hasUnlinkedFinancialBooking || hasInconsistentConfirmedBooking) {
         heldForReview++;
         continue;
       }
@@ -98,6 +100,13 @@ async function expireOverdueMemberships(): Promise<void> {
             .returning({ id: gymMembershipsTable.id });
           if (member.status === "expired") reactivated += updated.length;
         }
+        continue;
+      }
+
+      // Pending verification blocks suspension, but not reactivation from an
+      // independently confirmed payment covering the current date.
+      if (hasPendingReview) {
+        heldForReview++;
         continue;
       }
 
