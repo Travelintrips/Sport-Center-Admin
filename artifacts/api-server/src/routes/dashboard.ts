@@ -119,6 +119,8 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
 
     if (startDate) bookings = bookings.filter((b) => b.bookingDate >= (startDate as string));
     if (endDate) bookings = bookings.filter((b) => b.bookingDate <= (endDate as string));
+    // Exclude zero-value membership usage from CSV exports; retain database records.
+    bookings = bookings.filter((b) => Number(b.totalPrice) > 0);
 
     const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At\n";
     const rows = bookings.map((b) => {
