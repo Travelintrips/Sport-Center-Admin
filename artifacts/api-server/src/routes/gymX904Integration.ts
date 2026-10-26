@@ -212,6 +212,19 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
     return res.status(400).json({error:"INVALID_USER_COMMAND"});
   }
   try {
+    // A cancelled historical command must not block a new request. Reuse only
+    // an active command for the same physical PIN and UID.
+    if (commandType==="DELETE_USER") {
+      const active=await db.execute(sql`SELECT command_id,state
+        FROM sport_center.x904_user_commands
+        WHERE device_serial=${expectedSerial} AND command_type='DELETE_USER'
+          AND user_pin=${userPin} AND payload->>'expectedUid'=${String(expectedUid)}
+          AND state IN ('queued','claimed')
+        ORDER BY created_at ASC LIMIT 1`);
+      if (active.rows.length) return res.status(202).json({
+        command_id:active.rows[0].command_id,state:active.rows[0].state,reused:true
+      });
+    }
     const r=await db.execute(sql`INSERT INTO sport_center.x904_user_commands
       (device_serial, command_type, user_pin, payload, requested_by, idempotency_key)
       VALUES (${expectedSerial}, ${commandType}, ${userPin}, ${JSON.stringify({name:commandType==='DELETE_USER'?null:name.trim(),expectedUid:requiresExisting?expectedUid:null,expectedName:requiresExisting?expectedName:null})}::jsonb,
