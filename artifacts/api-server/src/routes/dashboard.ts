@@ -129,17 +129,21 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
       : [[], []];
     const invoiceById = new Map(invoices.filter((i) => invoiceIds.has(i.id)).map((i) => [i.id, i]));
     const paymentDateByBooking = new Map<number, string>();
+    const bookingGroupById = new Map(bookings.filter((b) => !!b.groupRef).map((b) => [b.id, b.groupRef!]));
+    const paymentDateByGroup = new Map<string, string>();
     for (const p of payments) {
       if (p.status !== "confirmed") continue;
       const day = dateWib(p.paidAt ?? p.confirmedAt);
       if (day && day > (paymentDateByBooking.get(p.bookingId) ?? "")) paymentDateByBooking.set(p.bookingId, day);
+      const groupRef = bookingGroupById.get(p.bookingId);
+      if (groupRef && day && day > (paymentDateByGroup.get(groupRef) ?? "")) paymentDateByGroup.set(groupRef, day);
     }
     const paymentDate = (b: typeof bookings[number]) => {
       if (b.payerType === "company") {
         const invoice = b.companyInvoiceId ? invoiceById.get(b.companyInvoiceId) : undefined;
         return invoice?.status === "paid" ? dateWib(invoice.paidAt ?? b.paidAt) : "";
       }
-      return dateWib(b.paidAt) || paymentDateByBooking.get(b.id) || "";
+      return dateWib(b.paidAt) || paymentDateByBooking.get(b.id) || (b.groupRef ? paymentDateByGroup.get(b.groupRef) : undefined) || "";
     };
     if (paymentBasis) {
       bookings = bookings.filter((b) => {
