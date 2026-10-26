@@ -996,9 +996,13 @@ router.post("/memberships/:id/renew", async (req, res) => {
       newStartDate = todayStr;
     }
 
-    const endD = new Date(newStartDate);
-    endD.setMonth(endD.getMonth() + months);
-    const newEndDate = endD.toISOString().split("T")[0]!;
+    const startD = new Date(`${newStartDate}T00:00:00Z`);
+    const targetMonthIndex = startD.getUTCMonth() + months;
+    const targetYear = startD.getUTCFullYear() + Math.floor(targetMonthIndex / 12);
+    const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+    const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    const targetDay = Math.min(startD.getUTCDate(), lastDayOfTargetMonth);
+    const newEndDate = new Date(Date.UTC(targetYear, targetMonth, targetDay)).toISOString().split("T")[0]!;
     const totalPrice = String(months * 300000);
 
     const [updated] = await db
