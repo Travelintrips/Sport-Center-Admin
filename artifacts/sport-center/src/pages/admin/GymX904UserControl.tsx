@@ -67,7 +67,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const validName=/^[A-Za-z0-9 ._-]{2,24}$/.test(name.trim());
   const permitted=action!=="DELETE_USER"&&capabilities.operations.includes(action)&&validPin&&confirmPin===pin&&!protectedUser&&
     (isExisting ? !!chosen&&Number.isInteger(chosen.device_uid)&&
-      (action==="DELETE_USER"||validName) : !chosen&&validName);
+      validName : !chosen&&validName);
   const eligibleUsers=users.filter(u=>u.device_role===0 && /^[0-9]{1,8}$/.test(u.user_pin) && Number.isInteger(u.device_uid));
   const filteredUsers=eligibleUsers.filter(u=>(u.user_pin+" "+u.display_name).toLowerCase().includes(bulkSearch.trim().toLowerCase()));
   const selectedUsers=bulkPins.map(p=>eligibleUsers.find(u=>u.user_pin===p)).filter((u):u is DeviceUser=>!!u);
@@ -105,18 +105,17 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   async function submit(){
     if(busy||bulkRunning||!permitted)return;
     const subject=isExisting?chosen:undefined;
-    if(action==="DELETE_USER"&&!window.confirm(`Hapus PIN ${pin} (${subject?.display_name}) dari X904? Riwayat absensi tetap ada.`))return;
     setBusy(true);setMessage("");
     try{
       const body={
         commandType:action,userPin:pin,expectedSerial:SERIAL,confirmPin,
         idempotencyKey:crypto.randomUUID().replace(/-/g,""),
-        ...(action==="DELETE_USER"?{}:{name:name.trim()}),
+        name:name.trim(),
         ...(isExisting?{expectedUid:subject!.device_uid,expectedName:subject!.display_name}:{})
       };
       const result=await request("/admin/gym-x904/user-command",{method:"POST",body:JSON.stringify(body)});
       setCommandId(result.command_id);
-      setMessage(result.reused?"Perintah penghapusan yang sama sedang diproses.":"Perintah diterima antrean. Menunggu konfirmasi dari X904.");
+      setMessage("Perintah diterima antrean. Menunggu konfirmasi dari X904.");
     }catch(e){setMessage(e instanceof Error?e.message:"Perintah gagal");}
     finally{setBusy(false);}
   }
@@ -152,7 +151,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     {protectedUser&&<p role="alert" className="text-sm text-destructive">Akun dengan hak administrator perangkat dilindungi dari perubahan otomatis.</p>}
     {action==="CREATE_USER"&&!!chosen&&<p role="alert" className="text-sm text-destructive">PIN sudah terdaftar pada perangkat.</p>}
     <button type="button" disabled={!permitted||busy||bulkRunning} onClick={()=>void submit()}
-      className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${permitted&&!busy&&!bulkRunning&&action==="DELETE_USER"?"bg-blue-600 text-white border-blue-600 hover:bg-blue-700":"bg-gray-100 text-gray-500 border-gray-200"} disabled:opacity-50`}>
+      className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${permitted&&!busy&&!bulkRunning?"bg-blue-600 text-white border-blue-600 hover:bg-blue-700":"bg-gray-100 text-gray-500 border-gray-200"} disabled:opacity-50`}>
       {busy?"Mengirim...":action==="CREATE_USER"?"Tambah pengguna":action==="UPDATE_USER"?"Simpan perubahan":"Hapus pengguna"}
     </button>
 
