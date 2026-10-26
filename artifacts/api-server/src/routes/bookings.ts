@@ -1105,7 +1105,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       }
 
       const requestedPageSize = Number(pageSize ?? 25);
-      const safePageSize = [10, 25, 50].includes(requestedPageSize)
+      const safePageSize = [10, 25, 50, 100, 200, 300].includes(requestedPageSize)
         ? requestedPageSize
         : 25;
       const totalRows = representatives.length;
