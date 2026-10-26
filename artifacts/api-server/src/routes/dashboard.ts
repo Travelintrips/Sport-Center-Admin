@@ -152,17 +152,15 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
       const groupRef = bookingGroupById.get(p.bookingId);
       if (groupRef) rememberGroupDate(groupRef, day);
     }
-    // Some grouped bookings store the confirmed timestamp only on their representative row.
-    for (const b of bookings) {
-      if (b.groupRef && ["confirmed", "completed"].includes(b.status)) rememberGroupDate(b.groupRef, dateWib(b.paidAt));
-    }
+    // A confirmed booking status is not proof of payment. Only confirmed
+    // payment records can establish a personal/group payment export date.
     const paymentDate = (b: typeof bookings[number]) => {
       if (b.payerType === "company") {
         const invoiceId = b.companyInvoiceId ?? invoiceIdByBooking.get(b.id);
         const invoice = invoiceId ? invoiceById.get(invoiceId) : undefined;
         return invoice?.status === "paid" ? dateWib(invoice.paidAt) : "";
       }
-      return (b.groupRef ? paymentDateByGroup.get(b.groupRef) : undefined) || dateWib(b.paidAt) || paymentDateByBooking.get(b.id) || "";
+      return (b.groupRef ? paymentDateByGroup.get(b.groupRef) : undefined) || paymentDateByBooking.get(b.id) || "";
     };
     if (paymentBasis) {
       bookings = bookings.filter((b) => {
