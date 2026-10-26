@@ -127,7 +127,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       <label className="text-sm">Operasi
         <select value={action} onChange={e=>{setAction(e.target.value as Action);setPin("");setConfirmPin("");setName("");setCommandId(null);}}
           className="mt-1 block w-full rounded-md border bg-background p-2">
-          {capabilities.operations.includes("CREATE_USER")&&<option value="CREATE_USER">Tambah</option>}{capabilities.operations.includes("UPDATE_USER")&&<option value="UPDATE_USER">Ubah nama</option>}
+          {capabilities.operations.includes("CREATE_USER")&&<option value="CREATE_USER">Tambah</option>}{capabilities.operations.includes("UPDATE_USER")&&<option value="UPDATE_USER">Ubah nama</option>}<option value="DELETE_USER" disabled hidden>Gunakan hapus beberapa pengguna</option>
         </select>
       </label>
       {isExisting?<label className="text-sm">Pengguna mesin
