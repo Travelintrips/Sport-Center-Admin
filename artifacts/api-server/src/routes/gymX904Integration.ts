@@ -305,7 +305,13 @@ router.post("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
   if(!row?.batch_id||Number(row.command_count)!==targets.length)
     return res.status(409).json({error:"TARGET_CHANGED_OR_PENDING_COMMAND"});
   return res.status(202).json({batchId:row.batch_id,state:"queued",count:targets.length});
- }catch{return res.status(409).json({error:"BATCH_NOT_ACCEPTED_OR_DUPLICATE"});}
+ }catch(error){
+  // A database failure is not the same as an idempotency conflict. Preserve
+  // the DB diagnostic server-side without exposing SQL, names or PINs to clients.
+  const code=typeof (error as {code?:unknown})?.code==="string" ? (error as {code:string}).code : "UNKNOWN";
+  console.error("[X904_BATCH_DELETE_INSERT_FAILED]", {dbCode:code});
+  return res.status(503).json({error:"BATCH_QUEUE_UNAVAILABLE"});
+ }
 });
 
 router.get("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
