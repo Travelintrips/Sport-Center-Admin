@@ -20,7 +20,7 @@ async function request(path:string,options?:RequestInit){
 }
 export default function GymX904UserControl({users,initialSelection}:{users:DeviceUser[];initialSelection?:{user:DeviceUser;action:"UPDATE_USER"|"DELETE_USER"}}){
   const queryClient=useQueryClient();
-  const [action,setAction]=useState<Action>(initialSelection?.action ?? "UPDATE_USER");
+  const [action,setAction]=useState<Action>("UPDATE_USER");
   const [pin,setPin]=useState(initialSelection?.user.user_pin ?? "");
   const [name,setName]=useState(initialSelection?.user.display_name ?? "");
   const [confirmPin,setConfirmPin]=useState("");
@@ -53,20 +53,21 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     refetchInterval:(q)=>["completed","failed","cancelled"].includes(q.state.data?.command.state ?? "")?false:4000,
     retry:false
   });
-  useEffect(()=>{ if(receipt?.command.state==="completed") { setMessage("Pengguna berhasil dihapus dari mesin X904."); void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]}); } },[receipt?.command.state,queryClient]);
+  useEffect(()=>{ if(receipt?.command.state==="completed") { setMessage("Perubahan pengguna berhasil dikonfirmasi oleh mesin X904."); void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]}); } },[receipt?.command.state,queryClient]);
   if(!capabilities?.allowed)return null;
   if(!capabilities.enabled)return <section className="rounded-xl border bg-card p-5 space-y-2">
     <h3 className="font-semibold">Pengelolaan pengguna X904</h3>
     <p className="text-sm text-muted-foreground">Kontrol tulis perangkat belum diaktifkan. Daftar pengguna tetap dapat dibaca tanpa perubahan.</p>
   </section>;
   const chosen=users.find(u=>u.user_pin===pin);
+  // Individual deletion is intentionally unavailable in the UI. Use the durable batch flow, even for one user.
   const isExisting=action!=="CREATE_USER";
   const protectedUser=isExisting&&chosen?.device_role!==0;
   const validPin=/^[0-9]{1,8}$/.test(pin);
   const validName=/^[A-Za-z0-9 ._-]{2,24}$/.test(name.trim());
-  const permitted=capabilities.operations.includes(action)&&validPin&&confirmPin===pin&&!protectedUser&&
+  const permitted=action!=="DELETE_USER"&&capabilities.operations.includes(action)&&validPin&&confirmPin===pin&&!protectedUser&&
     (isExisting ? !!chosen&&Number.isInteger(chosen.device_uid)&&
-      (action==="DELETE_USER"||validName) : !chosen&&validName);
+      validName : !chosen&&validName);
   const eligibleUsers=users.filter(u=>u.device_role===0 && /^[0-9]{1,8}$/.test(u.user_pin) && Number.isInteger(u.device_uid));
   const filteredUsers=eligibleUsers.filter(u=>(u.user_pin+" "+u.display_name).toLowerCase().includes(bulkSearch.trim().toLowerCase()));
   const selectedUsers=bulkPins.map(p=>eligibleUsers.find(u=>u.user_pin===p)).filter((u):u is DeviceUser=>!!u);
@@ -104,18 +105,17 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   async function submit(){
     if(busy||bulkRunning||!permitted)return;
     const subject=isExisting?chosen:undefined;
-    if(action==="DELETE_USER"&&!window.confirm(`Hapus PIN ${pin} (${subject?.display_name}) dari X904? Riwayat absensi tetap ada.`))return;
     setBusy(true);setMessage("");
     try{
       const body={
         commandType:action,userPin:pin,expectedSerial:SERIAL,confirmPin,
         idempotencyKey:crypto.randomUUID().replace(/-/g,""),
-        ...(action==="DELETE_USER"?{}:{name:name.trim()}),
+        name:name.trim(),
         ...(isExisting?{expectedUid:subject!.device_uid,expectedName:subject!.display_name}:{})
       };
       const result=await request("/admin/gym-x904/user-command",{method:"POST",body:JSON.stringify(body)});
       setCommandId(result.command_id);
-      setMessage(result.reused?"Perintah penghapusan yang sama sedang diproses.":"Perintah diterima antrean. Menunggu konfirmasi dari X904.");
+      setMessage("Perintah diterima antrean. Menunggu konfirmasi dari X904.");
     }catch(e){setMessage(e instanceof Error?e.message:"Perintah gagal");}
     finally{setBusy(false);}
   }
@@ -126,7 +126,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       <label className="text-sm">Operasi
         <select value={action} onChange={e=>{setAction(e.target.value as Action);setPin("");setConfirmPin("");setName("");setCommandId(null);}}
           className="mt-1 block w-full rounded-md border bg-background p-2">
-          {capabilities.operations.includes("CREATE_USER")&&<option value="CREATE_USER">Tambah</option>}{capabilities.operations.includes("UPDATE_USER")&&<option value="UPDATE_USER">Ubah nama</option>}{capabilities.operations.includes("DELETE_USER")&&<option value="DELETE_USER">Hapus</option>}
+          {capabilities.operations.includes("CREATE_USER")&&<option value="CREATE_USER">Tambah</option>}{capabilities.operations.includes("UPDATE_USER")&&<option value="UPDATE_USER">Ubah nama</option>}<option value="DELETE_USER" disabled hidden>Gunakan hapus beberapa pengguna</option>
         </select>
       </label>
       {isExisting?<label className="text-sm">Pengguna mesin
@@ -151,14 +151,14 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     {protectedUser&&<p role="alert" className="text-sm text-destructive">Akun dengan hak administrator perangkat dilindungi dari perubahan otomatis.</p>}
     {action==="CREATE_USER"&&!!chosen&&<p role="alert" className="text-sm text-destructive">PIN sudah terdaftar pada perangkat.</p>}
     <button type="button" disabled={!permitted||busy||bulkRunning} onClick={()=>void submit()}
-      className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${permitted&&!busy&&!bulkRunning&&action==="DELETE_USER"?"bg-blue-600 text-white border-blue-600 hover:bg-blue-700":"bg-gray-100 text-gray-500 border-gray-200"} disabled:opacity-50`}>
+      className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${permitted&&!busy&&!bulkRunning?"bg-blue-600 text-white border-blue-600 hover:bg-blue-700":"bg-gray-100 text-gray-500 border-gray-200"} disabled:opacity-50`}>
       {busy?"Mengirim...":action==="CREATE_USER"?"Tambah pengguna":action==="UPDATE_USER"?"Simpan perubahan":"Hapus pengguna"}
     </button>
 
     {capabilities.operations.includes("DELETE_USER")&&<div className="rounded-xl border p-4 space-y-4">
       <div>
-        <h4 className="text-sm font-semibold">Hapus beberapa pengguna biasa</h4>
-        <p className="text-xs text-muted-foreground">Cari nama atau PIN, periksa pilihan, lalu konfirmasi. Perintah dikirim berurutan dan berhenti jika ACK gagal atau belum diterima.</p>
+        <h4 className="text-sm font-semibold">Hapus pengguna (satu atau beberapa)</h4>
+        <p className="text-xs text-muted-foreground">Pilih satu atau beberapa pengguna, lalu konfirmasi. Semua penghapusan menggunakan antrean massal terverifikasi dan berhenti jika ACK gagal atau belum diterima.</p>
       </div>
       <label className="block text-sm font-medium">Cari nama atau PIN
         <input type="search" value={bulkSearch} disabled={busy||bulkRunning} onChange={e=>setBulkSearch(e.target.value)}
