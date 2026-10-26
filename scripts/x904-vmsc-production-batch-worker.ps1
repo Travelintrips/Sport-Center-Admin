@@ -59,7 +59,7 @@ try {
   $job = $claimText | ConvertFrom-Json -ErrorAction Stop
   if ([string]$job.commandType -ne 'DELETE_USER' -or
       [string]$job.userPin -notmatch '^[0-9]{1,8}$' -or
-      [string]$job.payload.expectedName -notmatch '^[A-Za-z0-9 ._-]{1,24}
+      [string]$job.payload.expectedName -notmatch '^[A-Za-z0-9 ._-]{1,24}$' -or
       [int]$job.payload.expectedUid -lt 1 -or [int]$job.payload.expectedUid -gt 65534) {
     throw 'BATCH_TARGET_NOT_ALLOWED'
   }
