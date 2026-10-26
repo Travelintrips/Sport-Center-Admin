@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ShoppingCart, CheckCircle2 } from "lucide-react";
+import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 export default function AdminCheckoutForm() {
@@ -357,11 +357,26 @@ export default function AdminCheckoutForm() {
   return (
     <div className="max-w-2xl mx-auto py-8 px-4">
       <div className="mb-8">
-        <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
-          <ShoppingCart className="text-primary w-8 h-8" />
-          Buat Booking (Admin)
-        </h1>
-        <p className="text-muted-foreground mt-1">Booking melalui validasi jadwal, harga, pajak dan status pembayaran pada layanan utama.</p>
+        <div className="flex items-start gap-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="mt-0.5 shrink-0"
+            onClick={() => setLocation("/admin/bookings")}
+            aria-label="Kembali ke halaman Pemesanan"
+            title="Kembali ke Pemesanan"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
+              <ShoppingCart className="text-primary w-8 h-8" />
+              Buat Booking (Admin)
+            </h1>
+            <p className="text-muted-foreground mt-1">Booking melalui validasi jadwal, harga, pajak dan status pembayaran pada layanan utama.</p>
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit}>
