@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download, Pencil, Save, X, ReceiptText } from "lucide-react";
 import { Label } from "@/components/ui/label";
-import { getToken } from "@/lib/auth";
+import { getToken, getCurrentRole } from "@/lib/auth";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
@@ -87,17 +87,36 @@ export default function AdminMemberships() {
       const form = new FormData();
       form.append("proof",paymentFile);
       form.append("paymentMethod",paymentMethodDraft);
+      const token = getToken();
       const response = await fetch(`${API}/memberships/${viewMember.id}/admin-payment-proof-upload`,{
-        method:"POST",headers:{Authorization:`Bearer ${getToken()}`},body:form,
+        method:"POST",headers:{Authorization:`Bearer ${token}`},body:form,
       });
       const data = await response.json();
       if(!response.ok) throw Error(data.error || "Upload gagal");
-      setViewMember(data);
+
+      const role = getCurrentRole();
+      if (role && role !== "staff") {
+        const confirmResponse = await fetch(`${API}/memberships/${viewMember.id}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "active" }),
+        });
+        const confirmed = await confirmResponse.json();
+        if (!confirmResponse.ok) {
+          throw Error(confirmed.error || "Bukti tersimpan, tetapi konfirmasi membership gagal");
+        }
+        setViewMember(confirmed);
+        setPaymentDecision("unpaid");
+        toast({title:"Pembayaran dikonfirmasi",description:"Bukti tersimpan dan perpanjangan membership selesai."});
+      } else {
+        setViewMember(data);
+        setPaymentDecision("unpaid");
+        toast({title:"Bukti pembayaran dikirim",description:"Menunggu verifikasi oleh admin/finance."});
+      }
+
       setPaymentFile(null);
-      setPaymentDecision("unpaid");
       queryClient.invalidateQueries({queryKey:getListMembershipsQueryKey()});
       queryClient.invalidateQueries({queryKey:["membership-payments",data.id]});
-      toast({title:"Bukti pembayaran dikirim",description:"Menunggu verifikasi, belum otomatis aktif."});
     }catch(err){setPaymentError(err instanceof Error?err.message:"Upload gagal");}
     finally{setPaymentUploading(false);}
   }
@@ -222,6 +241,9 @@ export default function AdminMemberships() {
     if (!member) return;
     setViewMember(member);
     setEditingDates(false);
+    if (new URLSearchParams(window.location.search).get("payment") === "paid") {
+      setPaymentDecision("paid");
+    }
     window.history.replaceState(window.history.state, "", window.location.pathname);
   }, [memberships, isLoading]);
 
@@ -904,9 +926,9 @@ export default function AdminMemberships() {
                       </Select>
                       <Label htmlFor="member-proof">Bukti pembayaran (gambar, maks. 10 MB)</Label>
                       <Input id="member-proof" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={e=>setPaymentFile(e.target.files?.[0]??null)}/>
-                      <p className="text-xs text-muted-foreground">Bukti akan masuk antrean verifikasi; tidak langsung mengaktifkan membership.</p>
+                      <p className="text-xs text-muted-foreground">{getCurrentRole()==="staff" ? "Bukti akan dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan perpanjangan langsung dikonfirmasi setelah validasi berhasil."}</p>
                       {paymentError && <p className="text-sm text-destructive">{paymentError}</p>}
-                      <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading} onClick={submitAdminMembershipProof}>{paymentUploading?"Mengirim bukti...":"Kirim untuk Verifikasi"}</Button>
+                      <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading} onClick={submitAdminMembershipProof}>{paymentUploading?"Memproses...":(getCurrentRole()==="staff"?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}</Button>
                     </div>
                   )}
                 </div>

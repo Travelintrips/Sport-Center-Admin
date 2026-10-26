@@ -70,6 +70,7 @@ export default function AdminCheckoutForm() {
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = bookingDay;
   const isMembership = bookingKind === "membership";
+  const hideRegularBookingFields = isMembership && memberAction !== "new";
   const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
   const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
   const estimatedEventDiscount = bookingKind === "event" ? Math.round(estimatedBase * 0.214) : 0;
@@ -137,7 +138,7 @@ export default function AdminCheckoutForm() {
       const data = await response.json();
       if(!response.ok) throw Error(data.error || "Proses membership gagal");
       if (memberAction !== "checkin" && Number.isInteger(Number(data.id)) && Number(data.id) > 0) {
-        setLocation("/admin/memberships?memberId=" + encodeURIComponent(String(data.id)));
+        setLocation("/admin/memberships?memberId=" + encodeURIComponent(String(data.id)) + (memberAction === "renew" ? "&payment=paid" : ""));
         return;
       }
       setMembershipResult(memberAction === "checkin" ? "Kunjungan berhasil dicatat tanpa tagihan baru."
@@ -386,6 +387,7 @@ export default function AdminCheckoutForm() {
           </CardHeader>
           <CardContent className="space-y-5">
 
+            {!hideRegularBookingFields && <>
             {/* Customer */}
             <div className="space-y-2">
               <Label htmlFor="customer">Nama Pemesan <span className="text-destructive">*</span></Label>
@@ -463,6 +465,7 @@ export default function AdminCheckoutForm() {
               Gym reguler menggunakan tarif per kunjungan, tanpa durasi atau pilihan slot jam.
               Member Gym menggunakan alur Membership terpisah agar kunjungan tidak ditagih ulang.
             </p>}
+            </>}
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
               <Select value={bookingKind} onValueChange={setBookingKind}>
@@ -486,7 +489,7 @@ export default function AdminCheckoutForm() {
               {isMembership && <p className="text-xs text-amber-700">Pilih member aktif dan catat kunjungan melalui modul Membership. Kunjungan member tidak dikenakan tagihan Rp30.000.</p>}
             </div>
 
-            {!isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
+            {!isMembership && !isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Pilih Jam Mulai</Label>
                 <span className="text-xs text-muted-foreground">Durasi {duration} jam</span>

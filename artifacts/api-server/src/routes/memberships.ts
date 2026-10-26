@@ -1172,8 +1172,8 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
 
     if (status === "active" && existing.status !== "active") {
       const role = String((req as any).user?.role ?? "");
-      if (!["owner", "admin", "super_admin", "finance"].includes(role)) {
-        res.status(403).json({error:"Hanya penanggung jawab keuangan yang dapat mengonfirmasi aktivasi membership"});
+      if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
+        res.status(403).json({error:"Staff hanya dapat mengirim bukti untuk verifikasi; konfirmasi membership memerlukan role non-staff yang berwenang."});
         return;
       }
       const [pending] = await db.select().from(membershipPaymentsTable)
