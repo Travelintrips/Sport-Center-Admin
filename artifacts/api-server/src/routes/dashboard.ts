@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, companyInvoicesTable, gymMembershipsTable, expensesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, companyInvoicesTable, companyInvoiceItemsTable, gymMembershipsTable, expensesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
@@ -132,6 +132,9 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
       return `${part("year")}-${part("month")}-${part("day")}`;
     };
     const invoiceIds = new Set(bookings.map((b) => b.companyInvoiceId).filter((id): id is number => id != null));
+    const invoiceItems = paymentBasis ? await db.select().from(companyInvoiceItemsTable) : [];
+    const invoiceIdByBooking = new Map(invoiceItems.filter((i) => i.bookingId != null).map((i) => [i.bookingId!, i.invoiceId]));
+    for (const id of invoiceIdByBooking.values()) invoiceIds.add(id);
     const [payments, invoices] = paymentBasis
       ? await Promise.all([db.select().from(paymentsTable), db.select().from(companyInvoicesTable)])
       : [[], []];
@@ -139,17 +142,25 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
     const paymentDateByBooking = new Map<number, string>();
     const bookingGroupById = new Map(bookings.filter((b) => !!b.groupRef).map((b) => [b.id, b.groupRef!]));
     const paymentDateByGroup = new Map<string, string>();
+    const rememberGroupDate = (groupRef: string, date: string) => {
+      if (date && date > (paymentDateByGroup.get(groupRef) ?? "")) paymentDateByGroup.set(groupRef, date);
+    };
     for (const p of payments) {
       if (p.status !== "confirmed") continue;
       const day = dateWib(p.paidAt ?? p.confirmedAt);
       if (day && day > (paymentDateByBooking.get(p.bookingId) ?? "")) paymentDateByBooking.set(p.bookingId, day);
       const groupRef = bookingGroupById.get(p.bookingId);
-      if (groupRef && day && day > (paymentDateByGroup.get(groupRef) ?? "")) paymentDateByGroup.set(groupRef, day);
+      if (groupRef) rememberGroupDate(groupRef, day);
+    }
+    // Some grouped bookings store the confirmed timestamp only on their representative row.
+    for (const b of bookings) {
+      if (b.groupRef && ["confirmed", "completed"].includes(b.status)) rememberGroupDate(b.groupRef, dateWib(b.paidAt));
     }
     const paymentDate = (b: typeof bookings[number]) => {
       if (b.payerType === "company") {
-        const invoice = b.companyInvoiceId ? invoiceById.get(b.companyInvoiceId) : undefined;
-        return invoice?.status === "paid" ? dateWib(invoice.paidAt ?? b.paidAt) : "";
+        const invoiceId = b.companyInvoiceId ?? invoiceIdByBooking.get(b.id);
+        const invoice = invoiceId ? invoiceById.get(invoiceId) : undefined;
+        return invoice?.status === "paid" ? dateWib(invoice.paidAt) : "";
       }
       return (b.groupRef ? paymentDateByGroup.get(b.groupRef) : undefined) || dateWib(b.paidAt) || paymentDateByBooking.get(b.id) || "";
     };
@@ -173,7 +184,8 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
         new Date(b.createdAt).toISOString(), paymentBasis ? paymentDate(b) : "",
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
     });
-    const csv = header + rows.join("\n");
+    // Each qualifying booking is emitted once; the export does not invent extra revenue rows.
+    const csv = "\uFEFF" + header + rows.join("\n");
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=bookings.csv");
     res.send(csv);
