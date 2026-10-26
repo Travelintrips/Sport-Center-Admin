@@ -4021,13 +4021,14 @@ export default function AdminBookings() {
   const [exportMonth, setExportMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
   const [exportYear, setExportYear] = useState(String(now.getFullYear()));
   const [exportAllData, setExportAllData] = useState(false);
+  const [exportDateBasis, setExportDateBasis] = useState<"booking" | "payment">("booking");
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExport = async () => {
     const token = getToken();
     setIsExporting(true);
     try {
-      let url = "/api/admin/bookings/export";
+      let url = `/api/admin/bookings/export?dateBasis=${exportDateBasis}`;
       let filename = "bookings.csv";
       if (!exportAllData) {
         const y = exportYear;
@@ -4037,7 +4038,7 @@ export default function AdminBookings() {
         const endDate = `${y}-${m}-${String(lastDay).padStart(2, "0")}`;
         const monthNames = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
         filename = `bookings-${monthNames[Number(m) - 1]}-${y}.csv`;
-        url += `?startDate=${startDate}&endDate=${endDate}`;
+        url += `&startDate=${startDate}&endDate=${endDate}`;
       }
       const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const blob = await r.blob();
@@ -4276,6 +4277,17 @@ export default function AdminBookings() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">Dasar tanggal ekspor</Label>
+              <Select value={exportDateBasis} onValueChange={(v) => setExportDateBasis(v as "booking" | "payment")}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="booking">Tanggal bermain</SelectItem>
+                  <SelectItem value="payment">Tanggal pembayaran</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Toggle: per-bulan vs semua */}
             <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
               <input
@@ -4322,7 +4334,7 @@ export default function AdminBookings() {
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 dark:text-slate-500">
-                  Akan mengekspor booking dengan tanggal bermain di bulan {MONTHS.find(m => m.value === exportMonth)?.label} {exportYear}.
+                  Akan mengekspor booking berdasarkan {exportDateBasis === "payment" ? "tanggal pembayaran" : "tanggal bermain"} di bulan {MONTHS.find(m => m.value === exportMonth)?.label} {exportYear}.
                 </p>
               </div>
             )}
