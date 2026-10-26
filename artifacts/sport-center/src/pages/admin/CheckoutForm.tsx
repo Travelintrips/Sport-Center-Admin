@@ -347,9 +347,12 @@ export default function AdminCheckoutForm() {
               </div>)}
         </div>
         <div className="flex gap-3 flex-wrap justify-center">
-          <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>Lihat Detail & Kelola Pembayaran</Button>
-          <Button variant="outline" onClick={() => setLocation("/admin/bookings")}>Lihat Semua Booking</Button>
-          <Button variant="outline" onClick={() => setCreatedOrder(null)}>Buat Booking Lagi</Button>
+          {(paymentChoice === "unpaid" || paymentSubmitted) && (
+            <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>
+              {paymentSubmitted ? "Lihat & Konfirmasi Pembayaran" : "Kelola Pembayaran"}
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => setLocation("/admin/bookings")}>Kembali ke Pemesanan</Button>
         </div>
       </div>
     );
