@@ -168,6 +168,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: true,
   });
 
+  const { data: portalSettings } = useQuery<any>({
+    queryKey: ["admin-portal-settings"],
+    queryFn: async () => {
+      const response = await fetch("/api/settings", { credentials: "same-origin" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
   const pendingApprovalCount = pendingApprovalData?.total ?? 0;
 
   useEffect(() => {
@@ -415,7 +427,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
       </main>
       
-      {user && <AiAsistenWidget />}
+      {user && portalSettings?.aiAssistantWidgetEnabled !== false && <AiAsistenWidget />}
 
       {/* Mobile Backdrop */}
       {isMobileOpen && (
