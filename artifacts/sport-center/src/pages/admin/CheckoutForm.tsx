@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft } from "lucide-react";
-import { getToken } from "@/lib/auth";
+import { getToken, getCurrentRole } from "@/lib/auth";
 
 export default function AdminCheckoutForm() {
   const { toast } = useToast();
@@ -173,8 +173,24 @@ export default function AdminCheckoutForm() {
       const saved = await fetch("/api/payments", {method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(payload)});
       const result = await saved.json();
       if (!saved.ok) throw Error(result.error || "Gagal mencatat pembayaran");
-      setPaymentSubmitted(true);
-      toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi; booking belum otomatis lunas."});
+
+      const currentRole = getCurrentRole();
+      if (currentRole && currentRole !== "staff") {
+        const confirmed = await fetch(`/api/payments/${result.id}`, {
+          method: "PATCH",
+          headers: {"Content-Type":"application/json", ...headers},
+          body: JSON.stringify({ status: "confirmed" }),
+        });
+        const confirmedResult = await confirmed.json();
+        if (!confirmed.ok) {
+          throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
+        }
+        setPaymentSubmitted(true);
+        toast({title:"Pembayaran dikonfirmasi",description:"Bukti tersimpan dan booking telah selesai dikonfirmasi."});
+      } else {
+        setPaymentSubmitted(true);
+        toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi oleh admin/finance."});
+      }
     } catch(err) {
       toast({title:"Pembayaran belum tercatat",description:err instanceof Error ? err.message : "Silakan periksa bukti",variant:"destructive"});
     } finally {setPaymentBusy(false);}
@@ -327,7 +343,7 @@ export default function AdminCheckoutForm() {
           </div>
           {paymentChoice === "unpaid" && <p className="text-sm text-muted-foreground">Booking tetap menunggu pembayaran. Tidak ada pembayaran baru yang dicatat.</p>}
           {paymentChoice === "paid" && (paymentSubmitted ?
-            <p className="text-sm font-medium text-green-700">Bukti diterima untuk verifikasi. Status lunas belum ditetapkan.</p>
+            <p className="text-sm font-medium text-green-700">{getCurrentRole()==="staff" ? "Bukti diterima untuk verifikasi. Status lunas belum ditetapkan." : "Bukti diterima dan pembayaran sudah dikonfirmasi."}</p>
             : <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">Unggah bukti pembayaran. OCR membantu pengecekan metode, tetapi tidak otomatis mengonfirmasi uang diterima.</p>
                 <Label>Metode Pembayaran</Label>
@@ -342,12 +358,12 @@ export default function AdminCheckoutForm() {
                 <Input id="booking-payment-proof" type="file" accept="image/*,.pdf" onChange={e => setPaymentProof(e.target.files?.[0] ?? null)} />
                 <p className="text-sm">Nominal booking: <strong>{formatRupiah(createdBookingAmount)}</strong></p>
                 <Button type="button" className="w-full" disabled={paymentBusy || !paymentProof || !createdBookingId || !(createdBookingAmount > 0)} onClick={submitBookingPayment}>
-                  {paymentBusy ? "Memproses bukti..." : "Kirim Bukti untuk Verifikasi"}
+                  {paymentBusy ? "Memproses bukti..." : (getCurrentRole()==="staff" ? "Unggah Bukti & Kirim Verifikasi" : "Unggah Bukti & Konfirmasi")}
                 </Button>
               </div>)}
         </div>
         <div className="flex gap-3 flex-wrap justify-center">
-          {(paymentChoice === "unpaid" || paymentSubmitted) && (
+          {(paymentChoice === "unpaid" || (paymentSubmitted && getCurrentRole()==="staff")) && (
             <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>
               {paymentSubmitted ? "Lihat & Konfirmasi Pembayaran" : "Kelola Pembayaran"}
             </Button>
