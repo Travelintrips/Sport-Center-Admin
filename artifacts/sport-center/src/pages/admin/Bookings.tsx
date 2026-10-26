@@ -3178,7 +3178,7 @@ export default function AdminBookings() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<10 | 25 | 50>(25);
+  const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100 | 200 | 300>(25);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedGroupRef, setSelectedGroupRef] = useState<string | null>(null);
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
@@ -4685,6 +4685,9 @@ export default function AdminBookings() {
                 <SelectItem value="10" className="text-xs">10 / halaman</SelectItem>
                 <SelectItem value="25" className="text-xs">25 / halaman</SelectItem>
                 <SelectItem value="50" className="text-xs">50 / halaman</SelectItem>
+                <SelectItem value="100" className="text-xs">100 / halaman</SelectItem>
+                <SelectItem value="200" className="text-xs">200 / halaman</SelectItem>
+                <SelectItem value="300" className="text-xs">300 / halaman</SelectItem>
               </SelectContent>
             </Select>
           </div>
