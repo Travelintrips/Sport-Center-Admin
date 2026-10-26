@@ -374,19 +374,24 @@ export default function AdminCheckoutForm() {
     );
   }
 
-  const renewalStartDate = (() => {
-    if (memberAction !== "renew" || !matchedMember?.endDate) return "";
-    const d = new Date(String(matchedMember.endDate) + "T00:00:00");
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"});
+  const renewalPeriodPreview = (() => {
+    if (memberAction !== "renew" || !matchedMember?.endDate) return { start: "", end: "" };
+    const currentEnd = new Date(String(matchedMember.endDate) + "T00:00:00");
+    if (Number.isNaN(currentEnd.getTime())) return { start: "", end: "" };
+    const start = new Date(currentEnd);
+    start.setDate(start.getDate() + 1);
+    const months = Number(memberMonths || 1);
+    const targetYear = start.getFullYear() + Math.floor((start.getMonth() + months) / 12);
+    const targetMonth = (start.getMonth() + months) % 12;
+    const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+    const end = new Date(targetYear, targetMonth, Math.min(start.getDate(), lastDay));
+    return {
+      start: start.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"}),
+      end: end.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"}),
+    };
   })();
-  const renewalEndDate = (() => {
-    if (memberAction !== "renew" || !matchedMember?.endDate) return "";
-    const d = new Date(String(matchedMember.endDate) + "T00:00:00");
-    if (Number.isNaN(d.getTime())) return "";
-    d.setMonth(d.getMonth() + Number(memberMonths || 1));
-    return d.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"});
-  })();
+  const renewalStartDate = renewalPeriodPreview.start;
+  const renewalEndDate = renewalPeriodPreview.end;
   const membershipCharge = 300000 * Number(memberMonths || 1);
 
   return (
