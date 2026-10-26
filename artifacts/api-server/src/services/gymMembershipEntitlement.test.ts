@@ -10,7 +10,20 @@ const base = {
   payments: [] as { id: number; periodStart: string; periodEnd: string; status: string; amount: number }[],
 };
 
-describe("GYM membership payment entitlement", () => {
+describe("GYM membership payment entitlement", () => {\n  it("keeps paid access despite a separate pending renewal", () => {
+    const payments = [
+      { id: 10, periodStart: "2026-10-01", periodEnd: "2026-10-31", status: "confirmed", amount: 300000 },
+      { id: 11, periodStart: "2026-11-01", periodEnd: "2026-11-30", status: "waiting_confirmation", amount: 300000 },
+    ];
+    expect(resolveGymEntitlement({ ...base, membershipStatus: "expired", payments })).toBe("active");
+  });
+  it("holds incomplete payment sources for manual review instead of suspending", () => {
+    expect(resolveGymEntitlement({ ...base, paymentSourcesComplete: false })).toBe("review_required");
+  });
+  it("rejects zero-value confirmed payments as proof of active access", () => {
+    expect(resolveGymEntitlement({ ...base, payments: [{ id: 12, periodStart: "2026-10-01", periodEnd: "2026-10-31", status: "confirmed", amount: 0 }] })).toBe("suspended");
+  });
+
   it("allows all seven grace days and suspends on day eight", () => {
     const member = { ...base, membershipEnd: "2026-10-23" };
     expect(resolveGymEntitlement({ ...member, today: "2026-10-23" })).toBe("active");
