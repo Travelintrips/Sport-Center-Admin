@@ -114,7 +114,7 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
 router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
   try {
     const { startDate, endDate, dateBasis } = req.query;
-    if (dateBasis && !["booking", "payment"].includes(String(dateBasis))) return res.status(400).json({ error: "Invalid dateBasis" });
+    if (dateBasis && !["booking", "payment"].includes(String(dateBasis))) { res.status(400).json({ error: "Invalid dateBasis" }); return; }
     const paymentBasis = dateBasis === "payment";
     let bookings = await db.select().from(bookingsTable);
     const facilities = await db.select().from(facilitiesTable);
