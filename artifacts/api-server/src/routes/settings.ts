@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { adminMiddleware, superAdminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
@@ -180,6 +180,24 @@ router.post("/settings/whatsapp-groups/sync", adminMiddleware, async (req, res) 
   }
 });
 
+router.patch("/settings/ai-assistant-widget", superAdminMiddleware, async (req, res) => {
+  try {
+    if (typeof req.body?.enabled !== "boolean") {
+      res.status(400).json({ error: "Nilai enabled wajib boolean." });
+      return;
+    }
+    const settings = await getOrCreateSettings();
+    const [updated] = await db.update(settingsTable)
+      .set({ aiAssistantWidgetEnabled: req.body.enabled })
+      .where(eq(settingsTable.id, settings.id))
+      .returning();
+    res.json(publicSettings(updated));
+  } catch (err) {
+    req.log.error({ err }, "Update AI Assistant widget setting error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/settings", async (req, res) => {
   try {
     const settings = await getOrCreateSettings();
@@ -200,6 +218,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
       "fonnteCustomerDevice","customerServiceWhatsapp",
       "adminGroupProvider","waGatewayAdminGroupId",
       "minaWebChatEnabled","minaWebChatGreeting","minaWebChatQuickActions",
+      "aiAssistantWidgetEnabled",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {

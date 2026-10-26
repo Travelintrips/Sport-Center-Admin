@@ -1,0 +1,1 @@
+ALTER TABLE sport_center.sport_settings\n  ADD COLUMN IF NOT EXISTS ai_assistant_widget_enabled boolean NOT NULL DEFAULT true;\n

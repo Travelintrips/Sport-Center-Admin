@@ -22,6 +22,7 @@ export const settingsTable = scSchema.table("sport_settings", {
   fonnteCustomerDevice: text("fonnte_customer_device"),
   customerServiceWhatsapp: text("customer_service_whatsapp"),
   minaWebChatEnabled: boolean("mina_web_chat_enabled").notNull().default(true),
+  aiAssistantWidgetEnabled: boolean("ai_assistant_widget_enabled").notNull().default(true),
   minaWebChatGreeting: text("mina_web_chat_greeting").notNull().default("Halo! Saya Mina, asisten Sport Center. Ada yang bisa saya bantu?"),
   minaWebChatQuickActions: text("mina_web_chat_quick_actions").notNull().default("Booking Fasilitas\nCek Jadwal\nCek Harga\nGym & Membership"),
   fonnteAdminWa: text("fonnte_admin_wa"),
