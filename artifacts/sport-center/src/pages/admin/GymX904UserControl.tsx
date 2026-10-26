@@ -53,7 +53,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     refetchInterval:(q)=>["completed","failed","cancelled"].includes(q.state.data?.command.state ?? "")?false:4000,
     retry:false
   });
-  useEffect(()=>{ if(receipt?.command.state==="completed") void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]}); },[receipt?.command.state,queryClient]);
+  useEffect(()=>{ if(receipt?.command.state==="completed") { setMessage("Pengguna berhasil dihapus dari mesin X904."); void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]}); } },[receipt?.command.state,queryClient]);
   if(!capabilities?.allowed)return null;
   if(!capabilities.enabled)return <section className="rounded-xl border bg-card p-5 space-y-2">
     <h3 className="font-semibold">Pengelolaan pengguna X904</h3>
@@ -105,7 +105,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     if(busy||bulkRunning||!permitted)return;
     const subject=isExisting?chosen:undefined;
     if(action==="DELETE_USER"&&!window.confirm(`Hapus PIN ${pin} (${subject?.display_name}) dari X904? Riwayat absensi tetap ada.`))return;
-    setBusy(true);setMessage("");setCommandId(null);
+    setBusy(true);setMessage("");
     try{
       const body={
         commandType:action,userPin:pin,expectedSerial:SERIAL,confirmPin,
@@ -115,7 +115,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       };
       const result=await request("/admin/gym-x904/user-command",{method:"POST",body:JSON.stringify(body)});
       setCommandId(result.command_id);
-      setMessage("Perintah diterima antrean. Menunggu pembacaan ulang dan ACK dari X904; belum berarti berhasil.");
+      setMessage(result.reused?"Perintah penghapusan yang sama sedang diproses.":"Perintah diterima antrean. Menunggu konfirmasi dari X904.");
     }catch(e){setMessage(e instanceof Error?e.message:"Perintah gagal");}
     finally{setBusy(false);}
   }
