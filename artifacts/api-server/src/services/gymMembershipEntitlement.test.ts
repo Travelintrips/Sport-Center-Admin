@@ -10,7 +10,8 @@ const base = {
   payments: [] as { id: number; periodStart: string; periodEnd: string; status: string; amount: number }[],
 };
 
-describe("GYM membership payment entitlement", () => {\n  it("keeps paid access despite a separate pending renewal", () => {
+describe("GYM membership payment entitlement", () => {
+  it("keeps paid access despite a separate pending renewal", () => {
     const payments = [
       { id: 10, periodStart: "2026-10-01", periodEnd: "2026-10-31", status: "confirmed", amount: 300000 },
       { id: 11, periodStart: "2026-11-01", periodEnd: "2026-11-30", status: "waiting_confirmation", amount: 300000 },
