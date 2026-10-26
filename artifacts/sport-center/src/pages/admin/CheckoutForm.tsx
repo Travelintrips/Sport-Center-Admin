@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -42,6 +43,7 @@ export default function AdminCheckoutForm() {
   const [members, setMembers] = useState<Array<{id:number; name:string; phone:string; status:string; endDate:string}>>([]);
   const [memberLoadError, setMemberLoadError] = useState("");
   const [membershipResult, setMembershipResult] = useState("");
+  const [membershipConfirmOpen, setMembershipConfirmOpen] = useState(false);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
@@ -120,8 +122,6 @@ export default function AdminCheckoutForm() {
     : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
-    const actionLabel = memberAction === "new" ? "pendaftaran" : memberAction === "renew" ? "perpanjangan" : "check-in";
-    if (!window.confirm("Konfirmasi " + actionLabel + " membership? Proses ini akan dicatat di sistem.")) return;
     setIsSubmitting(true);
     setMembershipResult("");
     try {
@@ -374,6 +374,21 @@ export default function AdminCheckoutForm() {
     );
   }
 
+  const renewalStartDate = (() => {
+    if (memberAction !== "renew" || !matchedMember?.endDate) return "";
+    const d = new Date(String(matchedMember.endDate) + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"});
+  })();
+  const renewalEndDate = (() => {
+    if (memberAction !== "renew" || !matchedMember?.endDate) return "";
+    const d = new Date(String(matchedMember.endDate) + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return "";
+    d.setMonth(d.getMonth() + Number(memberMonths || 1));
+    return d.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"});
+  })();
+  const membershipCharge = 300000 * Number(memberMonths || 1);
+
   return (
     <div className="max-w-2xl mx-auto py-8 px-4">
       <div className="mb-8">
@@ -609,7 +624,7 @@ export default function AdminCheckoutForm() {
               </>}
               {memberLoadError && <p className="text-xs text-destructive">{memberLoadError}</p>}
               {membershipResult && <p className="text-sm font-medium text-green-700">{membershipResult}</p>}
-              <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={submitMembership}>
+              <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
                 {isSubmitting ? "Memproses..." : memberAction === "new" ? "Daftarkan Member" : memberAction === "renew" ? "Perpanjang Membership" : "Catat Kunjungan (Rp0)"}
               </Button>
               <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>
@@ -626,6 +641,46 @@ export default function AdminCheckoutForm() {
           </CardFooter>
         </Card>
       </form>
+
+      <AlertDialog open={membershipConfirmOpen} onOpenChange={setMembershipConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {memberAction === "renew" ? "Konfirmasi Perpanjangan Membership" : memberAction === "new" ? "Konfirmasi Pendaftaran Membership" : "Konfirmasi Kunjungan Member"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                {memberAction === "renew" && matchedMember ? (
+                  <>
+                    <div className="rounded-lg border p-3 space-y-2 text-foreground">
+                      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Member</span><strong>{matchedMember.name} · {matchedMember.phone}</strong></div>
+                      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Perpanjangan</span><strong>{memberMonths} bulan</strong></div>
+                      {renewalStartDate && renewalEndDate && <div className="flex justify-between gap-4"><span className="text-muted-foreground">Periode berikutnya</span><strong>{renewalStartDate} – {renewalEndDate}</strong></div>}
+                      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tagihan</span><strong>{formatRupiah(membershipCharge)}</strong></div>
+                    </div>
+                    <p>Setelah dikonfirmasi, sistem membuat perpanjangan dan langsung membuka detail member untuk proses pembayaran.</p>
+                  </>
+                ) : (
+                  <p>Proses ini akan dicatat di sistem. Pastikan data yang dipilih sudah benar.</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmitting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isSubmitting}
+              onClick={(e) => {
+                e.preventDefault();
+                setMembershipConfirmOpen(false);
+                void submitMembership();
+              }}
+            >
+              {isSubmitting ? "Memproses..." : memberAction === "renew" ? "Ya, Perpanjang Membership" : memberAction === "new" ? "Ya, Daftarkan Member" : "Ya, Catat Kunjungan"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
