@@ -75,6 +75,7 @@ export default function AdminMemberships() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewMember, setViewMember] = useState<any>(null);
   const [paymentDecision,setPaymentDecision] = useState<"unpaid"|"paid">("unpaid");
+  const [paymentFocusMode,setPaymentFocusMode] = useState(false);
   const [paymentMethodDraft,setPaymentMethodDraft] = useState("qris");
   const [paymentFile,setPaymentFile] = useState<File|null>(null);
   const [paymentUploading,setPaymentUploading] = useState(false);
@@ -236,13 +237,14 @@ export default function AdminMemberships() {
   // Do not infer identity from name/phone: those may be duplicated.
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("memberId");
-    if (!raw || !/^\\d+$/.test(raw) || isLoading || !Array.isArray(memberships)) return;
+    if (!raw || !/^\d+$/.test(raw) || isLoading || !Array.isArray(memberships)) return;
     const member = memberships.find((m: any) => Number(m.id) === Number(raw));
     if (!member) return;
     setViewMember(member);
     setEditingDates(false);
     if (new URLSearchParams(window.location.search).get("payment") === "paid") {
       setPaymentDecision("paid");
+      setPaymentFocusMode(true);
     }
     window.history.replaceState(window.history.state, "", window.location.pathname);
   }, [memberships, isLoading]);
@@ -913,10 +915,11 @@ export default function AdminMemberships() {
                 <div className="rounded-xl border p-3 space-y-3">
                   <p className="font-semibold text-sm">Pembayaran Membership</p>
                   <p className="text-sm">Tagihan: <strong>{formatCurrency(viewMember.totalPrice)}</strong></p>
-                  <div className="grid grid-cols-2 gap-2">
+                  {!paymentFocusMode && <div className="grid grid-cols-2 gap-2">
                     <Button type="button" size="sm" variant={paymentDecision==="unpaid"?"default":"outline"} onClick={()=>setPaymentDecision("unpaid")}>Belum Dibayar</Button>
                     <Button type="button" size="sm" variant={paymentDecision==="paid"?"default":"outline"} onClick={()=>setPaymentDecision("paid")}>Sudah Dibayar</Button>
-                  </div>
+                  </div>}
+                  {paymentFocusMode && <p className="text-xs font-medium text-orange-700">Perpanjangan berhasil dibuat. Lengkapi pembayaran renewal di bawah ini.</p>}
                   {paymentDecision==="unpaid" ? <p className="text-xs text-muted-foreground">Tagihan tetap menunggu pembayaran. Tidak ada transaksi baru.</p> : (
                     <div className="space-y-2">
                       <Label>Metode pembayaran</Label>
@@ -983,7 +986,7 @@ export default function AdminMemberships() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setViewMember(null)}>Tutup</Button>
+              <Button variant="outline" onClick={() => { setViewMember(null); setPaymentFocusMode(false); setPaymentDecision("unpaid"); }}>Tutup</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
