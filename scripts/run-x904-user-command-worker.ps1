@@ -36,13 +36,25 @@ try {
   $job=$text|ConvertFrom-Json -ErrorAction Stop
   $id=[string]$job.commandId; $lease=[string]$job.leaseToken
   if($id -notmatch '^[a-fA-F0-9-]{36}$' -or $lease -notmatch '^[a-fA-F0-9-]{36}$' -or $job.deviceSerial -ne 'TDBD234200545') {throw 'CLAIM_SHAPE_INVALID'}
+  $isGroup=@('SUSPEND_USER','ACTIVATE_USER') -ccontains [string]$job.commandType
+  if($isGroup -and $e['X904_MANUAL_ACCESS_ENABLED'] -ne 'true') {
+    throw 'MANUAL_ACCESS_DISABLED'
+  }
   $cfg=@{deviceIp=$e['X904_DEVICE_IP'];deviceSerial=$e['X904_DEVICE_SERIAL'];
     sendEnabled=$e['X904_SEND_ENABLED'];userWriteEnabled=$e['X904_USER_WRITE_ENABLED'];
+    manualAccessEnabled=$e['X904_MANUAL_ACCESS_ENABLED'];
     commKey=$e['X904_DEVICE_COMM_KEY'];command=$job}|ConvertTo-Json -Depth 9 -Compress
   Push-Location $base
   try {
-    $output=$cfg | & $node $executor --execute-claimed 2>&1
-    $nodeExit=$LASTEXITCODE
+    if($isGroup) {
+      $groupExecutor=Join-Path $base 'migration\x904-vmsc-group-executor-stage.ps1'
+      if(-not(Test-Path $groupExecutor)){throw 'GROUP_EXECUTOR_UNAVAILABLE'}
+      $output=$cfg | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $groupExecutor -ExecuteClaimed 2>&1
+      $nodeExit=$LASTEXITCODE
+    } else {
+      $output=$cfg | & $node $executor --execute-claimed 2>&1
+      $nodeExit=$LASTEXITCODE
+    }
   } finally {Pop-Location}
   $result=$null
   try {$result=([string]($output|Select-Object -Last 1))|ConvertFrom-Json -ErrorAction Stop}catch{}
@@ -57,7 +69,16 @@ try {
   if($null -ne $result -and [string]$result.errorCode -match '^[A-Z0-9_]{1,64}$'){$errorCode=[string]$result.errorCode}
   $success=if($ok){'true'}else{'false'}
   $err=if($ok){'NULL'}else{"'$errorCode'"}
-  $ackSql="SELECT sport_center.x904_complete_user_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
+  if($isGroup) {
+    $gBefore='NULL';$gAfter='NULL'
+    if($null -ne $result) {
+      if($result.beforeGroup -is [int] -and $result.beforeGroup -in @(1,2)){$gBefore=[string]$result.beforeGroup}
+      if($result.afterGroup -is [int] -and $result.afterGroup -in @(1,2)){$gAfter=[string]$result.afterGroup}
+    }
+    $ackSql="SELECT sport_center.x904_complete_group_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$gBefore,$gAfter,$err);"
+  } else {
+    $ackSql="SELECT sport_center.x904_complete_user_command('$id'::uuid,'$lease'::uuid,$success,$uid,$before,$after,$err);"
+  }
   $ack=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c $ackSql 2>&1
   if($LASTEXITCODE -eq 0 -and (($ack|Out-String).Trim() -eq 't')){
     Report ('COMMAND_ACK command='+$id+' readback='+$success)
