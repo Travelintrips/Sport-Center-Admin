@@ -48,6 +48,24 @@ import { useState } from "react";
 import AiAsistenWidget from "@/components/admin/AiAsistenWidget";
 import { useToast } from "@/hooks/use-toast";
 
+const ADMIN_BOOKING_ALLOWED_PATHS = [
+  "/admin/dashboard",
+  "/admin/bookings",
+  "/admin/checkout",
+  "/admin/calendar",
+  "/admin/qr-checkin",
+  "/admin/reschedule",
+  "/admin/extensions",
+  "/admin/customers",
+  "/admin/memberships",
+] as const;
+
+function isAdminBookingPathAllowed(path: string): boolean {
+  return ADMIN_BOOKING_ALLOWED_PATHS.some(
+    (allowed) => path === allowed || path.startsWith(`${allowed}/`),
+  );
+}
+
 const NAV_GROUPS = [
   {
     label: "Utama",
@@ -155,7 +173,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const { data: healthData } = useQuery<HealthSummary>({
     queryKey: ["system-connections-health"],
     queryFn: fetchHealthSummary,
-    enabled: !!user,
+    enabled: !!user && user?.role !== "admin_booking",
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -164,7 +182,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const { data: pendingApprovalData } = useQuery<PendingApprovalSummary>({
     queryKey: ["pending-admin-approvals"],
     queryFn: fetchPendingApprovals,
-    enabled: !!user,
+    enabled: !!user && user?.role !== "admin_booking",
     staleTime: 5_000,
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,
@@ -177,12 +195,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.json();
     },
-    enabled: !!user,
+    enabled: !!user && user?.role !== "admin_booking",
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
 
-  const pendingApprovalCount = pendingApprovalData?.total ?? 0;
+  const isBookingOperator = user?.role === "admin_booking";
+  const pendingApprovalCount = isBookingOperator ? 0 : (pendingApprovalData?.total ?? 0);
 
   useEffect(() => {
     if (!user || pendingApprovalData == null) return;
@@ -234,6 +253,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       setLocation("/admin/login");
     }
   }, [isError, location, setLocation]);
+
+  useEffect(() => {
+    if (user?.role !== "admin_booking") return;
+    if (!isAdminBookingPathAllowed(location)) {
+      setLocation("/admin/bookings");
+    }
+  }, [location, setLocation, user?.role]);
 
   const handleLogout = () => { logoutMutation.mutate(); };
 
@@ -288,7 +314,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
         <div className="flex-1 overflow-y-auto py-3">
           <nav className="px-2 space-y-4">
-            {NAV_GROUPS.map((group) => (
+            {NAV_GROUPS.map((group) => ({
+              ...group,
+              items: isBookingOperator
+                ? group.items.filter((item) =>
+                    ADMIN_BOOKING_ALLOWED_PATHS.some((allowed) => item.href === allowed),
+                  )
+                : group.items,
+            })).filter((group) => group.items.length > 0).map((group) => (
               <div key={group.label}>
                 <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
                   {group.label}
@@ -429,7 +462,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
       </main>
       
-      {user && portalSettings?.aiAssistantWidgetEnabled !== false && <AiAsistenWidget />}
+      {user && !isBookingOperator && portalSettings?.aiAssistantWidgetEnabled !== false && <AiAsistenWidget />}
 
       {/* Mobile Backdrop */}
       {isMobileOpen && (
