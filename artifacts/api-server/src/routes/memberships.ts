@@ -1360,10 +1360,10 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       const membershipDpp = Math.round(totalPrice / 1.11);
       const membershipPpn = totalPrice - membershipDpp;
       pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
-      createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate).catch((err) =>
+      createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate, confirmedPayment!.id).catch((err) =>
         logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
-      createPublicMembershipAccountingEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate).catch((err) =>
+      createPublicMembershipAccountingEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate, confirmedPayment!.id).catch((err) =>
         logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
     }
