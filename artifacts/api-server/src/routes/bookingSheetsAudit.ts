@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { google } from "googleapis";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { isGoogleSheetsConfigured } from "../lib/googleSheets";
 
@@ -93,6 +95,57 @@ router.post("/admin/google-sheets/reconcile", adminMiddleware, async (req, res) 
   } catch (error) {
     req.log.error({err:error}, "Read-only Sheets reconciliation failed");
     res.status(502).json({ error: "Reconciliation read failed", writeEnabled: false });
+  }
+});
+// A read-only audit of actual payment/allocation sources. Uses existing tables,
+// so PROD can diagnose partial and grouped payments before the ledger migration.
+router.get("/admin/google-sheets/payment-sources", adminMiddleware, async (req, res) => {
+  const month=String(req.query.month ?? "");
+  if(!MONTH_PATTERN.test(month)){res.status(400).json({error:"Invalid payment month"});return;}
+  try {
+    const start = `${month}-01`;
+    const result = await db.execute(sql`
+      with allocated as (
+        select 'allocation'::text as source_type, a.booking_id, a.amount,
+          coalesce(p.paid_at,p.confirmed_at) as payment_ts
+        from sport_center.sport_payments p join sport_center.sport_payment_allocations a
+          on a.payment_id=p.id where p.status='confirmed'
+      ), direct as (
+        select 'direct'::text as source_type, p.booking_id, p.amount,
+          coalesce(p.paid_at,p.confirmed_at) as payment_ts
+        from sport_center.sport_payments p
+        where p.status='confirmed' and not exists
+          (select 1 from sport_center.sport_payment_allocations a where a.payment_id=p.id)
+      ), company as (
+        select 'corporate_invoice'::text as source_type, item.booking_id,
+          item.total_amount as amount, i.paid_at as payment_ts
+        from sport_center.company_invoices i join sport_center.company_invoice_items item
+          on item.invoice_id=i.id
+        where i.status='paid' and item.booking_id is not null
+      ), all_sources as (
+        select * from allocated union all select * from direct union all select * from company
+      )
+      select source_type,
+        case when payment_ts is null then 'MISSING_PAYMENT_DATE'
+          when amount is null or amount <= 0 then 'INVALID_AMOUNT'
+          when source_type='corporate_invoice' and b.payer_type::text<>'company' then 'PAYER_MISMATCH'
+          when source_type<>'corporate_invoice' and b.payer_type::text='company' then 'CORPORATE_PAYMENT_NEEDS_REVIEW'
+          else 'CANDIDATE'
+        end as validation_status,
+        count(*)::integer as event_count,
+        coalesce(sum(amount),0)::text as allocated_amount
+      from all_sources s join sport_center.sport_bookings b on b.id=s.booking_id
+      where b.total_price>0
+        and (payment_ts at time zone 'Asia/Jakarta')::date >= ${start}::date
+        and (payment_ts at time zone 'Asia/Jakarta')::date < (${start}::date + interval '1 month')
+      group by source_type,validation_status
+      order by source_type,validation_status
+    `);
+    const rows = (result as unknown as {rows?: unknown[]}).rows ?? result;
+    res.json({ month, tab: monthTarget(month), breakdown: rows, writeEnabled: false });
+  } catch(error) {
+    req.log.error({err:error},"Google Sheets payment source audit failed");
+    res.status(502).json({error:"Cannot audit payment sources",writeEnabled:false});
   }
 });
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
