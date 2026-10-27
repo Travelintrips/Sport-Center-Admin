@@ -1,7 +1,5 @@
 import { Router } from "express";
 import { google } from "googleapis";
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { isGoogleSheetsConfigured } from "../lib/googleSheets";
 import { db, bookingsTable, facilitiesTable } from "@workspace/db";
