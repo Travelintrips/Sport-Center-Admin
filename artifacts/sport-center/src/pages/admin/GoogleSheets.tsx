@@ -17,7 +17,7 @@ export default function GoogleSheets() {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Pemeriksaan gagal");
+      if (!response.ok) throw new Error(`${result.error || "Pemeriksaan gagal"}${result.reason ? ` (Kode: ${result.reason})` : ""}`);
       setAudit(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Pemeriksaan gagal");
