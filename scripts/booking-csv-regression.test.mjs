@@ -2,36 +2,37 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-// Static contract guards: prevent known export regressions. These are NOT production E2E tests.
+// Static safety guards only. Real finance totals require payment-ledger E2E.
 const source = readFileSync("artifacts/api-server/src/routes/dashboard.ts", "utf8");
 const route = source.slice(source.indexOf('router.get("/admin/bookings/export"'));
 
-test("export honors selected date basis and inclusive period", () => {
+test("export supports booking date versus payment date and WIB boundaries", () => {
   assert.match(route, /dateBasis === "payment"/);
   assert.match(route, /startDate/);
   assert.match(route, /endDate/);
+  assert.match(route, /Asia\/Jakarta/);
   assert.match(route, /b\.bookingDate/);
-  assert.match(route, /paymentDate\(b\)/);
 });
-test("positive-price filter applies before both date modes", () => {
-  const filterIndex = route.indexOf("Number(b.totalPrice) > 0");
-  const modeIndex = route.indexOf("if (paymentBasis)");
-  assert.ok(filterIndex > 0 && filterIndex < modeIndex);
+test("booking-date export excludes zero-price member usage", () => {
+  assert.match(route, /Number\(b\.totalPrice\) > 0/);
 });
-test("group payments propagate to every member; no group collapse", () => {
-  assert.match(route, /paymentDateByGroup/);
-  assert.match(route, /b\.groupRef/);
-  assert.match(route, /paymentsTable/);
-  assert.match(route, /p\.status !== "confirmed"/);
-  assert.doesNotMatch(route, /new Set\(bookings\.map\(\(b\) => b\.groupRef/);
+test("payment-date export records confirmed payments individually at actual amount", () => {
+  assert.match(route, /if \(p\.status !== "confirmed"\) continue/);
+  assert.match(route, /p\.amount, b\.status/);
+  assert.match(route, /p\.paymentType \?\? "full_payment"/);
+  assert.match(route, /p\.id, b\.groupRef/);
+  assert.match(route, /for \(const p of payments\)/);
 });
-test("corporate invoices require paid status and support linked invoice items", () => {
+test("group booking total is metadata, never booked as paid receipt", () => {
+  assert.match(route, /everyBooking\.filter\(\(item\) => item\.groupRef === b\.groupRef\)/);
+  assert.match(route, /p\.amount, b\.status/);
+});
+test("corporate invoice emits one paid invoice receipt, not one receipt per item", () => {
+  assert.match(route, /invoice\.status !== "paid"/);
+  assert.match(route, /invoicedBookings\.has\(id\)/);
   assert.match(route, /companyInvoiceItemsTable/);
-  assert.match(route, /invoiceIdByBooking/);
-  assert.match(route, /invoice\?\.status === "paid"/);
 });
-test("CSV header matches row count and includes payment date", () => {
-  assert.match(route, /Admin Notes,Created At,Payment Date/);
-  assert.match(route, /paymentBasis \? paymentDate\(b\) : ""/);
-  assert.match(route, /bookings\.map\(\(b\) =>/);
+test("CSV distinguishes payment type, payment ID and full booking amount", () => {
+  assert.match(route, /Payment Date,Payment Type,Payment ID,Group Ref,Booking Total/);
+  assert.match(route, /formatCreatedAtWib/);
 });
