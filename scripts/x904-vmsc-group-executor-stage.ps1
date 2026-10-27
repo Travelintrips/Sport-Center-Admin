@@ -39,9 +39,30 @@ try {
     }
   }
   Require ($count -gt 0 -and $count -le 10000 -and $matches -eq 1) 'PIN_MISSING_OR_AMBIGUOUS'
-  # UID must be verified against an independently authenticated device snapshot,
-  # and group 2 unlock combinations checked, before writes can be enabled.
-  Require $false 'GROUP_WRITE_PRECONDITIONS_NOT_VERIFIED'
+  # The worker must supply an independently authenticated TCP snapshot binding.
+  # A browser-provided UID or command payload alone is never trusted.
+  Require ($cfg.uidAttestedByWorker -ceq 'true' -and
+    [int]$cfg.verifiedUid -eq [int]$cmd.payload.expectedUid -and
+    [string]$cfg.verifiedPin -ceq [string]$cmd.userPin -and
+    [string]$cfg.verifiedName -ceq [string]$cmd.payload.expectedName) 'UID_ATTESTATION_REQUIRED'
+  $before=0
+  Require ([bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$before)) 'GROUP_READ_FAILED'
+  Require (@(1,2) -contains $before) 'UNEXPECTED_ACCESS_GROUP'
+  $desired=if($cmd.commandType -ceq 'SUSPEND_USER'){2}else{1}
+  # Group 2 must never be included in any door unlock combination.
+  if($desired -eq 2){
+    for($i=1;$i -le 10;$i++){
+      $a=0;$b=0;$c=0;$d=0;$e=0
+      Require ([bool]$zk.SSR_GetUnLockGroup(1,$i,[ref]$a,[ref]$b,[ref]$c,[ref]$d,[ref]$e)) 'UNLOCK_COMBINATION_READ_FAILED'
+      Require (-not (@($a,$b,$c,$d,$e) -contains 2)) 'SUSPEND_GROUP_CAN_UNLOCK'
+    }
+  }
+  if($before -ne $desired){
+    Require ([bool]$zk.SetUserGroup(1,[int]$cmd.userPin,$desired)) 'SET_GROUP_FAILED'
+  }
+  $after=0
+  Require ([bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$after) -and $after -eq $desired) 'GROUP_READBACK_MISMATCH'
+  [Console]::WriteLine((@{readBackConfirmed=$true;deviceUid=[int]$cmd.payload.expectedUid;beforeCount=$count;afterCount=$count;beforeGroup=$before;afterGroup=$after;errorCode=$null}|ConvertTo-Json -Compress))
 } catch {
   $code=[string]$_.Exception.Message
   if($code -cnotmatch '^[A-Z0-9_]{1,64}$'){$code='EXECUTION_FAILED'}
