@@ -6,10 +6,47 @@ import { Badge } from "@/components/ui/badge";
 
 const sheetUrl = "https://docs.google.com/spreadsheets/d/1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E/edit";
 
+const COLUMNS = ["Order Number","Customer Name","Customer Email","Customer Phone","Facility","Date","Start Time","End Time","Duration (hours)","Total Price","Status","Notes","Admin Notes","Created At"] as const;
+const MONTH_NAMES = ["JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI","JULI","AGUSTUS","SEPTEMBER","OKTOBER","NOVEMBER","DESEMBER"];
+// RFC4180 quote handling: commas, escaped quotes and embedded newlines.
+function parseCsv(raw: string): string[][] {
+  const out: string[][] = []; let row: string[] = [], cell = "", quoted = false;
+  const text = raw.replace(/^\\uFEFF/, "");
+  for (let i=0;i<text.length;i++) {
+    const c=text[i];
+    if(c==='"') { if(quoted && text[i+1]==='"'){ cell+='"';i++; }else quoted=!quoted; }
+    else if(c===',' && !quoted){row.push(cell);cell="";}
+    else if((c==='\\n'||c==='\\r') && !quoted){ if(c==='\\r'&&text[i+1]==='\\n')i++;row.push(cell);if(row.some(Boolean))out.push(row);row=[];cell="";}
+    else cell+=c;
+  }
+  if(cell || row.length){row.push(cell);out.push(row);}
+  return out;
+}
 export default function GoogleSheets() {
   const [audit, setAudit] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [month,setMonth] = useState("2026-10");
+  const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
+  const [previewError,setPreviewError] = useState("");
+  const [previewBusy,setPreviewBusy] = useState(false);
+  async function loadPreview() {
+    setPreviewBusy(true);setPreviewError("");setPreview(null);
+    try {
+      if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
+      const [year,mon]=month.split("-").map(Number);
+      const start=month+"-01";
+      const end=new Date(Date.UTC(year,mon,0)).toISOString().slice(0,10);
+      const q=new URLSearchParams({dateBasis:"payment",startDate:start,endDate:end});
+      const response=await fetch("/api/admin/bookings/export?"+q.toString(),{headers:{Authorization:`Bearer ${getToken()}`}});
+      if(!response.ok)throw new Error("Tidak dapat membaca pembayaran terkonfirmasi");
+      const parsed=parseCsv(await response.text());
+      if(!parsed.length || COLUMNS.some((h,i)=>parsed[0][i]!==h) || parsed[0][14]!=="Payment Date") throw new Error("Struktur ekspor pembayaran tidak sesuai; preview dibatalkan");
+      const rows=parsed.slice(1).filter(r=>r.length===15 && r[14]>=start && r[14]<=end);
+      setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});
+    }catch(e){setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{setPreviewBusy(false);}
+  }
+
   async function inspect() {
     setBusy(true); setError("");
     try {
@@ -59,15 +96,28 @@ export default function GoogleSheets() {
             {audit.title && <p>Spreadsheet: {audit.title}</p>}
             {audit.reason && <p>{audit.reason}</p>}
             {audit.rules && <p>Contoh PT Avia (bayar Oktober): <strong>{audit.rules.sampleSepBookingOctPaymentTab}</strong></p>}
-            {(audit.tabs || []).map((tab: any) => <div key={tab.name} className="rounded-lg border p-3 space-y-1">
-              <p className="font-semibold">{tab.name}</p>
-              <p>Formula (3 baris awal): {tab.formulaCountInFirst3Rows}</p>
-              <p className="text-xs text-slate-500">Contoh baris (read-only):</p>
-              <pre className="overflow-x-auto text-xs whitespace-pre-wrap">{JSON.stringify(tab.sampleHeaders, null, 2)}</pre>
-            </div>)}
+            <div className="overflow-x-auto"><table className="w-full text-xs text-left border-collapse">
+              <thead><tr className="border-b"><th className="p-2">Tab</th><th className="p-2">Baris contoh</th><th className="p-2">Formula (3 baris)</th><th className="p-2">Header</th></tr></thead>
+              <tbody>{(audit.tabs || []).map((tab:any)=><tr key={tab.name} className="border-b"><td className="p-2 font-medium">{tab.name}</td><td className="p-2">{tab.sampleHeaders?.length || 0}</td><td className="p-2">{tab.formulaCountInFirst3Rows}</td><td className="p-2">{tab.sampleHeaders?.some((r:string[])=>r[0]==="Order Number")?"Terdeteksi":"Perlu mapping"}</td></tr>)}</tbody>
+            </table></div>
+
           </div>}
         </CardContent>
       </Card>
+      <Card><CardHeader><CardTitle className="text-lg">Preview pembayaran terkonfirmasi (tanpa menulis Sheets)</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-slate-500">Menggunakan filter tanggal pembayaran WIB pada ekspor resmi booking. Booking yang belum memiliki bukti pembayaran sah tidak ikut.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="sheets-paid-month" className="text-sm font-medium">Bulan pembayaran</label>
+            <input id="sheets-paid-month" aria-label="Bulan pembayaran" type="month" value={month} onChange={e=>setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+            <button type="button" onClick={loadPreview} disabled={previewBusy} className="border rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">{previewBusy?"Memuat...":"Preview Data"}</button>
+          </div>
+          {previewError&&<p role="alert" className="text-sm text-red-600">{previewError}</p>}
+          {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview saja. Belum ada insert, update atau pengecekan duplikasi lintas sheet; Sync Now tetap terkunci.</p>
+            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}</tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}</tr>)}</tbody></table></div>
+            {preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
+          </div>}
+        </CardContent></Card>
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
           <CardHeader><CardTitle className="text-lg flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-green-600" /> Aturan sinkronisasi</CardTitle></CardHeader>
