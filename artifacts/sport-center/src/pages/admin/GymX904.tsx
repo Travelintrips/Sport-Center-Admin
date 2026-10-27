@@ -61,6 +61,16 @@ export default function GymX904() {
       return response.json();
     },enabled:tab==="users",retry:false,staleTime:30000
   });
+  const {data:verifiedAccess,refetch:refetchVerifiedAccess}=useQuery<{source:string;users:Array<{user_pin:string;device_uid:number;device_group:number;completed_at:string}>}>({
+    queryKey:["gym-x904-manual-access-status"],
+    queryFn:async()=>{
+      const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(API+"/admin/gym-x904/manual-access-status",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+      if(!response.ok)throw new Error("Status akses terverifikasi tidak tersedia");
+      return response.json();
+    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:15000
+  });
+  const accessFor=(user:LanUser)=>verifiedAccess?.users.find(x=>x.user_pin===user.user_pin&&x.device_uid===user.device_uid);
   const [accessNotice,setAccessNotice]=useState("");
   const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
   async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
@@ -69,7 +79,7 @@ export default function GymX904() {
     setAccessBusyPin(user.user_pin);setAccessNotice("Menunggu konfirmasi mesin untuk PIN "+user.user_pin);
     try { const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
       const response=await fetch(API+"/admin/gym-x904/user-command",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({commandType:op,userPin:user.user_pin,expectedUid:user.device_uid,expectedName:user.display_name,expectedSerial:"TDBD234200545",confirmPin:user.user_pin,idempotencyKey:crypto.randomUUID().replace(/-/g,"")})});
-      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");setAccessNotice("Perintah PIN "+user.user_pin+" masuk antrean; belum terverifikasi pada mesin.");
+      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");setAccessNotice("Perintah PIN "+user.user_pin+" masuk antrean; menunggu ACK dan pembacaan ulang mesin."); void refetchVerifiedAccess();
     }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal");}finally{setAccessBusyPin(null);}
   }
   const [commandMessage, setCommandMessage] = useState("");
@@ -493,9 +503,13 @@ export default function GymX904() {
             <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0))).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
-              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">Belum diverifikasi dari mesin</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{accessFor(u)?.device_group===1?"Aktif (ACK terakhir)":accessFor(u)?.device_group===2?"Suspend (ACK terakhir)":"Belum diverifikasi dari mesin"}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
-                {(["SUSPEND_USER","ACTIVATE_USER"] as const).map(op=><button key={op} type="button" title={!userCommandCapabilities.operations?.includes(op)?"Fitur akses manual belum diaktifkan di server":u.device_role!==0?"Akun pengelola perangkat tidak dapat diubah":"Perintah akses manual"} disabled={!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||u.device_role!==0||!!accessBusyPin} onClick={()=>void changeManualAccess(u,op)} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">{op==="SUSPEND_USER"?"Suspend":"Aktifkan"}</button>)}
+                {(() => {const state=accessFor(u);const op=state?.device_group===1?"SUSPEND_USER":state?.device_group===2?"ACTIVATE_USER":null;
+                  return <button type="button" title={!op?"Status grup belum terverifikasi dari ACK X904":!userCommandCapabilities.operations?.includes(op)?"Fitur manual belum diaktifkan di server":"Ubah akses mesin"}
+                    disabled={!op||!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||u.device_role!==0||!!accessBusyPin}
+                    onClick={()=>{if(op)void changeManualAccess(u,op);}}
+                    className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">{op==="ACTIVATE_USER"?"Aktifkan":"Suspend"}</button>})()}
                 {userCommandCapabilities.operations?.includes("UPDATE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>}
                 {userCommandCapabilities.operations?.includes("DELETE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"DELETE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Hapus</button>}
               </div></td>}
