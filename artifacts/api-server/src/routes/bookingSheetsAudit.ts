@@ -43,7 +43,19 @@ router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
     res.json({ connected: true, title: meta.data.properties?.title, spreadsheetId: TARGET_ID, tabs, writeEnabled: false, rules: { paidMonthTimezone: "Asia/Jakarta", sampleSepBookingOctPaymentTab: paidTabFromWibDate("2026-10-26T00:00:00+07:00") } });
   } catch (err) {
     req.log.error({ err }, "Booking sheets read-only audit failed");
-    res.status(502).json({ connected: false, error: "Tidak dapat membaca spreadsheet. Periksa izin service account dan konfigurasi server.", writeEnabled: false });
+    const status = Number((err as { code?: number; response?: { status?: number } })?.response?.status ?? (err as { code?: number })?.code);
+    const reason = status === 403 ? "GOOGLE_PERMISSION_DENIED"
+      : status === 404 ? "SPREADSHEET_NOT_FOUND"
+      : status === 401 ? "GOOGLE_AUTH_REJECTED"
+      : status === 429 ? "GOOGLE_QUOTA_EXCEEDED"
+      : err instanceof SyntaxError ? "SERVICE_ACCOUNT_JSON_INVALID"
+      : "SHEETS_READ_FAILED";
+    res.status(502).json({
+      connected: false,
+      error: "Tidak dapat membaca spreadsheet. Periksa izin service account dan konfigurasi server.",
+      reason,
+      writeEnabled: false,
+    });
   }
 });
 export default router;
