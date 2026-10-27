@@ -559,6 +559,29 @@ export async function loadSecretsFromGSM(): Promise<LoadResult> {
       ...result.loaded,
       ...setEnvironmentConfig(effectiveSection, env),
     ];
+    // Google Sheets uses a dedicated secret; never copy its private key into the shared config.
+    // A failed optional integration must not block core bookings or payment startup.
+    if (env === "prod" && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+      try {
+        const raw = await accessSecretValue(
+          projectId as string, "GOOGLE_SERVICE_ACCOUNT_JSON", bootstrap.credentials,
+        );
+        const key = JSON.parse(raw) as { type?: string; project_id?: string; client_email?: string; private_key?: string };
+        if (
+          key.type !== "service_account" ||
+          key.project_id !== "sport-center-506306" ||
+          key.client_email !== "sport-center@sport-center-506306.iam.gserviceaccount.com" ||
+          typeof key.private_key !== "string" ||
+          !key.private_key.includes("BEGIN PRIVATE KEY")
+        ) {
+          throw new Error("Invalid Google Sheets service-account credentials");
+        }
+        process.env.GOOGLE_SERVICE_ACCOUNT_JSON = raw;
+        result.loaded.push("GOOGLE_SERVICE_ACCOUNT_JSON");
+      } catch (error) {
+        result.failed.push(`Optional Google Sheets secret unavailable: ${secretAccessFailureCategory(error)}`);
+      }
+    }
     if (!result.loaded.includes(`SUPABASE_DATABASE_URL${env === "dev" ? "_DEV" : ""}`)) {
       result.fatal.push("database_url could not be loaded");
     }
