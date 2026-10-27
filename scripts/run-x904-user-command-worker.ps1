@@ -49,7 +49,7 @@ try {
     if($isGroup) {
       $groupExecutor=Join-Path $base 'migration\x904-vmsc-group-executor-stage.ps1'
       if(-not(Test-Path $groupExecutor)){throw 'GROUP_EXECUTOR_UNAVAILABLE'}
-      $output=$cfg | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $groupExecutor -ExecuteClaimed 2>&1
+      $output=$cfg | & powershell.exe -NoProfile -NonInteractive -File $groupExecutor -ExecuteClaimed 2>&1
       $nodeExit=$LASTEXITCODE
     } else {
       $output=$cfg | & $node $executor --execute-claimed 2>&1
