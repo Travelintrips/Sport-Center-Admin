@@ -1968,6 +1968,29 @@ export async function processPaymentAccountingOutbox(): Promise<{
     try {
       const input = await getConfirmedPaymentAccountingInput(pool, event.payment_id);
       if (!input) {
+        const statusResult = await pool.query(
+          `SELECT status FROM sport_center.sport_payments WHERE id = $1 LIMIT 1`,
+          [event.payment_id],
+        );
+        const sourceStatus = statusResult.rows[0]?.status == null
+          ? null
+          : String(statusResult.rows[0].status);
+        if (sourceStatus && sourceStatus !== "confirmed") {
+          // The payment was rejected/cancelled after the confirmation event was
+          // queued. Acknowledge the stale event; never create accounting for it.
+          await pool.query(
+            `UPDATE sport_center.payment_accounting_outbox
+                SET status = 'posted',
+                    processed_at = NOW(),
+                    locked_at = NULL,
+                    last_error = NULL,
+                    updated_at = NOW()
+              WHERE id = $1`,
+            [event.id],
+          );
+          posted++;
+          continue;
+        }
         throw new Error("PAYMENT_NOT_CONFIRMED_OR_MISSING");
       }
 
