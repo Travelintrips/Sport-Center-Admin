@@ -196,8 +196,8 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
   if (!actor || !["owner", "super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
   if (process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return res.status(503).json({error:"USER_WRITE_DISABLED"});
   const {commandType, userPin, expectedSerial, confirmPin, idempotencyKey, name, expectedUid, expectedName} = req.body ?? {};
-  if (process.env.GYM_X904_NAME_EDIT_ALL_ENABLED!=="true" && process.env.GYM_X904_USER_WRITE_TEST_PIN && (userPin !== process.env.GYM_X904_USER_WRITE_TEST_PIN || expectedUid !== 335 || !["UPDATE_USER","DELETE_USER"].includes(commandType))) return res.status(403).json({error:"TEST_USER_ONLY"});
-  if(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" && commandType!=="UPDATE_USER" && !(commandType==="DELETE_USER" && process.env.GYM_X904_USER_DELETE_ENABLED==="true")) return res.status(403).json({error:"OPERATION_NOT_ENABLED"});
+  if (!["SUSPEND_USER","ACTIVATE_USER"].includes(commandType) && process.env.GYM_X904_NAME_EDIT_ALL_ENABLED!=="true" && process.env.GYM_X904_USER_WRITE_TEST_PIN && (userPin !== process.env.GYM_X904_USER_WRITE_TEST_PIN || expectedUid !== 335 || !["UPDATE_USER","DELETE_USER"].includes(commandType))) return res.status(403).json({error:"TEST_USER_ONLY"});
+  if(!["SUSPEND_USER","ACTIVATE_USER"].includes(commandType) && process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" && commandType!=="UPDATE_USER" && !(commandType==="DELETE_USER" && process.env.GYM_X904_USER_DELETE_ENABLED==="true")) return res.status(403).json({error:"OPERATION_NOT_ENABLED"});
   // Separate explicit readiness gate; never infer manual group readiness from CUD flags.
   const isManualGroup=commandType==="SUSPEND_USER" || commandType==="ACTIVATE_USER";
   if(isManualGroup){
