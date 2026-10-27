@@ -505,8 +505,8 @@ export default function GymX904() {
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
               <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{accessFor(u)?.device_group===1?"Aktif (ACK terakhir)":accessFor(u)?.device_group===2?"Suspend (ACK terakhir)":"Belum diverifikasi dari mesin"}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
-                {(() => {const state=accessFor(u);const op=state?.device_group===1?"SUSPEND_USER":state?.device_group===2?"ACTIVATE_USER":null;
-                  return <button type="button" title={!op?"Status grup belum terverifikasi dari ACK X904":!userCommandCapabilities.operations?.includes(op)?"Fitur manual belum diaktifkan di server":"Ubah akses mesin"}
+                {(() => {const state=accessFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const op=state?.device_group===1?"SUSPEND_USER":state?.device_group===2?"ACTIVATE_USER":testUser?"SUSPEND_USER":null;
+                  return <button type="button" title={!op?"Status grup belum terverifikasi dari ACK X904":!userCommandCapabilities.operations?.includes(op)?"Fitur manual belum diaktifkan di server":testUser&&!state?"Uji PIN 200: mesin wajib memverifikasi Grup 1 sebelum suspend":"Ubah akses mesin"}
                     disabled={!op||!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||u.device_role!==0||!!accessBusyPin}
                     onClick={()=>{if(op)void changeManualAccess(u,op);}}
                     className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">{op==="ACTIVATE_USER"?"Aktifkan":"Suspend"}</button>})()}
