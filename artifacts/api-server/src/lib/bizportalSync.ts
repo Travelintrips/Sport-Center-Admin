@@ -1924,7 +1924,13 @@ export async function processPaymentAccountingOutbox(): Promise<{
     const result = await client.query(`
       SELECT id, payment_id
         FROM sport_center.payment_accounting_outbox
-       WHERE status IN ('pending', 'failed')
+       WHERE (
+              status IN ('pending', 'failed')
+              OR (
+                status = 'processing'
+                AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '15 minutes')
+              )
+             )
          AND available_at <= NOW()
          AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '15 minutes')
        ORDER BY id
