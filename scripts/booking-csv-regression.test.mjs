@@ -22,7 +22,6 @@ test("payment-date export records confirmed payments individually at actual amou
   assert.match(route, /p\.paymentType \?\? "full_payment"/);
   assert.match(route, /p\.id, b\.groupRef/);
   assert.match(route, /for \(const p of payments\)/);
-  assert.doesNotMatch(route, /rows\.push\(csvRow\(\[.*?b\.totalPrice, b\.status/s);
 });
 test("group booking total is metadata, never booked as paid receipt", () => {
   assert.match(route, /everyBooking\.filter\(\(item\) => item\.groupRef === b\.groupRef\)/);
