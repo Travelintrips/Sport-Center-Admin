@@ -372,6 +372,7 @@ async function ensureMembershipPaymentBooking(
       ppnRate: values.ppnRate,
       ppnAmount: values.ppnAmount,
       grandTotal: values.grandTotal,
+      paidAt: values.paidAt,
     })
     .returning();
 
