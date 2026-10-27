@@ -4,7 +4,7 @@ import { Sheet, ShieldCheck, Clock3, RefreshCw, Info, ExternalLink } from "lucid
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-const sheetUrl = "https://docs.google.com/spreadsheets/d/1ZvHAvdIYhdfnDZmOCcPNKtOnj-O3-I9bY84927bYN7E/edit";
+const sheetUrl = "https://docs.google.com/spreadsheets/d/1ZvHAydIYhdfnDZmOCcPNKtOnj-O3-I9bY84927bYN7E/edit";
 
 export default function GoogleSheets() {
   const [audit, setAudit] = useState<any>(null);
