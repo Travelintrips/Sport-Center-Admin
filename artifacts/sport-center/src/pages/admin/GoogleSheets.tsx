@@ -30,6 +30,25 @@ export default function GoogleSheets() {
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
+  const [reconciliation,setReconciliation] = useState<any>(null);
+  const [reconBusy,setReconBusy] = useState(false);
+  const [reconError,setReconError] = useState("");
+  async function reconcilePreview() {
+    if (!preview) return;
+    setReconBusy(true);setReconError("");setReconciliation(null);
+    try {
+      const response=await fetch("/api/admin/google-sheets/reconcile", {
+        method:"POST",
+        headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+        body:JSON.stringify({month,orderNumbers:preview.rows.map(row=>row[0])}),
+      });
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error || "Pemeriksaan duplikasi gagal");
+      setReconciliation(payload);
+    }catch(error){setReconError(error instanceof Error?error.message:"Pemeriksaan duplikasi gagal");}
+    finally{setReconBusy(false);}
+  }
+
   const [readiness,setReadiness] = useState<{tab:string;ready:boolean;reason:string|null;expectedHeaders?:string[];headerRow?:number|null;populatedFirstColumn?:number}|null>(null);
   const [readinessBusy,setReadinessBusy] = useState(false);
   const [readinessError,setReadinessError] = useState("");
@@ -45,7 +64,7 @@ export default function GoogleSheets() {
   }
 
   async function loadPreview() {
-    setPreviewBusy(true);setPreviewError("");setPreview(null);setReadiness(null);
+    setPreviewBusy(true);setPreviewError("");setPreview(null);setReadiness(null);setReconciliation(null);
     try {
       if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
       const [year,mon]=month.split("-").map(Number);
@@ -128,6 +147,14 @@ export default function GoogleSheets() {
           </div>
           {previewError&&<p role="alert" className="text-sm text-red-600">{previewError}</p>}
           {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview saja. Belum ada insert, update atau pengecekan duplikasi lintas sheet; Sync Now tetap terkunci.</p>
+            <button type="button" onClick={reconcilePreview} disabled={reconBusy} className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50">{reconBusy?"Mencocokkan...":"Cek Duplikasi Lintas Tab (Dry Run)"}</button>
+            {reconError&&<p role="alert" className="text-red-600 text-sm">{reconError}</p>}
+            {reconciliation&&<div className="rounded-lg border p-3 text-sm space-y-2">
+              <p><strong>{reconciliation.tab}</strong> — {reconciliation.ready?"Pemeriksaan data selesai":"Belum siap untuk sinkronisasi"}</p>
+              {reconciliation.ready?<p>Kandidat: {reconciliation.candidateCount} · Belum ada di Sheets: {reconciliation.newCount} · Sudah ada: {reconciliation.existingCount} · Duplikat dalam preview: {reconciliation.repeatedInPreviewCount}</p>:<p className="text-amber-700">Alasan: {reconciliation.reason}</p>}
+              {reconciliation.duplicates?.length>0&&<p>Contoh sudah ada: {reconciliation.duplicates.slice(0,10).map((item:any)=>item.orderNumber+" ("+item.tabs.join(", ")+")").join("; ")}</p>}
+              <p className="text-xs text-amber-700">Belum dapat digunakan untuk menulis: ledger pembayaran DP/grup dan uji idempotensi E2E belum selesai.</p>
+            </div>}
             <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}</tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}</tr>)}</tbody></table></div>
             {preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
           </div>}
