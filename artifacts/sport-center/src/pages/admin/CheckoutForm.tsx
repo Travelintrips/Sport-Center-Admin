@@ -44,6 +44,18 @@ export default function AdminCheckoutForm() {
   const [memberLoadError, setMemberLoadError] = useState("");
   const [membershipResult, setMembershipResult] = useState("");
   const [membershipConfirmOpen, setMembershipConfirmOpen] = useState(false);
+  const [membershipPaymentTarget, setMembershipPaymentTarget] = useState<null | {
+    membershipId: number;
+    action: "new" | "renew";
+    name: string;
+    periodStart: string;
+    periodEnd: string;
+    amount: number;
+  }>(null);
+  const [membershipPaymentMethod, setMembershipPaymentMethod] = useState("qris");
+  const [membershipPaymentFile, setMembershipPaymentFile] = useState<File | null>(null);
+  const [membershipPaymentBusy, setMembershipPaymentBusy] = useState(false);
+  const [membershipPaymentDone, setMembershipPaymentDone] = useState(false);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
@@ -138,14 +150,92 @@ export default function AdminCheckoutForm() {
       const data = await response.json();
       if(!response.ok) throw Error(data.error || "Proses membership gagal");
       if (memberAction !== "checkin" && Number.isInteger(Number(data.id)) && Number(data.id) > 0) {
-        setLocation("/admin/memberships?memberId=" + encodeURIComponent(String(data.id)) + (memberAction === "renew" ? "&payment=paid" : ""));
+        const target = memberAction === "renew"
+          ? {
+              membershipId: Number(data.id),
+              action: "renew" as const,
+              name: String(data.name ?? matchedMember?.name ?? "Member"),
+              periodStart: String(data.renewal?.periodStart ?? renewalStartDate ?? ""),
+              periodEnd: String(data.renewal?.periodEnd ?? renewalEndDate ?? ""),
+              amount: Number(data.renewal?.amount ?? membershipCharge),
+            }
+          : {
+              membershipId: Number(data.id),
+              action: "new" as const,
+              name: String(data.name ?? (isGuest ? guestName : selectedCustomer?.name) ?? "Member"),
+              periodStart: String(data.startDate ?? selectedDate ?? ""),
+              periodEnd: String(data.endDate ?? ""),
+              amount: Number(data.totalPrice ?? Number(memberMonths) * 300000),
+            };
+        setMembershipPaymentTarget(target);
+        setMembershipPaymentMethod("qris");
+        setMembershipPaymentFile(null);
+        setMembershipPaymentDone(false);
+        setMembershipResult(memberAction === "renew"
+          ? "Perpanjangan berhasil dibuat. Selesaikan pembayaran di bawah ini."
+          : "Member berhasil didaftarkan. Selesaikan pembayaran di bawah ini.");
+        toast({title:memberAction === "renew" ? "Perpanjangan dibuat" : "Member didaftarkan",description:"Lanjutkan pembayaran pada halaman ini."});
         return;
       }
-      setMembershipResult(memberAction === "checkin" ? "Kunjungan berhasil dicatat tanpa tagihan baru."
-        : "Permintaan membership tercatat. Selesaikan pembayaran melalui alur verifikasi Membership; belum dianggap lunas.");
-      toast({title:"Berhasil",description:"Periksa detail pada modul Membership."});
+      setMembershipResult("Kunjungan berhasil dicatat tanpa tagihan baru.");
+      toast({title:"Berhasil",description:"Kunjungan member berhasil dicatat."});
     } catch(e) {toast({title:"Membership gagal",description:e instanceof Error ? e.message : "Terjadi kesalahan",variant:"destructive"});}
     finally {setIsSubmitting(false);}
+  }
+
+  async function submitMembershipPaymentInline() {
+    if (!membershipPaymentTarget || !membershipPaymentFile || membershipPaymentBusy || membershipPaymentDone) return;
+    setMembershipPaymentBusy(true);
+    try {
+      const token = getToken();
+      const form = new FormData();
+      form.append("proof", membershipPaymentFile);
+      form.append("paymentMethod", membershipPaymentMethod);
+      const uploaded = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}/admin-payment-proof-upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+        body: form,
+      });
+      const uploadResult = await uploaded.json();
+      if (!uploaded.ok) throw Error(uploadResult.error || "Upload bukti pembayaran gagal");
+
+      const role = getCurrentRole();
+      if (role && role !== "staff") {
+        const confirmed = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token ?? ""}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status: "active" }),
+        });
+        const confirmedResult = await confirmed.json();
+        if (!confirmed.ok) throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi membership gagal");
+        setMembershipPaymentDone(true);
+        setMembershipResult(membershipPaymentTarget.action === "renew"
+          ? "Pembayaran dikonfirmasi. Perpanjangan membership selesai."
+          : "Pembayaran dikonfirmasi. Member baru sudah aktif.");
+        toast({
+          title: "Pembayaran dikonfirmasi",
+          description: membershipPaymentTarget.action === "renew"
+            ? "Perpanjangan membership selesai."
+            : "Pendaftaran member dan pembayaran selesai.",
+        });
+      } else {
+        setMembershipPaymentDone(true);
+        setMembershipResult("Bukti pembayaran berhasil dikirim dan menunggu verifikasi.");
+        toast({title:"Bukti pembayaran dikirim",description:"Menunggu verifikasi oleh admin/finance."});
+      }
+      setMembershipPaymentFile(null);
+    } catch (err) {
+      toast({
+        title: "Pembayaran membership gagal",
+        description: err instanceof Error ? err.message : "Silakan periksa kembali bukti pembayaran",
+        variant: "destructive",
+      });
+    } finally {
+      setMembershipPaymentBusy(false);
+    }
   }
 
   async function submitBookingPayment() {
@@ -587,7 +677,7 @@ export default function AdminCheckoutForm() {
             {isMembership && <div className="rounded-lg border p-4 space-y-3">
               <p className="font-semibold">Pengelolaan Member Gym</p>
               <Label>Tindakan Membership</Label>
-              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setMemberId("");setMembershipResult("");}}>
+              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setMemberId("");setMembershipResult("");setMembershipPaymentTarget(null);setMembershipPaymentDone(false);setMembershipPaymentFile(null);}}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">Daftar Member Baru</SelectItem>
@@ -602,7 +692,7 @@ export default function AdminCheckoutForm() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{[1,2,3,6,12].map(n => <SelectItem key={n} value={String(n)}>{n} bulan</SelectItem>)}</SelectContent>
                 </Select>
-                <p className="text-sm">Estimasi biaya membership: <strong>{formatRupiah(Number(memberMonths) * 300000)}</strong>. Verifikasi pembayaran dilakukan terpisah.</p>
+                <p className="text-sm">Tagihan membership: <strong>{formatRupiah(Number(memberMonths) * 300000)}</strong>. Pembayaran dapat diselesaikan langsung setelah pendaftaran.</p>
               </> : <>
                 <Label>Cari Member Gym</Label>
                 <Select value={memberId} onValueChange={setMemberId}>
@@ -629,10 +719,69 @@ export default function AdminCheckoutForm() {
               </>}
               {memberLoadError && <p className="text-xs text-destructive">{memberLoadError}</p>}
               {membershipResult && <p className="text-sm font-medium text-green-700">{membershipResult}</p>}
-              <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
+              {membershipPaymentTarget && (
+                <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-4 space-y-3">
+                  <div>
+                    <p className="font-semibold">
+                      {membershipPaymentTarget.action === "renew" ? "Pembayaran Perpanjangan Membership" : "Pembayaran Member Baru"}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {membershipPaymentTarget.name}
+                      {membershipPaymentTarget.periodStart && membershipPaymentTarget.periodEnd
+                        ? ` · ${membershipPaymentTarget.periodStart} s/d ${membershipPaymentTarget.periodEnd}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="flex justify-between gap-4 text-sm">
+                    <span>Tagihan</span>
+                    <strong>{formatRupiah(membershipPaymentTarget.amount)}</strong>
+                  </div>
+                  {!membershipPaymentDone ? (
+                    <>
+                      <Label>Metode pembayaran</Label>
+                      <Select value={membershipPaymentMethod} onValueChange={setMembershipPaymentMethod}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="qris">QRIS</SelectItem>
+                          <SelectItem value="transfer">Transfer Bank</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Label htmlFor="checkout-membership-proof">Bukti pembayaran</Label>
+                      <Input
+                        id="checkout-membership-proof"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                        onChange={(e) => setMembershipPaymentFile(e.target.files?.[0] ?? null)}
+                      />
+                      <Button
+                        type="button"
+                        className="w-full"
+                        disabled={!membershipPaymentFile || membershipPaymentBusy}
+                        onClick={submitMembershipPaymentInline}
+                      >
+                        {membershipPaymentBusy
+                          ? "Memproses..."
+                          : getCurrentRole() === "staff"
+                            ? "Unggah Bukti & Kirim Verifikasi"
+                            : "Unggah Bukti & Konfirmasi"}
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-700">
+                      {getCurrentRole() === "staff"
+                        ? "Bukti sudah dikirim. Menunggu verifikasi petugas berwenang."
+                        : membershipPaymentTarget.action === "renew"
+                          ? "Perpanjangan dan pembayaran sudah selesai."
+                          : "Pendaftaran member dan pembayaran sudah selesai."}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!membershipPaymentTarget && <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
                 {isSubmitting ? "Memproses..." : memberAction === "new" ? "Daftarkan Member" : memberAction === "renew" ? "Perpanjang Membership" : "Catat Kunjungan (Rp0)"}
-              </Button>
-              <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>
+              </Button>}
+              {(!membershipPaymentTarget || membershipPaymentDone) && <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>}
             </div>}
           </CardContent>
 
@@ -663,10 +812,10 @@ export default function AdminCheckoutForm() {
                       {renewalStartDate && renewalEndDate && <div className="flex justify-between gap-4"><span className="text-muted-foreground">Periode berikutnya</span><strong>{renewalStartDate} – {renewalEndDate}</strong></div>}
                       <div className="flex justify-between gap-4"><span className="text-muted-foreground">Tagihan</span><strong>{formatRupiah(membershipCharge)}</strong></div>
                     </div>
-                    <p>Setelah dikonfirmasi, sistem membuat perpanjangan dan langsung membuka detail member untuk proses pembayaran.</p>
+                    <p>Setelah dikonfirmasi, sistem membuat perpanjangan dan langsung menampilkan pembayaran pada halaman ini.</p>
                   </>
                 ) : (
-                  <p>Proses ini akan dicatat di sistem. Pastikan data yang dipilih sudah benar.</p>
+                  <p>{memberAction === "new" ? "Member baru akan dibuat dan pembayaran dapat langsung diselesaikan pada halaman ini." : "Proses ini akan dicatat di sistem. Pastikan data yang dipilih sudah benar."}</p>
                 )}
               </div>
             </AlertDialogDescription>
