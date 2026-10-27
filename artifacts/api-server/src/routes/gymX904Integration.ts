@@ -209,11 +209,28 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
        !Number.isSafeInteger(expectedUid) || expectedUid<1 || expectedUid>=65535 ||
        typeof expectedName!=="string" || !/^[A-Za-z0-9 ._-]{2,24}$/.test(expectedName))
       return res.status(400).json({error:"INVALID_MANUAL_ACCESS_COMMAND"});
-    // Restrict initial production rollout to the attested test identity only.
-    // Never permit a mass/manual write to unrelated members before live group snapshots and membership policy are verified.
-    if(process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN!=="200" || userPin!=="200" ||
-       expectedUid!==337 || expectedName!=="TEST SUSPEND X904")
-      return res.status(403).json({error:"MANUAL_ACCESS_TEST_PIN_ONLY"});
+    // Fail closed by default: global manual control requires an explicit rollout flag.
+    const testIdentity=userPin==="200" && expectedUid===337 && expectedName==="TEST SUSPEND X904" && process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN==="200";
+    if(!testIdentity && process.env.GYM_X904_MANUAL_ACCESS_ALL_ENABLED!=="true")
+      return res.status(403).json({error:"MANUAL_ACCESS_ALL_DISABLED"});
+    if(!testIdentity){
+      try{
+        const latest=await db.execute(sql`SELECT snapshot_id, observed_at, users FROM sport_center.gym_x904_access_snapshots
+          WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+        if(!latest.rows.length || Date.now()-new Date(latest.rows[0].observed_at as string).getTime()>300000 || Date.now()<new Date(latest.rows[0].observed_at as string).getTime())
+          return res.status(409).json({error:"SNAPSHOT_STALE"});
+        const match=(Array.isArray(latest.rows[0].users)?latest.rows[0].users:[]).find((x:any)=>String(x.pin)===userPin);
+        if(!match || match.enabled!==true && match.enabled!==false || Number(match.role)!==0 ||
+           String(match.name)!==expectedName || !((commandType==="SUSPEND_USER" && match.enabled===true && Number(match.group)===1) ||
+             (commandType==="ACTIVATE_USER" && match.enabled===false && Number(match.group)===2)))
+          return res.status(409).json({error:"MACHINE_ACCESS_STATE_MISMATCH"});
+        const mapping=await db.execute(sql`SELECT device_uid, display_name, device_role FROM sport_center.gym_x904_lan_users
+          WHERE device_serial='TDBD234200545' AND user_pin=${userPin} LIMIT 1`);
+        if(mapping.rows.length!==1 || Number(mapping.rows[0].device_uid)!==expectedUid ||
+           String(mapping.rows[0].display_name)!==expectedName || Number(mapping.rows[0].device_role)!==0)
+          return res.status(409).json({error:"MACHINE_IDENTITY_MISMATCH"});
+      }catch{return res.status(503).json({error:"MACHINE_SNAPSHOT_VALIDATION_UNAVAILABLE"});}
+    }
     try{
       const active=await db.execute(sql`SELECT command_id,state FROM sport_center.x904_user_commands
         WHERE device_serial=${expectedSerial} AND user_pin=${userPin}
