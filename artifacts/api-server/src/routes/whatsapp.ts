@@ -119,6 +119,71 @@ import {
 
 const router = Router();
 
+async function applyWaPaymentApprovalLifecycle(
+  booking: typeof bookingsTable.$inferSelect,
+  payment: typeof paymentsTable.$inferSelect,
+  changedByName: string,
+  note: string,
+): Promise<{ targetStatus: string; paidAt: Date; affected: Array<typeof bookingsTable.$inferSelect> }> {
+  const paidAt = payment.paidAt ?? payment.confirmedAt ?? new Date();
+  const isDp = payment.paymentType === "dp";
+  const targetStatus = isDp ? "pending_payment" : "confirmed";
+
+  const affected = await db.transaction(async (tx) => {
+    await tx
+      .update(paymentsTable)
+      .set({
+        status: "confirmed",
+        confirmedAt: payment.confirmedAt ?? paidAt,
+        paidAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(paymentsTable.id, payment.id));
+
+    const rows = booking.groupRef
+      ? await tx.select().from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
+      : [booking];
+
+    const updated: Array<typeof bookingsTable.$inferSelect> = [];
+    for (const row of rows) {
+      if (row.id !== booking.id && !isBookingConfirmableStatus(row.status)) continue;
+      const patch: Record<string, unknown> = {
+        status: targetStatus,
+        updatedAt: new Date(),
+      };
+      if (isDp) patch.isDpPaid = true;
+      else patch.paidAt = paidAt;
+
+      await tx.update(bookingsTable).set(patch as any).where(eq(bookingsTable.id, row.id));
+      await tx.insert(bookingHistoryTable).values({
+        bookingId: row.id,
+        fromStatus: row.status,
+        toStatus: targetStatus,
+        changedByName,
+        note: booking.groupRef ? `${note} (grup ${booking.groupRef})` : note,
+      });
+      updated.push({ ...row, ...(patch as any) });
+    }
+    return updated;
+  });
+
+  return { targetStatus, paidAt, affected };
+}
+
+async function syncWaApprovalAffectedBookings(
+  affected: Array<typeof bookingsTable.$inferSelect>,
+  proofUrl: string | null | undefined,
+  paidAt: Date,
+): Promise<void> {
+  await Promise.all(
+    affected.map((row) =>
+      syncStatusToBizportal(row.orderNumber, row.status, proofUrl, paidAt, row).catch((err) =>
+        logger.error({ err, orderNumber: row.orderNumber }, "[WA] gagal sync sibling booking ke BizPortal"),
+      ),
+    ),
+  );
+}
+
 type FonnteReplyContext = {
   inboxId?: string;
   inboundMessageId?: string;
@@ -1073,14 +1138,14 @@ router.post("/wa/action/:token", async (req, res) => {
 
         await consumeWaToken(req.params.token);
 
-        await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
-          .where(eq(paymentsTable.bookingId, booking.id));
-        await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
-          .where(eq(bookingsTable.id, booking.id));
-        await db.insert(bookingHistoryTable).values({
-          bookingId: booking.id, fromStatus: booking.status, toStatus: "confirmed",
-          changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WhatsApp",
-        });
+        const lifecycle = await applyWaPaymentApprovalLifecycle(
+          booking,
+          payment,
+          "admin (WhatsApp)",
+          payment.paymentType === "dp"
+            ? "DP dikonfirmasi via WhatsApp, menunggu pelunasan"
+            : "Pembayaran dikonfirmasi via WhatsApp",
+        );
 
         const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
         notifyWaBookingConfirmed({
@@ -1101,15 +1166,15 @@ router.post("/wa/action/:token", async (req, res) => {
           finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
         });
 
-        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
-        pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
+        syncWaApprovalAffectedBookings(lifecycle.affected, payment.proofUrl, lifecycle.paidAt).catch(() => {});
+        pushConfirmedPaymentAsBankMutation(booking, lifecycle.paidAt).catch(() => {});
 
         await logAudit({
           action: "wa_approve_payment",
           entity: "booking",
           entityId: booking.id,
           before: { status: booking.status },
-          after: { status: "confirmed" },
+          after: { status: lifecycle.targetStatus, groupRef: booking.groupRef ?? null, affectedBookingIds: lifecycle.affected.map((row) => row.id) },
           userName: "admin (WhatsApp)",
         });
 
@@ -2042,14 +2107,14 @@ router.post("/wa/review/:token", async (req, res) => {
 
       await consumeWaToken(req.params.token);
 
-      await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
-        .where(eq(paymentsTable.bookingId, booking.id));
-      await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
-        .where(eq(bookingsTable.id, booking.id));
-      await db.insert(bookingHistoryTable).values({
-        bookingId: booking.id, fromStatus: booking.status, toStatus: "confirmed",
-        changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WA Review Link",
-      });
+      const lifecycle = await applyWaPaymentApprovalLifecycle(
+        booking,
+        payment,
+        "admin (WhatsApp Review)",
+        payment.paymentType === "dp"
+          ? "DP dikonfirmasi via WA Review Link, menunggu pelunasan"
+          : "Pembayaran dikonfirmasi via WA Review Link",
+      );
 
       const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
       notifyWaBookingConfirmed({
@@ -2069,15 +2134,15 @@ router.post("/wa/review/:token", async (req, res) => {
         finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
       }).catch(() => {});
 
-      syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
-      pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
+      syncWaApprovalAffectedBookings(lifecycle.affected, payment.proofUrl, lifecycle.paidAt).catch(() => {});
+      pushConfirmedPaymentAsBankMutation(booking, lifecycle.paidAt).catch(() => {});
 
       await logAudit({
         action: "wa_approve_payment",
         entity: "booking",
         entityId: booking.id,
         before: { status: booking.status },
-        after: { status: "confirmed" },
+        after: { status: lifecycle.targetStatus, groupRef: booking.groupRef ?? null, affectedBookingIds: lifecycle.affected.map((row) => row.id) },
         userName: "admin (WhatsApp Review)",
       });
 
