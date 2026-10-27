@@ -4077,12 +4077,13 @@ router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) =>
           eq(bookingsTable.status, "waiting_confirmation"),
           notExists(
             db
-              .select({ id: waActionTokensTable.id })
-              .from(waActionTokensTable)
+              .select({ id: waNotifLogsTable.id })
+              .from(waNotifLogsTable)
               .where(
                 and(
-                  eq(waActionTokensTable.bookingId, bookingsTable.id),
-                  eq(waActionTokensTable.action, "review_payment"),
+                  eq(waNotifLogsTable.bookingId, bookingsTable.id),
+                  eq(waNotifLogsTable.event, "payment_proof_uploaded_admin"),
+                  eq(waNotifLogsTable.status, "sent"),
                 ),
               ),
           ),
