@@ -211,10 +211,26 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
       return res.status(400).json({error:"INVALID_MANUAL_ACCESS_COMMAND"});
     // Restrict initial production rollout to the attested test identity only.
     // Never permit a mass/manual write to unrelated members before live group snapshots and membership policy are verified.
-    if(process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN!=="200" || userPin!=="200" ||
-       expectedUid!==337 || expectedName!=="TEST SUSPEND X904")
+    const isTestPin=process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN==="200" &&
+      userPin==="200" && expectedUid===337 && expectedName==="TEST SUSPEND X904";
+    const expandedRollout=process.env.GYM_X904_MANUAL_ACCESS_ALL_REGULAR_ENABLED==="true";
+    if(!isTestPin && !expandedRollout)
       return res.status(403).json({error:"MANUAL_ACCESS_TEST_PIN_ONLY"});
     try{
+      if(!isTestPin){
+        // Fail closed for non-test targets. The SDK worker also rejects privileged users.
+        // The DB snapshot is only an identity guard, NOT evidence of current group state.
+        const target=await db.execute(sql`SELECT device_uid,display_name,device_role,last_seen_at
+          FROM sport_center.gym_x904_lan_users
+          WHERE device_serial=${expectedSerial} AND user_pin=${userPin} LIMIT 2`);
+        if(target.rows.length!==1 || Number(target.rows[0].device_uid)!==expectedUid ||
+           String(target.rows[0].display_name)!==expectedName ||
+           Number(target.rows[0].device_role)!==0)
+          return res.status(409).json({error:"MACHINE_IDENTITY_OR_ROLE_UNVERIFIED"});
+        // Until authenticated machine-side census group reads are published, do not
+        // infer active/suspended state from an old command ACK.
+        return res.status(503).json({error:"LIVE_GROUP_ATTESTATION_REQUIRED"});
+      }
       const active=await db.execute(sql`SELECT command_id,state FROM sport_center.x904_user_commands
         WHERE device_serial=${expectedSerial} AND user_pin=${userPin}
           AND state IN ('queued','claimed') LIMIT 1`);
