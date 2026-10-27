@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useListMemberships } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -73,14 +73,44 @@ export default function GymX904() {
   const accessFor=(user:LanUser)=>verifiedAccess?.users.find(x=>x.user_pin===user.user_pin&&x.device_uid===user.device_uid);
   const [accessNotice,setAccessNotice]=useState("");
   const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
+  const [pendingAccess,setPendingAccess]=useState<{commandId:string;pin:string;operation:"SUSPEND_USER"|"ACTIVATE_USER"}|null>(null);
+  const {data:accessReceipt,isError:accessReceiptError}=useQuery<{command:{state:string;result:{readBackConfirmed?:boolean;errorCode?:string|null}|null}}>({
+    queryKey:["gym-x904-manual-command-receipt",pendingAccess?.commandId],
+    queryFn:async()=>{
+      const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(API+"/admin/gym-x904/user-command/"+pendingAccess!.commandId,{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+      if(!response.ok)throw new Error("Status perintah tidak tersedia");
+      return response.json();
+    },
+    enabled:!!pendingAccess,
+    refetchInterval:pendingAccess?3000:false,
+    retry:false
+  });
+  useEffect(()=>{
+    if(!pendingAccess||!accessReceipt?.command)return;
+    const {state,result}=accessReceipt.command;
+    if(state!=="completed"&&state!=="failed"&&state!=="cancelled")return;
+    if(state==="completed"&&result?.readBackConfirmed===true){
+      setAccessNotice((pendingAccess.operation==="ACTIVATE_USER"?"Aktivasi berhasil":"Suspend berhasil")+" untuk PIN "+pendingAccess.pin+". ACK dan pembacaan ulang mesin terverifikasi.");
+      void refetchVerifiedAccess();
+    } else {
+      setAccessNotice("Perintah PIN "+pendingAccess.pin+" "+(result?.errorCode||"gagal atau dibatalkan")+". Periksa status mesin sebelum mencoba lagi.");
+    }
+    setPendingAccess(null);
+    setAccessBusyPin(null);
+  },[accessReceipt,pendingAccess,refetchVerifiedAccess]);
+  useEffect(()=>{
+    if(pendingAccess&&accessReceiptError)setAccessNotice("Pemeriksaan ACK sementara gagal untuk PIN "+pendingAccess.pin+". Status mesin belum dikonfirmasi; pengecekan akan dicoba kembali.");
+  },[accessReceiptError,pendingAccess]);
+
   async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
     if(accessBusyPin || !userCommandCapabilities?.enabled || !userCommandCapabilities.operations.includes(op) || user.device_role!==0)return;
     if(!window.confirm((op==="SUSPEND_USER"?"Suspend":"Aktifkan")+" PIN "+user.user_pin+"?"))return;
     setAccessBusyPin(user.user_pin);setAccessNotice("Menunggu konfirmasi mesin untuk PIN "+user.user_pin);
     try { const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
       const response=await fetch(API+"/admin/gym-x904/user-command",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({commandType:op,userPin:user.user_pin,expectedUid:user.device_uid,expectedName:user.display_name,expectedSerial:"TDBD234200545",confirmPin:user.user_pin,idempotencyKey:crypto.randomUUID().replace(/-/g,"")})});
-      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");setAccessNotice("Perintah PIN "+user.user_pin+" masuk antrean; menunggu ACK dan pembacaan ulang mesin."); void refetchVerifiedAccess();
-    }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal");}finally{setAccessBusyPin(null);}
+      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");if(typeof data.command_id!=="string")throw new Error("ID perintah tidak tersedia");setPendingAccess({commandId:data.command_id,pin:user.user_pin,operation:op});setAccessNotice("Perintah PIN "+user.user_pin+" masuk antrean; menunggu ACK dan pembacaan ulang mesin."); void refetchVerifiedAccess();
+    }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal");setAccessBusyPin(null);}
   }
   const [commandMessage, setCommandMessage] = useState("");
   const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;created_at:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
