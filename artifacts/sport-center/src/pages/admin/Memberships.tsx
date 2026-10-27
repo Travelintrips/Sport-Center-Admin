@@ -268,6 +268,14 @@ export default function AdminMemberships() {
     },
   });
   const paymentHistory = Array.isArray(rawPaymentHistory) ? rawPaymentHistory : [];
+  const pendingRenewalPayment = paymentHistory.find((payment) => payment.status === "pending_payment" || payment.status === "waiting_confirmation") ?? null;
+
+  useEffect(() => {
+    if (viewMember?.id && pendingRenewalPayment?.status === "pending_payment") {
+      setPaymentDecision("paid");
+      setPaymentFocusMode(true);
+    }
+  }, [viewMember?.id, pendingRenewalPayment?.id, pendingRenewalPayment?.status]);
 
   const checkedInIds = new Set(checkins.map((c) => c.membershipId));
   const checkinById = new Map(checkins.map((c) => [c.membershipId, c]));
@@ -872,7 +880,7 @@ export default function AdminMemberships() {
                 )}
               </div>
 
-              {viewMember.paymentProofUrl && (
+              {viewMember.paymentProofUrl && !pendingRenewalPayment && (
                 <div className="space-y-2">
                   <div className="text-sm font-medium flex items-center gap-2">
                     <ImageIcon size={14} />
@@ -911,38 +919,36 @@ export default function AdminMemberships() {
                 </div>
               )}
 
-              {viewMember.status === "pending_payment" && (
-                <div className="rounded-xl border p-3 space-y-3">
-                  <p className="font-semibold text-sm">Pembayaran Membership</p>
-                  <p className="text-sm">Tagihan: <strong>{formatCurrency(viewMember.totalPrice)}</strong></p>
-                  {!paymentFocusMode && <div className="grid grid-cols-2 gap-2">
-                    <Button type="button" size="sm" variant={paymentDecision==="unpaid"?"default":"outline"} onClick={()=>setPaymentDecision("unpaid")}>Belum Dibayar</Button>
-                    <Button type="button" size="sm" variant={paymentDecision==="paid"?"default":"outline"} onClick={()=>setPaymentDecision("paid")}>Sudah Dibayar</Button>
-                  </div>}
-                  {paymentFocusMode && <p className="text-xs font-medium text-orange-700">Perpanjangan berhasil dibuat. Lengkapi pembayaran renewal di bawah ini.</p>}
-                  {paymentDecision==="unpaid" ? <p className="text-xs text-muted-foreground">Tagihan tetap menunggu pembayaran. Tidak ada transaksi baru.</p> : (
-                    <div className="space-y-2">
-                      <Label>Metode pembayaran</Label>
-                      <Select value={paymentMethodDraft} onValueChange={setPaymentMethodDraft}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent><SelectItem value="qris">QRIS</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
-                      </Select>
-                      <Label htmlFor="member-proof">Bukti pembayaran (gambar, maks. 10 MB)</Label>
-                      <Input id="member-proof" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={e=>setPaymentFile(e.target.files?.[0]??null)}/>
-                      <p className="text-xs text-muted-foreground">{getCurrentRole()==="staff" ? "Bukti akan dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan perpanjangan langsung dikonfirmasi setelah validasi berhasil."}</p>
-                      {paymentError && <p className="text-sm text-destructive">{paymentError}</p>}
-                      <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading} onClick={submitAdminMembershipProof}>{paymentUploading?"Memproses...":(getCurrentRole()==="staff"?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}</Button>
-                    </div>
-                  )}
+              {pendingRenewalPayment?.status === "pending_payment" && (
+                <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-3 space-y-3">
+                  <div>
+                    <p className="font-semibold text-sm">Pembayaran Renewal #{pendingRenewalPayment.id}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Periode {pendingRenewalPayment.periodStart} s/d {pendingRenewalPayment.periodEnd}
+                    </p>
+                  </div>
+                  <p className="text-sm">Tagihan: <strong>{formatCurrency(pendingRenewalPayment.amount)}</strong></p>
+                  <div className="space-y-2">
+                    <Label>Metode pembayaran</Label>
+                    <Select value={paymentMethodDraft} onValueChange={setPaymentMethodDraft}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="qris">QRIS</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
+                    </Select>
+                    <Label htmlFor="member-proof">Bukti pembayaran (gambar, maks. 10 MB)</Label>
+                    <Input id="member-proof" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={e=>setPaymentFile(e.target.files?.[0]??null)}/>
+                    <p className="text-xs text-muted-foreground">{getCurrentRole()==="staff" ? "Bukti akan dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan renewal langsung dikonfirmasi setelah validasi berhasil."}</p>
+                    {paymentError && <p className="text-sm text-destructive">{paymentError}</p>}
+                    <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading} onClick={submitAdminMembershipProof}>
+                      {paymentUploading?"Memproses...":(getCurrentRole()==="staff"?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}
+                    </Button>
+                  </div>
                 </div>
               )}
-              {!viewMember.paymentProofUrl && viewMember.status === "pending_payment" && (
-                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
-                  Customer belum melakukan pembayaran / upload bukti.
+              {pendingRenewalPayment?.status === "waiting_confirmation" && (
+                <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+                  Bukti renewal #{pendingRenewalPayment.id} sudah diterima dan menunggu konfirmasi.
                 </div>
               )}
-
-              {viewMember.status === "pending_payment" && <p className="text-xs text-muted-foreground">Aktivasi tersedia setelah bukti dikirim dan diverifikasi oleh petugas berwenang.</p>}
               {/* Tombol konfirmasi menonjol untuk status yang butuh tindakan */}
               {viewMember.status === "waiting_confirmation" && viewMember.paymentProofUrl && (
                 <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-2">
