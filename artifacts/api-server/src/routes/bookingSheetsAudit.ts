@@ -16,6 +16,38 @@ export const paidTabFromWibDate = (value: Date | string): string => {
   return `PAID ${MONTHS[month - 1]} ${year}`;
 };
 
+const BOOKING_HEADERS = ["Order Number","Customer Name","Customer Email","Customer Phone","Facility","Date","Start Time","End Time","Duration (hours)","Total Price","Status","Notes","Admin Notes","Created At"];
+const MONTH_PATTERN = /^20\\d{2}-(0[1-9]|1[0-2])$/;
+export function monthTarget(month: string): string {
+  if (!MONTH_PATTERN.test(month)) throw new Error("Invalid payment month");
+  const [year, number] = month.split("-").map(Number);
+  return `PAID ${MONTHS[number - 1]} ${year}`;
+}
+router.get("/admin/google-sheets/month-readiness", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Bulan pembayaran tidak valid" }); return; }
+  const tab = monthTarget(month);
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ tab, ready: false, reason: "SERVICE_ACCOUNT_NOT_CONFIGURED" }); return; }
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\\\n/g, "\\n");
+    const auth = new google.auth.GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] });
+    const sheets = google.sheets({ version: "v4", auth });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" });
+    const exists = (meta.data.sheets || []).some(s => s.properties?.title === tab);
+    if (!exists) { res.json({ tab, ready: false, reason: "MONTH_TAB_MISSING", expectedHeaders: BOOKING_HEADERS, writeEnabled: false }); return; }
+    const [header, rows] = await Promise.all([
+      sheets.spreadsheets.values.get({ spreadsheetId: TARGET_ID, range: `'${tab}'!A1:N5`, valueRenderOption: "FORMATTED_VALUE" }),
+      sheets.spreadsheets.values.get({ spreadsheetId: TARGET_ID, range: `'${tab}'!A1:A10000`, valueRenderOption: "UNFORMATTED_VALUE" }),
+    ]);
+    const foundAt = (header.data.values || []).findIndex(row => BOOKING_HEADERS.every((name, i) => row[i] === name));
+    const ready = foundAt >= 0;
+    res.json({ tab, ready, reason: ready ? null : "BOOKING_HEADER_MISSING", headerRow: ready ? foundAt+1 : null, populatedFirstColumn: (rows.data.values || []).filter(r => r[0] != null && String(r[0]).trim() !== "").length, expectedHeaders: BOOKING_HEADERS, writeEnabled: false });
+  } catch (error) {
+    req.log.error({ err: error }, "Google Sheets month readiness failed");
+    res.status(502).json({ tab, ready: false, reason: "MONTH_READ_FAILED", writeEnabled: false });
+  }
+});
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
   // Read-only: never clear, append or update the destination spreadsheet.
   if (!isGoogleSheetsConfigured()) {
