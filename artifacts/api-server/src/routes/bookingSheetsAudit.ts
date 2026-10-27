@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { google } from "googleapis";
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { isGoogleSheetsConfigured } from "../lib/googleSheets";
+import { db, bookingsTable, facilitiesTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
 
 const router = Router();
 const TARGET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
@@ -146,6 +146,124 @@ router.get("/admin/google-sheets/payment-sources", adminMiddleware, async (req, 
   } catch(error) {
     req.log.error({err:error},"Google Sheets payment source audit failed");
     res.status(502).json({error:"Cannot audit payment sources",writeEnabled:false});
+  }
+});
+/**
+ * Narrow manual pilot: a single confirmed, fully settled, non-group personal
+ * booking. Does not bulk-sync or auto-sync. Guarded by persistent ledger.
+ */
+router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) => {
+  const orderNumber = String(req.body?.orderNumber ?? "").trim();
+  if (!/^SC-[A-Z0-9-]{1,40}$/.test(orderNumber)) { res.status(400).json({ error: "Nomor booking tidak valid" }); return; }
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ error: "Google Sheets credentials unavailable" }); return; }
+  let claimed: string | undefined;
+  try {
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+    if (!booking || Number(booking.totalPrice) <= 0) { res.status(404).json({ error: "Booking berbayar tidak ditemukan" }); return; }
+    // Group allocation, installment, corporate, and membership bookings require
+    // their own event-to-row accounting rules. Never silently include them in pilot.
+    if (booking.groupRef || booking.payerType === "company" || booking.membershipId || booking.membershipPaymentId) {
+      res.status(409).json({ error: "Booking grup/corporate/membership belum didukung Sync One" }); return;
+    }
+    const sourcesRaw = await db.execute(sql`
+      select source_key,source_type,payment_id,allocation_id,company_invoice_id,
+             amount,payment_ts,payment_date_wib,validation_status
+      from sport_center.booking_sheets_payment_sources
+      where booking_id = ${booking.id}
+      order by payment_ts asc
+    `);
+    const sources = Array.from(sourcesRaw as unknown as Array<Record<string, unknown>>);
+    if (sources.length !== 1 || sources[0].source_type !== "direct" || sources[0].validation_status !== "CANDIDATE") {
+      res.status(409).json({ error: "Hanya satu pembayaran langsung yang sudah terkonfirmasi yang boleh dipilotkan", eventCount: sources.length }); return;
+    }
+    const source = sources[0];
+    const due = Number(booking.grandTotal ?? booking.totalPrice);
+    if (!(Number(source.amount) >= due) || !(due > 0)) {
+      res.status(409).json({ error: "Booking belum lunas penuh atau nilai pembayaran tidak valid" }); return;
+    }
+    const tab = paidTabFromWibDate(String(source.payment_ts));
+    const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if (typeof creds.private_key === "string") creds.private_key = creds.private_key.replace(/\\n/g, "\n");
+    const auth = new google.auth.GoogleAuth({ credentials: creds, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+    const sheets = google.sheets({ version: "v4", auth });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" });
+    const paidTabs = (meta.data.sheets ?? []).map(sheet => sheet.properties?.title)
+      .filter((name): name is string => !!name && /^PAID /.test(name));
+    if (!paidTabs.includes(tab)) {
+      res.status(409).json({ error: "Tab bulan pembayaran belum dibuat", targetTab: tab }); return;
+    }
+    const data = await Promise.all(paidTabs.map(async name => ({
+      name,
+      values: (await sheets.spreadsheets.values.get({
+        spreadsheetId: TARGET_ID, range: `'${name.replace(/'/g,"''")}'!A1:AZ10000`,
+        valueRenderOption: "FORMATTED_VALUE",
+      })).data.values ?? [],
+    })));
+    const found = data.flatMap(item => item.values
+      .map((row, index) => String(row[0] ?? "").trim() === orderNumber ? {tab: item.name, row: index + 1} : null)
+      .filter((v): v is {tab:string;row:number} => v !== null));
+    if (found.length) {
+      res.json({ ok: true, alreadyPresent: true, locations: found, written: false, targetTab: tab }); return;
+    }
+    const dest = data.find(item => item.name === tab)!;
+    const headerOk = BOOKING_HEADERS.every((h, i) => dest.values[0]?.[i] === h);
+    const initiallyEmpty = dest.values.length === 0 || dest.values.every(row => row.every(cell => cell === "" || cell == null));
+    if (!headerOk && !initiallyEmpty) {
+      res.status(409).json({ error: "Tab mempunyai data dengan header tidak sesuai. Tidak akan ditimpa.", targetTab: tab }); return;
+    }
+    const sourceKey = String(source.source_key);
+    const claim = await db.execute(sql`
+      insert into sport_center.booking_sheets_sync_ledger
+        (source_key,booking_id,payment_id,payment_date_wib,target_tab,amount,status,attempt_count,last_attempt_at)
+      values (${sourceKey},${booking.id},${Number(source.payment_id)},${String(source.payment_date_wib)}::date,${tab},
+              ${Number(source.amount)},'writing',1,now())
+      on conflict (source_key) do nothing returning source_key
+    `);
+    if (!(Array.from(claim as unknown as Array<Record<string,unknown>>)).length) {
+      res.status(409).json({ error: "Sumber pembayaran telah diklaim ledger; perlu rekonsiliasi, bukan menulis ulang", sourceKey }); return;
+    }
+    claimed = sourceKey;
+    if (initiallyEmpty) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: TARGET_ID, range: `'${tab}'!A1:N1`, valueInputOption: "RAW",
+        requestBody: { values: [BOOKING_HEADERS] },
+      });
+    }
+    const facilities = await db.select().from(facilitiesTable);
+    const fac = facilities.find(item => item.id === booking.facilityId);
+    const createdParts = new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Jakarta",
+      day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(booking.createdAt));
+    const part = (type:string) => createdParts.find(p => p.type === type)?.value ?? "";
+    const createdAt = `${part("day")}/${part("month")}/${part("year")} ${part("hour")}:${part("minute")}:${part("second")} WIB`;
+    const row = [booking.orderNumber,booking.customerName,booking.customerEmail,booking.customerPhone,
+      fac?.name ?? "",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
+      booking.totalPrice,booking.status,booking.notes ?? "",booking.adminNotes ?? "",createdAt]
+      .map(value => value == null ? "" : String(value));
+    const appended = await sheets.spreadsheets.values.append({
+      spreadsheetId: TARGET_ID, range: `'${tab}'!A:N`, valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS", requestBody: {values:[row]},
+    });
+    const updated = appended.data.updates?.updatedRange ?? "";
+    const match = updated.match(/![A-Z]+(\d+):/);
+    if (!match) throw new Error("Append response missing row index; requires reconciliation");
+    const sheetRow = Number(match[1]);
+    const verify = await sheets.spreadsheets.values.get({
+      spreadsheetId: TARGET_ID,range:`'${tab}'!A${sheetRow}:N${sheetRow}`,
+      valueRenderOption:"FORMATTED_VALUE",
+    });
+    if (String(verify.data.values?.[0]?.[0] ?? "") !== orderNumber) {
+      throw new Error("Sheet row verification failed; requires reconciliation");
+    }
+    await db.execute(sql`update sport_center.booking_sheets_sync_ledger
+      set status='written',sheet_row=${sheetRow},written_at=now(),updated_at=now()
+      where source_key=${sourceKey} and status='writing'`);
+    claimed = undefined;
+    res.json({ok:true,written:true,orderNumber,targetTab:tab,sheetRow,sourceKey});
+  } catch (err) {
+    req.log.error({err, orderNumber}, "Sheets Sync One failed");
+    // Never auto-release a writing claim: a timeout can happen AFTER Google
+    // accepted the append. A reconciliation must check Sheets before retry.
+    res.status(502).json({ error: "Sync One gagal; tidak akan mengulang otomatis", needsReconciliation: !!claimed });
   }
 });
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
