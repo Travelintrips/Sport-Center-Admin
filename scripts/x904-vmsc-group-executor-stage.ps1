@@ -22,6 +22,20 @@ try {
   $mutex=New-Object System.Threading.Mutex($false,'Global\X904_VMSC_PRIMARY_SYNC')
   try {$owned=$mutex.WaitOne(0)} catch [System.Threading.AbandonedMutexException] {$owned=$true}
   Require $owned 'DEVICE_BUSY'
+  # UID proof is obtained locally, inside the same machine mutex, immediately
+  # before opening the SDK session. No browser-supplied attestation is accepted.
+  $node='C:\Program Files\nodejs\node.exe'
+  $attestor=Join-Path $PSScriptRoot 'x904-vmsc-group-uid-attestor.mjs'
+  Require ((Test-Path $node) -and (Test-Path $attestor)) 'ATTESTOR_UNAVAILABLE'
+  $proofInput=$cfg|ConvertTo-Json -Depth 12 -Compress
+  $proofOutput=$proofInput | & $node $attestor 2>&1
+  $proofExit=$LASTEXITCODE
+  $proof=$null
+  try {$proof=([string]($proofOutput|Select-Object -Last 1))|ConvertFrom-Json -ErrorAction Stop}catch{}
+  Require ($proofExit -eq 0 -and $null -ne $proof -and $proof.uidAttestedByWorker -eq $true) 'UID_ATTESTATION_FAILED'
+  Require ([int]$proof.verifiedUid -eq [int]$cmd.payload.expectedUid -and
+    [string]$proof.verifiedPin -ceq [string]$cmd.userPin -and
+    [string]$proof.verifiedName -ceq [string]$cmd.payload.expectedName) 'UID_ATTESTATION_REQUIRED'
   $zk=New-Object -ComObject zkemkeeper.ZKEM.1
   $zk.PullMode=1
   $key=[uint32]::Parse([string]$cfg.commKey)
@@ -38,13 +52,7 @@ try {
       Require ($name -ceq [string]$cmd.payload.expectedName -and $priv -eq 0) 'TARGET_CHANGED_REVIEW_REQUIRED'
     }
   }
-  Require ($count -gt 0 -and $count -le 10000 -and $matches -eq 1) 'PIN_MISSING_OR_AMBIGUOUS'
-  # The worker must supply an independently authenticated TCP snapshot binding.
-  # A browser-provided UID or command payload alone is never trusted.
-  Require ($cfg.uidAttestedByWorker -ceq 'true' -and
-    [int]$cfg.verifiedUid -eq [int]$cmd.payload.expectedUid -and
-    [string]$cfg.verifiedPin -ceq [string]$cmd.userPin -and
-    [string]$cfg.verifiedName -ceq [string]$cmd.payload.expectedName) 'UID_ATTESTATION_REQUIRED'
+  Require ($count -gt 0 -and $count -le 10000 -and $matches -eq 1 -and $count -eq [int]$proof.userCount) 'USER_SNAPSHOT_CHANGED'
   $before=0
   Require ([bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$before)) 'GROUP_READ_FAILED'
   Require (@(1,2) -contains $before) 'UNEXPECTED_ACCESS_GROUP'
