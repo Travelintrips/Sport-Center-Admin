@@ -79,6 +79,7 @@ const AdminAuditLog = lazy(() => import("@/pages/admin/AuditLog"));
 const AdminPricingRules = lazy(() => import("@/pages/admin/PricingRules"));
 const AdminMaintenance = lazy(() => import("@/pages/admin/Maintenance"));
 const AdminReports = lazy(() => import("@/pages/admin/Reports"));
+const AdminGoogleSheets = lazy(() => import("@/pages/admin/GoogleSheets"));
 const AdminQrCheckin = lazy(() => import("@/pages/admin/QrCheckin"));
 const AdminNotificationTemplates = lazy(() => import("@/pages/admin/NotificationTemplates"));
 const AdminRescheduleRequests = lazy(() => import("@/pages/admin/RescheduleRequests"));
@@ -160,6 +161,7 @@ function AdminRouter() {
     if (location === "/admin/pricing-rules") return <AdminPricingRules />;
     if (location === "/admin/maintenance") return <AdminMaintenance />;
     if (location === "/admin/reports") return <AdminReports />;
+    if (location === "/admin/google-sheets") return <AdminGoogleSheets />;
     if (location === "/admin/qr-checkin") return <AdminQrCheckin />;
     if (location === "/admin/notification-templates") return <AdminNotificationTemplates />;
     if (location === "/admin/reschedule") return <AdminRescheduleRequests />;
@@ -216,6 +218,7 @@ function Router() {
       <Route path="/admin/pricing-rules" component={AdminRouter} />
       <Route path="/admin/maintenance" component={AdminRouter} />
       <Route path="/admin/reports" component={AdminRouter} />
+      <Route path="/admin/google-sheets" component={AdminRouter} />
       <Route path="/admin/qr-checkin" component={AdminRouter} />
       <Route path="/admin/notification-templates" component={AdminRouter} />
       <Route path="/admin/reschedule" component={AdminRouter} />

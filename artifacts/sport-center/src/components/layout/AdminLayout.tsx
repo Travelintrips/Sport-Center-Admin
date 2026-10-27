@@ -38,6 +38,7 @@ import {
   AlertTriangle,
   CreditCard,
   WalletCards,
+  Sheet,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -88,6 +89,7 @@ const NAV_GROUPS = [
     label: "Laporan & Sistem",
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
+      { href: "/admin/google-sheets", label: "Google Sheets", icon: Sheet },
       { href: "/admin/expenses", label: "Pengeluaran", icon: TrendingDown },
       { href: "/admin/vendors", label: "Daftar Vendor", icon: Building2 },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
