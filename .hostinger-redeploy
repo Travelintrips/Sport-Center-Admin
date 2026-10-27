@@ -15,3 +15,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-27 force Hostinger rebuild for PR #276 actual membership payment date; verify CheckoutForm contains Tanggal pembayaran.
 
 2026-10-27 force Hostinger rebuild for PR #282 admin_booking sidebar and API scope; verify /api/healthz git_commit and operator sidebar.
+
+2026-10-27 force Hostinger rebuild for PR #297 WA group lifecycle + accounting outbox integrity.
