@@ -52,7 +52,7 @@ export default function GymX904() {
   const [tab, setTab] = useState<GymTab>("dashboard");
   const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
   const queryClient = useQueryClient();
-  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER">}>({
+  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER"|"SUSPEND_USER"|"ACTIVATE_USER">}>({
     queryKey:["gym-x904-user-capabilities"],
     queryFn:async()=>{
       const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
@@ -61,6 +61,17 @@ export default function GymX904() {
       return response.json();
     },enabled:tab==="users",retry:false,staleTime:30000
   });
+  const [accessNotice,setAccessNotice]=useState("");
+  const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
+  async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
+    if(accessBusyPin || !userCommandCapabilities?.enabled || !userCommandCapabilities.operations.includes(op) || user.device_role!==0)return;
+    if(!window.confirm((op==="SUSPEND_USER"?"Suspend":"Aktifkan")+" PIN "+user.user_pin+"?"))return;
+    setAccessBusyPin(user.user_pin);setAccessNotice("Menunggu konfirmasi mesin untuk PIN "+user.user_pin);
+    try { const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(API+"/admin/gym-x904/user-command",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({commandType:op,userPin:user.user_pin,expectedUid:user.device_uid,expectedName:user.display_name,expectedSerial:"TDBD234200545",confirmPin:user.user_pin,idempotencyKey:crypto.randomUUID().replace(/-/g,"")})});
+      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");setAccessNotice("Perintah PIN "+user.user_pin+" masuk antrean; belum terverifikasi pada mesin.");
+    }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal");}finally{setAccessBusyPin(null);}
+  }
   const [commandMessage, setCommandMessage] = useState("");
   const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;created_at:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
     queryKey: ["gym-x904-read-command"],
@@ -463,7 +474,7 @@ export default function GymX904() {
         <p className="text-sm text-muted-foreground">Menu ini tidak menampilkan data contoh sebagai data mesin. Data pengguna, kartu, dan aturan hanya dapat tampil setelah pembacaan read-only, validasi identitas perangkat, dan sinkronisasi yang berhasil.</p>
         <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["gym-x904-integration"] })} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted"><RefreshCw size={14} /> Periksa status lagi</button>
       </section>}      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
-        <h2 className="font-semibold">User yang terdaftar langsung pada Solution X904 (LAN)</h2>
+        <h2 className="font-semibold">User yang terdaftar langsung pada Solution X904 (LAN)</h2>{accessNotice&&<p role="status" className="text-sm">{accessNotice}</p>}<p className="text-xs text-muted-foreground">Suspend otomatis belum diaktifkan. Status akses belum tersedia dalam snapshot LAN; perubahan manual hanya boleh dinyatakan berhasil setelah ACK dan pembacaan ulang grup X904.</p>
         <p className="text-xs text-muted-foreground">Hanya snapshot terautentikasi yang selesai disimpan. Status aktivasi akun dan template biometrik tidak dibaca. PIN mesin belum otomatis dipetakan ke member Gym.</p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm">Cari nama atau PIN mesin
@@ -479,11 +490,12 @@ export default function GymX904() {
         {lanUsersError ? <p role="alert" className="text-sm">Daftar LAN belum tersedia atau backend belum aktif.</p> :
           lanUsersLoading ? <p className="text-sm">Memuat pengguna dari snapshot LAN...</p> :
           <div className="overflow-x-auto"><table className="w-full text-sm text-left">
-            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
+            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0))).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
-              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">Belum diverifikasi dari mesin</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
+                {(["SUSPEND_USER","ACTIVATE_USER"] as const).map(op=>userCommandCapabilities.operations?.includes(op)&&<button key={op} type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0||!!accessBusyPin} onClick={()=>void changeManualAccess(u,op)} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">{op==="SUSPEND_USER"?"Suspend":"Aktifkan"}</button>)}
                 {userCommandCapabilities.operations?.includes("UPDATE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>}
                 {userCommandCapabilities.operations?.includes("DELETE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"DELETE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Hapus</button>}
               </div></td>}
