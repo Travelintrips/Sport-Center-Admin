@@ -18,6 +18,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft } from "lucide-react";
 import { getToken, getCurrentRole } from "@/lib/auth";
 
+function jakartaDateOnly(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 export default function AdminCheckoutForm() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -53,6 +62,7 @@ export default function AdminCheckoutForm() {
     amount: number;
   }>(null);
   const [membershipPaymentMethod, setMembershipPaymentMethod] = useState("qris");
+  const [membershipPaymentDate, setMembershipPaymentDate] = useState(jakartaDateOnly);
   const [membershipPaymentFile, setMembershipPaymentFile] = useState<File | null>(null);
   const [membershipPaymentBusy, setMembershipPaymentBusy] = useState(false);
   const [membershipPaymentDone, setMembershipPaymentDone] = useState(false);
@@ -169,6 +179,7 @@ export default function AdminCheckoutForm() {
             };
         setMembershipPaymentTarget(target);
         setMembershipPaymentMethod("qris");
+        setMembershipPaymentDate(jakartaDateOnly());
         setMembershipPaymentFile(null);
         setMembershipPaymentDone(false);
         setMembershipResult(memberAction === "renew"
@@ -191,6 +202,7 @@ export default function AdminCheckoutForm() {
       const form = new FormData();
       form.append("proof", membershipPaymentFile);
       form.append("paymentMethod", membershipPaymentMethod);
+      form.append("paymentDate", membershipPaymentDate);
       const uploaded = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}/admin-payment-proof-upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token ?? ""}` },
@@ -773,6 +785,15 @@ export default function AdminCheckoutForm() {
                           <SelectItem value="transfer">Transfer Bank</SelectItem>
                         </SelectContent>
                       </Select>
+                      <Label htmlFor="checkout-membership-payment-date">Tanggal pembayaran</Label>
+                      <Input
+                        id="checkout-membership-payment-date"
+                        type="date"
+                        value={membershipPaymentDate}
+                        max={jakartaDateOnly()}
+                        onChange={(e) => setMembershipPaymentDate(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">Isi sesuai tanggal transaksi pada bukti pembayaran. Tanggal input/verifikasi tetap tercatat terpisah untuk audit.</p>
                       <Label htmlFor="checkout-membership-proof">Bukti pembayaran</Label>
                       <Input
                         id="checkout-membership-proof"
@@ -783,7 +804,7 @@ export default function AdminCheckoutForm() {
                       <Button
                         type="button"
                         className="w-full"
-                        disabled={!membershipPaymentFile || membershipPaymentBusy}
+                        disabled={!membershipPaymentFile || !membershipPaymentDate || membershipPaymentBusy}
                         onClick={submitMembershipPaymentInline}
                       >
                         {membershipPaymentBusy

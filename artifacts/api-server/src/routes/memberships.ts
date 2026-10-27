@@ -47,6 +47,36 @@ class MembershipProofError extends Error {
   }
 }
 
+function jakartaDateOnly(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function normalizePaymentDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  const paymentDate = raw || jakartaDateOnly();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+    throw new MembershipProofError(400, "Tanggal pembayaran harus berformat YYYY-MM-DD");
+  }
+  const parsed = new Date(paymentDate + "T00:00:00Z");
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== paymentDate) {
+    throw new MembershipProofError(400, "Tanggal pembayaran tidak valid");
+  }
+  if (paymentDate > jakartaDateOnly()) {
+    throw new MembershipProofError(400, "Tanggal pembayaran tidak boleh di masa depan");
+  }
+  return paymentDate;
+}
+
+function paymentDateToInstant(paymentDate: string | null | undefined, fallback: Date): Date {
+  if (!paymentDate) return fallback;
+  return new Date(paymentDate + "T12:00:00+07:00");
+}
+
 function membershipProofSecret(): string {
   const secret = String(process.env.SESSION_SECRET ?? "").trim();
   if (!secret) throw new Error("SESSION_SECRET is required for membership proof uploads");
@@ -106,6 +136,7 @@ async function applyMembershipPaymentProof(
   paymentId: number,
   paymentMethod: string,
   paymentProofUrl: string,
+  paymentDateInput?: unknown,
   reqLog?: { error: (obj: unknown, msg?: string) => void },
 ) {
   if (!["qris", "transfer"].includes(paymentMethod)) {
@@ -136,12 +167,14 @@ async function applyMembershipPaymentProof(
     throw new MembershipProofError(409, "Sesi pembayaran membership sudah tidak aktif");
   }
 
+  const paymentDate = normalizePaymentDate(paymentDateInput);
   const submittedAt = new Date();
   await db.transaction(async (tx) => {
     await tx.update(membershipPaymentsTable)
       .set({
         paymentMethod,
         paymentProofUrl,
+        paymentDate,
         status: "waiting_confirmation",
         submittedAt,
         updatedAt: submittedAt,
@@ -160,6 +193,7 @@ async function applyMembershipPaymentProof(
     ...pendingPayment,
     paymentMethod,
     paymentProofUrl,
+    paymentDate,
     status: "waiting_confirmation",
     submittedAt,
     updatedAt: submittedAt,
@@ -290,6 +324,7 @@ async function ensureMembershipPaymentBooking(
     source: "gym_membership_payment",
     membershipId: membership.id,
     membershipPaymentId: payment.id,
+    paidAt: isConfirmed ? paymentDateToInstant(payment.paymentDate, payment.confirmedAt ?? new Date()) : null,
     notes: `Pembayaran membership gym #${membership.id} | Payment #${payment.id} | Periode ${payment.periodStart} s/d ${payment.periodEnd}`,
     updatedAt: new Date(),
   };
@@ -337,7 +372,7 @@ async function ensureMembershipPaymentBooking(
       ppnRate: values.ppnRate,
       ppnAmount: values.ppnAmount,
       grandTotal: values.grandTotal,
-      paidAt: isConfirmed ? payment.confirmedAt ?? new Date() : null,
+      paidAt: values.paidAt,
     })
     .returning();
 
@@ -1045,7 +1080,7 @@ router.post("/memberships/:id/admin-payment-proof-upload", adminMiddleware, memb
     const safeExt: Record<string,string> = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp","image/heic":".heic","image/heif":".heif"};
     const objectName = `membership-${id}-payment-${pending.id}-${randomUUID()}${safeExt[req.file.mimetype.toLowerCase()]}`;
     const proofUrl = await uploadFile(BUCKETS.proof,objectName,req.file.buffer,req.file.mimetype);
-    const membership = await applyMembershipPaymentProof(id,pending.id,String(req.body?.paymentMethod ?? ""),proofUrl,req.log);
+    const membership = await applyMembershipPaymentProof(id,pending.id,String(req.body?.paymentMethod ?? ""),proofUrl,req.body?.paymentDate,req.log);
     res.json({...membership,totalPrice:Number(membership.totalPrice)});
   } catch(err) {
     if(err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
@@ -1102,6 +1137,7 @@ router.post(
         tokenPayload.paymentId,
         paymentMethod,
         paymentProofUrl,
+        req.body?.paymentDate,
         req.log,
       );
       res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
@@ -1135,6 +1171,7 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
       tokenPayload.paymentId,
       paymentMethod,
       paymentProofUrl,
+      req.body?.paymentDate,
       req.log,
     );
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
@@ -1291,6 +1328,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       }
 
       const confirmedAt = new Date();
+      const paymentDate = payment.paymentDate ?? jakartaDateOnly(confirmedAt);
       const refNumber = `MB-${membership.id}-P${payment.id}`;
       const mutationKey = `SC-MBP-${payment.id}`;
       await db
@@ -1299,6 +1337,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           status: "confirmed",
           paymentMethod: membership.paymentMethod,
           paymentProofUrl: membership.paymentProofUrl,
+          paymentDate,
           confirmedAt,
           mutationKey,
           accountingRef: refNumber,
@@ -1315,16 +1354,16 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       syncBookingRecordToBizportal(paymentBooking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );
-      const today = new Date().toISOString().split("T")[0]!;
+      const journalDate = confirmedPayment!.paymentDate ?? paymentDate;
       // totalPrice sudah inklusif PPN — hitung DPP dan PPN agar tidak double-count
       const totalPrice = Number(membership.totalPrice);
       const membershipDpp = Math.round(totalPrice / 1.11);
       const membershipPpn = totalPrice - membershipDpp;
       pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
-      createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
+      createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate).catch((err) =>
         logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
-      createPublicMembershipAccountingEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
+      createPublicMembershipAccountingEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate).catch((err) =>
         logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
     }
