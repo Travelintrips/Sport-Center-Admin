@@ -1352,11 +1352,9 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       syncBookingRecordToBizportal(paymentBooking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );
-      const journalDate = confirmedPayment!.paymentDate ?? paymentDate;
-      // totalPrice sudah inklusif PPN — hitung DPP dan PPN agar tidak double-count
-      const totalPrice = Number(membership.totalPrice);
-      const membershipDpp = Math.round(totalPrice / 1.11);
-      const membershipPpn = totalPrice - membershipDpp;
+      // Accounting is owned by the canonical sport_payments projection/outbox.
+      // Keep only the bank-mutation projection here; never create a second
+      // membership-specific journal for the same confirmed payment.
       pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
     }
     // Also repair/sync payment bookings when an admin changes the membership
