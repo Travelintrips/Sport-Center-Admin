@@ -422,7 +422,7 @@ async function ensureSportCenterPaymentMirror(
   const payment = source.rows[0];
   if (!payment) throw new Error(`[accounting] Source confirmed payment ${input.sourcePaymentId} tidak ditemukan.`);
 
-  const booking = await client.query(
+  let booking = await client.query(
     `SELECT id
        FROM public.sport_bookings
       WHERE sc_booking_id = $1
@@ -430,7 +430,61 @@ async function ensureSportCenterPaymentMirror(
     [payment.booking_id],
   );
   if (booking.rows.length !== 1) {
-    throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} tidak ditemukan.`);
+    // Confirmation can race the asynchronous BizPortal booking sync.
+    // Repair the mirror inline, idempotently, before posting the payment.
+    await client.query(
+      `INSERT INTO public.sport_bookings
+         (company_id, booking_number, customer_name, customer_phone, customer_email,
+          facility_id, facility_name, booking_date, start_time, end_time, duration_hours,
+          status, payment_status, base_amount, discount_amount, total_amount,
+          notes, tax_rate, tax_amount, sc_booking_id, created_at, updated_at)
+       SELECT COALESCE(sp.company_id, 1),
+              sb.order_number,
+              sb.customer_name,
+              sb.customer_phone,
+              sb.customer_email,
+              NULL,
+              COALESCE(sf.name, 'Sport Center'),
+              sb.booking_date,
+              sb.start_time,
+              sb.end_time,
+              COALESCE(sb.duration_hours, 1),
+              sb.status::text,
+              CASE WHEN sb.status::text IN ('confirmed','paid','completed') THEN 'paid' ELSE 'unpaid' END,
+              COALESCE(sb.base_price, sb.total_price, 0),
+              COALESCE(sb.discount_amount, 0),
+              COALESCE(sb.grand_total, sb.total_price, 0),
+              sb.notes,
+              COALESCE(sb.ppn_rate, 0),
+              COALESCE(sb.ppn_amount, 0),
+              sb.id,
+              sb.created_at,
+              NOW()
+         FROM sport_center.sport_bookings sb
+         LEFT JOIN sport_center.facilities sf ON sf.id = sb.facility_id
+         JOIN sport_center.sport_payments sp ON sp.booking_id = sb.id AND sp.id = $1
+        WHERE sb.id = $2
+       ON CONFLICT (booking_number) DO UPDATE SET
+         sc_booking_id = COALESCE(public.sport_bookings.sc_booking_id, EXCLUDED.sc_booking_id),
+         status = EXCLUDED.status,
+         payment_status = EXCLUDED.payment_status,
+         total_amount = EXCLUDED.total_amount,
+         tax_rate = EXCLUDED.tax_rate,
+         tax_amount = EXCLUDED.tax_amount,
+         updated_at = NOW()`,
+      [input.sourcePaymentId, payment.booking_id],
+    );
+    booking = await client.query(
+      `SELECT id
+         FROM public.sport_bookings
+        WHERE sc_booking_id = $1 OR booking_number = $2
+        ORDER BY CASE WHEN sc_booking_id = $1 THEN 0 ELSE 1 END
+        LIMIT 1`,
+      [payment.booking_id, payment.order_number],
+    );
+  }
+  if (booking.rows.length !== 1) {
+    throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} gagal dibuat.`);
   }
 
   // NOTE: bank_account_id is intentionally omitted from this INSERT/UPDATE.
