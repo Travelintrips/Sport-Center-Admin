@@ -172,6 +172,17 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
       if (endDate) bookings = bookings.filter((b) => b.bookingDate <= String(endDate));
     }
 
+    const formatCreatedAtWib = (value: Date | string | null | undefined) => {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+      }).formatToParts(date);
+      const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+      return `${part("day")}/${part("month")}/${part("year")} ${part("hour")}:${part("minute")}:${part("second")} WIB`;
+    };
     const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At,Payment Date\n";
     const rows = bookings.map((b) => {
       const fac = facilities.find((f) => f.id === b.facilityId);
@@ -179,7 +190,7 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
         b.orderNumber, b.customerName, b.customerEmail, b.customerPhone,
         fac?.name ?? "", b.bookingDate, b.startTime, b.endTime, b.durationHours,
         b.totalPrice, b.status, b.notes ?? "", b.adminNotes ?? "",
-        new Date(b.createdAt).toISOString(), paymentBasis ? paymentDate(b) : "",
+        formatCreatedAtWib(b.createdAt), paymentBasis ? paymentDate(b) : "",
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
     });
     // Each qualifying booking is emitted once; the export does not invent extra revenue rows.
