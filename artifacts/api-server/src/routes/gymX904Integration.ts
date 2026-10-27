@@ -405,6 +405,44 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)
     deviceSerial:"TDBD234200545",manualAccessEnabled:allowed && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true",manualAccessReason:process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" ? null : "VMSC_GROUP_EXECUTOR_NOT_READY",durableBulkEnabled:allowed && process.env.GYM_X904_DURABLE_BULK_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true" && process.env.GYM_X904_USER_DELETE_ENABLED==="true",operations:(allowed && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true" ? ["SUSPEND_USER","ACTIVATE_USER"] : []).concat(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? (process.env.GYM_X904_USER_DELETE_ENABLED==="true" ? ["UPDATE_USER","DELETE_USER"] : ["UPDATE_USER"]) : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"]),testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
 });
 
+// Read-only census from authenticated VMSC SDK; never infer state from old command ACK.
+router.get("/admin/gym-x904/live-access-status",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor||!["owner","super_admin"].includes(actor.role))
+    return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  try{
+    const snapshots=await db.execute(sql`SELECT snapshot_id,observed_at,user_count,users
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545'
+      ORDER BY observed_at DESC,snapshot_id DESC LIMIT 1`);
+    const lan=await db.execute(sql`SELECT user_pin,device_uid,display_name,device_role
+      FROM sport_center.gym_x904_lan_users WHERE device_serial='TDBD234200545'`);
+    if(!snapshots.rows.length)
+      return res.json({source:"device_sdk_snapshot",available:false,machineCount:null,appCount:lan.rows.length,observedAt:null,users:[]});
+    const snap=snapshots.rows[0];
+    const raw=Array.isArray(snap.users)?snap.users:[];
+    const appByPin=new Map(lan.rows.map(x=>[String(x.user_pin),x]));
+    const machinePins=new Set(raw.map((x:any)=>String(x.pin)));
+    const users=raw.map((x:any)=>{
+      const pin=String(x.pin);
+      const app=appByPin.get(pin);
+      const matches=!!app && String(app.display_name)===String(x.name) &&
+        Number(app.device_role)===Number(x.role);
+      return {user_pin:pin,display_name:String(x.name),device_group:Number(x.group),
+        enabled:x.enabled===true,device_role:Number(x.role),
+        device_uid:matches?Number(app!.device_uid):null,
+        identityMatched:matches};
+    });
+    return res.json({source:"device_sdk_snapshot",available:true,observedAt:snap.observed_at,
+      machineCount:Number(snap.user_count),appCount:lan.rows.length,
+      missingInMachine:lan.rows.filter(x=>!machinePins.has(String(x.user_pin))).length,
+      unmatchedIdentity:users.filter((x:any)=>!x.identityMatched).length,users});
+  }catch{
+    return res.status(503).json({error:"LIVE_ACCESS_SNAPSHOT_UNAVAILABLE"});
+  }
+});
+
 // Last confirmed group mutation, not a live device snapshot. Unknown until a verified ACK exists.
 router.get("/admin/gym-x904/manual-access-status",adminMiddleware,async(req,res)=>{
   res.setHeader("Cache-Control","no-store");
