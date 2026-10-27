@@ -1622,9 +1622,8 @@ export async function pushMembershipPaymentAsBankMutation(
   if (amount <= 0) return;
 
   const mutationKey = `SC-MBP-${payment.id}`;
-  const transactionDate = confirmedAt
-    ? confirmedAt.toISOString().split("T")[0]!
-    : new Date().toISOString().split("T")[0]!;
+  const transactionDate = payment.paymentDate
+    ?? (confirmedAt ? confirmedAt.toISOString().split("T")[0]! : new Date().toISOString().split("T")[0]!);
    const description = [
      "SPORT CENTER MEMBER GYM",
      `MB-${membership.id}`,
