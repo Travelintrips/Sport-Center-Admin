@@ -1,4 +1,4 @@
-import { describe,it,expect } from "vitest";
+import { describe, it, expect } from "@jest/globals";
 import {bookingSheetsEventKey,bookingSheetsPaidTab} from "./bookingSheetsEventKey";
 describe("Google Sheets booking payment identity",()=>{
  it("separates DP and settlement for one booking",()=>{
