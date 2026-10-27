@@ -30,6 +30,25 @@ export default function GoogleSheets() {
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
+  const [syncBusy,setSyncBusy]=useState("");
+  const [syncMessage,setSyncMessage]=useState("");
+  async function syncOne(orderNumber:string) {
+    if(!window.confirm(`Kirim booking ${orderNumber} yang sudah lunas ke tab pembayaran Google Sheets? Sistem menolak grup, corporate, membership, dan DP.`))return;
+    setSyncBusy(orderNumber);setSyncMessage("");
+    try {
+      const response=await fetch("/api/admin/google-sheets/sync-one",{
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+        body:JSON.stringify({orderNumber}),
+      });
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||"Sinkronisasi gagal");
+      setSyncMessage(result.written
+        ?`${orderNumber} berhasil diverifikasi di ${result.targetTab} baris ${result.sheetRow}`
+        :`${orderNumber} tidak ditulis ulang: ${result.alreadyPresent?"sudah ada di Sheets":"tidak ada perubahan"}`);
+    }catch(e){setSyncMessage(e instanceof Error?e.message:"Sinkronisasi gagal");}
+    finally{setSyncBusy("");}
+  }
+
   const [sourceAudit,setSourceAudit]=useState<any>(null);
   const [sourceBusy,setSourceBusy]=useState(false);
   const [sourceError,setSourceError]=useState("");
@@ -118,11 +137,11 @@ export default function GoogleSheets() {
           </h1>
           <p className="text-sm text-slate-500 mt-1">Laporan &amp; Sistem · Integrasi laporan pembayaran booking</p>
         </div>
-        <Badge variant="secondary" className="w-fit">Belum terhubung · Mode persiapan</Badge>
+        <Badge variant="secondary" className="w-fit">Mode pilot manual · Auto-sync nonaktif</Badge>
       </header>
       <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-900 dark:text-amber-200 flex gap-2">
         <Info className="h-5 w-5 shrink-0" />
-        <span>Halaman konfigurasi tahap awal. Sinkronisasi otomatis dan manual belum diaktifkan. Tidak ada data yang ditulis ke Google Sheets melalui halaman ini.</span>
+        <span>Sinkronisasi otomatis dan massal belum aktif. Fitur Sync One hanya untuk uji satu booking personal lunas penuh; penulisan dilakukan setelah konfirmasi admin.</span>
       </div>
       <Card>
         <CardHeader><CardTitle className="text-lg">Spreadsheet tujuan</CardTitle></CardHeader>
@@ -171,7 +190,9 @@ export default function GoogleSheets() {
               {reconciliation.duplicates?.length>0&&<p>Contoh sudah ada: {reconciliation.duplicates.slice(0,10).map((item:any)=>item.orderNumber+" ("+item.tabs.join(", ")+")").join("; ")}</p>}
               <p className="text-xs text-amber-700">Belum dapat digunakan untuk menulis: ledger pembayaran DP/grup dan uji idempotensi E2E belum selesai.</p>
             </div>}
-            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}</tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}</tr>)}</tbody></table></div>
+            <p className="text-xs text-slate-500">Pilot manual: Sync One hanya boleh untuk satu booking personal non-grup yang lunas penuh. Jangan gunakan untuk DP, membership, atau corporate.</p>
+            {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
+            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Aksi</th></tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><button type="button" onClick={()=>syncOne(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
             {preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
           </div>}
         </CardContent></Card>
