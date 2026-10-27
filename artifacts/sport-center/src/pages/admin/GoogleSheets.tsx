@@ -30,8 +30,22 @@ export default function GoogleSheets() {
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
+  const [readiness,setReadiness] = useState<{tab:string;ready:boolean;reason:string|null;expectedHeaders?:string[];headerRow?:number|null;populatedFirstColumn?:number}|null>(null);
+  const [readinessBusy,setReadinessBusy] = useState(false);
+  const [readinessError,setReadinessError] = useState("");
+  async function checkMonth() {
+    setReadinessBusy(true);setReadiness(null);setReadinessError("");
+    try {
+      const response=await fetch("/api/admin/google-sheets/month-readiness?"+new URLSearchParams({month}),{headers:{Authorization:`Bearer ${getToken()}`}});
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.reason || data.error || "Pemeriksaan tab gagal");
+      setReadiness(data);
+    }catch(e){setReadinessError(e instanceof Error?e.message:"Pemeriksaan tab gagal");}
+    finally{setReadinessBusy(false);}
+  }
+
   async function loadPreview() {
-    setPreviewBusy(true);setPreviewError("");setPreview(null);
+    setPreviewBusy(true);setPreviewError("");setPreview(null);setReadiness(null);
     try {
       if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
       const [year,mon]=month.split("-").map(Number);
@@ -116,6 +130,23 @@ export default function GoogleSheets() {
           {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview saja. Belum ada insert, update atau pengecekan duplikasi lintas sheet; Sync Now tetap terkunci.</p>
             <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}</tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}</tr>)}</tbody></table></div>
             {preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
+          </div>}
+        </CardContent></Card>
+      <Card><CardHeader><CardTitle className="text-lg">Kesiapan tab bulanan sebelum sinkronisasi</CardTitle></CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-slate-500">Setiap pembayaran dipetakan ke tab bulan pembayaran WIB. Jika tab November belum dibuat manual atau belum memiliki 14 header yang benar, sistem harus menahan penulisan; tidak dialihkan ke Oktober.</p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <span>Periksa bulan: <strong>{month}</strong></span>
+            <button type="button" onClick={checkMonth} disabled={readinessBusy} className="rounded-lg border px-3 py-2 font-medium disabled:opacity-50">{readinessBusy?"Memeriksa...":"Periksa Kesiapan Tab"}</button>
+          </div>
+          {readinessError&&<p role="alert" className="text-red-600">{readinessError}</p>}
+          {readiness&&<div className="rounded-lg border p-3 space-y-2">
+            <p>Tujuan: <strong>{readiness.tab}</strong></p>
+            <p>Status: <strong>{readiness.ready?"Header booking valid — pemeriksaan baca lulus":"Belum siap — sinkronisasi harus ditahan"}</strong></p>
+            {!readiness.ready&&<p className="text-amber-700">Alasan: {readiness.reason==="MONTH_TAB_MISSING"?"Tab belum dibuat. Buat tab manual menggunakan nama tujuan persis.":readiness.reason==="BOOKING_HEADER_MISSING"?"14 header booking belum ditemukan dalam lima baris pertama.":"Tidak dapat memvalidasi tab."}</p>}
+            {readiness.ready&&<p>Baris header: {readiness.headerRow}. Sel terisi di kolom A: {readiness.populatedFirstColumn}.</p>}
+            {!readiness.ready&&<p className="text-xs text-slate-500">Header A–N yang harus digunakan: {readiness.expectedHeaders?.join(" · ")}</p>}
+            <p className="text-xs text-slate-500">Hasil hanya-baca, bukan persetujuan menulis. Sync Now dan auto-sync masih terkunci.</p>
           </div>}
         </CardContent></Card>
       <div className="grid md:grid-cols-2 gap-4">
