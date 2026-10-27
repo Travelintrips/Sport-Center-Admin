@@ -11,12 +11,12 @@ const MONTH_NAMES = ["JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI","JULI","A
 // RFC4180 quote handling: commas, escaped quotes and embedded newlines.
 function parseCsv(raw: string): string[][] {
   const out: string[][] = []; let row: string[] = [], cell = "", quoted = false;
-  const text = raw.replace(/^\\uFEFF/, "");
+  const text = raw.replace(/^\uFEFF/, "");
   for (let i=0;i<text.length;i++) {
     const c=text[i];
     if(c==='"') { if(quoted && text[i+1]==='"'){ cell+='"';i++; }else quoted=!quoted; }
     else if(c===',' && !quoted){row.push(cell);cell="";}
-    else if((c==='\\n'||c==='\\r') && !quoted){ if(c==='\\r'&&text[i+1]==='\\n')i++;row.push(cell);if(row.some(Boolean))out.push(row);row=[];cell="";}
+    else if((c==='\n'||c==='\r') && !quoted){ if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(Boolean))out.push(row);row=[];cell="";}
     else cell+=c;
   }
   if(cell || row.length){row.push(cell);out.push(row);}
@@ -33,7 +33,7 @@ export default function GoogleSheets() {
   async function loadPreview() {
     setPreviewBusy(true);setPreviewError("");setPreview(null);
     try {
-      if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
+      if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
       const [year,mon]=month.split("-").map(Number);
       const start=month+"-01";
       const end=new Date(Date.UTC(year,mon,0)).toISOString().slice(0,10);
