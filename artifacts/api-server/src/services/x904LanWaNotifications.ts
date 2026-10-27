@@ -75,21 +75,39 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     const day = latest.slice(0, 10);
     const daily = await tx.execute(sql`
       SELECT l.event_id,l.device_serial,l.user_pin,l.device_time,
-        COALESCE(NULLIF(trim(u.display_name),''),'Pengguna X904') AS display_name
+        COALESCE(NULLIF(trim(u.display_name),''),'Pengguna X904') AS display_name,
+        membership.status AS membership_status
       FROM sport_center.gym_x904_lan_logs l
+      LEFT JOIN sport_center.gym_x904_lan_state state
+        ON state.device_serial=l.device_serial
       LEFT JOIN sport_center.gym_x904_lan_users u
         ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
+        AND u.last_seen_snapshot=state.last_snapshot_id
+      LEFT JOIN LATERAL (
+        SELECT m.status::text AS status
+        FROM sport_center.sport_memberships m
+        WHERE u.device_role=0
+          AND lower(btrim(m.name))=lower(btrim(u.display_name))
+          AND (SELECT count(*) FROM sport_center.sport_memberships same
+               WHERE lower(btrim(same.name))=lower(btrim(u.display_name)))=1
+          AND (SELECT count(*) FROM sport_center.gym_x904_lan_users other
+               WHERE other.device_serial=u.device_serial
+                 AND other.last_seen_snapshot=state.last_snapshot_id
+                 AND other.device_role=0
+                 AND lower(btrim(other.display_name))=lower(btrim(u.display_name)))=1
+        LIMIT 1
+      ) membership ON true
       WHERE l.device_serial=${serial}
         AND l.device_time >= ${day + " 00:00:00"}
         AND l.device_time <= ${latest}
       ORDER BY l.device_time,l.event_id LIMIT 10000`);
     const dailyRows = daily.rows;
     if (!dailyRows.length) throw new Error("X904_DAILY_RECAP_EMPTY");
-    const people = new Map<string,{name:string;times:string[]}>();
+    const people = new Map<string,{name:string;times:string[];membershipStatus:string|null}>();
     for (const r of dailyRows) {
       const pin = String(r.user_pin);
       const key = String(r.device_serial) + ":" + pin;
-      const entry = people.get(key) ?? {name:String(r.display_name).slice(0,80),times:[]};
+      const entry = people.get(key) ?? {name:String(r.display_name).slice(0,80),times:[],membershipStatus:r.membership_status == null ? null : String(r.membership_status)};
       entry.times.push(String(r.device_time));
       people.set(key,entry);
     }
@@ -102,7 +120,11 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     // Never invent card identifiers or verification results.
     const lines = sorted.map((person,i) => {
       const scanTimes = person.times.map(t => t.slice(11,16)).join(", ");
-      return `${i+1}. *${person.name}* — ${scanTimes} WIB`;
+      // Status is derived from the unique current machine account + unique member name.
+      // Ambiguous/unmapped identities (e.g. several POLRES users) receive no marker.
+      const marker = person.membershipStatus === "active" ? " (M)"
+        : person.membershipStatus === "expired" ? " (ME)" : "";
+      return `${i+1}. *${person.name}${marker}* — ${scanTimes} WIB`;
     });
     const body = [
       "✅ *REKAP ABSENSI GYM*",
