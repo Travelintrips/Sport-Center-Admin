@@ -183,17 +183,72 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
       const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
       return `${part("day")}/${part("month")}/${part("year")} ${part("hour")}:${part("minute")}:${part("second")} WIB`;
     };
-    const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At,Payment Date\n";
-    const rows = bookings.map((b) => {
-      const fac = facilities.find((f) => f.id === b.facilityId);
-      return [
-        b.orderNumber, b.customerName, b.customerEmail, b.customerPhone,
-        fac?.name ?? "", b.bookingDate, b.startTime, b.endTime, b.durationHours,
-        b.totalPrice, b.status, b.notes ?? "", b.adminNotes ?? "",
-        formatCreatedAtWib(b.createdAt), paymentBasis ? paymentDate(b) : "",
-      ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
-    });
-    // Each qualifying booking is emitted once; the export does not invent extra revenue rows.
+    // Payment-month CSV is a receipt ledger, not a booking-value ledger.
+    // Export ONE row per confirmed payment (including DP and final payment).
+    // Otherwise a confirmed DP on a recurring group incorrectly exports the
+    // full price of all group sessions as money received that month.
+    const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At,Payment Date,Payment Type,Payment ID,Group Ref,Booking Total\\n";
+    const csvRow = (values: unknown[]) =>
+      values.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",");
+    const rows: string[] = [];
+    if (paymentBasis) {
+      const bookingById = new Map(bookings.map((b) => [b.id, b]));
+      // Need all bookings for representative lookup: filtering by payment date
+      // above can remove a session if the payment is linked elsewhere.
+      const everyBooking = await db.select().from(bookingsTable);
+      const allById = new Map(everyBooking.map((b) => [b.id, b]));
+      for (const p of payments) {
+        if (p.status !== "confirmed") continue;
+        const day = dateWib(p.paidAt ?? p.confirmedAt);
+        if (!day || (startDate && day < String(startDate)) || (endDate && day > String(endDate))) continue;
+        const b = allById.get(p.bookingId);
+        if (!b || b.payerType === "company" || Number(b.totalPrice) <= 0) continue;
+        const fac = facilities.find((facility) => facility.id === b.facilityId);
+        rows.push(csvRow([
+          b.orderNumber, b.customerName, b.customerEmail, b.customerPhone,
+          fac?.name ?? "", b.bookingDate, b.startTime, b.endTime, b.durationHours,
+          p.amount, b.status, b.notes ?? "", b.adminNotes ?? "",
+          formatCreatedAtWib(b.createdAt), day, p.paymentType ?? "full_payment",
+          p.id, b.groupRef ?? "", b.groupRef
+            ? everyBooking.filter((item) => item.groupRef === b.groupRef)
+                .reduce((sum, item) => sum + Number(item.totalPrice), 0)
+            : b.totalPrice,
+        ]));
+      }
+      // Corporate payments are canonical at invoice level: do not multiply
+      // receipt by the number of invoice items or group sessions.
+      const invoicedBookings = new Map<number, typeof everyBooking[number]>();
+      for (const b of everyBooking) {
+        const id = b.companyInvoiceId ?? invoiceIdByBooking.get(b.id);
+        if (id != null && !invoicedBookings.has(id)) invoicedBookings.set(id, b);
+      }
+      for (const invoice of invoices) {
+        if (invoice.status !== "paid") continue;
+        const day = dateWib(invoice.paidAt);
+        if (!day || (startDate && day < String(startDate)) || (endDate && day > String(endDate))) continue;
+        const b = invoicedBookings.get(invoice.id);
+        if (!b || b.payerType !== "company") continue;
+        const fac = facilities.find((facility) => facility.id === b.facilityId);
+        rows.push(csvRow([
+          b.orderNumber, b.customerName, b.customerEmail, b.customerPhone,
+          fac?.name ?? "", b.bookingDate, b.startTime, b.endTime, b.durationHours,
+          invoice.grandTotal ?? invoice.totalAmount, b.status, b.notes ?? "", b.adminNotes ?? "",
+          formatCreatedAtWib(b.createdAt), day, "company_invoice", `INV-${invoice.id}`,
+          b.groupRef ?? "", invoice.grandTotal ?? invoice.totalAmount,
+        ]));
+      }
+    } else {
+      for (const b of bookings) {
+        const fac = facilities.find((facility) => facility.id === b.facilityId);
+        rows.push(csvRow([
+          b.orderNumber, b.customerName, b.customerEmail, b.customerPhone,
+          fac?.name ?? "", b.bookingDate, b.startTime, b.endTime, b.durationHours,
+          b.totalPrice, b.status, b.notes ?? "", b.adminNotes ?? "",
+          formatCreatedAtWib(b.createdAt), "", "", "", b.groupRef ?? "", b.totalPrice,
+        ]));
+      }
+    }
+    // Payment-basis total is the sum of actual confirmed receipt rows, not booking totals.
     const csv = "\uFEFF" + header + rows.join("\n");
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=bookings.csv");
