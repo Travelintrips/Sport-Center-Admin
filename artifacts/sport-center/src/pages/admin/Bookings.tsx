@@ -3181,6 +3181,35 @@ export default function AdminBookings() {
   const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100 | 200 | 300>(25);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedGroupRef, setSelectedGroupRef] = useState<string | null>(null);
+  // Paginated group rows are summaries. Always load the authoritative booking
+  // detail, including payment rows linked to *any* member of the group.
+  useEffect(() => {
+    const id = selectedBooking?.id;
+    if (!id) return;
+    const controller = new AbortController();
+    fetch(`/api/bookings/${id}`, {
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((detail) => {
+        if (!controller.signal.aborted) {
+          setSelectedBooking((current: any) =>
+            current?.id === id ? { ...current, ...detail } : current
+          );
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.error("Failed to refresh booking payment details", error);
+        }
+      });
+    return () => controller.abort();
+  }, [selectedBooking?.id]);
+
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
   const [fixDiscountId, setFixDiscountId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
