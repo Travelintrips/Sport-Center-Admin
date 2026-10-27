@@ -19,8 +19,6 @@ import {
   syncBookingToBizportal,
   pushMembershipPaymentAsBankMutation,
 } from "../lib/bizportalSync";
-import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
-import { logAccountingError } from "../lib/auditLog";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
@@ -1360,12 +1358,6 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       const membershipDpp = Math.round(totalPrice / 1.11);
       const membershipPpn = totalPrice - membershipDpp;
       pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
-      createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate, confirmedPayment!.id).catch((err) =>
-        logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
-      );
-      createPublicMembershipAccountingEntry(membership.id, refNumber, membershipDpp, membershipPpn, journalDate, confirmedPayment!.id).catch((err) =>
-        logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
-      );
     }
     // Also repair/sync payment bookings when an admin changes the membership
     // dates or cancels it. This keeps the order mirror consistent with the
