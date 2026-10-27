@@ -45,7 +45,7 @@ import { calculateBookingWithholdingTax } from "../lib/tax";
 import { logAudit, logAccountingError } from "../lib/auditLog";
 import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
-import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { recordTaxTransaction, resolveCustomerTax } from "../lib/tax";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import {
@@ -176,11 +176,29 @@ async function syncWaApprovalAffectedBookings(
   paidAt: Date,
 ): Promise<void> {
   await Promise.all(
-    affected.map((row) =>
-      syncStatusToBizportal(row.orderNumber, row.status, proofUrl, paidAt, row).catch((err) =>
-        logger.error({ err, orderNumber: row.orderNumber }, "[WA] gagal sync sibling booking ke BizPortal"),
-      ),
-    ),
+    affected.map(async (row) => {
+      const [facility] = await db
+        .select({ name: facilitiesTable.name, category: facilitiesTable.category })
+        .from(facilitiesTable)
+        .where(eq(facilitiesTable.id, row.facilityId))
+        .limit(1);
+      if (!facility) {
+        logger.error({ orderNumber: row.orderNumber, facilityId: row.facilityId }, "[WA] fasilitas sibling tidak ditemukan");
+        return;
+      }
+      try {
+        await syncBookingToBizportal({
+          booking: row,
+          facilityName: facility.name,
+          facilityCategory: facility.category,
+          paymentProofUrl: proofUrl ?? null,
+          paidAt,
+          groupRef: row.groupRef,
+        });
+      } catch (err) {
+        logger.error({ err, orderNumber: row.orderNumber }, "[WA] gagal upsert sibling booking ke BizPortal");
+      }
+    }),
   );
 }
 
