@@ -30,6 +30,22 @@ export default function GoogleSheets() {
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
+  const [sourceAudit,setSourceAudit]=useState<any>(null);
+  const [sourceBusy,setSourceBusy]=useState(false);
+  const [sourceError,setSourceError]=useState("");
+  async function auditPaymentSources() {
+    setSourceBusy(true);setSourceAudit(null);setSourceError("");
+    try {
+      const response=await fetch("/api/admin/google-sheets/payment-sources?"+new URLSearchParams({month}),{
+        headers:{Authorization:`Bearer ${getToken()}`}
+      });
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error||"Audit pembayaran gagal");
+      setSourceAudit(data);
+    }catch(e){setSourceError(e instanceof Error?e.message:"Audit pembayaran gagal");}
+    finally{setSourceBusy(false);}
+  }
+
   const [reconciliation,setReconciliation] = useState<any>(null);
   const [reconBusy,setReconBusy] = useState(false);
   const [reconError,setReconError] = useState("");
@@ -175,6 +191,16 @@ export default function GoogleSheets() {
             {!readiness.ready&&<p className="text-xs text-slate-500">Header A–N yang harus digunakan: {readiness.expectedHeaders?.join(" · ")}</p>}
             <p className="text-xs text-slate-500">Hasil hanya-baca, bukan persetujuan menulis. Sync Now dan auto-sync masih terkunci.</p>
           </div>}
+        </CardContent></Card>
+      <Card><CardHeader><CardTitle className="text-lg">Audit sumber pembayaran dan alokasi</CardTitle></CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-slate-500">Membedakan pembayaran langsung, alokasi grup, dan invoice perusahaan yang lunas berdasarkan bulan pembayaran WIB. Informasi ini untuk validasi ledger, belum mengirim data ke Sheets.</p>
+          <div className="flex flex-wrap gap-3 items-center"><span>Bulan: <strong>{month}</strong></span><button type="button" onClick={auditPaymentSources} disabled={sourceBusy} className="rounded-lg border px-3 py-2 font-medium disabled:opacity-50">{sourceBusy?"Memeriksa...":"Audit Sumber Pembayaran"}</button></div>
+          {sourceError&&<p role="alert" className="text-red-600">{sourceError}</p>}
+          {sourceAudit&&<div className="overflow-x-auto"><table className="w-full text-xs text-left">
+            <thead><tr className="border-b"><th className="p-2">Jenis sumber</th><th className="p-2">Validasi</th><th className="p-2">Event</th><th className="p-2">Nilai alokasi</th></tr></thead>
+            <tbody>{(sourceAudit.breakdown||[]).map((row:any,i:number)=><tr key={i} className="border-b"><td className="p-2">{row.source_type}</td><td className="p-2">{row.validation_status}</td><td className="p-2">{row.event_count}</td><td className="p-2">{row.allocated_amount}</td></tr>)}</tbody>
+          </table><p className="text-xs text-slate-500 mt-2">Event pembayaran tidak sama dengan jumlah booking unik. Pembayaran DP/grup dapat menghasilkan beberapa event.</p></div>}
         </CardContent></Card>
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
