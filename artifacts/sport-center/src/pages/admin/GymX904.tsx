@@ -96,11 +96,52 @@ export default function GymX904() {
   async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
     if(accessBusyPin || !userCommandCapabilities?.enabled || !userCommandCapabilities.operations.includes(op) || user.device_role!==0)return;
     if(!window.confirm((op==="SUSPEND_USER"?"Suspend":"Aktifkan")+" PIN "+user.user_pin+"?"))return;
-    setAccessBusyPin(user.user_pin);setAccessNotice("Menunggu konfirmasi mesin untuk PIN "+user.user_pin);
-    try { const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+    setAccessBusyPin(user.user_pin);
+    setAccessNotice("Mengirim perintah PIN "+user.user_pin+"...");
+    try {
+      const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
       const response=await fetch(API+"/admin/gym-x904/user-command",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({commandType:op,userPin:user.user_pin,expectedUid:user.device_uid,expectedName:user.display_name,expectedSerial:"TDBD234200545",confirmPin:user.user_pin,idempotencyKey:crypto.randomUUID().replace(/-/g,"")})});
-      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");setAccessNotice("Perintah PIN "+user.user_pin+" masuk antrean; menunggu ACK dan pembacaan ulang mesin."); void refetchVerifiedAccess();
-    }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal");}finally{setAccessBusyPin(null);}
+      const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");
+      const commandId=String(data.command_id??"");
+      if(!/^[a-f0-9-]{36}$/i.test(commandId))throw new Error("ID perintah tidak tersedia");
+      setAccessNotice("PIN "+user.user_pin+": antrean diterima, menunggu ACK mesin.");
+      const deadline=Date.now()+90000;
+      let ackComplete=false;
+      while(Date.now()<deadline){
+        await new Promise<void>(resolve=>setTimeout(resolve,3000));
+        const statusResponse=await fetch(API+"/admin/gym-x904/user-command/"+commandId,{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+        if(!statusResponse.ok)throw new Error("Tidak dapat memeriksa ACK perintah");
+        const statusData=await statusResponse.json();
+        const command=statusData.command;
+        if(command?.state==="failed"||command?.state==="cancelled")throw new Error("Mesin menolak perintah: "+String(command.error_code??command.result?.errorCode??"UNKNOWN"));
+        if(command?.state==="completed"){
+          if(command.result?.readBackConfirmed!==true || Number(command.result?.afterGroup)!==(op==="SUSPEND_USER"?2:1))
+            throw new Error("ACK diterima tanpa pembacaan ulang grup yang benar");
+          ackComplete=true;break;
+        }
+      }
+      if(!ackComplete)throw new Error("ACK belum diterima dalam 90 detik; periksa status sebelum mengulangi perintah.");
+      setAccessNotice("ACK PIN "+user.user_pin+" berhasil. Menunggu snapshot SDK berikutnya...");
+      await refetchVerifiedAccess();
+      // Snapshot is published every three minutes; never claim final success based solely on ACK.
+      const snapshotDeadline=Date.now()+220000;
+      let snapshotConfirmed=false;
+      while(Date.now()<snapshotDeadline){
+        const fresh=await queryClient.fetchQuery({queryKey:["gym-x904-live-access-status"],queryFn:async()=>{
+          const r=await fetch(API+"/admin/gym-x904/live-access-status",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+          if(!r.ok)throw new Error("Snapshot SDK tidak tersedia");
+          return r.json();
+        },staleTime:0});
+        const row=fresh.users?.find((v:{user_pin:string;device_group:number;identityMatched:boolean})=>v.user_pin===user.user_pin);
+        if(row?.identityMatched && row.device_group===(op==="SUSPEND_USER"?2:1) && new Date(fresh.observedAt).getTime()>Date.now()-240000){
+          snapshotConfirmed=true;break;
+        }
+        await new Promise<void>(resolve=>setTimeout(resolve,5000));
+      }
+      if(!snapshotConfirmed)throw new Error("ACK berhasil, tetapi snapshot terbaru belum mengonfirmasi status. Jangan ulangi perintah sebelum dicek.");
+      setAccessNotice((op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+user.user_pin+" terkonfirmasi ACK dan snapshot SDK.");
+    }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal atau belum terverifikasi");}
+    finally{setAccessBusyPin(null);}
   }
   const [commandMessage, setCommandMessage] = useState("");
   const { data: readCommand, refetch: refetchReadCommand } = useQuery<{command: null | {command_id:string;state:string;created_at:string;completed_at:string|null;result:Record<string,unknown>|null;error_code:string|null}}>({
@@ -523,9 +564,9 @@ export default function GymX904() {
             <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0))).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
-              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1":m.device_group===2?"Grup 2":"Grup "+m.device_group)+" · "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1 · akses diperbolehkan":m.device_group===2?"Grup 2 · akses ditahan":"Grup "+m.device_group+" · akses tidak diketahui")+" · akun "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
-                {(() => {const m=machineFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const verified=!!m&&m.identityMatched&&m.device_uid===u.device_uid&&m.device_role===0&&u.device_role===0&&/^[A-Za-z0-9 ._-]{2,24}$/.test(u.display_name)&&machineSnapshotFresh;const op=verified&&m.device_group===1&&m.enabled?"SUSPEND_USER":verified&&m.device_group===2&&!m.enabled?"ACTIVATE_USER":null;const permitted=manualAccessAllEnabled||testUser;const reason=!machineSnapshotFresh?"Snapshot mesin kedaluwarsa":!m?"PIN tidak ditemukan pada mesin":!m.identityMatched||m.device_uid!==u.device_uid?"Identitas mesin tidak cocok":u.device_role!==0||m.device_role!==0?"Akun administrator perangkat tidak dapat diubah":!/^[A-Za-z0-9 ._-]{2,24}$/.test(u.display_name)?"Nama mesin perlu dilengkapi sebelum mengubah akses":!op?"Status grup dan aktif/nonaktif mesin tidak konsisten":!permitted?"Kontrol manual semua pengguna belum diaktifkan pada server":!userCommandCapabilities.operations?.includes(op)?"Kontrol manual belum tersedia":"Ubah akses mesin";
+                {(() => {const m=machineFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const verified=!!m&&m.identityMatched&&m.device_uid===u.device_uid&&m.device_role===0&&u.device_role===0&&/^[A-Za-z0-9 ._-]{1,24}$/.test(u.display_name)&&machineSnapshotFresh;const op=verified&&m.device_group===1&&m.enabled?"SUSPEND_USER":verified&&m.device_group===2?"ACTIVATE_USER":null;const permitted=manualAccessAllEnabled||testUser;const reason=!machineSnapshotFresh?"Snapshot mesin kedaluwarsa":!m?"PIN tidak ditemukan pada mesin":!m.identityMatched||m.device_uid!==u.device_uid?"Identitas mesin tidak cocok":u.device_role!==0||m.device_role!==0?"Akun administrator perangkat tidak dapat diubah":!/^[A-Za-z0-9 ._-]{2,24}$/.test(u.display_name)?"Nama mesin perlu dilengkapi sebelum mengubah akses":!op?"Status grup dan aktif/nonaktif mesin tidak konsisten":!permitted?"Kontrol manual semua pengguna belum diaktifkan pada server":!userCommandCapabilities.operations?.includes(op)?"Kontrol manual belum tersedia":"Ubah akses mesin";
                   return <button type="button" title={reason}
                     disabled={!op||!permitted||!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||!!accessBusyPin}
                     onClick={()=>{if(op)void changeManualAccess(u,op);}}
