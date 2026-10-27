@@ -400,6 +400,24 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)
     deviceSerial:"TDBD234200545",manualAccessEnabled:allowed && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true",manualAccessReason:process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" ? null : "VMSC_GROUP_EXECUTOR_NOT_READY",durableBulkEnabled:allowed && process.env.GYM_X904_DURABLE_BULK_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true" && process.env.GYM_X904_USER_DELETE_ENABLED==="true",operations:(allowed && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true" ? ["SUSPEND_USER","ACTIVATE_USER"] : []).concat(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? (process.env.GYM_X904_USER_DELETE_ENABLED==="true" ? ["UPDATE_USER","DELETE_USER"] : ["UPDATE_USER"]) : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"]),testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
 });
 
+// Last confirmed group mutation, not a live device snapshot. Unknown until a verified ACK exists.
+router.get("/admin/gym-x904/manual-access-status",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor||!["owner","super_admin"].includes(actor.role)) return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  try{
+    const r=await db.execute(sql`SELECT DISTINCT ON (user_pin) user_pin,command_type,completed_at,
+      (result->>'deviceUid')::integer AS device_uid,
+      (result->>'afterGroup')::integer AS device_group
+      FROM sport_center.x904_user_commands
+      WHERE device_serial='TDBD234200545' AND state='completed'
+        AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        AND result->>'readBackConfirmed'='true'
+      ORDER BY user_pin,completed_at DESC`);
+    return res.json({source:"last_verified_command_ack",users:r.rows});
+  }catch{return res.status(503).json({error:"MANUAL_ACCESS_STATUS_UNAVAILABLE"});}
+});
+
 // VMSC claims and receipts use scoped database SECURITY DEFINER functions.
 // No public HTTP path can claim or complete a machine mutation.
 router.get("/admin/gym-x904/user-command/:commandId",adminMiddleware,async(req,res)=>{
