@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual, createHmac, createHash } from "node:crypto";
 import { adminMiddleware } from "../lib/auth";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -494,6 +494,51 @@ router.get("/admin/gym-x904/user-command/:commandId",adminMiddleware,async(req,r
     if(!r.rows.length) return res.status(404).json({error:"COMMAND_NOT_FOUND"});
     return res.json({command:r.rows[0]});
   } catch {return res.status(503).json({error:"COMMAND_STATUS_UNAVAILABLE"});}
+});
+
+router.get("/internal/gym-x904/diagnostics/command/:commandId", async (req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const secret=process.env.X904_OC_DIAGNOSTICS_HMAC_SECRET ?? "";
+  if(process.env.X904_OC_DIAGNOSTICS_ENABLED!=="true" || secret.length<48)
+    return res.status(404).json({error:"DIAGNOSTICS_DISABLED"});
+  const timestamp=String(req.header("x-x904-timestamp")??"");
+  const nonce=String(req.header("x-x904-nonce")??"");
+  const signature=String(req.header("x-x904-signature")??"");
+  const commandId=String(req.params.commandId??"");
+  if(!/^[0-9a-f-]{36}$/i.test(commandId) || !/^\\d{13}$/.test(timestamp) ||
+     !/^[a-zA-Z0-9_-]{16,96}$/.test(nonce) || !/^[a-f0-9]{64}$/i.test(signature))
+    return res.status(400).json({error:"INVALID_DIAGNOSTIC_REQUEST"});
+  if(Math.abs(Date.now()-Number(timestamp))>60_000)
+    return res.status(401).json({error:"DIAGNOSTIC_TIMESTAMP_EXPIRED"});
+  const msg=["GET","/internal/gym-x904/diagnostics/command/"+commandId,timestamp,nonce].join("\\n");
+  const expected=createHmac("sha256",secret).update(msg).digest("hex");
+  if(!timingSafeEqual(Buffer.from(expected,"hex"),Buffer.from(signature,"hex")))
+    return res.status(401).json({error:"DIAGNOSTIC_AUTH_FAILED"});
+  const nonceHash=createHash("sha256").update(nonce).digest("hex");
+  const requestId=randomUUID();
+  try{
+    const audit=await db.execute(sql`INSERT INTO sport_center.x904_diagnostic_audit
+      (request_id,nonce_hash,command_id,action,result)
+      VALUES (${requestId}::uuid,${nonceHash},${commandId}::uuid,'command_status','accepted')
+      ON CONFLICT (nonce_hash) DO NOTHING RETURNING request_id`);
+    if(!audit.rows.length)return res.status(409).json({error:"DIAGNOSTIC_REPLAY"});
+    const rows=await db.execute(sql`SELECT command_id,command_type,user_pin,state,created_at,
+      completed_at,result->>'errorCode' AS error_code,
+      result->>'readBackConfirmed' AS readback_confirmed,
+      result->>'beforeGroup' AS before_group,result->>'afterGroup' AS after_group
+      FROM sport_center.x904_user_commands
+      WHERE command_id=${commandId}::uuid AND device_serial='TDBD234200545'
+      AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')`);
+    if(!rows.rows.length)return res.status(404).json({error:"COMMAND_NOT_FOUND",requestId});
+    const cmd=rows.rows[0];
+    const snap=await db.execute(sql`SELECT snapshot_id,observed_at,
+       (SELECT jsonb_build_object('group',u->>'group','enabled',u->>'enabled','role',u->>'role')
+        FROM jsonb_array_elements(users) u WHERE u->>'pin'=${String(cmd.user_pin)} LIMIT 1) AS observed
+       FROM sport_center.gym_x904_access_snapshots
+       WHERE device_serial='TDBD234200545'
+       ORDER BY snapshot_id DESC LIMIT 1`);
+    return res.json({requestId,source:"x904_read_only_diagnostic",command:cmd,snapshot:snap.rows[0]??null});
+  }catch{return res.status(503).json({error:"DIAGNOSTIC_AUDIT_OR_QUERY_UNAVAILABLE"});}
 });
 
 export default router;
