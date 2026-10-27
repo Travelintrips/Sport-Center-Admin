@@ -4143,6 +4143,8 @@ router.post("/admin/bookings/:id/resend-wa", adminMiddleware, async (req, res) =
     const reviewUrl = `${appUrl}/ulasan/${reviewToken}`;
 
     await notifyPaymentProofUploaded({
+      bookingId: booking.id,
+      groupRef: booking.groupRef,
       customerName: booking.customerName,
       customerPhone: booking.customerPhone,
       orderNumber: booking.orderNumber,
