@@ -71,6 +71,25 @@ export default function GymX904() {
     },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:15000
   });
   const accessFor=(user:LanUser)=>verifiedAccess?.users.find(x=>x.user_pin===user.user_pin&&x.device_uid===user.device_uid);
+  const {data:machineAccess,isError:machineAccessError}=useQuery<{
+    available:boolean;source:string;observedAt:string|null;machineCount:number|null;appCount:number;
+    missingInMachine?:number;unmatchedIdentity?:number;
+    users:Array<{user_pin:string;display_name:string;device_group:number;enabled:boolean;device_role:number;device_uid:number|null;identityMatched:boolean}>
+  }>({
+    queryKey:["gym-x904-live-access-status"],
+    queryFn:async()=>{
+      const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(API+"/admin/gym-x904/live-access-status",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+      if(!response.ok)throw new Error("Snapshot mesin belum tersedia");
+      return response.json();
+    },
+    enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:15000
+  });
+  const machineSnapshotFresh=!!machineAccess?.observedAt &&
+    Date.now()-new Date(machineAccess.observedAt).getTime()>=0 &&
+    Date.now()-new Date(machineAccess.observedAt).getTime()<300000;
+  const machineFor=(user:LanUser)=>machineAccess?.users.find(x=>x.user_pin===user.user_pin);
+
   const [accessNotice,setAccessNotice]=useState("");
   const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
   async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
@@ -503,7 +522,7 @@ export default function GymX904() {
             <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0))).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
-              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{accessFor(u)?.device_group===1?"Aktif (ACK terakhir)":accessFor(u)?.device_group===2?"Suspend (ACK terakhir)":"Belum diverifikasi dari mesin"}</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1":m.device_group===2?"Grup 2":"Grup "+m.device_group)+" · "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
                 {(() => {const state=accessFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const op=state?.device_group===1?"SUSPEND_USER":state?.device_group===2?"ACTIVATE_USER":testUser?"SUSPEND_USER":null;
                   return <button type="button" title={!op?"Status grup belum terverifikasi dari ACK X904":!userCommandCapabilities.operations?.includes(op)?"Fitur manual belum diaktifkan di server":testUser&&!state?"Uji PIN 200: mesin wajib memverifikasi Grup 1 sebelum suspend":"Ubah akses mesin"}
