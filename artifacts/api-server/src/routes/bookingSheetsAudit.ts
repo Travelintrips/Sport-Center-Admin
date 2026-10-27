@@ -17,7 +17,7 @@ export const paidTabFromWibDate = (value: Date | string): string => {
 };
 
 const BOOKING_HEADERS = ["Order Number","Customer Name","Customer Email","Customer Phone","Facility","Date","Start Time","End Time","Duration (hours)","Total Price","Status","Notes","Admin Notes","Created At"];
-const MONTH_PATTERN = /^20\\d{2}-(0[1-9]|1[0-2])$/;
+const MONTH_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 export function monthTarget(month: string): string {
   if (!MONTH_PATTERN.test(month)) throw new Error("Invalid payment month");
   const [year, number] = month.split("-").map(Number);
@@ -30,7 +30,7 @@ router.get("/admin/google-sheets/month-readiness", adminMiddleware, async (req, 
   if (!isGoogleSheetsConfigured()) { res.status(503).json({ tab, ready: false, reason: "SERVICE_ACCOUNT_NOT_CONFIGURED" }); return; }
   try {
     const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
-    if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\\\n/g, "\\n");
+    if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
     const auth = new google.auth.GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] });
     const sheets = google.sheets({ version: "v4", auth });
     const meta = await sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" });
