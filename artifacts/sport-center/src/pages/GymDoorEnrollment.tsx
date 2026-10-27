@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useGetMe } from "@workspace/api-client-react";
+import { useGetMe, getGetMeQueryKey } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { Camera, LockKeyhole, ShieldCheck, AlertTriangle } from "lucide-react";
 
@@ -8,7 +8,7 @@ import { Camera, LockKeyhole, ShieldCheck, AlertTriangle } from "lucide-react";
  * and this page has no endpoint capable of mutating X904 accounts.
  */
 export default function GymDoorEnrollment() {
-  const { data: user, isLoading, isError } = useGetMe({ query: { retry: false } });
+  const { data: user, isLoading, isError } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState("");
