@@ -198,9 +198,31 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
   const {commandType, userPin, expectedSerial, confirmPin, idempotencyKey, name, expectedUid, expectedName} = req.body ?? {};
   if (process.env.GYM_X904_NAME_EDIT_ALL_ENABLED!=="true" && process.env.GYM_X904_USER_WRITE_TEST_PIN && (userPin !== process.env.GYM_X904_USER_WRITE_TEST_PIN || expectedUid !== 335 || !["UPDATE_USER","DELETE_USER"].includes(commandType))) return res.status(403).json({error:"TEST_USER_ONLY"});
   if(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" && commandType!=="UPDATE_USER" && !(commandType==="DELETE_USER" && process.env.GYM_X904_USER_DELETE_ENABLED==="true")) return res.status(403).json({error:"OPERATION_NOT_ENABLED"});
-  // Fail closed: manual group changes require a separately verified VMSC executor.
-  if(commandType==="SUSPEND_USER" || commandType==="ACTIVATE_USER")
-    return res.status(503).json({error:"VMSC_GROUP_EXECUTOR_NOT_READY"});
+  // Separate explicit readiness gate; never infer manual group readiness from CUD flags.
+  const isManualGroup=commandType==="SUSPEND_USER" || commandType==="ACTIVATE_USER";
+  if(isManualGroup){
+    if(process.env.GYM_X904_MANUAL_ACCESS_ENABLED!=="true")
+      return res.status(503).json({error:"VMSC_GROUP_EXECUTOR_NOT_READY"});
+    if(typeof userPin!=="string" || !/^[0-9]{1,8}$/.test(userPin) ||
+       expectedSerial!=="TDBD234200545" || confirmPin!==userPin ||
+       typeof idempotencyKey!=="string" || !/^[a-zA-Z0-9_-]{16,96}$/.test(idempotencyKey) ||
+       !Number.isSafeInteger(expectedUid) || expectedUid<1 || expectedUid>=65535 ||
+       typeof expectedName!=="string" || !/^[A-Za-z0-9 ._-]{2,24}$/.test(expectedName))
+      return res.status(400).json({error:"INVALID_MANUAL_ACCESS_COMMAND"});
+    try{
+      const active=await db.execute(sql`SELECT command_id,state FROM sport_center.x904_user_commands
+        WHERE device_serial=${expectedSerial} AND user_pin=${userPin}
+          AND state IN ('queued','claimed') LIMIT 1`);
+      if(active.rows.length) return res.status(409).json({error:"USER_COMMAND_IN_PROGRESS"});
+      const result=await db.execute(sql`INSERT INTO sport_center.x904_user_commands
+        (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
+        VALUES (${expectedSerial},${commandType},${userPin},
+          ${JSON.stringify({expectedUid,expectedName})}::jsonb,${actor.userId},${idempotencyKey})
+        ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
+      if(!result.rows.length) return res.status(409).json({error:"DUPLICATE_COMMAND"});
+      return res.status(202).json({command_id:result.rows[0].command_id,state:"queued"});
+    }catch{return res.status(503).json({error:"MANUAL_ACCESS_QUEUE_UNAVAILABLE"});}
+  }
   const isCreate=commandType==="CREATE_USER";
   const requiresExisting=commandType==="UPDATE_USER" || commandType==="DELETE_USER";
   const safeDisplay=(v:unknown)=>typeof v==="string" && /^[A-Za-z0-9 ._-]{2,24}$/.test(v);
