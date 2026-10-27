@@ -11,3 +11,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-20 request Hostinger rebuild latest main for Calendar PR #166 commit 26f7a2a6; preserve existing X904 settings and all booking data; verify healthz SHA and admin role access after deploy.
 
 2026-10-27 force Hostinger rebuild for PR #273 membership checkout clarity; verify production CheckoutForm bundle contains Lanjutkan Perpanjangan.
+
+2026-10-27 force Hostinger rebuild for PR #276 actual membership payment date; verify CheckoutForm contains Tanggal pembayaran.
