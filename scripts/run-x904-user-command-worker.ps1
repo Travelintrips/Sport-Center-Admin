@@ -29,6 +29,15 @@ try {
   $conn='host=aws-1-ap-southeast-2.pooler.supabase.com port=5432 dbname=postgres user=x904_vmsc_evidence_login.nzdweipzckfszczzqtuw sslmode=verify-full sslrootcert=C:/Users/Admin/Downloads/prod-ca-2021.crt connect_timeout=15'
   $who=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c 'SELECT current_user;' 2>&1
   if($LASTEXITCODE -ne 0 -or (($who|Out-String).Trim() -ne 'x904_vmsc_evidence_login')) {throw 'DB_ROLE_GUARD_FAILED'}
+  # Fail closed before leasing any command: never claim a manual group job when
+  # the VMSC group executor is disabled. This avoids stranded claimed jobs.
+  $manualReady=($e['X904_MANUAL_ACCESS_ENABLED'] -eq 'true' -and
+    (Test-Path (Join-Path $base 'migration\\x904-vmsc-group-executor-stage.ps1')))
+  if(-not $manualReady) {
+    $pendingManual=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM sport_center.x904_user_commands WHERE state='queued' AND command_type IN ('SUSPEND_USER','ACTIVATE_USER');" 2>&1
+    if($LASTEXITCODE -ne 0) {throw 'DB_MANUAL_QUEUE_CHECK_UNAVAILABLE'}
+    if([int](($pendingManual|Out-String).Trim()) -gt 0) {Report 'MANUAL_QUEUE_WAITING_EXECUTOR_DISABLED';exit 0}
+  }
   $claim=& $psql $conn -X -w -t -A -v ON_ERROR_STOP=1 -c "SELECT coalesce(sport_center.x904_claim_user_command()::text,'null');" 2>&1
   if($LASTEXITCODE -ne 0) {throw 'DB_CLAIM_UNAVAILABLE'}
   $text=($claim|Out-String).Trim()
