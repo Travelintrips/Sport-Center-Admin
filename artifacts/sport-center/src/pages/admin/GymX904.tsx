@@ -52,7 +52,7 @@ export default function GymX904() {
   const [tab, setTab] = useState<GymTab>("dashboard");
   const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
   const queryClient = useQueryClient();
-  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER"|"SUSPEND_USER"|"ACTIVATE_USER">}>({
+  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;manualAccessAllEnabled?:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER"|"SUSPEND_USER"|"ACTIVATE_USER">}>({
     queryKey:["gym-x904-user-capabilities"],
     queryFn:async()=>{
       const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
@@ -89,6 +89,7 @@ export default function GymX904() {
     Date.now()-new Date(machineAccess.observedAt).getTime()>=0 &&
     Date.now()-new Date(machineAccess.observedAt).getTime()<300000;
   const machineFor=(user:LanUser)=>machineAccess?.users.find(x=>x.user_pin===user.user_pin);
+  const manualAccessAllEnabled=userCommandCapabilities?.manualAccessAllEnabled===true;
 
   const [accessNotice,setAccessNotice]=useState("");
   const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
@@ -524,9 +525,9 @@ export default function GymX904() {
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
               <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1":m.device_group===2?"Grup 2":"Grup "+m.device_group)+" · "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
-                {(() => {const state=accessFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const op=state?.device_group===1?"SUSPEND_USER":state?.device_group===2?"ACTIVATE_USER":testUser?"SUSPEND_USER":null;
-                  return <button type="button" title={!op?"Status grup belum terverifikasi dari ACK X904":!userCommandCapabilities.operations?.includes(op)?"Fitur manual belum diaktifkan di server":testUser&&!state?"Uji PIN 200: mesin wajib memverifikasi Grup 1 sebelum suspend":"Ubah akses mesin"}
-                    disabled={!op||!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||u.device_role!==0||!!accessBusyPin}
+                {(() => {const m=machineFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const verified=!!m&&m.identityMatched&&m.device_uid===u.device_uid&&m.device_role===0&&u.device_role===0&&machineSnapshotFresh;const op=verified&&m.device_group===1&&m.enabled?"SUSPEND_USER":verified&&m.device_group===2&&!m.enabled?"ACTIVATE_USER":null;const permitted=manualAccessAllEnabled||testUser;const reason=!machineSnapshotFresh?"Snapshot mesin kedaluwarsa":!m?"PIN tidak ditemukan pada mesin":!m.identityMatched||m.device_uid!==u.device_uid?"Identitas mesin tidak cocok":u.device_role!==0||m.device_role!==0?"Akun administrator perangkat tidak dapat diubah":!op?"Status grup dan aktif/nonaktif mesin tidak konsisten":!permitted?"Kontrol manual semua pengguna belum diaktifkan pada server":!userCommandCapabilities.operations?.includes(op)?"Kontrol manual belum tersedia":"Ubah akses mesin";
+                  return <button type="button" title={reason}
+                    disabled={!op||!permitted||!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||!!accessBusyPin}
                     onClick={()=>{if(op)void changeManualAccess(u,op);}}
                     className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">{op==="ACTIVATE_USER"?"Aktifkan":"Suspend"}</button>})()}
                 {userCommandCapabilities.operations?.includes("UPDATE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>}
