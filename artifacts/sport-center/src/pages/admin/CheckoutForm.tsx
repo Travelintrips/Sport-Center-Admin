@@ -602,7 +602,7 @@ export default function AdminCheckoutForm() {
                 <SelectContent>
                   <SelectItem value="personal">Personal / Umum</SelectItem>
                   <SelectItem value="corporate">Perusahaan / Corporate</SelectItem>
-                  <SelectItem value="membership">Membership Gym (kelola di Membership)</SelectItem>
+                  <SelectItem value="membership">Membership Gym</SelectItem>
                   <SelectItem value="event">Event / Grup</SelectItem>
                 </SelectContent>
               </Select>
@@ -615,7 +615,7 @@ export default function AdminCheckoutForm() {
               </Select>}
               {!isMembership && <p className="text-xs text-muted-foreground">{isCompanyPayer ? "Penagihan mengikuti status approval dan konfigurasi invoice perusahaan; bukan otomatis menunggu pembayaran." : "Booking belum dianggap lunas. Bukti pembayaran perlu diverifikasi sebelum konfirmasi."}</p>}
               {bookingKind === "event" && <p className="text-xs text-amber-700">Alur ini untuk satu sesi event. Booking grup multi-sesi harus menggunakan alur grup khusus.</p>}
-              {isMembership && <p className="text-xs text-amber-700">Pilih member aktif dan catat kunjungan melalui modul Membership. Kunjungan member tidak dikenakan tagihan Rp30.000.</p>}
+              {isMembership && <p className="text-xs text-muted-foreground">Kelola pendaftaran, perpanjangan, pembayaran, atau kunjungan member langsung dari halaman ini.</p>}
             </div>
 
             {!isMembership && !isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
@@ -707,7 +707,34 @@ export default function AdminCheckoutForm() {
                       <div className="px-3 py-2 text-sm text-muted-foreground">Member tidak ditemukan</div>}
                   </SelectContent>
                 </Select>
-                {matchedMember && <p className="text-sm">Status: <strong>{matchedMember.status}</strong> · Berlaku hingga {matchedMember.endDate}</p>}
+                {matchedMember && (
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Member</span>
+                      <strong>{matchedMember.name}</strong>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Status</span>
+                      <strong>{matchedMember.status}</strong>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Berlaku hingga</span>
+                      <strong>{matchedMember.endDate}</strong>
+                    </div>
+                    {memberAction === "renew" && renewalStartDate && renewalEndDate && (
+                      <>
+                        <div className="border-t pt-2 flex justify-between gap-4">
+                          <span className="text-muted-foreground">Periode baru</span>
+                          <strong>{renewalStartDate} – {renewalEndDate}</strong>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span className="text-muted-foreground">Tagihan</span>
+                          <strong>{formatRupiah(membershipCharge)}</strong>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 {memberAction === "renew" && <>
                   <Label>Perpanjangan</Label>
                   <Select value={memberMonths} onValueChange={setMemberMonths}>
@@ -779,7 +806,7 @@ export default function AdminCheckoutForm() {
               )}
 
               {!membershipPaymentTarget && <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
-                {isSubmitting ? "Memproses..." : memberAction === "new" ? "Daftarkan Member" : memberAction === "renew" ? "Perpanjang Membership" : "Catat Kunjungan (Rp0)"}
+                {isSubmitting ? "Memproses..." : memberAction === "new" ? "Lanjutkan Pendaftaran" : memberAction === "renew" ? "Lanjutkan Perpanjangan" : "Catat Kunjungan (Rp0)"}
               </Button>}
               {(!membershipPaymentTarget || membershipPaymentDone) && <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>}
             </div>}
