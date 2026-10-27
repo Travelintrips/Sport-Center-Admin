@@ -262,7 +262,10 @@ async function sendWA(
   }
 }
 
-export async function sendWAToAdmins(message: string): Promise<void> {
+export async function sendWAToAdmins(
+  message: string,
+  ctx?: { bookingId?: number; orderNumber?: string; event?: string },
+): Promise<void> {
   const { adminPhones, adminGroupProvider, waGatewayAdminGroupId } = await getWaConfig();
   const isDev = process.env.NODE_ENV !== "production";
 
@@ -282,7 +285,7 @@ export async function sendWAToAdmins(message: string): Promise<void> {
     }
 
     seen.add(clean);
-    await sendWA(phone, message);
+    await sendWA(phone, message, ctx);
   }
 
   if (adminGroupProvider !== "cst_gateway") return;
@@ -311,11 +314,18 @@ export async function sendWAToAdmins(message: string): Promise<void> {
       { messageId: queued.messageId, status: queued.status, groupId: waGatewayAdminGroupId },
       "[WA] notifikasi grup admin masuk queue CST WA Gateway",
     );
+    if (ctx) {
+      await logWaSend(waGatewayAdminGroupId, message, "sent", null, ctx);
+    }
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
     logger.error(
-      { err: err instanceof Error ? err.message : String(err), groupId: waGatewayAdminGroupId },
+      { err: error, groupId: waGatewayAdminGroupId },
       "[WA] gagal mengirim notifikasi grup via CST WA Gateway; tidak fallback ke Fonnte",
     );
+    if (ctx) {
+      await logWaSend(waGatewayAdminGroupId || "admin-group", message, "failed", error, ctx);
+    }
   }
 }
 
@@ -622,11 +632,21 @@ export async function notifyPaymentProofUploaded(data: BookingNotifData & { revi
       `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
       `Total: *Rp ${data.totalPrice}*\n\n` +
       `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
-    await sendWAToAdmins(msg);
+    await sendWAToAdmins(msg, {
+      bookingId: data.bookingId,
+      orderNumber: data.orderNumber,
+      event: "payment_proof_uploaded_admin",
+    });
     return;
   }
   const tpl = await getTemplate("admin_payment_proof");
-  if (tpl) await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>));
+  if (tpl) {
+    await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>), {
+      bookingId: data.bookingId,
+      orderNumber: data.orderNumber,
+      event: "payment_proof_uploaded_admin",
+    });
+  }
 }
 
 export interface MembershipPaymentProofData {
