@@ -209,6 +209,11 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
        !Number.isSafeInteger(expectedUid) || expectedUid<1 || expectedUid>=65535 ||
        typeof expectedName!=="string" || !/^[A-Za-z0-9 ._-]{2,24}$/.test(expectedName))
       return res.status(400).json({error:"INVALID_MANUAL_ACCESS_COMMAND"});
+    // Restrict initial production rollout to the attested test identity only.
+    // Never permit a mass/manual write to unrelated members before live group snapshots and membership policy are verified.
+    if(process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN!=="200" || userPin!=="200" ||
+       expectedUid!==337 || expectedName!=="TEST SUSPEND X904")
+      return res.status(403).json({error:"MANUAL_ACCESS_TEST_PIN_ONLY"});
     try{
       const active=await db.execute(sql`SELECT command_id,state FROM sport_center.x904_user_commands
         WHERE device_serial=${expectedSerial} AND user_pin=${userPin}
