@@ -793,6 +793,8 @@ router.post("/payments", async (req, res) => {
     const APP_URL = await getBaseUrl();
     const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
     notifyPaymentProofUploaded({
+      bookingId: booking.id,
+      groupRef: booking.groupRef,
       customerName: booking.customerName,
       customerPhone: booking.customerPhone,
       orderNumber: booking.orderNumber,
