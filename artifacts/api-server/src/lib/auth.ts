@@ -169,6 +169,43 @@ export function authMiddlewareWithQueryToken(req: Request, res: Response, next: 
 
 const ADMIN_ROLES = ["owner", "admin", "super_admin", "admin_booking", "finance", "staff"];
 
+const ADMIN_BOOKING_DENIED_API_PREFIXES = [
+  "/admin/system",
+  "/settings",
+  "/paylabs",
+  "/payment-settlement",
+  "/bank-reconciliation",
+  "/expenses",
+  "/vendors",
+  "/notifications",
+  "/notification-templates",
+  "/document-settings",
+  "/document-templates",
+  "/tax",
+  "/operator-accounts",
+  "/user-roles",
+  "/audit",
+  "/data-connections",
+  "/ap-members",
+  "/promos",
+  "/pricing-rules",
+  "/maintenance",
+  "/schedules",
+  "/company-verifications",
+  "/company-invoices",
+  "/company-billing",
+  "/discount-settings",
+  "/gym-x904",
+  "/wa-ai",
+] as const;
+
+function isAdminBookingApiDenied(req: Request): boolean {
+  const path = String(req.path || req.originalUrl || "").split("?")[0] ?? "";
+  return ADMIN_BOOKING_DENIED_API_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(prefix + "/"),
+  );
+}
+
 /**
  * Admin middleware that also accepts ?_token= query param.
  * Use ONLY for document preview/pdf endpoints (window.open() flows).
@@ -189,6 +226,10 @@ export function adminMiddleware(req: Request, res: Response, next: NextFunction)
     const role = (req as any).user?.role;
     if (!ADMIN_ROLES.includes(role)) {
       res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    if (role === "admin_booking" && isAdminBookingApiDenied(req)) {
+      res.status(403).json({ error: "Forbidden: Booking Admin scope only" });
       return;
     }
     next();
