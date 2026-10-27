@@ -48,6 +48,53 @@ router.get("/admin/google-sheets/month-readiness", adminMiddleware, async (req, 
     res.status(502).json({ tab, ready: false, reason: "MONTH_READ_FAILED", writeEnabled: false });
   }
 });
+// Read-only reconciliation. Never append/write, even when candidates appear new.
+// Duplicate check includes all PAID tabs to prevent a booking silently moving months.
+router.post("/admin/google-sheets/reconcile", adminMiddleware, async (req, res) => {
+  const month = String(req.body?.month ?? "");
+  const candidateIds = req.body?.orderNumbers;
+  if (!MONTH_PATTERN.test(month) || !Array.isArray(candidateIds) || candidateIds.length > 2000 ||
+    candidateIds.some((id: unknown) => typeof id !== "string" || !/^SC-[A-Z0-9-]{1,40}$/.test(id))) {
+    res.status(400).json({ error: "Invalid reconciliation request" }); return;
+  }
+  const tab = monthTarget(month);
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ error: "Service account not configured" }); return; }
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+    const auth = new google.auth.GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] });
+    const sheets = google.sheets({ version: "v4", auth });
+    const metadata = await sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" });
+    const names = (metadata.data.sheets ?? []).map(s => s.properties?.title).filter((name): name is string => Boolean(name));
+    const paidNames = names.filter(name => /^PAID (JANUARI|FEBRUARI|MARET|APRIL|MEI|JUNI|JULI|AGUSTUS|SEPTEMBER|OKTOBER|NOVEMBER|DESEMBER) 20\\d{2}$/.test(name));
+    if (!names.includes(tab)) { res.json({ ready: false, tab, reason: "MONTH_TAB_MISSING", writeEnabled: false }); return; }
+    const rowsByTab = await Promise.all(paidNames.map(async name => {
+      const data = await sheets.spreadsheets.values.get({ spreadsheetId: TARGET_ID, range: `'${name}'!A1:N10000`, valueRenderOption: "UNFORMATTED_VALUE" });
+      return { name, rows: data.data.values ?? [] };
+    }));
+    const target = rowsByTab.find(item => item.name === tab)!;
+    const headerRow = target.rows.findIndex(row => BOOKING_HEADERS.every((h, i) => row[i] === h));
+    if (headerRow < 0) { res.json({ ready: false, tab, reason: "BOOKING_HEADER_MISSING", writeEnabled: false }); return; }
+    const existing = new Map<string, string[]>();
+    for (const item of rowsByTab) {
+      for (const row of item.rows) {
+        const id = String(row[0] ?? "").trim();
+        if (/^SC-[A-Z0-9-]{1,40}$/.test(id)) existing.set(id, [...(existing.get(id) ?? []), item.name]);
+      }
+    }
+    const counts = new Map<string, number>();
+    for (const id of candidateIds) counts.set(id, (counts.get(id) ?? 0)+1);
+    const blocked = [...counts].filter(([, count]) => count > 1).map(([id]) => id);
+    const duplicates = [...counts.keys()].filter(id => existing.has(id)).map(id => ({ orderNumber: id, tabs: existing.get(id) }));
+    const newIds = [...counts.keys()].filter(id => !existing.has(id) && !blocked.includes(id));
+    res.json({ ready: true, tab, candidateCount: candidateIds.length, uniqueCount: counts.size, newCount: newIds.length,
+      existingCount: duplicates.length, repeatedInPreviewCount: blocked.length, duplicates, repeatedInPreview: blocked,
+      note: "Dry run only: no payment allocation ledger, partial-payment validation or Sheets writes", writeEnabled: false });
+  } catch (error) {
+    req.log.error({err:error}, "Read-only Sheets reconciliation failed");
+    res.status(502).json({ error: "Reconciliation read failed", writeEnabled: false });
+  }
+});
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
   // Read-only: never clear, append or update the destination spreadsheet.
   if (!isGoogleSheetsConfigured()) {
