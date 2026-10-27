@@ -37,9 +37,9 @@ try {
     }
   }
   Require ($count -gt 0 -and $count -le 10000 -and $matches -eq 1) 'PIN_MISSING_OR_AMBIGUOUS'
-  # Fail closed until an authenticated UID-to-PIN snapshot is independently
-  # checked by the queue worker, not supplied by the browser or job payload.
-  Require $false 'WORKER_UID_ATTESTATION_NOT_IMPLEMENTED'
+  # No group write until the worker proves UID/PIN binding using an independently
+  # authenticated snapshot and checks the group 2 unlock-combination policy.
+  Require $false 'GROUP_WRITE_PRECONDITIONS_NOT_VERIFIED'
 } catch {
   $code=[string]$_.Exception.Message
   if($code -cnotmatch '^[A-Z0-9_]{1,64}$'){$code='EXECUTION_FAILED'}
