@@ -1262,27 +1262,10 @@ export async function createPublicMembershipAccountingEntry(
   dpp: number,
   ppnAmount: number,
   journalDate: string,
-  membershipPaymentId?: number,
 ): Promise<void> {
   const pool = getPublicPool();
   if (!pool) {
     console.warn("[accounting] Tidak ada Supabase URL — skip createPublicMembershipAccountingEntry");
-    return;
-  }
-
-  const existingEntry = await pool.query(
-    `SELECT id, status
-       FROM public.accounting_entries
-      WHERE ref = $1
-         OR correlation_id = $2
-      ORDER BY id DESC
-      LIMIT 1`,
-    [refNumber, `sc_membership_${refNumber}`],
-  );
-  if (existingEntry.rows.length > 0) {
-    if (existingEntry.rows[0].status !== "posted") {
-      await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [existingEntry.rows[0].id]);
-    }
     return;
   }
 
@@ -1297,18 +1280,13 @@ export async function createPublicMembershipAccountingEntry(
   const entryResult = await pool.query(
     `INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
-       source_schema, source_table, source_payment_id,
        total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
-    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_membership',$6,
-            'sport_center','sport_membership_payments',$7,
-            $8,$8,$9,NULL,$10,'{}')
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_membership',$6,$7,$7,$8,NULL,$9,'{}')
     RETURNING id`,
     [
       entryNumber, ids.journalId, journalDate, refNumber,
       `Pembayaran Member Gym Sport Center (${refNumber})`,
-      membershipPaymentId ?? membershipId,
-      membershipPaymentId ?? null,
-      grandTotal, COMPANY_ID,
+      membershipId, grandTotal, COMPANY_ID,
       `sc_membership_${refNumber}`,
     ]
   );
@@ -1975,25 +1953,15 @@ export async function createMembershipJournalEntry(
   dpp: number,
   ppnAmount: number,
   journalDate: string,
-  membershipPaymentId?: number,
 ): Promise<void> {
-  const [existing] = await db
-    .select({ id: accountingJournalsTable.id })
-    .from(accountingJournalsTable)
-    .where(eq(accountingJournalsTable.orderNumber, refNumber))
-    .limit(1);
-  if (existing) return;
-
   // grandTotal = dpp + ppnAmount = jumlah yang diterima dari customer (inklusif PPN)
   const grandTotal = dpp + ppnAmount;
   const [journal] = await db
     .insert(accountingJournalsTable)
     .values({
       bookingId: null,
-      paymentId: null,
       orderNumber: refNumber,
       journalType: "membership_payment_confirmed",
-      status: "posted",
       debitAccount: "Bank Mandiri",
       debitAmount: String(grandTotal),
       creditRevenueAccount: "Pendapatan Sport Center",
@@ -2002,7 +1970,7 @@ export async function createMembershipJournalEntry(
       creditPpnAmount: String(ppnAmount),
       journalDate,
       isReversal: false,
-      notes: `Pembayaran dikonfirmasi untuk member gym ${refNumber}${membershipPaymentId ? ` | membership_payment_id=${membershipPaymentId}` : ""}`,
+      notes: `Pembayaran dikonfirmasi untuk member gym ${refNumber}`,
     })
     .returning();
 
