@@ -28,7 +28,23 @@ BEGIN
      SELECT 1 FROM jsonb_array_elements(p_users) AS x(v)
      WHERE jsonb_typeof(x.v) <> 'object'
        OR x.v->>'pin' !~ '^[0-9]{1,8}$'
-       OR x.v->>'name' !~ '^[A-Za-z0-9 ._-]{1,24}$'
+       OR x.v->>'name' !~ '^[A-Za-z0-9 ._-]{0,24}
+       OR jsonb_typeof(x.v->'role') <> 'number'
+       OR (x.v->>'role')::integer NOT BETWEEN 0 AND 15
+       OR jsonb_typeof(x.v->'group') <> 'number'
+       OR (x.v->>'group')::integer NOT BETWEEN 0 AND 99
+       OR jsonb_typeof(x.v->'enabled') <> 'boolean'
+  ) THEN RAISE EXCEPTION 'INVALID_USER_ROW'; END IF;
+  IF (SELECT count(DISTINCT x.v->>'pin') FROM jsonb_array_elements(p_users) AS x(v)) <> p_count
+  THEN RAISE EXCEPTION 'DUPLICATE_PIN'; END IF;
+  INSERT INTO sport_center.gym_x904_access_snapshots(device_serial, user_count, users)
+    VALUES ('TDBD234200545',p_count,p_users) RETURNING snapshot_id INTO v_id;
+  RETURN v_id;
+END $$;
+REVOKE ALL ON FUNCTION sport_center.x904_publish_access_snapshot(jsonb,integer) FROM PUBLIC, anon, authenticated;
+GRANT USAGE ON SCHEMA sport_center TO x904_vmsc_evidence_login;
+GRANT EXECUTE ON FUNCTION sport_center.x904_publish_access_snapshot(jsonb,integer) TO x904_vmsc_evidence_login;
+
        OR jsonb_typeof(x.v->'role') <> 'number'
        OR (x.v->>'role')::integer NOT BETWEEN 0 AND 15
        OR jsonb_typeof(x.v->'group') <> 'number'
