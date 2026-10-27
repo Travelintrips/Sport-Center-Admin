@@ -505,12 +505,12 @@ router.get("/internal/gym-x904/diagnostics/command/:commandId", async (req,res)=
   const nonce=String(req.header("x-x904-nonce")??"");
   const signature=String(req.header("x-x904-signature")??"");
   const commandId=String(req.params.commandId??"");
-  if(!/^[0-9a-f-]{36}$/i.test(commandId) || !/^\\d{13}$/.test(timestamp) ||
+  if(!/^[0-9a-f-]{36}$/i.test(commandId) || !/^\d{13}$/.test(timestamp) ||
      !/^[a-zA-Z0-9_-]{16,96}$/.test(nonce) || !/^[a-f0-9]{64}$/i.test(signature))
     return res.status(400).json({error:"INVALID_DIAGNOSTIC_REQUEST"});
   if(Math.abs(Date.now()-Number(timestamp))>60_000)
     return res.status(401).json({error:"DIAGNOSTIC_TIMESTAMP_EXPIRED"});
-  const msg=["GET","/internal/gym-x904/diagnostics/command/"+commandId,timestamp,nonce].join("\\n");
+  const msg=["GET","/internal/gym-x904/diagnostics/command/"+commandId,timestamp,nonce].join("\n");
   const expected=createHmac("sha256",secret).update(msg).digest("hex");
   if(!timingSafeEqual(Buffer.from(expected,"hex"),Buffer.from(signature,"hex")))
     return res.status(401).json({error:"DIAGNOSTIC_AUTH_FAILED"});
