@@ -105,7 +105,7 @@ export default function GymX904() {
       const commandId=String(data.command_id??"");
       if(!/^[a-f0-9-]{36}$/i.test(commandId))throw new Error("ID perintah tidak tersedia");
       setAccessNotice("PIN "+user.user_pin+": antrean diterima, menunggu ACK mesin.");
-      const deadline=Date.now()+90000;
+      const deadline=Date.now()+360000;
       let ackComplete=false;
       while(Date.now()<deadline){
         await new Promise<void>(resolve=>setTimeout(resolve,3000));
@@ -120,11 +120,11 @@ export default function GymX904() {
           ackComplete=true;break;
         }
       }
-      if(!ackComplete)throw new Error("ACK belum diterima dalam 90 detik; periksa status sebelum mengulangi perintah.");
+      if(!ackComplete)throw new Error("ACK belum diterima dalam 6 menit. ID perintah: "+commandId+". Jangan ulangi sebelum memeriksa status.");
       setAccessNotice("ACK PIN "+user.user_pin+" berhasil. Menunggu snapshot SDK berikutnya...");
       await refetchVerifiedAccess();
       // Snapshot is published every three minutes; never claim final success based solely on ACK.
-      const snapshotDeadline=Date.now()+220000;
+      const snapshotDeadline=Date.now()+240000;
       let snapshotConfirmed=false;
       while(Date.now()<snapshotDeadline){
         const fresh=await queryClient.fetchQuery({queryKey:["gym-x904-live-access-status"],queryFn:async()=>{
