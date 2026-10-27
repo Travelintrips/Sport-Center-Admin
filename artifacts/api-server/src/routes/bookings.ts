@@ -4054,10 +4054,10 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
   }
 });
 
-// ─── GET /admin/bookings/wa-unnotified — bookings waiting_confirmation dengan belum ada WA ────
+// ─── GET /admin/bookings/wa-unnotified — waiting_confirmation tanpa bukti delivery WA admin ────
 router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) => {
   try {
-    const unnotified = await db
+    const waiting = await db
       .select({
         id: bookingsTable.id,
         orderNumber: bookingsTable.orderNumber,
@@ -4069,27 +4069,38 @@ router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) =>
         endTime: bookingsTable.endTime,
         totalPrice: bookingsTable.totalPrice,
         status: bookingsTable.status,
+        groupRef: bookingsTable.groupRef,
         createdAt: bookingsTable.createdAt,
       })
       .from(bookingsTable)
-      .where(
-        and(
-          eq(bookingsTable.status, "waiting_confirmation"),
-          notExists(
-            db
-              .select({ id: waNotifLogsTable.id })
-              .from(waNotifLogsTable)
-              .where(
-                and(
-                  eq(waNotifLogsTable.bookingId, bookingsTable.id),
-                  eq(waNotifLogsTable.event, "payment_proof_uploaded_admin"),
-                  eq(waNotifLogsTable.status, "sent"),
-                ),
-              ),
-          ),
-        ),
-      )
+      .where(eq(bookingsTable.status, "waiting_confirmation"))
       .orderBy(desc(bookingsTable.createdAt));
+
+    const unnotified = [];
+    for (const booking of waiting) {
+      const coveredBookingIds = booking.groupRef
+        ? (await db
+            .select({ id: bookingsTable.id })
+            .from(bookingsTable)
+            .where(eq(bookingsTable.groupRef, booking.groupRef))).map((row) => row.id)
+        : [booking.id];
+
+      const [sent] = coveredBookingIds.length > 0
+        ? await db
+            .select({ id: waNotifLogsTable.id })
+            .from(waNotifLogsTable)
+            .where(
+              and(
+                inArray(waNotifLogsTable.bookingId, coveredBookingIds),
+                eq(waNotifLogsTable.event, "payment_proof_uploaded_admin"),
+                eq(waNotifLogsTable.status, "sent"),
+              ),
+            )
+            .limit(1)
+        : [];
+
+      if (!sent) unnotified.push(booking);
+    }
 
     const facilityIds = [...new Set(unnotified.map((b) => b.facilityId))];
     const facilities =
