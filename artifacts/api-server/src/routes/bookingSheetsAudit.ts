@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { google } from "googleapis";
 import { adminMiddleware } from "../lib/auth";
 import { isGoogleSheetsConfigured } from "../lib/googleSheets";
@@ -436,7 +436,7 @@ router.get("/admin/google-sheets/recovery-history",adminMiddleware,async(req,res
     res.json({items:rows});
   }catch(error){req.log.error({err:error},"Recovery history unavailable");res.status(502).json({error:"Riwayat belum tersedia"});}
 });
-router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) => {
+async function syncOneHandler(req: Request, res: Response): Promise<void> {
   const orderNumber = String(req.body?.orderNumber ?? "").trim();
   if (!/^SC-[A-Z0-9-]{1,40}$/.test(orderNumber)) { res.status(400).json({ error: "Nomor booking tidak valid" }); return; }
   if (!isGoogleSheetsConfigured()) { res.status(503).json({ error: "Google Sheets credentials unavailable" }); return; }
@@ -573,7 +573,23 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
     // accepted the append. A reconciliation must check Sheets before retry.
     res.status(502).json({ error: "Sync One gagal; tidak akan mengulang otomatis", needsReconciliation: !!claimed, stage, ...(stage === "LEDGER_CLAIM" && dbCode ? { dbCode } : {}) });
   }
-});
+}
+
+// Internal worker adapter: reuses the same guarded function as the admin route.
+export async function syncPaidBookingFromAutoQueue(orderNumber: string, log: {error: (...args: unknown[]) => void}) {
+  let statusCode=200;
+  let body: Record<string, unknown>|undefined;
+  const response={
+    status(code:number){statusCode=code;return this;},
+    json(payload:Record<string,unknown>){body=payload;return this;},
+  } as unknown as Response;
+  const request={body:{orderNumber},log} as unknown as Request;
+  await syncOneHandler(request,response);
+  if(!body)throw new Error("Sync One ended without response");
+  return {statusCode,body};
+}
+router.post("/admin/google-sheets/sync-one",adminMiddleware,syncOneHandler);
+
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
   // Read-only: never clear, append or update the destination spreadsheet.
   if (!isGoogleSheetsConfigured()) {
