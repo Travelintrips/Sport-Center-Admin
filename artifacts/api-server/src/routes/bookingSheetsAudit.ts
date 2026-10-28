@@ -6,6 +6,16 @@ import { db, bookingsTable, facilitiesTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 
 const router = Router();
+// DB adapters differ: postgres-js returns an array, node-postgres returns { rows }.
+function sqlResultRows(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value as Record<string, unknown>[];
+  if (value && typeof value === "object" && "rows" in value) {
+    const rows = (value as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as Record<string, unknown>[];
+  }
+  throw new Error("Unexpected SQL result shape");
+}
+
 const TARGET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
 const MONTHS = ["JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"];
 export const paidTabFromWibDate = (value: Date | string): string => {
@@ -215,9 +225,9 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
       where booking_id = ${booking.id}
       order by payment_ts asc
     `);
-    const sources = Array.from(sourcesRaw as unknown as Array<Record<string, unknown>>);
+    const sources = sqlResultRows(sourcesRaw);
     if (sources.length !== 1 || sources[0].source_type !== "direct" || sources[0].validation_status !== "CANDIDATE") {
-      res.status(409).json({ error: "Hanya satu pembayaran langsung yang sudah terkonfirmasi yang boleh dipilotkan", eventCount: sources.length }); return;
+      res.status(409).json({ error: "Hanya satu pembayaran langsung yang sudah terkonfirmasi yang boleh dipilotkan", eventCount: sources.length, reason: "SOURCE_NOT_SINGLE_CONFIRMED_DIRECT" }); return;
     }
     const source = sources[0];
     const due = Number(booking.grandTotal ?? booking.totalPrice);
@@ -270,7 +280,7 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
               ${Number(source.amount)},'writing',1,now())
       on conflict (source_key) do nothing returning source_key
     `);
-    if (!(Array.from(claim as unknown as Array<Record<string,unknown>>)).length) {
+    if (!sqlResultRows(claim).length) {
       res.status(409).json({ error: "Sumber pembayaran telah diklaim ledger; perlu rekonsiliasi, bukan menulis ulang", sourceKey }); return;
     }
     claimed = sourceKey;
