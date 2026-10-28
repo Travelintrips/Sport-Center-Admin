@@ -223,6 +223,62 @@ router.get("/admin/google-sheets/ledger-health", adminMiddleware, async (req, re
     res.status(502).json({ok:false,writeAttempted:false,error:"Ledger health check failed"});
   }
 });
+// Read-only status of bookings already shown in the paid preview.
+// Ledger is authoritative for the stored sync result; optional live check compares Sheets column A.
+router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, res) => {
+  const orderNumbers = req.body?.orderNumbers;
+  const verifySheets = req.body?.verifySheets === true;
+  if (!Array.isArray(orderNumbers) || orderNumbers.length > 200 ||
+      orderNumbers.some(x => typeof x !== "string" || !/^SC-[0-9]{1,12}$/.test(x))) {
+    res.status(400).json({error:"Invalid orderNumbers (max 200)"}); return;
+  }
+  const unique = [...new Set(orderNumbers as string[])];
+  if (!unique.length) { res.json({items:[],checkedSheets:false}); return; }
+  try {
+    const rows = sqlResultRows(await db.execute(sql`
+      select b.order_number, l.status, l.target_tab, l.sheet_row, l.written_at
+      from sport_center.sport_bookings b
+      left join lateral (
+        select status,target_tab,sheet_row,written_at
+        from sport_center.booking_sheets_sync_ledger l
+        where l.booking_id=b.id
+        order by l.written_at desc nulls last, l.id desc limit 1
+      ) l on true
+      where b.order_number in (${sql.join(unique.map(value => sql`${value}`),sql`,`)})
+    `));
+    const items = unique.map(order => {
+      const found = rows.find(row => row.order_number === order);
+      return {orderNumber:order,status:found?.status === "written" ? "synced" :
+        found?.status === "writing" ? "needs_review" : found?.status ? "error" : "not_synced",
+        targetTab: found?.target_tab ?? null, sheetRow:found?.sheet_row ?? null};
+    });
+    if (!verifySheets) {res.json({items,checkedSheets:false});return;}
+    if (!isGoogleSheetsConfigured()) {res.status(503).json({error:"Google Sheets belum dikonfigurasi"});return;}
+    const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if (typeof creds.private_key === "string") creds.private_key = creds.private_key.replace(/\\n/g,"\n");
+    const auth = new google.auth.GoogleAuth({credentials:creds,scopes:["https://www.googleapis.com/auth/spreadsheets.readonly"]});
+    const sheets = google.sheets({version:"v4",auth});
+    const tabs = [...new Set(items.filter(x=>x.status==="synced"&&x.targetTab).map(x=>String(x.targetTab)))];
+    if(tabs.length>12){res.status(400).json({error:"Terlalu banyak tab untuk satu pemeriksaan"});return;}
+    const results = await Promise.all(tabs.map(async tab => ({
+      tab,
+      values:(await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`'${tab.replace(/'/g,"''")}'!A1:A10000`,valueRenderOption:"FORMATTED_VALUE"})).data.values ?? [],
+    })));
+    for (const item of items) {
+      if(item.status!=="synced")continue;
+      const tab=results.find(t=>t.tab===item.targetTab);
+      if(!tab){item.status="needs_review";continue;}
+      const locations:number[]=[];
+      tab.values.forEach((row,i)=>{if(row[0]===item.orderNumber)locations.push(i+1);});
+      if(locations.length===0)item.status="missing";
+      else if(locations.length>1 || locations[0]!==Number(item.sheetRow))item.status="needs_review";
+    }
+    res.json({items,checkedSheets:true,checkedAt:new Date().toISOString()});
+  } catch(error) {
+    req.log.error({err:error},"Google Sheets read-only status check failed");
+    res.status(502).json({error:"Pemeriksaan status gagal; ledger dan Sheets tidak diubah"});
+  }
+});
 router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) => {
   const orderNumber = String(req.body?.orderNumber ?? "").trim();
   if (!/^SC-[A-Z0-9-]{1,40}$/.test(orderNumber)) { res.status(400).json({ error: "Nomor booking tidak valid" }); return; }
