@@ -35,7 +35,15 @@ export async function writeClaimedPaymentEvent(
   if(!Number.isSafeInteger(row)||row<2) return {status:"needs_review",reason:"VERIFY_FAILED"};
   try {
     const saved=await port.readRow(tab,row);
-    if(saved.length<values.length||values.some((v,i)=>String(saved[i]??"")!==v))
+    // Google RAW writes can return numeric 150000 instead of input "150000.00".
+    // Compare the amount in integer cents, never with floating-point equality.
+    const toCents=(v:string):bigint|null=>{
+      const m=/^(\d+)(?:\.(\d{1,2}))?$/.exec(v);
+      return m ? BigInt(m[1])*100n+BigInt((m[2]??"").padEnd(2,"0")) : null;
+    };
+    if(saved.length<values.length||values.some((v,i)=>i===8
+      ? toCents(String(saved[i]??""))!==toCents(v)
+      : String(saved[i]??"")!==v))
       return {status:"needs_review",reason:"VERIFY_FAILED"};
   } catch {return {status:"needs_review",reason:"VERIFY_FAILED"};}
   return {status:"written",tab,row};

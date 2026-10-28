@@ -51,3 +51,14 @@ describe('all supported payment source types',()=>{
   });
  }
 });
+
+describe('Google Sheets numeric round-trip',()=>{
+ it('accepts equal numeric amount without trailing decimal zeros',async()=>{
+  const row=['membership_payment:42','membership','','','','','42','2026-10-28','150000','CANDIDATE'];
+  expect(await writeClaimedPaymentEvent(sample,tab,fake({readRow:async()=>row}))).toEqual({status:'written',tab,row:2});
+ });
+ it('rejects even one-cent difference',async()=>{
+  const row=['membership_payment:42','membership','','','','','42','2026-10-28','150000.01','CANDIDATE'];
+  expect(await writeClaimedPaymentEvent(sample,tab,fake({readRow:async()=>row}))).toEqual({status:'needs_review',reason:'VERIFY_FAILED'});
+ });
+});
