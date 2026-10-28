@@ -103,11 +103,12 @@ export default function GymX904() {
     if(!stored || !/^[a-f0-9-]{36}$/i.test(stored.id) || !/^[0-9]{1,8}$/.test(stored.pin))return;
     const pending=stored;
     let cancelled=false;
+    let finished=false;
     setAccessBusyPin(pending.pin);
     setAccessPhase("queued");
     setAccessNotice("Memulihkan status perintah PIN "+pending.pin+" setelah login ulang. ID "+pending.id);
     const poll=async()=>{
-      const token=getToken();if(!token||cancelled)return;
+      const token=getToken();if(!token||cancelled||finished)return;
       try {
         const response=await fetch(API+"/admin/gym-x904/user-command/"+pending.id,{headers:{Authorization:"Bearer "+token},cache:"no-store"});
         if(response.status===401)return; // Session may require login again.
@@ -115,7 +116,7 @@ export default function GymX904() {
         const data=await response.json();const command=data.command;
         if(command?.state==="failed"||command?.state==="cancelled"){
           setAccessPhase("error");setAccessNotice("Perintah PIN "+pending.pin+" gagal: "+String(command.error_code??command.result?.errorCode??"UNKNOWN")+" · ID "+pending.id);
-          window.localStorage.removeItem(storageKey);setAccessBusyPin(null);return;
+          finished=true;window.localStorage.removeItem(storageKey);setAccessBusyPin(null);return;
         }
         if(command?.state!=="completed"){
           setAccessPhase(command?.state==="claimed"?"claimed":"queued");
@@ -131,7 +132,7 @@ export default function GymX904() {
         const completedAt=new Date(command.completed_at).getTime();
         if(row?.identityMatched && row.device_group===(pending.op==="SUSPEND_USER"?2:1) && Number.isFinite(completedAt) && new Date(fresh.observedAt).getTime()>completedAt){
           setAccessPhase("success");setAccessNotice("BERHASIL: "+(pending.op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+pending.pin+" terkonfirmasi ACK dan snapshot. ID "+pending.id);
-          window.localStorage.removeItem(storageKey);setAccessBusyPin(null);
+          finished=true;window.localStorage.removeItem(storageKey);setAccessBusyPin(null);
           await queryClient.invalidateQueries({queryKey:["gym-x904-live-access-status"]});
         }
       }catch{if(!cancelled){setAccessPhase("error");setAccessNotice("Koneksi terputus. Status perintah "+pending.id+" akan diperiksa lagi; jangan klik ulang.");}}
