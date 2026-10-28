@@ -480,6 +480,21 @@ router.get("/admin/gym-x904/manual-access-status",adminMiddleware,async(req,res)
 
 // VMSC claims and receipts use scoped database SECURITY DEFINER functions.
 // No public HTTP path can claim or complete a machine mutation.
+router.get("/admin/gym-x904/user-command-recent",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor||!["owner","super_admin"].includes(actor.role))return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  try{
+    const rows=await db.execute(sql`SELECT command_id,user_pin,command_type,state,created_at,completed_at
+      FROM sport_center.x904_user_commands WHERE requested_by=${actor.userId}
+        AND device_serial='TDBD234200545'
+        AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        AND created_at>now()-interval '20 minutes'
+      ORDER BY created_at DESC LIMIT 1`);
+    return res.json({command:rows.rows[0]??null});
+  }catch{return res.status(503).json({error:"MANUAL_ACCESS_STATUS_UNAVAILABLE"});}
+});
+
 router.get("/admin/gym-x904/user-command/:commandId",adminMiddleware,async(req,res)=>{
   res.setHeader("Cache-Control","no-store");
   const actor=(req as any).user;
