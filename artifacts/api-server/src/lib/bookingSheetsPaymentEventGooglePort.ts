@@ -39,7 +39,7 @@ export function createPaymentEventGooglePort(): PaymentEventSheetPort {
     async readRow(tab,row){
       assertTab(tab);
       if(!Number.isSafeInteger(row)||row<2)throw new Error("ROW_INVALID");
-      const response=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`${quote(tab)}!A${row}:J${row}`,valueRenderOption:"FORMATTED_VALUE"});
+      const response=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`${quote(tab)}!A${row}:J${row}`,valueRenderOption:"UNFORMATTED_VALUE"});
       return (response.data.values?.[0]??[]).map(String);
     },
   };
