@@ -187,7 +187,7 @@ router.get("/admin/bookings/export", adminMiddleware, async (req, res) => {
     // Export ONE row per confirmed payment (including DP and final payment).
     // Otherwise a confirmed DP on a recurring group incorrectly exports the
     // full price of all group sessions as money received that month.
-    const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At,Payment Date,Payment Type,Payment ID,Group Ref,Booking Total\\n";
+    const header = "Order Number,Customer Name,Customer Email,Customer Phone,Facility,Date,Start Time,End Time,Duration (hours),Total Price,Status,Notes,Admin Notes,Created At,Payment Date,Payment Type,Payment ID,Group Ref,Booking Total\n";
     const csvRow = (values: unknown[]) =>
       values.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",");
     const rows: string[] = [];
