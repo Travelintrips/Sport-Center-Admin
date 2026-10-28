@@ -103,6 +103,26 @@ router.get("/admin/google-sheets/month-readiness", adminMiddleware, async (req, 
     res.status(502).json({ tab, ready: false, reason: "MONTH_READ_FAILED", writeEnabled: false });
   }
 });
+// Read-only diagnostics for the next-generation payment-event sync.
+// The endpoint does not activate a worker or write to the existing booking tabs.
+router.get("/admin/google-sheets/payment-event-candidates", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  try {
+    const result = await db.execute(sql`
+      select source_type, validation_status, count(*)::integer as count,
+             coalesce(sum(amount),0)::text as amount_total
+      from sport_center.booking_sheets_payment_event_candidates
+      where payment_date_wib >= ${month + "-01"}::date
+        and payment_date_wib < (${month + "-01"}::date + interval '1 month')
+      group by source_type,validation_status order by source_type,validation_status
+    `);
+    res.json({ month, readOnly: true, enabled: false, items: sqlResultRows(result) });
+  } catch (error) {
+    req.log.error({ err: error }, "Payment event candidate diagnostics unavailable");
+    res.status(503).json({ error: "Payment-event view belum tersedia; jalankan migrasi DEV terlebih dahulu", readOnly: true });
+  }
+});
 // Read-only reconciliation. Never append/write, even when candidates appear new.
 // Duplicate check includes all PAID tabs to prevent a booking silently moving months.
 router.post("/admin/google-sheets/reconcile", adminMiddleware, async (req, res) => {
