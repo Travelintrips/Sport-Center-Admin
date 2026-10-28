@@ -2065,6 +2065,18 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         if (status === "confirmed") {
           const isDP = claimed.paymentType === "dp";
           const prevStatus = booking?.status ?? "waiting_confirmation";
+
+          if (booking?.groupRef) {
+            await tx
+              .update(bookingGroupsTable)
+              .set(
+                isDP
+                  ? { status: "pending", isDpPaid: true, updatedAt: new Date() }
+                  : { status: "paid", updatedAt: new Date() },
+              )
+              .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+          }
+
           if (bookingAlreadyConfirmed) {
             // Repair the narrow split-state where a previous workaround or
             // partial confirmation already confirmed the booking while the
