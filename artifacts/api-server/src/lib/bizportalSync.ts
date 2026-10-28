@@ -1855,16 +1855,68 @@ async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: numb
        sp.provider_order_id,
        sp.merchant_trade_no,
        sp.provider_trade_no,
-        sb.dpp,
-        sb.ppn_amount,
-        sb.grand_total,
-       COALESCE(sb.ppn_rate, 0) AS ppn_rate,
-        sb.ppn_treatment,
-        COALESCE(sb.ppn_collected_by_customer, false) AS ppn_collected_by_customer,
+       CASE
+         WHEN sb.group_ref IS NOT NULL THEN
+           CASE
+             WHEN COALESCE(bg.ppn_amount, 0) > 0
+                  AND COALESCE(bg.total_payment_override, bg.total_payment, 0) > 0
+               THEN ROUND(
+                 sp.amount * COALESCE(bg.dpp, bg.total_payment_override, bg.total_payment)
+                 / COALESCE(NULLIF(bg.total_payment_override, 0), NULLIF(bg.total_payment, 0))
+               )
+             ELSE ROUND(sp.amount)
+           END
+         WHEN sp.payment_type IN ('dp', 'pelunasan')
+              AND COALESCE(sb.ppn_amount, 0) > 0
+              AND COALESCE(sb.grand_total, sb.total_price, 0) > 0
+           THEN ROUND(
+             sp.amount * COALESCE(NULLIF(sb.dpp, 0), sb.grand_total - COALESCE(sb.ppn_amount, 0))
+             / COALESCE(NULLIF(sb.grand_total, 0), NULLIF(sb.total_price, 0))
+           )
+         ELSE COALESCE(NULLIF(sb.dpp, 0), sb.grand_total - COALESCE(sb.ppn_amount, 0), sb.total_price)
+       END AS dpp,
+       CASE
+         WHEN sb.group_ref IS NOT NULL THEN
+           CASE
+             WHEN COALESCE(bg.ppn_amount, 0) > 0
+                  AND COALESCE(bg.total_payment_override, bg.total_payment, 0) > 0
+               THEN ROUND(sp.amount) - ROUND(
+                 sp.amount * COALESCE(bg.dpp, bg.total_payment_override, bg.total_payment)
+                 / COALESCE(NULLIF(bg.total_payment_override, 0), NULLIF(bg.total_payment, 0))
+               )
+             ELSE 0
+           END
+         WHEN sp.payment_type IN ('dp', 'pelunasan')
+              AND COALESCE(sb.ppn_amount, 0) > 0
+              AND COALESCE(sb.grand_total, sb.total_price, 0) > 0
+           THEN ROUND(sp.amount) - ROUND(
+             sp.amount * COALESCE(NULLIF(sb.dpp, 0), sb.grand_total - COALESCE(sb.ppn_amount, 0))
+             / COALESCE(NULLIF(sb.grand_total, 0), NULLIF(sb.total_price, 0))
+           )
+         ELSE COALESCE(sb.ppn_amount, 0)
+       END AS ppn_amount,
+       CASE
+         WHEN sb.group_ref IS NOT NULL THEN ROUND(sp.amount)
+         WHEN sp.payment_type IN ('dp', 'pelunasan') THEN ROUND(sp.amount)
+         ELSE COALESCE(sb.grand_total, sb.total_price)
+       END AS grand_total,
+       CASE
+         WHEN sb.group_ref IS NOT NULL THEN COALESCE(bg.ppn_rate, 0)
+         ELSE COALESCE(sb.ppn_rate, 0)
+       END AS ppn_rate,
+       CASE
+         WHEN sb.group_ref IS NOT NULL THEN bg.ppn_treatment
+         ELSE sb.ppn_treatment
+       END AS ppn_treatment,
+       CASE
+         WHEN sb.group_ref IS NOT NULL THEN COALESCE(bg.ppn_treatment = 'collected_by_customer', false)
+         ELSE COALESCE(sb.ppn_collected_by_customer, false)
+       END AS ppn_collected_by_customer,
        COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date::text AS journal_date,
        COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::text AS paid_at
      FROM sport_center.sport_payments sp
      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+     LEFT JOIN sport_center.booking_groups bg ON bg.group_ref = sb.group_ref
     WHERE sp.id = $1
       AND sp.status = 'confirmed'`,
     [paymentId],
