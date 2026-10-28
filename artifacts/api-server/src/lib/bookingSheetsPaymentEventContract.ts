@@ -30,7 +30,7 @@ export function paymentEventRow(candidate: PaymentEventCandidate): string[] {
   const sourceOk =
     (e.source_type === "direct" && e.booking_id != null && e.payment_id != null && e.allocation_id == null && e.company_invoice_id == null && e.membership_payment_id == null && e.source_key === `payment:${e.payment_id}:booking:${e.booking_id}`) ||
     (e.source_type === "allocation" && e.booking_id != null && e.payment_id != null && e.allocation_id != null && e.company_invoice_id == null && e.membership_payment_id == null && e.source_key === `payment:${e.payment_id}:allocation:${e.allocation_id}:booking:${e.booking_id}`) ||
-    (e.source_type === "corporate_invoice" && e.booking_id != null && e.payment_id == null && e.allocation_id == null && e.company_invoice_id != null && e.membership_payment_id == null && e.source_key.startsWith(`invoice:${e.company_invoice_id}:item:`) && e.source_key.endsWith(`:booking:${e.booking_id}`)) ||
+    (e.source_type === "corporate_invoice" && e.booking_id != null && e.payment_id == null && e.allocation_id == null && e.company_invoice_id != null && e.membership_payment_id == null && new RegExp(`^invoice:${e.company_invoice_id}:item:[0-9]+:booking:${e.booking_id}$`).test(e.source_key)) ||
     (e.source_type === "membership" && e.booking_id == null && e.payment_id == null && e.allocation_id == null && e.company_invoice_id == null && e.membership_payment_id != null && e.source_key === `membership_payment:${e.membership_payment_id}`);
   if (!sourceOk) throw new Error("EVENT_SOURCE_LINK_INVALID");
   return [e.source_key,e.source_type,e.booking_id,e.payment_id,e.allocation_id,e.company_invoice_id,e.membership_payment_id,e.payment_date_wib,e.amount,e.validation_status]

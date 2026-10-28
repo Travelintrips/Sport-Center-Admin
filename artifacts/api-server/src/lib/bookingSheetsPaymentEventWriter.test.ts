@@ -14,3 +14,16 @@ describe('payment event append fail closed',()=>{
  it('requires exact row verification',async()=>expect(await writeClaimedPaymentEvent(sample,tab,fake({readRow:async()=>['wrong']}))).toEqual({status:'needs_review',reason:'VERIFY_FAILED'}));
  it('rejects old booking tab names',async()=>expect(writeClaimedPaymentEvent(sample,'PAID OKTOBER 2026',fake())).rejects.toThrow('EVENT_TAB_INVALID'));
 });
+
+describe('source integrity',()=>{
+ it('rejects invalid corporate item IDs',async()=>{
+  const bad:PaymentEventCandidate={...sample,source_type:'corporate_invoice',source_key:'invoice:10:item:abc:booking:20',booking_id:20,company_invoice_id:10,membership_payment_id:null};
+  await expect(writeClaimedPaymentEvent(bad,tab,fake())).rejects.toThrow('EVENT_SOURCE_KEY_INVALID');
+ });
+ it('rejects an invalid membership amount',async()=>{
+  await expect(writeClaimedPaymentEvent({...sample,amount:'150000.001'},tab,fake())).rejects.toThrow('EVENT_AMOUNT_INVALID');
+ });
+ it('rejects an unconfirmed source event',async()=>{
+  await expect(writeClaimedPaymentEvent({...sample,validation_status:'MISSING_PAYMENT_DATE'},tab,fake())).rejects.toThrow('EVENT_NOT_VALIDATED');
+ });
+});
