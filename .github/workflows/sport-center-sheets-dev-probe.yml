@@ -3,6 +3,11 @@ name: Sport Center Google Sheets DEV read-only probe
 on:
   workflow_dispatch:
     inputs:
+      transaction_dev_e2e:
+        description: "Run isolated real API booking, payment, worker, ledger, Sheets, replay"
+        required: false
+        type: boolean
+        default: false
       startup_dev_e2e:
         description: "Boot isolated DEV app and verify readiness without payment writes"
         required: false
@@ -97,7 +102,7 @@ jobs:
         run: node scripts/patch-payment-mirror-dev-e2e.mjs
 
       - name: Isolated DEV API startup smoke test (no transactions)
-        if: ${{ inputs.startup_dev_e2e == true }}
+        if: ${{ inputs.startup_dev_e2e == true || inputs.transaction_dev_e2e == true }}
         shell: bash
         env:
           SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
@@ -106,6 +111,7 @@ jobs:
           SHEETS_PAYMENT_EVENTS_ENABLED: 'true'
           HOST: 127.0.0.1
           PORT: '38888'
+          RUN_TRANSACTION: ${{ inputs.transaction_dev_e2e }}
         run: |
           set -euo pipefail
           umask 077
@@ -129,3 +135,4 @@ jobs:
             exit 1
           fi
           echo 'DEV_API_STARTUP_READINESS_PASS'
+          if [ "$RUN_TRANSACTION" = 'true' ]; then node scripts/run-payment-event-api-dev-e2e.mjs; fi
