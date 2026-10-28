@@ -11,7 +11,7 @@ import { recordX904MembershipReconciliation } from "./x904MembershipReconciliati
  */
 export function hasCanonicalConfirmedMembershipPayments(
   confirmedPaymentIds: number[],
-  linkedRows: Array<{ id: unknown; booking_count: unknown }>,
+  linkedRows: Array<Record<string, unknown>>,
 ): boolean {
   if (!confirmedPaymentIds.length || linkedRows.length !== confirmedPaymentIds.length) return false;
   const expected = new Set(confirmedPaymentIds);
