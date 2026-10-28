@@ -18,6 +18,7 @@ create table if not exists sport_center.booking_sheets_recovery_history (
  target_tab text not null,
  old_sheet_row integer,
  new_sheet_row integer not null check (new_sheet_row > 1),
+ admin_user_id integer,
  created_at timestamptz not null default now()
 );
 alter table sport_center.booking_sheets_recovery_history enable row level security;
