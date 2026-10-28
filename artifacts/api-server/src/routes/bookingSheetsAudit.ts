@@ -3,7 +3,7 @@ import { google } from "googleapis";
 import { adminMiddleware } from "../lib/auth";
 import { isGoogleSheetsConfigured } from "../lib/googleSheets";
 import { db, bookingsTable, facilitiesTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 const router = Router();
 // DB adapters differ: postgres-js returns an array, node-postgres returns { rows }.
@@ -284,7 +284,7 @@ router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, re
           valueRenderOption: "UNFORMATTED_VALUE",
         })).data.values ?? [],
       })));
-      const bookings = await db.select().from(bookingsTable);
+      const bookings = await db.select().from(bookingsTable).where(inArray(bookingsTable.orderNumber,confirmed.map(item=>item.orderNumber)));
       const facilities = await db.select().from(facilitiesTable);
       for (const item of confirmed) {
         const booking = bookings.find(row => row.orderNumber === item.orderNumber);
