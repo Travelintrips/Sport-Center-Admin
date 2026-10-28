@@ -1326,6 +1326,9 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           .returning();
       }
 
+      // Canonical payment trigger requires exactly one linked booking before status becomes confirmed.
+      // Never bypass the DB guard or confirm a payment whose booking cannot be resolved.
+      await ensureMembershipPaymentBooking(membership, payment);
       const confirmedAt = new Date();
       const paymentDate = payment.paymentDate ?? jakartaDateOnly(confirmedAt);
       const refNumber = `MB-${membership.id}-P${payment.id}`;
