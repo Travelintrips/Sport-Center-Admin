@@ -123,6 +123,23 @@ router.get("/admin/google-sheets/payment-event-candidates", adminMiddleware, asy
     res.status(503).json({ error: "Payment-event view belum tersedia; jalankan migrasi DEV terlebih dahulu", readOnly: true });
   }
 });
+// Read-only readiness check for a dedicated transaction tab. Does not create headers.
+router.get("/admin/google-sheets/payment-event-readiness", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ ready:false,reason:"SERVICE_ACCOUNT_NOT_CONFIGURED" }); return; }
+  const tab = monthTarget(month).replace(/^PAID /,"PAYMENT EVENTS ");
+  try {
+    const {createPaymentEventGooglePort}=await import("../lib/bookingSheetsPaymentEventGooglePort");
+    const {PAYMENT_EVENT_HEADERS}=await import("../lib/bookingSheetsPaymentEventContract");
+    const headers=await createPaymentEventGooglePort().readHeaders(tab);
+    const ready=PAYMENT_EVENT_HEADERS.every((value,index)=>headers[index]===value);
+    res.json({tab,ready,reason:ready?null:"EVENT_HEADERS_MISSING_OR_MISMATCH",writeEnabled:false});
+  } catch(error) {
+    req.log.warn({err:error,tab},"Payment event readiness read failed");
+    res.status(503).json({tab,ready:false,reason:"EVENT_TAB_READ_FAILED",writeEnabled:false});
+  }
+});
 // Inspect concrete source keys without exposing payment credentials or modifying data.
 // A bounded, deterministic sample supports a duplicate/eligibility audit in DEV.
 router.get("/admin/google-sheets/payment-event-preview", adminMiddleware, async (req, res) => {
