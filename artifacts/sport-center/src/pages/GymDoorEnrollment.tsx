@@ -40,6 +40,17 @@ export default function GymDoorEnrollment() {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Browser atau koneksi HTTPS tidak mendukung kamera.");
       const live = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: "user" } });
       stream.current = live;
+      // A camera permission revocation or background interruption must invalidate
+      // any earlier successful frame preflight immediately.
+      for (const track of live.getVideoTracks()) {
+        track.addEventListener("ended", () => {
+          if (stream.current === live) {
+            setCameraReady(false);
+            setCaptured(false);
+            setCameraError("Kamera terputus. Ulangi pemeriksaan kamera sebelum melanjutkan.");
+          }
+        }, { once: true });
+      }
       if (video.current) {
         video.current.srcObject = live;
         await video.current.play();
