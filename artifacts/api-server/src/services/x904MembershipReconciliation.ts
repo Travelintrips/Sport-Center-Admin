@@ -55,6 +55,15 @@ export function planX904MembershipReconciliation(input: ReconciliationInput): X9
     version: 1, membershipId: input.membershipId, date: input.today,
     membershipStart: input.membershipStart, membershipEnd: input.membershipEnd,
     membershipStatus: input.membershipStatus, entitlement, evidence,
+    // A later verified mapping is a distinct review receipt, not a duplicate
+    // of the earlier unverified candidate. Never include snapshot timestamps.
+    identity: input.identity?.status === "verified" ? {
+      membershipId: input.identity.membershipId,
+      deviceSerial: input.identity.deviceSerial,
+      pin: input.identity.userPin,
+      uid: input.identity.deviceUid,
+      valid: input.identity.snapshotFresh && input.identity.matchesSdk && input.identity.uniqueMembership,
+    } : null,
   })).digest("hex");
   const identity = input.identity;
   const validIdentity = identity !== null &&
