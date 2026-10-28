@@ -25,6 +25,49 @@ export function monthTarget(month: string): string {
   const [year, number] = month.split("-").map(Number);
   return `PAID ${MONTHS[number - 1]} ${year}`;
 }
+// Explicit admin action. Never repair or overwrite a populated tab.
+router.post("/admin/google-sheets/create-header", adminMiddleware, async (req, res) => {
+  const month = String(req.body?.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Bulan tidak valid" }); return; }
+  const tab = monthTarget(month);
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ error: "Service account belum tersedia" }); return; }
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+    const auth = new google.auth.GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
+    const sheets = google.sheets({ version: "v4", auth });
+    const metadata = await sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" });
+    if (!(metadata.data.sheets ?? []).some(sheet => sheet.properties?.title === tab)) {
+      res.status(409).json({ error: "Tab belum tersedia. Tidak ada tab yang dibuat.", code: "MONTH_TAB_MISSING", tab }); return;
+    }
+    const range = `'${tab.replace(/'/g, "''")}'`;
+    // Entire-sheet FORMULA read detects used values and formulas beyond the initial rows/columns.
+    const current = await sheets.spreadsheets.values.get({
+      spreadsheetId: TARGET_ID, range, valueRenderOption: "FORMULA",
+    });
+    const values = current.data.values ?? [];
+    if (BOOKING_HEADERS.every((header, i) => values[0]?.[i] === header)) {
+      res.json({ ok: true, alreadyPresent: true, tab, headerRow: 1, written: false }); return;
+    }
+    if (values.some(row => row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== ""))) {
+      res.status(409).json({ error: "Tab memiliki data atau rumus; header tidak akan ditimpa", code: "TAB_NOT_EMPTY", tab }); return;
+    }
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: TARGET_ID, range: `'${tab}'!A1:N1`, valueInputOption: "RAW",
+      requestBody: { values: [BOOKING_HEADERS] },
+    });
+    const check = await sheets.spreadsheets.values.get({
+      spreadsheetId: TARGET_ID, range: `'${tab}'!A1:N1`, valueRenderOption: "FORMATTED_VALUE",
+    });
+    if (!BOOKING_HEADERS.every((header, i) => check.data.values?.[0]?.[i] === header)) {
+      res.status(502).json({ error: "Header ditulis tetapi verifikasi belum sesuai; periksa sebelum mencoba ulang", code: "HEADER_VERIFY_FAILED", tab }); return;
+    }
+    res.json({ ok: true, written: true, tab, headerRow: 1, columns: BOOKING_HEADERS.length });
+  } catch (error) {
+    req.log.error({ err: error, tab }, "Google Sheets header creation failed");
+    res.status(502).json({ error: "Gagal menyiapkan header Google Sheets. Tidak ada sinkronisasi booking.", tab });
+  }
+});
 router.get("/admin/google-sheets/month-readiness", adminMiddleware, async (req, res) => {
   const month = String(req.query.month ?? "");
   if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Bulan pembayaran tidak valid" }); return; }
