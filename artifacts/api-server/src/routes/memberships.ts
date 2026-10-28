@@ -993,6 +993,21 @@ router.post("/memberships", async (req, res) => {
     await syncToPublic(membership);
     res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice), paymentProofToken: createMembershipProofToken(membership.id, payment.id) });
   } catch (err) {
+    if (process.env.SPORT_CENTER_E2E_PAYMENT_EVENTS === "true") {
+      const e = err as any;
+      const root = e?.cause ?? e;
+      const message = String(root?.message ?? "");
+      const category = /does not exist/i.test(message) ? "MISSING_OBJECT"
+        : /duplicate|constraint|violates/i.test(message) ? "CONSTRAINT"
+        : /permission denied/i.test(message) ? "PERMISSION"
+        : /transaction/i.test(message) ? "TRANSACTION"
+        : "OTHER";
+      console.error("MEMBERSHIP_DEV_DIAG", JSON.stringify({
+        code: String(root?.code ?? "UNKNOWN").slice(0, 12),
+        category,
+        object: String(root?.table ?? root?.constraint ?? "").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 64),
+      }));
+    }
     req.log.error({ err }, "Create membership error");
     res.status(500).json({ error: "Internal server error" });
   }
