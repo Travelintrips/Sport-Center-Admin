@@ -1606,6 +1606,8 @@ export async function createJournalEntry(
     const existing = await db
       .select({
         id: accountingJournalsTable.id,
+        status: accountingJournalsTable.status,
+        bookingId: accountingJournalsTable.bookingId,
         companyId: accountingJournalsTable.companyId,
         paymentMethod: accountingJournalsTable.paymentMethod,
         paymentProvider: accountingJournalsTable.paymentProvider,
@@ -1620,6 +1622,9 @@ export async function createJournalEntry(
         grossAmount: accountingJournalsTable.grossAmount,
         dppAmount: accountingJournalsTable.dppAmount,
         taxAmount: accountingJournalsTable.taxAmount,
+        debitAmount: accountingJournalsTable.debitAmount,
+        creditRevenueAmount: accountingJournalsTable.creditRevenueAmount,
+        creditPpnAmount: accountingJournalsTable.creditPpnAmount,
         providerReference: accountingJournalsTable.providerReference,
         providerOrderId: accountingJournalsTable.providerOrderId,
         merchantTradeNo: accountingJournalsTable.merchantTradeNo,
@@ -1641,22 +1646,62 @@ export async function createJournalEntry(
         .from(accountingJournalLinesTable)
         .where(eq(accountingJournalLinesTable.journalId, current.id))
         .limit(1);
+
+      // Posted journals are immutable by design. A retry must therefore be a
+      // pure idempotency check: validate the financial snapshot and return
+      // without issuing an UPDATE. Metadata enrichment for historical posted
+      // journals is handled by the dedicated, explicitly-gated migration.
+      if (current.status === "posted") {
+        if (existingLines.length === 0) {
+          throw new Error(
+            `[accounting] POSTED_JOURNAL_WITHOUT_LINES: payment=${paymentId} journal=${current.id}`,
+          );
+        }
+        if (current.bookingId != null && current.bookingId !== bookingId) {
+          throw new Error(
+            `[accounting] POSTED_JOURNAL_BOOKING_MISMATCH: payment=${paymentId} journal=${current.id} existing=${current.bookingId} expected=${bookingId}`,
+          );
+        }
+        const expectedGross = Number(paymentContext?.grossAmount ?? grandTotal);
+        const headerDebit = Number(current.debitAmount ?? 0);
+        const headerCredit =
+          Number(current.creditRevenueAmount ?? 0) + Number(current.creditPpnAmount ?? 0);
+        // Legacy journals may carry stale gross/dpp/tax metadata from the
+        // primary booking of a group. The posted header and lines are the
+        // immutable financial evidence; accept the retry when those totals
+        // still equal the canonical payment amount.
+        if (
+          Math.abs(headerDebit - expectedGross) > 0.01 ||
+          Math.abs(headerCredit - expectedGross) > 0.01 ||
+          Math.abs(headerDebit - headerCredit) > 0.01
+        ) {
+          throw new Error(
+            `[accounting] POSTED_JOURNAL_AMOUNT_MISMATCH: payment=${paymentId} journal=${current.id}`,
+          );
+        }
+        console.info(
+          `[accounting] Internal journal posted sudah valid untuk payment=${paymentId} (id=${current.id}) — retry no-op`,
+        );
+        return;
+      }
+
+      // Draft/non-posted journals may still be completed safely.
       await db
         .update(accountingJournalsTable)
         .set({
           bookingId,
-          status: existingLines.length === 0 ? "draft" : "posted",
+          status: "draft",
           companyId: paymentContext?.companyId ?? current.companyId ?? null,
           paymentMethod: paymentMethod ?? current.paymentMethod ?? null,
           paymentProvider: paymentContext?.paymentProvider ?? current.paymentProvider ?? null,
-           providerName: paymentContext?.providerName ?? current.providerName ?? null,
-           providerId: paymentContext?.providerId ?? current.providerId ?? null,
+          providerName: paymentContext?.providerName ?? current.providerName ?? null,
+          providerId: paymentContext?.providerId ?? current.providerId ?? null,
           paymentType: paymentContext?.paymentType ?? current.paymentType ?? null,
           bankAccountId: paymentContext?.bankAccountId ?? current.bankAccountId ?? null,
-           expectedSettlementDate: paymentContext?.expectedSettlementDate ?? current.expectedSettlementDate ?? null,
-           settlementStatus: paymentContext?.settlementStatus ?? current.settlementStatus ?? null,
-           mdrRate: paymentContext?.mdrRate != null ? String(paymentContext.mdrRate) : current.mdrRate ?? null,
-           mdrAmount: paymentContext?.mdrAmount != null ? String(paymentContext.mdrAmount) : current.mdrAmount ?? null,
+          expectedSettlementDate: paymentContext?.expectedSettlementDate ?? current.expectedSettlementDate ?? null,
+          settlementStatus: paymentContext?.settlementStatus ?? current.settlementStatus ?? null,
+          mdrRate: paymentContext?.mdrRate != null ? String(paymentContext.mdrRate) : current.mdrRate ?? null,
+          mdrAmount: paymentContext?.mdrAmount != null ? String(paymentContext.mdrAmount) : current.mdrAmount ?? null,
           grossAmount: String(paymentContext?.grossAmount ?? current.grossAmount ?? grandTotal),
           dppAmount: String(paymentContext?.dppAmount ?? current.dppAmount ?? subtotal),
           taxAmount: String(paymentContext?.taxAmount ?? current.taxAmount ?? ppnAmount),
@@ -1666,16 +1711,17 @@ export async function createJournalEntry(
           providerTradeNo: paymentContext?.providerTradeNo ?? current.providerTradeNo ?? null,
         })
         .where(eq(accountingJournalsTable.id, current.id));
-      console.info(
-        `[accounting] Internal journal sudah ada untuk payment=${paymentId} (id=${current.id}) — metadata diperkaya`,
-      );
+
       if (existingLines.length === 0) {
         await postJournalLines(current.id, lines);
-        await db
-          .update(accountingJournalsTable)
-          .set({ status: "posted" })
-          .where(eq(accountingJournalsTable.id, current.id));
       }
+      await db
+        .update(accountingJournalsTable)
+        .set({ status: "posted" })
+        .where(eq(accountingJournalsTable.id, current.id));
+      console.info(
+        `[accounting] Internal journal draft dilengkapi untuk payment=${paymentId} (id=${current.id})`,
+      );
       return;
     }
   }
@@ -1832,25 +1878,39 @@ export function postConfirmedPaymentAccounting(
     const snapshotPph = Math.max(0, Number(bookingSnapshot?.pphAmount ?? 0));
     const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? snapshotPph)));
     const storedGross = Number(bookingSnapshot?.grandTotal ?? bookingSnapshot?.totalPrice ?? 0);
-    const inputGross = Math.round(Number(input.dpp ?? 0) + Number(input.ppnAmount ?? 0));
-    // A payment can be a DP or pelunasan, so its amount is not necessarily
-    // the booking total. Once a booking snapshot exists, it is the source of
-    // truth; only legacy rows without a snapshot may use caller-provided
-    // amounts.
+    const inputGross = Math.round(
+      Number(input.grossAmount ?? (Number(input.dpp ?? 0) + Number(input.ppnAmount ?? 0))),
+    );
+    // The outbox supplies a payment-level tax snapshot. This is authoritative
+    // for group payments and partial payments (DP/pelunasan), where the
+    // primary booking total is not the amount being posted.
+    const hasExplicitPaymentSnapshot =
+      input.grossAmount != null &&
+      Number.isFinite(Number(input.grossAmount)) &&
+      Number(input.grossAmount) > 0;
     const hasBookingTaxSnapshot =
       bookingSnapshot?.dpp != null ||
       bookingSnapshot?.ppnAmount != null ||
       bookingSnapshot?.grandTotal != null;
-    const snapshotGross = hasBookingTaxSnapshot
-      ? storedGross
-      : inputGross > 0
-        ? inputGross
-        : storedGross;
+    const snapshotGross = hasExplicitPaymentSnapshot
+      ? inputGross
+      : hasBookingTaxSnapshot
+        ? storedGross
+        : inputGross > 0
+          ? inputGross
+          : storedGross;
     const snapshotDpp = Math.max(
       0,
-      Number(bookingSnapshot?.dpp ?? (snapshotGross - Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0))),
+      hasExplicitPaymentSnapshot
+        ? Number(input.dpp ?? (snapshotGross - Number(input.ppnAmount ?? 0)))
+        : Number(bookingSnapshot?.dpp ?? (snapshotGross - Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0))),
     );
-    const snapshotPpn = Math.max(0, Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0));
+    const snapshotPpn = Math.max(
+      0,
+      hasExplicitPaymentSnapshot
+        ? Number(input.ppnAmount ?? 0)
+        : Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0),
+    );
     const collectedByCustomer =
       bookingSnapshot?.ppnCollectedByCustomer === true ||
       bookingSnapshot?.ppnTreatment === "collected_by_customer" ||

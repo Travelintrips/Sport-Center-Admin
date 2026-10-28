@@ -232,6 +232,77 @@ describe("confirmed booking payment accounting", () => {
     expect(mockInsert).toHaveBeenCalledTimes(2);
   });
 
+  it("treats a matching posted journal retry as a no-op", async () => {
+    mockSelect
+      .mockImplementationOnce(() => selectResult([{
+        id: 303,
+        status: "posted",
+        bookingId: 15,
+        grossAmount: "200000",
+        dppAmount: "180180",
+        taxAmount: "19820",
+        debitAmount: "200000",
+        creditRevenueAmount: "180180",
+        creditPpnAmount: "19820",
+      }]))
+      .mockImplementationOnce(() => selectResult([{ id: 9001 }]));
+
+    await createJournalEntry(
+      15,
+      "SC-0015",
+      180180,
+      19820,
+      "2026-08-08",
+      "QRIS",
+      803,
+      {
+        companyId: 1,
+        paymentProvider: "mandiri_direct",
+        grossAmount: 200000,
+        dppAmount: 180180,
+        taxAmount: 19820,
+      },
+    );
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a posted journal retry has a different financial snapshot", async () => {
+    mockSelect
+      .mockImplementationOnce(() => selectResult([{
+        id: 304,
+        status: "posted",
+        bookingId: 15,
+        grossAmount: "200000",
+        dppAmount: "180180",
+        taxAmount: "19820",
+        debitAmount: "200000",
+        creditRevenueAmount: "180180",
+        creditPpnAmount: "19820",
+      }]))
+      .mockImplementationOnce(() => selectResult([{ id: 9002 }]));
+
+    await expect(createJournalEntry(
+      15,
+      "SC-0015",
+      170000,
+      19820,
+      "2026-08-08",
+      "QRIS",
+      804,
+      {
+        companyId: 1,
+        paymentProvider: "mandiri_direct",
+        grossAmount: 189820,
+        dppAmount: 170000,
+        taxAmount: 19820,
+      },
+    )).rejects.toThrow("POSTED_JOURNAL_AMOUNT_MISMATCH");
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
   it("stores invoice PPh and net cash in the internal journal snapshot", async () => {
     const journalValues: Record<string, unknown>[] = [];
     mockInsert
