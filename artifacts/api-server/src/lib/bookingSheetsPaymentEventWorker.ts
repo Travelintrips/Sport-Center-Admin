@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { writeClaimedPaymentEvent } from "./bookingSheetsPaymentEventWriter";
 import { createPaymentEventGooglePort } from "./bookingSheetsPaymentEventGooglePort";
-import type { PaymentEventCandidate } from "./bookingSheetsPaymentEventContract";
+import { paymentEventRow, type PaymentEventCandidate } from "./bookingSheetsPaymentEventContract";
 
 const MONTHS=["JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI","JULI","AGUSTUS","SEPTEMBER","OKTOBER","NOVEMBER","DESEMBER"];
 function rows(value:unknown):Record<string,unknown>[] {
@@ -36,6 +36,9 @@ async function tick():Promise<void> {
       const event=candidate as unknown as PaymentEventCandidate;
       let claimed=false;
       try {
+        // Validate source identity, date and amount BEFORE creating a durable claim.
+        // Invalid candidates must not permanently occupy source_key in the ledger.
+        paymentEventRow(event);
         // Durable unique claim prior to ANY Sheets operation. No automatic retries.
         const claim=rows(await db.execute(sql`
           insert into sport_center.booking_sheets_payment_event_ledger
