@@ -123,6 +123,27 @@ router.get("/admin/google-sheets/payment-event-candidates", adminMiddleware, asy
     res.status(503).json({ error: "Payment-event view belum tersedia; jalankan migrasi DEV terlebih dahulu", readOnly: true });
   }
 });
+// Inspect concrete source keys without exposing payment credentials or modifying data.
+// A bounded, deterministic sample supports a duplicate/eligibility audit in DEV.
+router.get("/admin/google-sheets/payment-event-preview", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  try {
+    const result = await db.execute(sql`
+      select source_key,source_type,booking_id,payment_id,allocation_id,
+             company_invoice_id,membership_payment_id,amount::text as amount,
+             payment_date_wib::text as payment_date_wib,validation_status
+      from sport_center.booking_sheets_payment_event_candidates
+      where payment_date_wib >= ${month + "-01"}::date
+        and payment_date_wib < (${month + "-01"}::date + interval '1 month')
+      order by payment_date_wib,source_key limit 200
+    `);
+    res.json({ month, readOnly: true, limit: 200, items: sqlResultRows(result) });
+  } catch (error) {
+    req.log.error({err:error}, "Payment-event preview unavailable");
+    res.status(503).json({ error: "Payment-event view belum siap di database", readOnly: true });
+  }
+});
 // Read-only reconciliation. Never append/write, even when candidates appear new.
 // Duplicate check includes all PAID tabs to prevent a booking silently moving months.
 router.post("/admin/google-sheets/reconcile", adminMiddleware, async (req, res) => {
