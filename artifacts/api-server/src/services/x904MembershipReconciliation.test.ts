@@ -46,7 +46,7 @@ describe("X904 read-only payment reconciliation", () => {
   it("does not grant paid entitlement for unconfirmed payments", () => {
     const result = planX904MembershipReconciliation({
       ...base, payments: base.payments.map(p => ({ ...p, status: "waiting_confirmation" })),
-      membershipEnd: "2026-10-01",
+      membershipStart: "2026-09-01", membershipEnd: "2026-10-01",
     });
     expect(result.entitlement).toBe("suspended");
     expect(result.executeDeviceCommand).toBe(false);
