@@ -29,6 +29,22 @@ describe("canonical payment provider rules", () => {
     expect(resolvePaylabsPaidAt({ paidAt: "not-a-date" }, callbackAt)).toBe(callbackAt);
   });
 
+  it("uses an explicit Jakarta payment date for manual payments", () => {
+    const submittedAt = new Date("2026-10-28T08:00:00.000Z");
+    expect(resolveManualPaymentPaidAt(
+      { paymentDate: "2026-10-27" },
+      submittedAt,
+    ).toISOString()).toBe("2026-10-27T05:00:00.000Z");
+  });
+
+  it("does not trust a future manual payment date", () => {
+    const submittedAt = new Date("2026-10-28T08:00:00.000Z");
+    expect(resolveManualPaymentPaidAt(
+      { paymentDate: "2026-10-29" },
+      submittedAt,
+    )).toBe(submittedAt);
+  });
+
   it("always gives manual payments an effective timestamp", () => {
     const submittedAt = new Date("2026-08-30T17:30:00.000Z");
     expect(resolveManualPaymentPaidAt({}, submittedAt)).toBe(submittedAt);
