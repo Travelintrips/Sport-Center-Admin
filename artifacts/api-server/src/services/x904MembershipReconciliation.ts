@@ -61,7 +61,7 @@ export function planX904MembershipReconciliation(input: ReconciliationInput): X9
     identity.status === "verified" &&
     identity.membershipId === input.membershipId &&
     identity.snapshotFresh && identity.matchesSdk && identity.uniqueMembership &&
-    /^\\d{1,10}$/.test(identity.userPin) &&
+    new RegExp("^[0-9]{1,10}$").test(identity.userPin) &&
     Number.isSafeInteger(identity.deviceUid) &&
     identity.deviceUid > 0 && identity.deviceUid < 65535 &&
     identity.deviceSerial.length > 0;
