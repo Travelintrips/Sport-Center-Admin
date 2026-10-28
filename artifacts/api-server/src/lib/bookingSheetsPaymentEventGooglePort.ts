@@ -1,10 +1,19 @@
 import {google} from "googleapis";
 import {type PaymentEventSheetPort} from "./bookingSheetsPaymentEventWriter";
 
-const TARGET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
+const PROD_SPREADSHEET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
+/** DEV must never write to the production workbook, even with production credentials. */
+export function paymentEventSpreadsheetId(): string {
+  const environment = process.env.APP_ENV ?? process.env.NODE_ENV;
+  if (environment === "production") return PROD_SPREADSHEET_ID;
+  const id = process.env.GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID?.trim();
+  if (!id || id === PROD_SPREADSHEET_ID) throw new Error("EVENT_DEV_SPREADSHEET_NOT_ISOLATED");
+  return id;
+}
 const EVENT_TAB = /^PAYMENT EVENTS (?:JANUARI|FEBRUARI|MARET|APRIL|MEI|JUNI|JULI|AGUSTUS|SEPTEMBER|OKTOBER|NOVEMBER|DESEMBER) 20\d{2}$/;
 const quote = (name:string)=>`'${name.replace(/'/g,"''")}'`;
 export function createPaymentEventGooglePort(): PaymentEventSheetPort {
+  const TARGET_ID = paymentEventSpreadsheetId();
   const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if(!raw)throw new Error("GOOGLE_SHEETS_UNCONFIGURED");
   const credentials=JSON.parse(raw);

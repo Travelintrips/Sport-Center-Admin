@@ -27,3 +27,8 @@ test('duplicate scan never truncates sheet at row 100000',()=>{
  assert.match(google,/\!A:A/);
  assert.doesNotMatch(google,/A1:A100000/);
 });
+test('DEV event Sheet cannot use hardcoded production workbook',()=>{
+ assert.match(google,/EVENT_DEV_SPREADSHEET_NOT_ISOLATED/);
+ assert.match(google,/GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID/);
+ assert.match(google,/id === PROD_SPREADSHEET_ID/);
+});

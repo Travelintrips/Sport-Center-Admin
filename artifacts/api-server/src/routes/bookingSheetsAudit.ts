@@ -131,16 +131,18 @@ router.post("/admin/google-sheets/payment-event-create-header", adminMiddleware,
   const tab = monthTarget(month).replace(/^PAID /,"PAYMENT EVENTS ");
   try {
     const {PAYMENT_EVENT_HEADERS} = await import("../lib/bookingSheetsPaymentEventContract");
+    const {paymentEventSpreadsheetId}=await import("../lib/bookingSheetsPaymentEventGooglePort");
+    const eventSpreadsheetId=paymentEventSpreadsheetId();
     const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
     if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\n/g,"\n");
     const auth = new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
     const sheets = google.sheets({version:"v4",auth});
-    const metadata = await sheets.spreadsheets.get({spreadsheetId:TARGET_ID,fields:"sheets(properties(title))"});
+    const metadata = await sheets.spreadsheets.get({spreadsheetId:eventSpreadsheetId,fields:"sheets(properties(title))"});
     if (!(metadata.data.sheets ?? []).some(sheet => sheet.properties?.title === tab)) {
       res.status(409).json({error:"Tab transaksi belum tersedia",code:"EVENT_TAB_MISSING",tab}); return;
     }
     const range = `'${tab.replace(/'/g,"''")}'`;
-    const current = await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range,valueRenderOption:"FORMULA"});
+    const current = await sheets.spreadsheets.values.get({spreadsheetId:eventSpreadsheetId,range,valueRenderOption:"FORMULA"});
     const values = current.data.values ?? [];
     if (PAYMENT_EVENT_HEADERS.every((v,i)=>values[0]?.[i]===v)) {
       res.json({ok:true,alreadyPresent:true,tab,written:false}); return;
@@ -148,8 +150,8 @@ router.post("/admin/google-sheets/payment-event-create-header", adminMiddleware,
     if (values.some(row=>row.some(cell=>cell != null && String(cell).trim()!==""))) {
       res.status(409).json({error:"Tab tidak kosong; header tidak ditimpa",code:"EVENT_TAB_NOT_EMPTY",tab}); return;
     }
-    await sheets.spreadsheets.values.update({spreadsheetId:TARGET_ID,range:`${range}!A1:J1`,valueInputOption:"RAW",requestBody:{values:[[...PAYMENT_EVENT_HEADERS]]}});
-    const verify=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`${range}!A1:J1`,valueRenderOption:"FORMATTED_VALUE"});
+    await sheets.spreadsheets.values.update({spreadsheetId:eventSpreadsheetId,range:`${range}!A1:J1`,valueInputOption:"RAW",requestBody:{values:[[...PAYMENT_EVENT_HEADERS]]}});
+    const verify=await sheets.spreadsheets.values.get({spreadsheetId:eventSpreadsheetId,range:`${range}!A1:J1`,valueRenderOption:"FORMATTED_VALUE"});
     if (!PAYMENT_EVENT_HEADERS.every((v,i)=>verify.data.values?.[0]?.[i]===v)) {
       res.status(502).json({ok:false,code:"EVENT_HEADER_VERIFICATION_FAILED",tab}); return;
     }
