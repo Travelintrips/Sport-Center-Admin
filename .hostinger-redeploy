@@ -19,3 +19,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-27 force Hostinger rebuild for PR #297 WA group lifecycle + accounting outbox integrity.
 
 2026-10-27 force Hostinger rebuild for PR #300 accounting mirror type casts and stale rejected outbox terminal handling.
+
+2026-10-28 force Hostinger rebuild for PR #314 payment accounting outbox idempotency/group-aware fix.
