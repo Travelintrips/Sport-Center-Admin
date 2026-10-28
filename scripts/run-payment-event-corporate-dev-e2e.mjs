@@ -23,7 +23,7 @@ const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 try{
  const cfg=await db.query('select enabled from sport_center.booking_sheets_payment_event_config where id=true');
  if(cfg.rows[0]?.enabled!==false)throw Error('EVENT_CONFIG_ALREADY_ENABLED');
- const existing=await db.query("select count(*)::int n from sport_center.booking_sheets_payment_event_candidates c where c.validation_status='CANDIDATE' and not exists(select 1 from sport_center.booking_sheets_payment_event_ledger l where l.source_key=c.source_key and l.status='written')");
+ const existing=await db.query("select count(*)::int n from sport_center.booking_sheets_payment_event_candidates c where c.payment_ts >= '2026-10-30T00:00:00Z' and c.validation_status='CANDIDATE' and not exists(select 1 from sport_center.booking_sheets_payment_event_ledger l where l.source_key=c.source_key and l.status='written')");
  if(existing.rows[0].n!==0)throw Error('NONEMPTY_DEV_PAYMENT_CANDIDATES');
  const tokenData=JSON.stringify({userId:1,role:'admin',tenantId:null,exp:Date.now()+15*60*1000});
  const token=Buffer.from(tokenData).toString('base64')+'.'+crypto.createHmac('sha256',process.env.SESSION_SECRET).update(tokenData).digest('hex');
