@@ -407,6 +407,7 @@ export default function AdminCheckoutForm() {
       setCreatedBookingAmount(Number(created.grandTotal ?? created.totalPrice ?? 0));
       setPaymentChoice(null);
       setPaymentProof(null);
+      setBookingPaymentDate(jakartaDateOnly());
       setPaymentSubmitted(false);
       toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}` });
 
