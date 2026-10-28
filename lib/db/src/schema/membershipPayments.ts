@@ -24,6 +24,7 @@ export const membershipPaymentsTable = scSchema.table(
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
     status: text("status", { enum: membershipPaymentStatuses }).notNull().default("pending_payment"),
     paymentMethod: text("payment_method"),
+    settlementProviderCode: text("settlement_provider_code"),
     paymentProofUrl: text("payment_proof_url"),
     paymentDate: text("payment_date"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
