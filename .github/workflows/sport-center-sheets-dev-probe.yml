@@ -3,6 +3,11 @@ name: Sport Center Google Sheets DEV read-only probe
 on:
   workflow_dispatch:
     inputs:
+      corporate_dev_e2e:
+        description: "DEV corporate invoice API payment event E2E"
+        required: false
+        type: boolean
+        default: false
       group_dev_e2e:
         description: "Isolated recurring group allocation real API E2E"
         required: false
@@ -112,7 +117,7 @@ jobs:
         run: node scripts/patch-payment-mirror-dev-e2e.mjs
 
       - name: Isolated DEV API startup smoke test (no transactions)
-        if: ${{ inputs.startup_dev_e2e == true || inputs.transaction_dev_e2e == true || inputs.dp_dev_e2e == true || inputs.group_dev_e2e == true }}
+        if: ${{ inputs.startup_dev_e2e == true || inputs.transaction_dev_e2e == true || inputs.dp_dev_e2e == true || inputs.group_dev_e2e == true || inputs.corporate_dev_e2e == true }}
         shell: bash
         env:
           SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
@@ -124,6 +129,7 @@ jobs:
           RUN_TRANSACTION: ${{ inputs.transaction_dev_e2e }}
           RUN_DP: ${{ inputs.dp_dev_e2e }}
           RUN_GROUP: ${{ inputs.group_dev_e2e }}
+          RUN_CORPORATE: ${{ inputs.corporate_dev_e2e }}
         run: |
           set -euo pipefail
           umask 077
@@ -150,3 +156,4 @@ jobs:
           if [ "$RUN_TRANSACTION" = 'true' ]; then node scripts/run-payment-event-api-dev-e2e.mjs; fi
           if [ "$RUN_DP" = 'true' ]; then node scripts/run-payment-event-dp-dev-e2e.mjs; fi
           if [ "$RUN_GROUP" = 'true' ]; then node scripts/run-payment-event-group-dev-e2e.mjs; fi
+          if [ "$RUN_CORPORATE" = 'true' ]; then node scripts/run-payment-event-corporate-dev-e2e.mjs; fi
