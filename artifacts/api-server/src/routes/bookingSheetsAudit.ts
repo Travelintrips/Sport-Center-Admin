@@ -205,6 +205,24 @@ router.get("/admin/google-sheets/payment-sources", adminMiddleware, async (req, 
  * Narrow manual pilot: a single confirmed, fully settled, non-group personal
  * booking. Does not bulk-sync or auto-sync. Guarded by persistent ledger.
  */
+// Admin-only read-only DB diagnostics; never reveal connection strings, secrets or role names.
+router.get("/admin/google-sheets/ledger-health", adminMiddleware, async (req, res) => {
+  try {
+    const result = sqlResultRows(await db.execute(sql`
+      select
+        to_regclass('sport_center.booking_sheets_sync_ledger') is not null as table_exists,
+        has_schema_privilege(current_user, 'sport_center', 'USAGE') as schema_usage,
+        has_table_privilege(current_user, 'sport_center.booking_sheets_sync_ledger', 'INSERT') as can_insert,
+        has_table_privilege(current_user, 'sport_center.booking_sheets_sync_ledger', 'SELECT') as can_select,
+        pg_has_role(current_user, 'service_role', 'MEMBER') as service_role_member
+    `));
+    const item = result[0] ?? {};
+    res.json({ ok: true, checks: item, writeAttempted: false });
+  } catch (error) {
+    req.log.error({err: error}, "Sheets ledger health check failed");
+    res.status(502).json({ok:false,writeAttempted:false,error:"Ledger health check failed"});
+  }
+});
 router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) => {
   const orderNumber = String(req.body?.orderNumber ?? "").trim();
   if (!/^SC-[A-Z0-9-]{1,40}$/.test(orderNumber)) { res.status(400).json({ error: "Nomor booking tidak valid" }); return; }
@@ -334,7 +352,9 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
     claimed = undefined;
     res.json({ok:true,written:true,orderNumber,targetTab:tab,sheetRow,sourceKey});
   } catch (err) {
-    const dbCode = err && typeof err === "object" && "code" in err && typeof err.code === "string" ? err.code : undefined;
+    const cause = err && typeof err === "object" && "cause" in err ? err.cause : undefined;
+    const dbCode = [err, cause].map(value => value && typeof value === "object" && "code" in value ? value.code : undefined)
+      .find(value => typeof value === "string" && /^[0-9A-Z]{5}$/.test(value));
     req.log.error({err, orderNumber, stage, dbCode}, "Sheets Sync One failed");
     // Never auto-release a writing claim: a timeout can happen AFTER Google
     // accepted the append. A reconciliation must check Sheets before retry.
