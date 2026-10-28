@@ -573,7 +573,6 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     // accepted the append. A reconciliation must check Sheets before retry.
     res.status(502).json({ error: "Sync One gagal; tidak akan mengulang otomatis", needsReconciliation: !!claimed, stage, ...(stage === "LEDGER_CLAIM" && dbCode ? { dbCode } : {}) });
   }
-});
 }
 
 // Internal worker adapter: reuses the same guarded function as the admin route.
