@@ -4,8 +4,10 @@ import {type PaymentEventSheetPort} from "./bookingSheetsPaymentEventWriter";
 const PROD_SPREADSHEET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
 /** DEV must never write to the production workbook, even with production credentials. */
 export function paymentEventSpreadsheetId(): string {
-  const environment = process.env.APP_ENV ?? process.env.NODE_ENV;
-  if (environment === "production") return PROD_SPREADSHEET_ID;
+  // Explicit dual confirmation prevents NODE_ENV=production in a DEV runtime
+  // from silently selecting the live workbook.
+  if (process.env.APP_ENV === "production" && process.env.NODE_ENV === "production")
+    return PROD_SPREADSHEET_ID;
   const id = process.env.GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID?.trim();
   if (!id || id === PROD_SPREADSHEET_ID) throw new Error("EVENT_DEV_SPREADSHEET_NOT_ISOLATED");
   return id;

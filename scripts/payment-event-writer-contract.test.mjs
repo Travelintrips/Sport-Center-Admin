@@ -32,3 +32,7 @@ test('DEV event Sheet cannot use hardcoded production workbook',()=>{
  assert.match(google,/GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID/);
  assert.match(google,/id === PROD_SPREADSHEET_ID/);
 });
+
+test('production workbook requires explicit dual environment confirmation',()=>{
+ assert.match(google,/APP_ENV === "production" && process\.env\.NODE_ENV === "production"/);
+});
