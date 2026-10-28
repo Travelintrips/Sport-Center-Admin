@@ -103,6 +103,102 @@ router.get("/admin/google-sheets/month-readiness", adminMiddleware, async (req, 
     res.status(502).json({ tab, ready: false, reason: "MONTH_READ_FAILED", writeEnabled: false });
   }
 });
+// Read-only diagnostics for the next-generation payment-event sync.
+// The endpoint does not activate a worker or write to the existing booking tabs.
+router.get("/admin/google-sheets/payment-event-candidates", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  try {
+    const result = await db.execute(sql`
+      select source_type, validation_status, count(*)::integer as count,
+             coalesce(sum(amount),0)::text as amount_total
+      from sport_center.booking_sheets_payment_event_candidates
+      where payment_date_wib >= ${month + "-01"}::date
+        and payment_date_wib < (${month + "-01"}::date + interval '1 month')
+      group by source_type,validation_status order by source_type,validation_status
+    `);
+    res.json({ month, readOnly: true, enabled: false, items: sqlResultRows(result) });
+  } catch (error) {
+    req.log.error({ err: error }, "Payment event candidate diagnostics unavailable");
+    res.status(503).json({ error: "Payment-event view belum tersedia; jalankan migrasi DEV terlebih dahulu", readOnly: true });
+  }
+});
+// Explicit admin-only initialization; never create a tab, replace data, or overwrite formulas.
+router.post("/admin/google-sheets/payment-event-create-header", adminMiddleware, async (req, res) => {
+  const month = String(req.body?.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ error: "Service account not configured" }); return; }
+  const tab = monthTarget(month).replace(/^PAID /,"PAYMENT EVENTS ");
+  try {
+    const {PAYMENT_EVENT_HEADERS} = await import("../lib/bookingSheetsPaymentEventContract");
+    const {paymentEventSpreadsheetId}=await import("../lib/bookingSheetsPaymentEventGooglePort");
+    const eventSpreadsheetId=paymentEventSpreadsheetId();
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if (typeof credentials.private_key === "string") credentials.private_key = credentials.private_key.replace(/\\n/g,"\n");
+    const auth = new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
+    const sheets = google.sheets({version:"v4",auth});
+    const metadata = await sheets.spreadsheets.get({spreadsheetId:eventSpreadsheetId,fields:"sheets(properties(title))"});
+    if (!(metadata.data.sheets ?? []).some(sheet => sheet.properties?.title === tab)) {
+      res.status(409).json({error:"Tab transaksi belum tersedia",code:"EVENT_TAB_MISSING",tab}); return;
+    }
+    const range = `'${tab.replace(/'/g,"''")}'`;
+    const current = await sheets.spreadsheets.values.get({spreadsheetId:eventSpreadsheetId,range,valueRenderOption:"FORMULA"});
+    const values = current.data.values ?? [];
+    if (PAYMENT_EVENT_HEADERS.every((v,i)=>values[0]?.[i]===v)) {
+      res.json({ok:true,alreadyPresent:true,tab,written:false}); return;
+    }
+    if (values.some(row=>row.some(cell=>cell != null && String(cell).trim()!==""))) {
+      res.status(409).json({error:"Tab tidak kosong; header tidak ditimpa",code:"EVENT_TAB_NOT_EMPTY",tab}); return;
+    }
+    await sheets.spreadsheets.values.update({spreadsheetId:eventSpreadsheetId,range:`${range}!A1:J1`,valueInputOption:"RAW",requestBody:{values:[[...PAYMENT_EVENT_HEADERS]]}});
+    const verify=await sheets.spreadsheets.values.get({spreadsheetId:eventSpreadsheetId,range:`${range}!A1:J1`,valueRenderOption:"FORMATTED_VALUE"});
+    if (!PAYMENT_EVENT_HEADERS.every((v,i)=>verify.data.values?.[0]?.[i]===v)) {
+      res.status(502).json({ok:false,code:"EVENT_HEADER_VERIFICATION_FAILED",tab}); return;
+    }
+    res.json({ok:true,tab,written:true});
+  } catch(error) {
+    req.log.error({err:error,tab},"Unable to initialize payment event header");
+    res.status(503).json({error:"Unable to initialize event header",tab});
+  }
+});
+// Read-only readiness check for a dedicated transaction tab. Does not create headers.
+router.get("/admin/google-sheets/payment-event-readiness", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  if (!isGoogleSheetsConfigured()) { res.status(503).json({ ready:false,reason:"SERVICE_ACCOUNT_NOT_CONFIGURED" }); return; }
+  const tab = monthTarget(month).replace(/^PAID /,"PAYMENT EVENTS ");
+  try {
+    const {createPaymentEventGooglePort}=await import("../lib/bookingSheetsPaymentEventGooglePort");
+    const {PAYMENT_EVENT_HEADERS}=await import("../lib/bookingSheetsPaymentEventContract");
+    const headers=await createPaymentEventGooglePort().readHeaders(tab);
+    const ready=PAYMENT_EVENT_HEADERS.every((value,index)=>headers[index]===value);
+    res.json({tab,ready,reason:ready?null:"EVENT_HEADERS_MISSING_OR_MISMATCH",writeEnabled:false});
+  } catch(error) {
+    req.log.warn({err:error,tab},"Payment event readiness read failed");
+    res.status(503).json({tab,ready:false,reason:"EVENT_TAB_READ_FAILED",writeEnabled:false});
+  }
+});
+// Inspect concrete source keys without exposing payment credentials or modifying data.
+// A bounded, deterministic sample supports a duplicate/eligibility audit in DEV.
+router.get("/admin/google-sheets/payment-event-preview", adminMiddleware, async (req, res) => {
+  const month = String(req.query.month ?? "");
+  if (!MONTH_PATTERN.test(month)) { res.status(400).json({ error: "Invalid payment month" }); return; }
+  try {
+    const result = await db.execute(sql`
+      select source_key,source_type,booking_id,payment_id,allocation_id,
+             company_invoice_id,membership_payment_id,amount::text as amount,
+             payment_date_wib::text as payment_date_wib,validation_status
+      from sport_center.booking_sheets_payment_event_candidates
+      where payment_date_wib >= ${month + "-01"}::date
+        and payment_date_wib < (${month + "-01"}::date + interval '1 month')
+      order by payment_date_wib,source_key limit 200
+    `);
+    res.json({ month, readOnly: true, limit: 200, items: sqlResultRows(result) });
+  } catch (error) {
+    req.log.error({err:error}, "Payment-event preview unavailable");
+    res.status(503).json({ error: "Payment-event view belum siap di database", readOnly: true });
+  }
+});
 // Read-only reconciliation. Never append/write, even when candidates appear new.
 // Duplicate check includes all PAID tabs to prevent a booking silently moving months.
 router.post("/admin/google-sheets/reconcile", adminMiddleware, async (req, res) => {

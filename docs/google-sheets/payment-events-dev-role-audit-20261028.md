@@ -1,0 +1,5 @@
+# DEV security blocker: source view invoker permissions
+
+The transaction candidate view was installed with `security_invoker=true` (required to avoid implicit RLS bypass). Read-only DEV inspection found `sport_center_app` has SELECT on `booking_sheets_payment_event_candidates` but lacks SELECT on all underlying relations: `booking_sheets_payment_sources`, `sport_payments`, `sport_payment_allocations`, `sport_bookings`, `company_invoices`, `company_invoice_items`, and `sport_membership_payments`. Each base table has RLS enabled and zero policies. This prevents claiming a successful E2E merely because CI and migrations passed.
+
+Do not solve this by giving broad grants or changing the view to a privileged invoker without security review. A narrowly authorized read projection (or audited role-specific RLS) must be implemented, and the effective backend-role query must pass before rollout. CI tests are synthetic and cannot replace this verification. Both `SHEETS_PAYMENT_EVENTS_ENABLED` and database `booking_sheets_payment_event_config.enabled` must stay disabled in production until resolved.
