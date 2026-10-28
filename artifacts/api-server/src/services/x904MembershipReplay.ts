@@ -14,7 +14,7 @@ export async function replayMissedX904MembershipPayments(options: {
 }): Promise<{ scanned: number; created: number; duplicate: number; held: number; disabled: boolean }> {
   if (process.env.GYM_X904_MEMBERSHIP_RECONCILIATION_ENABLED !== "true")
     return { scanned: 0, created: 0, duplicate: 0, held: 0, disabled: true };
-  if (!/^\d{4}-\\d{2}-\\d{2}$/.test(options.today))
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(options.today))
     throw new Error("INVALID_REPLAY_DAY");
   const limit = Math.max(1, Math.min(50, options.limit ?? 25));
   const found = await db.execute(sql`
