@@ -74,6 +74,7 @@ export default function AdminCheckoutForm() {
   const [paymentChoice, setPaymentChoice] = useState<"paid" | "unpaid" | null>(null);
   const [paymentProof, setPaymentProof] = useState<File | null>(null);
   const [paidMethod, setPaidMethod] = useState("Transfer Bank");
+  const [bookingPaymentDate, setBookingPaymentDate] = useState(jakartaDateOnly);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
 
@@ -269,6 +270,7 @@ export default function AdminCheckoutForm() {
         bookingId:createdBookingId, amount:createdBookingAmount, paymentType:"full_payment",
         paymentMethod:paidMethod,
         ...(paidMethod === "QRIS" ? {paymentProvider:"mandiri_direct"} : {}),
+        paymentDate:bookingPaymentDate,
         proofUrl:fileResult.objectPath ?? fileResult.url,
         ocrScanToken:fileResult.ocrScanToken,
       };
@@ -456,10 +458,19 @@ export default function AdminCheckoutForm() {
                     <SelectItem value="QRIS">QRIS Mandiri Direct</SelectItem>
                   </SelectContent>
                 </Select>
+                <Label htmlFor="booking-payment-date">Tanggal Pembayaran *</Label>
+                <Input
+                  id="booking-payment-date"
+                  type="date"
+                  value={bookingPaymentDate}
+                  max={jakartaDateOnly()}
+                  onChange={e => setBookingPaymentDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Isi sesuai tanggal transaksi pada bukti pembayaran. Tanggal pembuatan booking dan waktu konfirmasi admin tetap tercatat terpisah.</p>
                 <Label htmlFor="booking-payment-proof">Bukti pembayaran *</Label>
                 <Input id="booking-payment-proof" type="file" accept="image/*,.pdf" onChange={e => setPaymentProof(e.target.files?.[0] ?? null)} />
                 <p className="text-sm">Nominal booking: <strong>{formatRupiah(createdBookingAmount)}</strong></p>
-                <Button type="button" className="w-full" disabled={paymentBusy || !paymentProof || !createdBookingId || !(createdBookingAmount > 0)} onClick={submitBookingPayment}>
+                <Button type="button" className="w-full" disabled={paymentBusy || !paymentProof || !bookingPaymentDate || !createdBookingId || !(createdBookingAmount > 0)} onClick={submitBookingPayment}>
                   {paymentBusy ? "Memproses bukti..." : (getCurrentRole()==="staff" ? "Unggah Bukti & Kirim Verifikasi" : "Unggah Bukti & Konfirmasi")}
                 </Button>
               </div>)}
