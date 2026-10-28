@@ -35,6 +35,33 @@ export default function GoogleSheets() {
   const [syncBusy,setSyncBusy]=useState("");
   const [pendingSync,setPendingSync]=useState<string|null>(null);
   const [syncOrderSearch,setSyncOrderSearch]=useState("");
+  const [pendingBatchOrders,setPendingBatchOrders]=useState<string[]>([]);
+  const [batchBusy,setBatchBusy]=useState(false);
+  const [batchMessage,setBatchMessage]=useState("");
+  const pilotBatchCandidates=preview ? [...new Set(preview.rows.filter(row =>
+    !row[17] && Number(row[9])>0 && Number(row[18])>0 &&
+    Number(row[9])>=Number(row[18]) && syncStatuses[row[0]]?.status==="not_synced"
+  ).map(row=>row[0]))].slice(0,5) : [];
+  async function runPilotBatch(orders:string[]) {
+    setBatchBusy(true);setBatchMessage("");
+    let completed=0,skipped=0,failed="";
+    try {
+      for(const orderNumber of orders) {
+        const response=await fetch("/api/admin/google-sheets/sync-one",{
+          method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+          body:JSON.stringify({orderNumber}),
+        });
+        const result=await response.json();
+        if(!response.ok){failed=`${orderNumber}: ${result.error||"Sync One gagal"}`;break;}
+        if(result.written)completed++;else skipped++;
+        setBatchMessage(`Diproses ${completed+skipped}/${orders.length}; berhasil ${completed}; dilewati ${skipped}.`);
+      }
+      setBatchMessage(`Batch selesai: ${completed} ditulis, ${skipped} sudah ada/tidak berubah.${failed?` Dihentikan pada ${failed}. Tidak ada retry otomatis.`:""}`);
+      await checkSyncStatus(preview?.rows.map(row=>row[0])??orders,false);
+    }catch(error){setBatchMessage(`Batch dihentikan: ${error instanceof Error?error.message:"kesalahan jaringan"}. Jangan ulangi tanpa rekonsiliasi.`);}
+    finally{setBatchBusy(false);}
+  }
+
   const [pendingRecovery,setPendingRecovery]=useState<string|null>(null);
   const [recoverBusy,setRecoverBusy]=useState(false);
   const [recoveryHistory,setRecoveryHistory]=useState<Record<string,Array<{target_tab:string;old_sheet_row:number|null;new_sheet_row:number;created_at:string}>>>({});
@@ -217,6 +244,21 @@ export default function GoogleSheets() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    <AlertDialog open={pendingBatchOrders.length>0} onOpenChange={open=>{if(!batchBusy&&!open)setPendingBatchOrders([]);}}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Sync Now — Pilot Maksimal 5 Booking</AlertDialogTitle>
+          <AlertDialogDescription>
+            Kirim satu per satu hanya kandidat pembayaran lunas yang belum ada di ledger. Backend memeriksa kelayakan dan antiduplikasi ulang setiap booking. Batch berhenti pada error pertama dan tidak akan mengulang otomatis.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="rounded-lg border p-3 text-sm">{pendingBatchOrders.join(" · ")}</div>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={batchBusy}>Batal</AlertDialogCancel>
+          <AlertDialogAction disabled={batchBusy} onClick={()=>{const orders=pendingBatchOrders;setPendingBatchOrders([]);void runPilotBatch(orders);}}>Ya, Sync Pilot Batch</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <AlertDialog open={pendingRecovery !== null} onOpenChange={open=>{if(!recoverBusy&&!open)setPendingRecovery(null);}}>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -271,7 +313,7 @@ export default function GoogleSheets() {
       </header>
       <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-900 dark:text-amber-200 flex gap-2">
         <Info className="h-5 w-5 shrink-0" />
-        <span>Sinkronisasi otomatis dan massal belum aktif. Fitur Sync One hanya untuk uji satu booking personal lunas penuh; penulisan dilakukan setelah konfirmasi admin.</span>
+        <span>Sinkronisasi otomatis belum aktif. Sync One tersedia untuk satu booking personal lunas penuh; Sync Now terbatas pada pilot maksimal lima kandidat per konfirmasi admin.</span>
       </div>
       <Card>
         <CardHeader><CardTitle className="text-lg">Spreadsheet tujuan</CardTitle></CardHeader>
@@ -331,6 +373,11 @@ export default function GoogleSheets() {
               <button type="button" className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" disabled={statusBusy} onClick={()=>void checkSyncStatus(preview.rows.map(r=>r[0]),true)}>{statusBusy?"Memeriksa...":"Periksa Status Sheets (Read-only)"}</button>
               <span className="text-xs text-slate-500">Badge awal dari ledger; tombol pemeriksaan membandingkan keberadaan baris di Sheets. Tidak mengubah booking atau Sheets.</span>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="rounded-lg border border-blue-600 px-3 py-2 text-sm font-semibold disabled:opacity-50" disabled={batchBusy||statusBusy||!!syncBusy||pilotBatchCandidates.length===0} onClick={()=>setPendingBatchOrders(pilotBatchCandidates)}>{batchBusy?"Sinkronisasi batch berjalan...":`Sync Now (Pilot ${pilotBatchCandidates.length}/5)`}</button>
+              <span className="text-xs text-slate-500">Hanya kandidat tanpa ledger dan bukan grup, maksimal 5 per konfirmasi. DP, corporate, membership dan error ditolak server.</span>
+            </div>
+            {batchMessage&&<p role="status" className="text-sm text-blue-700">{batchMessage}</p>}
             {statusError&&<p role="alert" className="text-sm text-red-600">{statusError}</p>}
             {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
             <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat..."}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button>{syncStatuses[row[0]]?.status==="missing" && <button type="button" className="ml-2 rounded border border-amber-600 text-amber-800 px-2 py-1 disabled:opacity-50" disabled={recoverBusy||!!syncBusy} onClick={()=>setPendingRecovery(row[0])}>Pulihkan ke Sheets</button>}{(syncStatuses[row[0]]?.status==="synced"||syncStatuses[row[0]]?.status==="missing")&&<button type="button" className="ml-2 rounded border px-2 py-1" onClick={()=>void readRecoveryHistory(row[0])}>Riwayat</button>}{recoveryHistory[row[0]] && <div className="text-xs mt-1 text-slate-600 whitespace-normal max-w-64">{recoveryHistory[row[0]].length ? recoveryHistory[row[0]].map((entry,i)=><div key={i}>Dipulihkan: {entry.target_tab}, baris {entry.old_sheet_row??"-"} → {entry.new_sheet_row}, {new Date(entry.created_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</div>) : "Belum ada riwayat pemulihan"}</div>}</td></tr>)}</tbody></table></div>
@@ -386,7 +433,7 @@ export default function GoogleSheets() {
             <p>Status koneksi: <strong>Belum diverifikasi</strong></p>
             <p>Sinkron otomatis: <strong>Belum aktif</strong></p>
             <p>Riwayat sinkron: <strong>Belum tersedia</strong></p>
-            <div className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-slate-400 cursor-not-allowed" aria-disabled="true"><RefreshCw className="h-4 w-4" /> Sync Now (belum aktif)</div>
+            <div className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-slate-400 cursor-not-allowed" aria-disabled="true"><RefreshCw className="h-4 w-4" /> Sync Now (pilot maksimal 5 pada Preview)</div>
             <p className="text-slate-500">Tahap selanjutnya: audit header dan formula tab PAID, pemetaan kolom, koneksi Google Sheets API, worker transaksi, preview, dan verifikasi end-to-end.</p>
           </CardContent>
         </Card>
