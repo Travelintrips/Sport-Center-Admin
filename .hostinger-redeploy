@@ -27,3 +27,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-28 Hostinger rebuild for PR #317 group-vs-individual payment accounting tax snapshot hotfix.
 
 2026-10-28 retrigger after bd5a0909 deployment completed; target PR #317 hotfix.
+
+2026-10-28 deploy PR #321 group header lifecycle consistency.
