@@ -1,5 +1,5 @@
 import { db, membershipPaymentsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { planX904MembershipReconciliation } from "./x904MembershipReconciliation";
 import { recordX904MembershipReconciliation } from "./x904MembershipReconciliationWorker";
 
@@ -21,9 +21,24 @@ export async function onConfirmedMembershipPaymentX904(input: {
   const payments = await db.select().from(membershipPaymentsTable)
     .where(eq(membershipPaymentsTable.membershipId, input.membershipId));
 
-  if (!payments.some(p => p.status === "confirmed" && Number(p.amount) > 0)) {
+  const confirmed = payments.filter(p => p.status === "confirmed" && Number(p.amount) > 0 && p.confirmedAt !== null); 
+  if (!confirmed.length) {
     return "review_required";
   }
+
+  // A confirmed membership payment must have exactly one canonical booking.
+  // Unlinked or ambiguously linked payments cannot produce an X904 receipt.
+  const linked = await db.execute(sql`
+    SELECT p.id, count(b.id)::integer AS booking_count
+    FROM sport_center.sport_membership_payments p
+    LEFT JOIN sport_center.sport_bookings b ON b.membership_payment_id = p.id
+    WHERE p.membership_id = ${input.membershipId}
+      AND p.status = 'confirmed' AND p.amount > 0 AND p.confirmed_at IS NOT NULL
+    GROUP BY p.id
+  `);
+  const sourceComplete = linked.rows.length === confirmed.length
+    && linked.rows.every(row => Number(row.booking_count) === 1);
+  if (!sourceComplete) return "review_required";
 
   // DEV has no gym_x904_access_snapshots table yet. Do not fabricate SDK
   // evidence or query a missing table. Require an independent, audited
@@ -34,7 +49,7 @@ export async function onConfirmedMembershipPaymentX904(input: {
     membershipEnd: input.endDate,
     membershipStatus: input.membershipStatus,
     today: input.today,
-    paymentSourcesComplete: true,
+    paymentSourcesComplete: sourceComplete,
     payments: payments.map(p => ({
       id: p.id,
       periodStart: p.periodStart,
