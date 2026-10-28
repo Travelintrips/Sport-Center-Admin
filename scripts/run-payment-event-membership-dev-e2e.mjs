@@ -18,7 +18,7 @@ if(creds.type!=='service_account')throw Error('SA_INVALID');
 const sheets=google.sheets({version:'v4',auth:new google.auth.GoogleAuth({credentials:creds,scopes:['https://www.googleapis.com/auth/spreadsheets']})});
 const keyDate=new Date().toISOString().slice(0,10);
 const nonce=crypto.randomBytes(4).toString('hex');
-async function api(path,method,body,token){const r=await fetch(base+path,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(20000)});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error('API_'+method+'_'+path+'_'+r.status+'_'+String(j.code??j.error??'unknown').slice(0,100));return j;}
+async function api(path,method,body,token){const r=await fetch(base+path,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(20000)});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error('API_'+method+'_'+path+'_'+r.status+'_'+String(j.dbCode??j.error??'unknown').slice(0,100)+'_CONSTRAINT_'+String(j.dbConstraint??'none').slice(0,60));return j;}
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 try{
  const cfg=await db.query('select enabled from sport_center.booking_sheets_payment_event_config where id=true');
