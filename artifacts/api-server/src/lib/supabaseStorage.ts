@@ -122,7 +122,14 @@ export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | nul
 let client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {
-  if (isIsolatedPaymentEventE2E()) throw new Error("E2E_STORAGE_DISABLED");
+  if (isIsolatedPaymentEventE2E()) {
+    const devRef = "xssrfshdrtdfupgqwfdw";
+    const keyRef = getProjectRef(process.env.SUPABASE_SERVICE_ROLE_KEY_DEV ?? "");
+    const explicitlyConfiguredUrl = (process.env.SUPABASE_URL ?? "").trim();
+    if (keyRef !== devRef) throw new Error("E2E_STORAGE_DEV_KEY_REQUIRED");
+    if (explicitlyConfiguredUrl && new URL(explicitlyConfiguredUrl).hostname !== `${devRef}.supabase.co`)
+      throw new Error("E2E_STORAGE_DEV_URL_REQUIRED");
+  }
   const serviceKey =
     SERVICE_KEY ||
     (IS_DEV ? process.env.SUPABASE_SERVICE_ROLE_KEY_DEV : process.env.SUPABASE_SERVICE_ROLE_KEY) ||

@@ -122,6 +122,7 @@ jobs:
         env:
           SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
+          SUPABASE_SERVICE_ROLE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
           SPORT_CENTER_E2E_PAYMENT_EVENTS: 'true'
           SHEETS_PAYMENT_EVENTS_ENABLED: 'true'
           HOST: 127.0.0.1
