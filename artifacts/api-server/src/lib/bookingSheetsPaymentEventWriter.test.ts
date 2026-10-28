@@ -95,3 +95,28 @@ describe('post-append crash and timeout isolation',()=>{
   expect(appendCalls).toBe(1);
  });
 });
+
+
+describe('manual recovery from crash after append',()=>{
+ it('adopts only an exact existing row and performs no append',async()=>{
+  const {inspectStrandedPaymentEvent}=await import('./bookingSheetsPaymentEventWriter');
+  const rows:string[][]=[];let calls=0;
+  const port=fake({
+   append:async(_t,values)=>{calls++;rows.push(values);return {row:2}},
+   findSourceKeyAcrossEventTabs:async()=>rows.length?[{tab,row:2}]:[],
+   readRow:async()=>rows[0],
+  });
+  expect(await inspectStrandedPaymentEvent(sample,port)).toEqual({status:'needs_review',reason:'MISSING'});
+  expect(await writeClaimedPaymentEvent(sample,tab,port)).toEqual({status:'written',tab,row:2});
+  // Child worker crash happens before database ledger status update; row survives.
+  expect(await inspectStrandedPaymentEvent(sample,port)).toEqual({status:'verified_existing',tab,row:2});
+  expect(calls).toBe(1);
+ });
+ it('refuses reconciliation when two matching keys exist or row was edited',async()=>{
+  const {inspectStrandedPaymentEvent}=await import('./bookingSheetsPaymentEventWriter');
+  const p=fake({findSourceKeyAcrossEventTabs:async()=>[{tab,row:2},{tab,row:3}]});
+  expect(await inspectStrandedPaymentEvent(sample,p)).toEqual({status:'needs_review',reason:'DUPLICATE'});
+  const edited=fake({findSourceKeyAcrossEventTabs:async()=>[{tab,row:2}],readRow:async()=>['wrong']});
+  expect(await inspectStrandedPaymentEvent(sample,edited)).toEqual({status:'needs_review',reason:'ROW_MISMATCH'});
+ });
+});
