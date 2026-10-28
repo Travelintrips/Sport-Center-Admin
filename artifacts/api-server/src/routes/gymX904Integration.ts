@@ -318,7 +318,7 @@ router.post("/admin/gym-x904/delete-batches",adminMiddleware,async(req,res)=>{
     !targets.every((t:unknown)=>{if(!t||typeof t!=="object")return false;const x=t as Record<string,unknown>;
       return typeof x.userPin==="string"&&/^[0-9]{1,8}$/.test(x.userPin)&&
         Number.isSafeInteger(x.expectedUid)&&Number(x.expectedUid)>0&&Number(x.expectedUid)<65535&&
-        typeof x.expectedName==="string"&&/^[A-Za-z0-9 ._-]{1,24}$/.test(x.expectedName);})||
+        typeof x.expectedName==="string"&&/^[A-Za-z0-9 ._-]{0,24}$/.test(x.expectedName);})||
     new Set(targets.map((t:{userPin:string})=>t.userPin)).size!==targets.length)
    return res.status(400).json({error:"INVALID_BATCH_TARGETS"});
  const batchId=randomUUID();
