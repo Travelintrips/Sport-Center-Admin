@@ -6,8 +6,11 @@ const PROD_SPREADSHEET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
 export function paymentEventSpreadsheetId(): string {
   // Explicit dual confirmation prevents NODE_ENV=production in a DEV runtime
   // from silently selecting the live workbook.
-  if (process.env.APP_ENV === "production" && process.env.NODE_ENV === "production")
-    return PROD_SPREADSHEET_ID;
+  const appProduction = process.env.APP_ENV === "production";
+  const nodeProduction = process.env.NODE_ENV === "production";
+  // Mixed signals are a configuration error, not permission to select DEV.
+  if (appProduction !== nodeProduction) throw new Error("EVENT_ENVIRONMENT_MISMATCH");
+  if (appProduction) return PROD_SPREADSHEET_ID;
   const id = process.env.GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID?.trim();
   if (!id || id === PROD_SPREADSHEET_ID) throw new Error("EVENT_DEV_SPREADSHEET_NOT_ISOLATED");
   return id;

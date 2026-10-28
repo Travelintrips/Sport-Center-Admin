@@ -34,5 +34,6 @@ test('DEV event Sheet cannot use hardcoded production workbook',()=>{
 });
 
 test('production workbook requires explicit dual environment confirmation',()=>{
- assert.match(google,/APP_ENV === "production" && process\.env\.NODE_ENV === "production"/);
+ assert.match(google,/appProduction !== nodeProduction/);
+ assert.match(google,/EVENT_ENVIRONMENT_MISMATCH/);
 });
