@@ -27,3 +27,9 @@ describe('source integrity',()=>{
   await expect(writeClaimedPaymentEvent({...sample,validation_status:'MISSING_PAYMENT_DATE'},tab,fake())).rejects.toThrow('EVENT_NOT_VALIDATED');
  });
 });
+
+describe('date safety',()=>{
+ it('rejects nonexistent calendar dates',async()=>{
+  await expect(writeClaimedPaymentEvent({...sample,payment_date_wib:'2026-02-31'},tab,fake())).rejects.toThrow('EVENT_DATE_INVALID');
+ });
+});

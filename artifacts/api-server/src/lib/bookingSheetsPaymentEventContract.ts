@@ -23,6 +23,9 @@ export function paymentEventRow(candidate: PaymentEventCandidate): string[] {
   const e = candidate;
   if (e.validation_status !== "CANDIDATE" || !/^\d{4}-\d{2}-\d{2}$/.test(e.payment_date_wib))
     throw new Error("EVENT_NOT_VALIDATED");
+  const parsed = new Date(`${e.payment_date_wib}T00:00:00Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0,10) !== e.payment_date_wib)
+    throw new Error("EVENT_DATE_INVALID");
   if (!/^(?:payment:\d+:(?:booking:\d+|allocation:\d+:booking:\d+)|invoice:\d+:item:\d+:booking:\d+|membership_payment:\d+)$/.test(e.source_key))
     throw new Error("EVENT_SOURCE_KEY_INVALID");
   if (!/^\d+(?:\.\d{1,2})?$/.test(e.amount) || Number(e.amount) <= 0 || !Number.isSafeInteger(Math.round(Number(e.amount) * 100)))
