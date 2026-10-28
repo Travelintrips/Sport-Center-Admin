@@ -29,7 +29,7 @@ async function tick():Promise<void> {
         where status='pending' and created_at >= ${startAt}::timestamptz
         order by created_at,id limit 1 for update skip locked
       )
-      returning id,source_key,booking_id
+      returning id,source_key,booking_id,payment_id
     `));
     job=claimed[0];
     if(!job)return;
