@@ -309,6 +309,133 @@ router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, re
     res.status(502).json({error:"Pemeriksaan status gagal; ledger dan Sheets tidak diubah"});
   }
 });
+// Recovery is deliberately separate from Sync One. It is ONLY for a previously
+// written direct-payment source whose row was manually removed from the report.
+router.post("/admin/google-sheets/recover-one", adminMiddleware, async (req, res) => {
+  const orderNumber=String(req.body?.orderNumber??"").trim();
+  if(!/^SC-[0-9]{1,12}$/.test(orderNumber)){res.status(400).json({error:"Nomor booking tidak valid"});return;}
+  if(!isGoogleSheetsConfigured()){res.status(503).json({error:"Google Sheets tidak terkonfigurasi"});return;}
+  let stage="BOOKING";
+  let claimed=false;
+  try {
+    const [booking]=await db.select().from(bookingsTable).where(eq(bookingsTable.orderNumber,orderNumber)).limit(1);
+    if(!booking || booking.groupRef || booking.payerType==="company" || booking.membershipId || booking.membershipPaymentId){
+      res.status(409).json({error:"Pemulihan hanya untuk booking personal langsung non-grup",code:"NOT_ELIGIBLE"});return;
+    }
+    stage="PAYMENT";
+    const sources=sqlResultRows(await db.execute(sql`
+      select source_key,source_type,payment_id,amount,payment_ts,payment_date_wib::text as payment_date_wib,validation_status
+      from sport_center.booking_sheets_payment_sources where booking_id=${booking.id}
+    `));
+    const due=Number(booking.grandTotal??booking.totalPrice);
+    if(sources.length!==1 || sources[0].source_type!=="direct" ||
+       sources[0].validation_status!=="CANDIDATE" || Number(sources[0].amount)<due || due<=0){
+      res.status(409).json({error:"Pembayaran bukan satu pelunasan langsung yang valid",code:"PAYMENT_NOT_ELIGIBLE"});return;
+    }
+    const source=sources[0], sourceKey=String(source.source_key);
+    const ledger=sqlResultRows(await db.execute(sql`
+      select id,status,target_tab,sheet_row,attempt_count from sport_center.booking_sheets_sync_ledger
+      where source_key=${sourceKey} and booking_id=${booking.id}
+    `))[0];
+    const tab=paidTabFromWibDate(String(source.payment_ts));
+    if(!ledger || ledger.status!=="written" || ledger.target_tab!==tab){
+      res.status(409).json({error:"Ledger belum berstatus written atau bulan tujuan berbeda; perlu investigasi",code:"LEDGER_NOT_ELIGIBLE"});return;
+    }
+    stage="SHEETS_READ";
+    const creds=JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    if(typeof creds.private_key==="string")creds.private_key=creds.private_key.replace(/\\n/g,"\n");
+    const auth=new google.auth.GoogleAuth({credentials:creds,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
+    const sheets=google.sheets({version:"v4",auth});
+    const metadata=await sheets.spreadsheets.get({spreadsheetId:TARGET_ID,fields:"sheets(properties(title))"});
+    const paidTabs=(metadata.data.sheets??[]).map(s=>s.properties?.title).filter((n):n is string=>!!n&&/^PAID /.test(n));
+    if(!paidTabs.includes(tab)||paidTabs.length>60){
+      res.status(409).json({error:"Tab tujuan tidak ditemukan atau terlalu banyak tab untuk pemeriksaan aman",code:"TAB_NOT_READY"});return;
+    }
+    const scan=async()=>Promise.all(paidTabs.map(async name=>({
+      name, values:(await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,
+        range:`'${name.replace(/'/g,"''")}'!A:A`,valueRenderOption:"FORMATTED_VALUE"})).data.values??[],
+    })));
+    const matches=(data:Awaited<ReturnType<typeof scan>>)=>data.flatMap(item=>item.values
+      .map((row,i)=>String(row[0]??"").trim()===orderNumber?{tab:item.name,row:i+1}:null)
+      .filter((v):v is {tab:string;row:number}=>v!==null));
+    const existing=matches(await scan());
+    if(existing.length){
+      res.status(409).json({error:"Booking masih ditemukan dalam Google Sheets; pemulihan ditolak",code:"ROW_ALREADY_PRESENT",locations:existing});return;
+    }
+    const h=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`'${tab}'!A1:N1`});
+    if(!BOOKING_HEADERS.every((v,i)=>h.data.values?.[0]?.[i]===v)){
+      res.status(409).json({error:"Header tab tujuan tidak sesuai",code:"INVALID_HEADER"});return;
+    }
+    stage="LEDGER_RECOVERY_CLAIM";
+    // Atomic claim prevents two admins restoring the same source simultaneously.
+    // A crashed claim stays writing and requires manual reconciliation.
+    const locked=sqlResultRows(await db.execute(sql`
+      update sport_center.booking_sheets_sync_ledger
+      set status='writing',attempt_count=attempt_count+1,last_attempt_at=now(),updated_at=now()
+      where source_key=${sourceKey} and status='written' and booking_id=${booking.id}
+      returning source_key
+    `));
+    if(!locked.length){res.status(409).json({error:"Pemulihan sedang diproses atau status sudah berubah",code:"RECOVERY_CLAIM_CONFLICT"});return;}
+    claimed=true;
+    stage="SECOND_READ";
+    // Recheck after acquiring claim to reduce race with manual Sheets edits.
+    if(matches(await scan()).length) {
+      res.status(409).json({error:"Baris muncul kembali saat pemulihan. Klaim tertahan untuk rekonsiliasi.",code:"ROW_REAPPEARED",needsReconciliation:true});return;
+    }
+    const facility=(await db.select().from(facilitiesTable)).find(item=>item.id===booking.facilityId);
+    const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Jakarta",day:"2-digit",month:"2-digit",
+      year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(booking.createdAt));
+    const part=(name:string)=>parts.find(p=>p.type===name)?.value??"";
+    const created=`${part("day")}/${part("month")}/${part("year")} ${part("hour")}:${part("minute")}:${part("second")} WIB`;
+    const row=[booking.orderNumber,booking.customerName,booking.customerEmail,booking.customerPhone,
+      facility?.name??"",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
+      booking.totalPrice,booking.status,booking.notes??"",booking.adminNotes??"",created].map(v=>v==null?"":String(v));
+    stage="SHEETS_RESTORE_APPEND";
+    const response=await sheets.spreadsheets.values.append({spreadsheetId:TARGET_ID,
+      range:`'${tab}'!A:N`,insertDataOption:"INSERT_ROWS",valueInputOption:"RAW",requestBody:{values:[row]}});
+    const m=(response.data.updates?.updatedRange??"").match(/![A-Z]+(\d+):/);
+    if(!m)throw new Error("No append position returned; manual reconciliation required");
+    const sheetRow=Number(m[1]);
+    stage="SHEETS_VERIFY";
+    const verify=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,
+      range:`'${tab}'!A${sheetRow}:N${sheetRow}`,valueRenderOption:"UNFORMATTED_VALUE"});
+    if(!row.every((v,i)=>String(verify.data.values?.[0]?.[i]??"")===v)){
+      throw new Error("Restored row not verified; manual reconciliation required");
+    }
+    stage="LEDGER_FINALIZE";
+    const finalized=sqlResultRows(await db.execute(sql`
+      update sport_center.booking_sheets_sync_ledger
+      set status='written',sheet_row=${sheetRow},written_at=now(),updated_at=now(),last_error_code=null
+      where source_key=${sourceKey} and status='writing' and booking_id=${booking.id}
+      returning source_key
+    `));
+    if(!finalized.length)throw new Error("Ledger finalization failed");
+    claimed=false;
+    try {
+      await db.execute(sql`
+        insert into sport_center.booking_sheets_recovery_history
+          (source_key,booking_id,order_number,target_tab,old_sheet_row,new_sheet_row)
+        values (${sourceKey},${booking.id},${orderNumber},${tab},${Number(ledger.sheet_row)||null},${sheetRow})
+      `);
+    }catch(error){req.log.error({err:error,orderNumber},"Recovery succeeded but history insert failed");}
+    res.json({ok:true,recovered:true,orderNumber,targetTab:tab,sheetRow});
+  }catch(error){
+    req.log.error({err:error,orderNumber,stage},"Sheets recovery failed");
+    res.status(502).json({error:"Pemulihan gagal; tidak akan mengulang otomatis",stage,needsReconciliation:claimed});
+  }
+});
+router.get("/admin/google-sheets/recovery-history",adminMiddleware,async(req,res)=>{
+  const orderNumber=String(req.query.orderNumber??"").trim();
+  if(!/^SC-[0-9]{1,12}$/.test(orderNumber)){res.status(400).json({error:"Nomor booking tidak valid"});return;}
+  try{
+    const rows=sqlResultRows(await db.execute(sql`
+      select order_number,target_tab,old_sheet_row,new_sheet_row,created_at
+      from sport_center.booking_sheets_recovery_history
+      where order_number=${orderNumber} order by id desc limit 20
+    `));
+    res.json({items:rows});
+  }catch(error){req.log.error({err:error},"Recovery history unavailable");res.status(502).json({error:"Riwayat belum tersedia"});}
+});
 router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) => {
   const orderNumber = String(req.body?.orderNumber ?? "").trim();
   if (!/^SC-[A-Z0-9-]{1,40}$/.test(orderNumber)) { res.status(400).json({ error: "Nomor booking tidak valid" }); return; }
