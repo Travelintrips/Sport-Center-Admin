@@ -167,6 +167,7 @@ jobs:
           if [ "$RUN_MEMBERSHIP" = 'true' ]; then
             node scripts/run-payment-event-membership-dev-e2e.mjs || {
               node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8");console.log("MEMBERSHIP_ERROR_CLASSES",JSON.stringify({codes:[...new Set((s.match(/(?:code|sqlState|sqlstate)[^\n]{0,18}[A-Z0-9]{5}/g)||[]).map(x=>x.slice(0,45)))].slice(-8),messages:[...new Set((s.match(/(?:duplicate key|violates not-null|foreign key|does not exist|invalid input syntax|relation [^\n]{0,60}|column [^\n]{0,60}|Gagal membuat data membership)/g)||[]))].slice(-8)}))'
+              node -e 'const fs=require("fs");const lines=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8").split("\n");const records=lines.map(x=>{try{return JSON.parse(x)}catch{return null}}).filter(Boolean).filter(x=>String(x.msg||"").includes("Create membership error"));for(const x of records.slice(-2)){const e=x.err||x.error||{};const scrub=v=>String(v||"").replace(/postgres(?:ql)?:\/\/[^\s]+/g,"[DB]").replace(/[\w.+-]+@[\w.-]+/g,"[EMAIL]").slice(0,180);console.log("MEMBERSHIP_CREATE_ERROR",JSON.stringify({type:scrub(e.type),code:scrub(e.code),message:scrub(e.message),detail:scrub(e.detail),cause:scrub(e.cause?.message)}))}'
               exit 1
             }
           fi
