@@ -83,7 +83,7 @@ try{
  const sheet=await sheets.spreadsheets.values.get({spreadsheetId:id,range:"'"+finalLedger.target_tab+"'!A:A"});
  const keys=(sheet.data.values??[]).map(v=>String(v[0]??''));
  if(keys.filter(k=>k===row.source_key).length!==1||keys.filter(k=>k===finalRow.source_key).length!==1)throw Error('DP_FINAL_DUPLICATION');
- const ledgerRows=await db.query('select source_key,status from sport_center.booking_sheets_payment_event_ledger where source_key=any($1::text[])',[row.source_key,finalRow.source_key]);
+ const ledgerRows=await db.query('select source_key,status from sport_center.booking_sheets_payment_event_ledger where source_key=any($1::text[])',[[row.source_key,finalRow.source_key]]);
  if(ledgerRows.rows.length!==2||ledgerRows.rows.some(r=>r.status!=='written'))throw Error('DP_FINAL_LEDGER_COUNT');
  console.log('DEV_DP_FINAL_E2E_PASS',JSON.stringify({bookingId:b.id,dpPaymentId:p.id,finalPaymentId:p2.id,ledgerRows:2,sheetRows:2,duplicates:0}));
 }finally{
