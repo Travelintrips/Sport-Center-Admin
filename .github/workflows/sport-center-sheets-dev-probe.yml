@@ -3,6 +3,11 @@ name: Sport Center Google Sheets DEV read-only probe
 on:
   workflow_dispatch:
     inputs:
+      verify_dev_database:
+        description: "Read-only Supabase DEV target and payment-event readiness"
+        required: false
+        type: boolean
+        default: false
       synthetic_write_replay:
         description: "Explicit DEV-only synthetic Google Sheets append/replay"
         required: false
@@ -68,3 +73,9 @@ jobs:
           trap 'rm -f "$secret_file"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/probe-payment-events-dev-write.mjs
+
+      - name: Verify Supabase DEV connection and event readiness (read-only)
+        if: ${{ inputs.verify_dev_database == true }}
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        run: node scripts/check-payment-events-dev-db.mjs
