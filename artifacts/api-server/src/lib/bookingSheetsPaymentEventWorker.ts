@@ -42,7 +42,7 @@ async function tick():Promise<void> {
             (source_key,source_type,booking_id,payment_id,allocation_id,company_invoice_id,membership_payment_key,amount,payment_at,status,attempt_count)
           values (${event.source_key},${event.source_type},${event.booking_id},${event.payment_id},${event.allocation_id},
             ${event.company_invoice_id},${event.membership_payment_id==null?null:String(event.membership_payment_id)},
-            ${event.amount}::numeric,${String(candidate.payment_ts)}::timestamptz,'writing',1)
+            ${event.amount}::numeric,${new Date(String(candidate.payment_ts)).toISOString()}::timestamptz,'writing',1)
           on conflict(source_key) do nothing returning id
         `));
         claimed=claim.length===1;
