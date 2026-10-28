@@ -12,6 +12,16 @@ const base = {
 };
 
 describe("X904 read-only payment reconciliation", () => {
+  it("creates a new reconciliation receipt after identity is verified", () => {
+    const unverified = planX904MembershipReconciliation({ ...base, identity: null });
+    const verified = planX904MembershipReconciliation(base);
+    const repeated = planX904MembershipReconciliation(base);
+    expect(unverified.eventKey).not.toBe(verified.eventKey);
+    expect(verified.eventKey).toBe(repeated.eventKey);
+    expect(unverified.state).toBe("review_required");
+    expect(verified.state).toBe("ready");
+    expect(verified.executeDeviceCommand).toBe(false);
+  });
   it("emits a stable key for repeated and reordered payment events", () => {
     const second = { id: 100, periodStart: "2026-09-06", periodEnd: "2026-10-06",
       status: "confirmed", amount: 300000 };
