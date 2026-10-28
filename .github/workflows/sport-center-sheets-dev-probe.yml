@@ -164,4 +164,9 @@ jobs:
           if [ "$RUN_DP" = 'true' ]; then node scripts/run-payment-event-dp-dev-e2e.mjs; fi
           if [ "$RUN_GROUP" = 'true' ]; then node scripts/run-payment-event-group-dev-e2e.mjs; fi
           if [ "$RUN_CORPORATE" = 'true' ]; then node scripts/run-payment-event-corporate-dev-e2e.mjs; fi
-          if [ "$RUN_MEMBERSHIP" = 'true' ]; then node scripts/run-payment-event-membership-dev-e2e.mjs; fi
+          if [ "$RUN_MEMBERSHIP" = 'true' ]; then
+            node scripts/run-payment-event-membership-dev-e2e.mjs || {
+              node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8");console.log("MEMBERSHIP_ERROR_CLASSES",JSON.stringify({codes:[...new Set((s.match(/(?:code|sqlState|sqlstate)[^\n]{0,18}[A-Z0-9]{5}/g)||[]).map(x=>x.slice(0,45)))].slice(-8),messages:[...new Set((s.match(/(?:duplicate key|violates not-null|foreign key|does not exist|invalid input syntax|relation [^\n]{0,60}|column [^\n]{0,60}|Gagal membuat data membership)/g)||[]))].slice(-8)}))'
+              exit 1
+            }
+          fi
