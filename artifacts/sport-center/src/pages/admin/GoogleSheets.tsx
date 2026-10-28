@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getToken } from "@/lib/auth";
 import { Sheet, ShieldCheck, Clock3, RefreshCw, Info, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +30,7 @@ export default function GoogleSheets() {
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
+  const previewRequestRef = useRef(0);
   const [syncBusy,setSyncBusy]=useState("");
   const [syncMessage,setSyncMessage]=useState("");
   async function syncOne(orderNumber:string) {
@@ -99,6 +100,7 @@ export default function GoogleSheets() {
   }
 
   async function loadPreview() {
+    const request = ++previewRequestRef.current;
     setPreviewBusy(true);setPreviewError("");setPreview(null);setReadiness(null);setReconciliation(null);
     try {
       if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
@@ -111,9 +113,11 @@ export default function GoogleSheets() {
       const parsed=parseCsv(await response.text());
       if(!parsed.length || COLUMNS.some((h,i)=>parsed[0][i]!==h) || parsed[0][14]!=="Payment Date") throw new Error("Struktur ekspor pembayaran tidak sesuai; preview dibatalkan");
       const rows=parsed.slice(1).filter(r=>r.length===15 && r[14]>=start && r[14]<=end);
-      setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});
-    }catch(e){setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{setPreviewBusy(false);}
+      if (request === previewRequestRef.current) setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});
+    }catch(e){if(request === previewRequestRef.current)setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{if(request === previewRequestRef.current)setPreviewBusy(false);}
   }
+
+  useEffect(() => { void loadPreview(); return () => {previewRequestRef.current += 1;}; }, [month]);
 
   async function inspect() {
     setBusy(true); setError("");
@@ -176,8 +180,8 @@ export default function GoogleSheets() {
         <CardContent className="space-y-3">
           <p className="text-sm text-slate-500">Menggunakan filter tanggal pembayaran WIB pada ekspor resmi booking. Booking yang belum memiliki bukti pembayaran sah tidak ikut.</p>
           <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="sheets-paid-month" className="text-sm font-medium">Bulan pembayaran</label>
-            <input id="sheets-paid-month" aria-label="Bulan pembayaran" type="month" value={month} onChange={e=>setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+            <label htmlFor="sheets-paid-month" className="text-sm font-medium">Filter Bulan Pembayaran</label>
+            <input id="sheets-paid-month" aria-label="Filter Bulan Pembayaran" type="month" value={month} onChange={e=>{setPreview(null);setReconciliation(null);setReadiness(null);setSourceAudit(null);setMonth(e.target.value);}} className="border rounded-lg px-3 py-2 text-sm" />
             <button type="button" onClick={loadPreview} disabled={previewBusy} className="border rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">{previewBusy?"Memuat...":"Preview Data"}</button>
           </div>
           {previewError&&<p role="alert" className="text-sm text-red-600">{previewError}</p>}
