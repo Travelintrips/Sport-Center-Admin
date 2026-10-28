@@ -21,3 +21,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-27 force Hostinger rebuild for PR #300 accounting mirror type casts and stale rejected outbox terminal handling.
 
 2026-10-28 force Hostinger rebuild for PR #314 payment accounting outbox idempotency/group-aware fix.
+
+2026-10-28 second Hostinger rebuild trigger after prior queued deployment completed; target accounting fix b669a812/e2f32777.
