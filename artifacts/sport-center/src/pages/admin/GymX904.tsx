@@ -94,48 +94,52 @@ export default function GymX904() {
   const [accessNotice,setAccessNotice]=useState("");
   const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
   const [accessPhase,setAccessPhase]=useState<"idle"|"queued"|"claimed"|"ack"|"success"|"error">("idle");
-  // Recover a submitted command after login redirects or a page reload. The server still
-  // authorizes status by requesting admin; this local record is only a lookup pointer.
+  // Recover recent command after login redirects via owner-scoped server status; never store user commands in the browser.
   useEffect(()=>{
-    const storageKey="x904_manual_command_pending_v1";
-    let stored:{id:string;pin:string;op:"SUSPEND_USER"|"ACTIVATE_USER"}|null=null;
-    try { const raw=window.localStorage.getItem(storageKey);if(raw)stored=JSON.parse(raw); }catch{return;}
-    if(!stored || !/^[a-f0-9-]{36}$/i.test(stored.id) || !/^[0-9]{1,8}$/.test(stored.pin))return;
-    const pending=stored;
+    let pending:{id:string;pin:string;op:"SUSPEND_USER"|"ACTIVATE_USER"}|null=null;
     let cancelled=false;
     let finished=false;
-    setAccessBusyPin(pending.pin);
-    setAccessPhase("queued");
-    setAccessNotice("Memulihkan status perintah PIN "+pending.pin+" setelah login ulang. ID "+pending.id);
+
     const poll=async()=>{
       const token=getToken();if(!token||cancelled||finished)return;
+      if(!pending){
+        const recent=await fetch(API+"/admin/gym-x904/user-command-recent",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+        if(!recent.ok)return;
+        const data=await recent.json();const c=data.command;
+        if(!c)return;
+        pending={id:String(c.command_id),pin:String(c.user_pin),op:c.command_type};
+        setAccessBusyPin(pending.pin);
+        setAccessPhase("queued");
+        setAccessNotice("Memulihkan perintah PIN "+pending.pin+" dari server. ID "+pending.id);
+      }
+      const current=pending;
       try {
-        const response=await fetch(API+"/admin/gym-x904/user-command/"+pending.id,{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+        const response=await fetch(API+"/admin/gym-x904/user-command/"+current.id,{headers:{Authorization:"Bearer "+token},cache:"no-store"});
         if(response.status===401)return; // Session may require login again.
-        if(!response.ok){setAccessPhase("error");setAccessNotice("Status perintah "+pending.id+" belum bisa dibaca ("+response.status+"). Jangan mengirim ulang.");return;}
+        if(!response.ok){setAccessPhase("error");setAccessNotice("Status perintah "+current.id+" belum bisa dibaca ("+response.status+"). Jangan mengirim ulang.");return;}
         const data=await response.json();const command=data.command;
         if(command?.state==="failed"||command?.state==="cancelled"){
-          setAccessPhase("error");setAccessNotice("Perintah PIN "+pending.pin+" gagal: "+String(command.error_code??command.result?.errorCode??"UNKNOWN")+" · ID "+pending.id);
-          finished=true;window.localStorage.removeItem(storageKey);setAccessBusyPin(null);return;
+          setAccessPhase("error");setAccessNotice("Perintah PIN "+current.pin+" gagal: "+String(command.error_code??command.result?.errorCode??"UNKNOWN")+" · ID "+current.id);
+          finished=true;setAccessBusyPin(null);return;
         }
         if(command?.state!=="completed"){
           setAccessPhase(command?.state==="claimed"?"claimed":"queued");
-          setAccessNotice("PIN "+pending.pin+": "+(command?.state==="claimed"?"sedang diproses VMSC":"menunggu ACK mesin")+" · ID "+pending.id+". Jangan klik ulang.");return;
+          setAccessNotice("PIN "+current.pin+": "+(command?.state==="claimed"?"sedang diproses VMSC":"menunggu ACK mesin")+" · ID "+current.id+". Jangan klik ulang.");return;
         }
-        if(command.result?.readBackConfirmed!==true || Number(command.result?.afterGroup)!==(pending.op==="SUSPEND_USER"?2:1)){
-          setAccessPhase("error");setAccessNotice("ACK tidak sesuai untuk PIN "+pending.pin+" · ID "+pending.id);return;
+        if(command.result?.readBackConfirmed!==true || Number(command.result?.afterGroup)!==(current.op==="SUSPEND_USER"?2:1)){
+          setAccessPhase("error");setAccessNotice("ACK tidak sesuai untuk PIN "+current.pin+" · ID "+current.id);return;
         }
-        setAccessPhase("ack");setAccessNotice("PIN "+pending.pin+": ACK berhasil; menunggu snapshot setelah ACK.");
+        setAccessPhase("ack");setAccessNotice("PIN "+current.pin+": ACK berhasil; menunggu snapshot setelah ACK.");
         const snapResponse=await fetch(API+"/admin/gym-x904/live-access-status",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
         if(!snapResponse.ok)return;
-        const fresh=await snapResponse.json();const row=fresh.users?.find((v:{user_pin:string;device_group:number;identityMatched:boolean})=>v.user_pin===pending.pin);
+        const fresh=await snapResponse.json();const row=fresh.users?.find((v:{user_pin:string;device_group:number;identityMatched:boolean})=>v.user_pin===current.pin);
         const completedAt=new Date(command.completed_at).getTime();
-        if(row?.identityMatched && row.device_group===(pending.op==="SUSPEND_USER"?2:1) && Number.isFinite(completedAt) && new Date(fresh.observedAt).getTime()>completedAt){
-          setAccessPhase("success");setAccessNotice("BERHASIL: "+(pending.op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+pending.pin+" terkonfirmasi ACK dan snapshot. ID "+pending.id);
-          finished=true;window.localStorage.removeItem(storageKey);setAccessBusyPin(null);
+        if(row?.identityMatched && row.device_group===(current.op==="SUSPEND_USER"?2:1) && Number.isFinite(completedAt) && new Date(fresh.observedAt).getTime()>completedAt){
+          setAccessPhase("success");setAccessNotice("BERHASIL: "+(current.op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+current.pin+" terkonfirmasi ACK dan snapshot. ID "+current.id);
+          finished=true;setAccessBusyPin(null);
           await queryClient.invalidateQueries({queryKey:["gym-x904-live-access-status"]});
         }
-      }catch{if(!cancelled){setAccessPhase("error");setAccessNotice("Koneksi terputus. Status perintah "+pending.id+" akan diperiksa lagi; jangan klik ulang.");}}
+      }catch{if(!cancelled){setAccessPhase("error");setAccessNotice("Koneksi terputus. Status perintah "+current.id+" akan diperiksa lagi; jangan klik ulang.");}}
     };
     void poll();const timer=window.setInterval(()=>void poll(),5000);
     return ()=>{cancelled=true;window.clearInterval(timer);};
@@ -152,7 +156,6 @@ export default function GymX904() {
       const data=await response.json();if(!response.ok)throw new Error(data.error??"Perintah ditolak");
       const commandId=String(data.command_id??"");
       if(!/^[a-f0-9-]{36}$/i.test(commandId))throw new Error("ID perintah tidak tersedia");
-      window.localStorage.setItem("x904_manual_command_pending_v1",JSON.stringify({id:commandId,pin:user.user_pin,op}));
       setAccessNotice("PIN "+user.user_pin+": antrean diterima, menunggu ACK mesin.");
       const deadline=Date.now()+360000;
       let ackComplete=false;
@@ -194,7 +197,6 @@ export default function GymX904() {
         await new Promise<void>(resolve=>setTimeout(resolve,5000));
       }
       if(!snapshotConfirmed)throw new Error("ACK berhasil, tetapi snapshot terbaru belum mengonfirmasi status. Jangan ulangi perintah sebelum dicek.");
-      window.localStorage.removeItem("x904_manual_command_pending_v1");
       setAccessPhase("success");
       setAccessNotice("BERHASIL: "+(op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+user.user_pin+" terkonfirmasi ACK dan snapshot SDK. Status grup "+(op==="SUSPEND_USER"?"2 (ditahan)":"1 (diizinkan)")+".");
       await queryClient.invalidateQueries({queryKey:["gym-x904-live-access-status"]});
