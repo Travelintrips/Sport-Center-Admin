@@ -124,7 +124,8 @@ jobs:
           done
           if [ "$ready" != 1 ]; then
             grep -oE 'Error \[ERR_[A-Z_]+\]|E2E_[A-Z_]+|STARTUP_[A-Z_]+|PAYMENT_MIRROR_[A-Z_]+|Cannot find module|Cannot find package|ERR_[A-Z_]+|Runtime initialization complete|SyntaxError|TypeError' "$RUNNER_TEMP/sc-e2e-server.log" | sort -u | head -12 || :
-            echo '::error::Isolated DEV API startup/readiness did not succeed'
+            node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8"); console.log("STARTUP_LOG_SHAPE",JSON.stringify({lines:s.split("\n").length,bytes:s.length,hasListening:s.includes("Listening on"),hasBootstrap:s.includes("E2E DEV direct bootstrap"),hasReady:s.includes("Runtime initialization complete"),hasError:s.includes("Error"),firstLine:(s.split("\n").find(x=>x.trim())||"").replace(/https?:\/\/\S+/g,"[URL]").slice(0,100)}))'
+            echo '::error::Isolated DEV API startup/readiness did not succeed' 
             exit 1
           fi
           echo 'DEV_API_STARTUP_READINESS_PASS'
