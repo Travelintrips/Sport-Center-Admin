@@ -111,8 +111,8 @@ export default function GoogleSheets() {
       const response=await fetch("/api/admin/bookings/export?"+q.toString(),{headers:{Authorization:`Bearer ${getToken()}`}});
       if(!response.ok)throw new Error("Tidak dapat membaca pembayaran terkonfirmasi");
       const parsed=parseCsv(await response.text());
-      if(!parsed.length || COLUMNS.some((h,i)=>parsed[0][i]!==h) || parsed[0][14]!=="Payment Date") throw new Error("Struktur ekspor pembayaran tidak sesuai; preview dibatalkan");
-      const rows=parsed.slice(1).filter(r=>r.length===15 && r[14]>=start && r[14]<=end);
+      if(!parsed.length || COLUMNS.some((h,i)=>parsed[0][i]!==h) || parsed[0][14]!=="Payment Date" || parsed[0][15]!=="Payment Type" || parsed[0][16]!=="Payment ID" || parsed[0][17]!=="Group Ref" || parsed[0][18]!=="Booking Total") throw new Error("Struktur ekspor pembayaran tidak sesuai; preview dibatalkan");
+      const rows=parsed.slice(1).filter(r=>r.length===19 && r[14]>=start && r[14]<=end);
       if (request === previewRequestRef.current) setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});
     }catch(e){if(request === previewRequestRef.current)setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{if(request === previewRequestRef.current)setPreviewBusy(false);}
   }
