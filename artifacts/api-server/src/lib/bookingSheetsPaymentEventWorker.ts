@@ -58,9 +58,10 @@ async function tick():Promise<void> {
             where source_key=${event.source_key} and status='writing' returning id`));
           if(finalized.length!==1)throw new Error("EVENT_LEDGER_FINALIZATION_FAILED");
         } else {
-          await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
+          const reviewed=rows(await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
             set status='needs_review',last_error_code=${result.reason},updated_at=now()
-            where source_key=${event.source_key} and status='writing'`);
+            where source_key=${event.source_key} and status='writing' returning id`));
+          if(reviewed.length!==1)throw new Error("EVENT_REVIEW_FINALIZATION_FAILED");
         }
       } catch(error) {
         logger.error({err:error,sourceKey:event.source_key},"Payment event requires reconciliation");
