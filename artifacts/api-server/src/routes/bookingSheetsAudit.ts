@@ -225,6 +225,23 @@ router.get("/admin/google-sheets/ledger-health", adminMiddleware, async (req, re
 });
 // Read-only status of bookings already shown in the paid preview.
 // Ledger is authoritative for the stored sync result; optional live check compares Sheets column A.
+// Read-only operational overview; backend rollout flag is controlled in DB.
+router.get("/admin/google-sheets/auto-status", adminMiddleware, async (req, res) => {
+  try {
+    const config=sqlResultRows(await db.execute(sql`
+      select enabled,start_at::text as start_at from sport_center.booking_sheets_auto_config where id=true
+    `))[0];
+    const statuses=sqlResultRows(await db.execute(sql`
+      select status,count(*)::integer as total from sport_center.booking_sheets_auto_queue group by status
+    `));
+    const counts: Record<string,number> = {};
+    for(const row of statuses) counts[String(row.status)]=Number(row.total);
+    res.json({enabled:config?.enabled===true,startAt:config?.start_at??null,counts});
+  }catch(error){
+    req.log.error({err:error},"Sheets auto status unavailable");
+    res.status(503).json({error:"Status auto-sync belum tersedia"});
+  }
+});
 router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, res) => {
   const orderNumbers = req.body?.orderNumbers;
   const verifySheets = req.body?.verifySheets === true;

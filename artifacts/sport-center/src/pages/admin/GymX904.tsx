@@ -68,7 +68,7 @@ export default function GymX904() {
       const response=await fetch(API+"/admin/gym-x904/manual-access-status",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
       if(!response.ok)throw new Error("Status akses terverifikasi tidak tersedia");
       return response.json();
-    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:15000
+    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:30000
   });
   const accessFor=(user:LanUser)=>verifiedAccess?.users.find(x=>x.user_pin===user.user_pin&&x.device_uid===user.device_uid);
   const {data:machineAccess,isError:machineAccessError}=useQuery<{
@@ -83,7 +83,7 @@ export default function GymX904() {
       if(!response.ok)throw new Error("Snapshot mesin belum tersedia");
       return response.json();
     },
-    enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:15000
+    enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:30000
   });
   const {data:pendingLedger,isError:pendingLedgerError}=useQuery<{commands:Array<{
     command_id:string;user_pin:string;command_type:string;state:string;verified:boolean;blocked:boolean;
@@ -95,7 +95,7 @@ export default function GymX904() {
       const r=await fetch(API+"/admin/gym-x904/manual-access-pending",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
       if(!r.ok)throw new Error("Tidak dapat membaca antrean mesin");
       return r.json();
-    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:5000
+    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:12000
   });
   const lockedMachinePin=(pin:string)=>pendingLedger?.commands.find(c=>c.user_pin===pin&&c.blocked);
   const machineSnapshotFresh=!!machineAccess?.observedAt &&
@@ -154,7 +154,7 @@ export default function GymX904() {
         }
       }catch{if(!cancelled){setAccessPhase("error");setAccessNotice("Koneksi terputus. Status perintah "+current.id+" akan diperiksa lagi; jangan klik ulang.");}}
     };
-    void poll();const timer=window.setInterval(()=>void poll(),5000);
+    void poll();const timer=window.setInterval(()=>void poll(),10000);
     return ()=>{cancelled=true;window.clearInterval(timer);};
   },[queryClient]);
   async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
