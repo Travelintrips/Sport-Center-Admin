@@ -11,11 +11,14 @@ function rows(value:unknown): Record<string,unknown>[] {
 }
 
 let running=false;
-async function tick(startAt:string):Promise<void> {
+async function tick():Promise<void> {
   if(running)return;
   running=true;
   let job:Record<string,unknown>|undefined;
   try {
+    const config=rows(await db.execute(sql`select enabled,start_at::text as start_at from sport_center.booking_sheets_auto_config where id=true`))[0];
+    if(!config?.enabled || !config.start_at)return;
+    const startAt=String(config.start_at);
     const claimed=rows(await db.execute(sql`
       update sport_center.booking_sheets_auto_queue
       set status='processing', attempt_count=attempt_count+1, started_at=now(), updated_at=now()
@@ -60,17 +63,8 @@ async function tick(startAt:string):Promise<void> {
 }
 
 export function startBookingSheetsAutoWorker():void {
-  if(process.env.SHEETS_AUTO_SYNC_ENABLED!=="true"){
-    logger.info("Sheets auto-sync disabled; no automatic writes");
-    return;
-  }
-  const startAt=process.env.SHEETS_AUTO_SYNC_START_AT;
-  if(!startAt || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.test(startAt) || Number.isNaN(Date.parse(startAt))){
-    logger.error("Sheets auto-sync refused to start: SHEETS_AUTO_SYNC_START_AT required");
-    return;
-  }
-  logger.info({startAt},"Sheets auto-sync enabled for fresh confirmed personal full payments only");
-  void tick(startAt);
-  const timer=setInterval(()=>void tick(startAt),30_000);
+  logger.info("Sheets auto-sync worker started; DB rollout flag is disabled by default");
+  void tick();
+  const timer=setInterval(()=>void tick(),30_000);
   timer.unref();
 }
