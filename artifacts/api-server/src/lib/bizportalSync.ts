@@ -1841,84 +1841,181 @@ async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: numb
   journalDate: string;
 } | null> {
   const { rows } = await pool.query(
-    `SELECT
-       sp.id AS payment_id,
-       sp.booking_id,
-       sb.order_number,
-       sp.amount,
-       sp.payment_method,
-       sp.payment_provider::text AS payment_provider,
-       sp.payment_type,
-       sp.company_id,
-       sp.bank_account_id,
-       sp.provider_reference,
-       sp.provider_order_id,
-       sp.merchant_trade_no,
-       sp.provider_trade_no,
-       CASE
-         WHEN sb.group_ref IS NOT NULL THEN
-           CASE
-             WHEN COALESCE(bg.ppn_amount, 0) > 0
-                  AND COALESCE(bg.total_payment_override, bg.total_payment, 0) > 0
-               THEN ROUND(
-                 sp.amount * COALESCE(bg.dpp, bg.total_payment_override, bg.total_payment)
-                 / COALESCE(NULLIF(bg.total_payment_override, 0), NULLIF(bg.total_payment, 0))
-               )
-             ELSE ROUND(sp.amount)
-           END
-         WHEN sp.payment_type IN ('dp', 'pelunasan')
-              AND COALESCE(sb.ppn_amount, 0) > 0
-              AND COALESCE(sb.grand_total, sb.total_price, 0) > 0
-           THEN ROUND(
-             sp.amount * COALESCE(NULLIF(sb.dpp, 0), sb.grand_total - COALESCE(sb.ppn_amount, 0))
-             / COALESCE(NULLIF(sb.grand_total, 0), NULLIF(sb.total_price, 0))
+    `WITH payment_context AS (
+       SELECT
+         sp.id AS payment_id,
+         sp.booking_id,
+         sb.order_number,
+         sp.amount,
+         sp.payment_method,
+         sp.payment_provider::text AS payment_provider,
+         sp.payment_type,
+         sp.company_id,
+         sp.bank_account_id,
+         sp.provider_reference,
+         sp.provider_order_id,
+         sp.merchant_trade_no,
+         sp.provider_trade_no,
+         sb.group_ref,
+         sb.total_price AS booking_total_price,
+         sb.dpp AS booking_dpp,
+         sb.ppn_amount AS booking_ppn_amount,
+         sb.grand_total AS booking_grand_total,
+         sb.ppn_rate AS booking_ppn_rate,
+         sb.ppn_treatment AS booking_ppn_treatment,
+         COALESCE(sb.ppn_collected_by_customer, false) AS booking_ppn_collected_by_customer,
+         bg.ppn_rate AS group_ppn_rate_config,
+         bg.ppn_treatment AS group_ppn_treatment,
+         COALESCE(pa.alloc_count, 0) AS alloc_count,
+         pa.alloc_dpp,
+         gf.group_gross,
+         gf.group_dpp,
+         gf.group_ppn_rate,
+         COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date::text AS journal_date,
+         COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::text AS paid_at
+       FROM sport_center.sport_payments sp
+       JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+       LEFT JOIN sport_center.booking_groups bg ON bg.group_ref = sb.group_ref
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*)::int AS alloc_count,
+           SUM(
+             CASE
+               WHEN COALESCE(ab.grand_total, ab.total_price, 0) > 0 THEN
+                 a.amount
+                 * COALESCE(
+                     NULLIF(ab.dpp, 0),
+                     COALESCE(ab.grand_total, ab.total_price, 0) - COALESCE(ab.ppn_amount, 0)
+                   )
+                 / COALESCE(NULLIF(ab.grand_total, 0), NULLIF(ab.total_price, 0))
+               ELSE a.amount
+             END
+           ) AS alloc_dpp
+         FROM sport_center.sport_payment_allocations a
+         JOIN sport_center.sport_bookings ab ON ab.id = a.booking_id
+         WHERE a.payment_id = sp.id
+       ) pa ON true
+       LEFT JOIN LATERAL (
+         SELECT
+           SUM(COALESCE(gb.grand_total, gb.total_price, 0)) AS group_gross,
+           SUM(
+             COALESCE(
+               NULLIF(gb.dpp, 0),
+               COALESCE(gb.grand_total, gb.total_price, 0) - COALESCE(gb.ppn_amount, 0)
+             )
+           ) AS group_dpp,
+           MAX(gb.ppn_rate) AS group_ppn_rate
+         FROM sport_center.sport_bookings gb
+         WHERE gb.group_ref = sb.group_ref
+       ) gf ON sb.group_ref IS NOT NULL
+       WHERE sp.id = $1
+         AND sp.status = 'confirmed'
+     ),
+     calculated AS (
+       SELECT
+         pc.*,
+         (
+           pc.group_ref IS NOT NULL
+           AND (
+             pc.alloc_count > 1
+             OR ABS(
+               pc.amount - COALESCE(pc.booking_grand_total, pc.booking_total_price, 0)
+             ) > 0.01
            )
-         ELSE COALESCE(NULLIF(sb.dpp, 0), sb.grand_total - COALESCE(sb.ppn_amount, 0), sb.total_price)
-       END AS dpp,
-       CASE
-         WHEN sb.group_ref IS NOT NULL THEN
-           CASE
-             WHEN COALESCE(bg.ppn_amount, 0) > 0
-                  AND COALESCE(bg.total_payment_override, bg.total_payment, 0) > 0
-               THEN ROUND(sp.amount) - ROUND(
-                 sp.amount * COALESCE(bg.dpp, bg.total_payment_override, bg.total_payment)
-                 / COALESCE(NULLIF(bg.total_payment_override, 0), NULLIF(bg.total_payment, 0))
-               )
-             ELSE 0
-           END
-         WHEN sp.payment_type IN ('dp', 'pelunasan')
-              AND COALESCE(sb.ppn_amount, 0) > 0
-              AND COALESCE(sb.grand_total, sb.total_price, 0) > 0
-           THEN ROUND(sp.amount) - ROUND(
-             sp.amount * COALESCE(NULLIF(sb.dpp, 0), sb.grand_total - COALESCE(sb.ppn_amount, 0))
-             / COALESCE(NULLIF(sb.grand_total, 0), NULLIF(sb.total_price, 0))
+         ) AS is_group_payment,
+         CASE
+           WHEN pc.group_ref IS NOT NULL
+                AND (
+                  pc.alloc_count > 1
+                  OR ABS(
+                    pc.amount - COALESCE(pc.booking_grand_total, pc.booking_total_price, 0)
+                  ) > 0.01
+                )
+             THEN ROUND(
+               CASE
+                 WHEN pc.alloc_count > 0 AND pc.alloc_dpp IS NOT NULL
+                   THEN pc.alloc_dpp
+                 WHEN COALESCE(pc.group_gross, 0) > 0
+                   THEN pc.amount
+                        * COALESCE(pc.group_dpp, pc.group_gross)
+                        / pc.group_gross
+                 ELSE pc.amount
+               END
+             )
+           WHEN pc.payment_type IN ('dp', 'pelunasan')
+                AND COALESCE(pc.booking_grand_total, pc.booking_total_price, 0) > 0
+             THEN ROUND(
+               pc.amount
+               * COALESCE(
+                   NULLIF(pc.booking_dpp, 0),
+                   COALESCE(pc.booking_grand_total, pc.booking_total_price, 0)
+                     - COALESCE(pc.booking_ppn_amount, 0)
+                 )
+               / COALESCE(
+                   NULLIF(pc.booking_grand_total, 0),
+                   NULLIF(pc.booking_total_price, 0)
+                 )
+             )
+           ELSE COALESCE(
+             NULLIF(pc.booking_dpp, 0),
+             COALESCE(pc.booking_grand_total, pc.booking_total_price, 0)
+               - COALESCE(pc.booking_ppn_amount, 0),
+             pc.booking_total_price
            )
-         ELSE COALESCE(sb.ppn_amount, 0)
-       END AS ppn_amount,
+         END AS accounting_dpp,
+         CASE
+           WHEN pc.group_ref IS NOT NULL
+                AND (
+                  pc.alloc_count > 1
+                  OR ABS(
+                    pc.amount - COALESCE(pc.booking_grand_total, pc.booking_total_price, 0)
+                  ) > 0.01
+                )
+             THEN ROUND(pc.amount)
+           WHEN pc.payment_type IN ('dp', 'pelunasan')
+             THEN ROUND(pc.amount)
+           ELSE COALESCE(pc.booking_grand_total, pc.booking_total_price)
+         END AS accounting_gross
+       FROM payment_context pc
+     )
+     SELECT
+       payment_id,
+       booking_id,
+       order_number,
+       amount,
+       payment_method,
+       payment_provider,
+       payment_type,
+       company_id,
+       bank_account_id,
+       provider_reference,
+       provider_order_id,
+       merchant_trade_no,
+       provider_trade_no,
+       accounting_dpp AS dpp,
+       GREATEST(0, accounting_gross - accounting_dpp) AS ppn_amount,
+       accounting_gross AS grand_total,
        CASE
-         WHEN sb.group_ref IS NOT NULL THEN ROUND(sp.amount)
-         WHEN sp.payment_type IN ('dp', 'pelunasan') THEN ROUND(sp.amount)
-         ELSE COALESCE(sb.grand_total, sb.total_price)
-       END AS grand_total,
-       CASE
-         WHEN sb.group_ref IS NOT NULL THEN COALESCE(bg.ppn_rate, 0)
-         ELSE COALESCE(sb.ppn_rate, 0)
+         WHEN is_group_payment
+           THEN COALESCE(group_ppn_rate_config, group_ppn_rate, 0)
+         ELSE COALESCE(booking_ppn_rate, 0)
        END AS ppn_rate,
        CASE
-         WHEN sb.group_ref IS NOT NULL THEN bg.ppn_treatment
-         ELSE sb.ppn_treatment
+         WHEN is_group_payment
+           THEN COALESCE(group_ppn_treatment, booking_ppn_treatment)
+         ELSE booking_ppn_treatment
        END AS ppn_treatment,
        CASE
-         WHEN sb.group_ref IS NOT NULL THEN COALESCE(bg.ppn_treatment = 'collected_by_customer', false)
-         ELSE COALESCE(sb.ppn_collected_by_customer, false)
+         WHEN is_group_payment
+           THEN COALESCE(
+             COALESCE(group_ppn_treatment, booking_ppn_treatment) = 'collected_by_customer',
+             false
+           )
+         ELSE booking_ppn_collected_by_customer
        END AS ppn_collected_by_customer,
-       COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date::text AS journal_date,
-       COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::text AS paid_at
-     FROM sport_center.sport_payments sp
-     JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
-     LEFT JOIN sport_center.booking_groups bg ON bg.group_ref = sb.group_ref
-    WHERE sp.id = $1
-      AND sp.status = 'confirmed'`,
+       journal_date,
+       paid_at
+     FROM calculated`,
     [paymentId],
   );
   const row = rows[0];
