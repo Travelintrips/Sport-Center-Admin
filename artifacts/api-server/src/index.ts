@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { isIsolatedPaymentEventE2E } from "./lib/paymentEventE2EMode";
 import { startScheduler } from "./lib/scheduler";
 import { startBookingSheetsAutoWorker } from "./lib/bookingSheetsAutoWorker";
 import { startBookingSheetsPaymentEventWorker } from "./lib/bookingSheetsPaymentEventWorker";
@@ -1304,10 +1305,12 @@ async function runStartupSeed() {
 // Hostinger-assigned port. Business routes remain fail-closed through the
 // startup readiness middleware until this function completes.
 export async function initializeRuntime(): Promise<void> {
+  const e2e = isIsolatedPaymentEventE2E();
+  if(e2e)logger.warn("Isolated DEV payment-event E2E: background tasks and startup provisioning disabled");
   // This is a financial safety migration, not a best-effort schema migration.
   // It still completes before business traffic is marked ready, but no longer
   // blocks the platform from observing listen() within its startup deadline.
-  try {
+  if (!e2e) try {
     await withTransientDbRetry(() => startPaymentMirrorMigration(), 3);
     logger.info("Payment mirror migration verified");
   } catch (err) {
@@ -1322,7 +1325,7 @@ export async function initializeRuntime(): Promise<void> {
     );
   }
 
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !e2e) {
     initBizportalTables().catch(() => {});
     ensureDefaultTemplates().catch(() => {});
 
@@ -1336,7 +1339,7 @@ export async function initializeRuntime(): Promise<void> {
 
   // Local development can use the configured local database without requiring
   // Supabase Storage. Production always verifies its remote storage only.
-  if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
+  if (e2e || (process.env.NODE_ENV === "development" && process.env.DATABASE_URL)) {
     logger.info("Skipping Supabase Storage bucket validation for local development");
   } else {
     import("./lib/supabaseStorage").then(({ validateBuckets }) => {
@@ -1349,8 +1352,10 @@ export async function initializeRuntime(): Promise<void> {
   // Mark ready only after the accounting safety gate and required development
   // provisioning have completed. Scheduler starts only after this point.
   markStartupReady();
-  startScheduler();
-  startBookingSheetsAutoWorker();
+  if (!e2e) {
+    startScheduler();
+    startBookingSheetsAutoWorker();
+  }
   startBookingSheetsPaymentEventWorker();
 }
 
