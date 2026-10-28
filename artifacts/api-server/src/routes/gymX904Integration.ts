@@ -253,8 +253,8 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
              WHERE device_serial=${expectedSerial} ORDER BY snapshot_id DESC LIMIT 1`);
           const snap=snapshots.rows[0];
           const observed=snap&&Array.isArray(snap.users)?snap.users.find((x:any)=>String(x.pin)===userPin):null;
-          if(!snap||!last.completed_at||new Date(snap.observed_at).getTime()<=new Date(last.completed_at).getTime()||
-             Number(observed?.group)!==group||last.result?.readBackConfirmed!==true)
+          if(!snap||!last.completed_at||new Date(String(snap.observed_at)).getTime()<=new Date(String(last.completed_at)).getTime()||
+             Number(observed?.group)!==group||(last.result as {readBackConfirmed?:boolean}|null)?.readBackConfirmed!==true)
             return res.status(409).json({error:"PREVIOUS_COMMAND_AWAITING_VERIFIED_SNAPSHOT",command_id:last.command_id});
         }
       }
