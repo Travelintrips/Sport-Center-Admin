@@ -73,6 +73,7 @@ const AdminCustomers = lazy(() => import("@/pages/admin/Customers"));
 const AdminPromos = lazy(() => import("@/pages/admin/Promos"));
 const AdminSettings = lazy(() => import("@/pages/admin/Settings"));
 const AdminMemberships = lazy(() => import("@/pages/admin/Memberships"));
+const GymDoorEnrollment = lazy(() => import("@/pages/GymDoorEnrollment"));
 const AdminGymX904 = lazy(() => import("@/pages/admin/GymX904"));
 const AdminApMembers = lazy(() => import("@/pages/admin/ApMembers"));
 const AdminAuditLog = lazy(() => import("@/pages/admin/AuditLog"));
@@ -282,6 +283,7 @@ function Router() {
             <Route path="/register" component={Register} />
             <Route path="/my-bookings" component={MyBookings} />
             <Route path="/my-profile" component={MyProfile} />
+            <Route path="/gym-door-access" component={GymDoorEnrollment} />
             <Route path="/verify-id" component={VerifyId} />
             <Route path="/membership" component={Membership} />
             <Route path="/promos" component={Promos} />
