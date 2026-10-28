@@ -1,5 +1,5 @@
 -- Safe durable outbox for new, confirmed, single-payment personal bookings.
--- The worker remains OFF until SHEETS_AUTO_SYNC_ENABLED=true is explicitly configured.
+-- The worker reads booking_sheets_auto_config, initially disabled.
 -- One-row rollout switch. Only database administrators can enable auto writes.
 create table if not exists sport_center.booking_sheets_auto_config (
  id boolean primary key default true check(id),
@@ -12,14 +12,14 @@ insert into sport_center.booking_sheets_auto_config(id,enabled)
  values(true,false) on conflict(id) do nothing;
 alter table sport_center.booking_sheets_auto_config enable row level security;
 grant select on sport_center.booking_sheets_auto_config to sport_center_app;
-do $
+do $auto_config$
 begin
  if not exists (select 1 from pg_policies where schemaname='sport_center'
    and tablename='booking_sheets_auto_config' and policyname='booking_sheets_auto_backend_config_read') then
    create policy booking_sheets_auto_backend_config_read on sport_center.booking_sheets_auto_config
     for select to sport_center_app using (true);
  end if;
-end $;
+end $auto_config$;
 
 create table if not exists sport_center.booking_sheets_auto_queue (
  id bigint generated always as identity primary key,
