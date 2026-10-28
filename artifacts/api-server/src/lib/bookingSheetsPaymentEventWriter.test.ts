@@ -62,3 +62,36 @@ describe('Google Sheets numeric round-trip',()=>{
   expect(await writeClaimedPaymentEvent(sample,tab,fake({readRow:async()=>row}))).toEqual({status:'needs_review',reason:'VERIFY_FAILED'});
  });
 });
+
+describe('post-append crash and timeout isolation',()=>{
+ it('returns needs_review if server times out after the row was persisted; never retries the append',async()=>{
+  const saved:string[][]=[];
+  const row=['membership_payment:42','membership','','','','','42','2026-10-28','150000.00','CANDIDATE'];
+  let appendCalls=0;
+  const port=fake({
+   findSourceKeyAcrossEventTabs:async()=>saved.length?[{tab,row:2}]:[],
+   append:async(_t,v)=>{appendCalls++;saved.push(v);throw Error('NETWORK_TIMEOUT_AFTER_APPEND');},
+   readRow:async()=>row,
+  });
+  expect(await writeClaimedPaymentEvent(sample,tab,port)).toEqual({status:'needs_review',reason:'AMBIGUOUS_APPEND'});
+  expect(saved).toHaveLength(1);
+  expect(await writeClaimedPaymentEvent(sample,tab,port)).toEqual({status:'needs_review',reason:'ALREADY_PRESENT'});
+  expect(appendCalls).toBe(1);
+  expect(saved).toHaveLength(1);
+ });
+ it('detects an existing row after worker crash between append and ledger finalization',async()=>{
+  const saved:string[][]=[];
+  let appendCalls=0;
+  const values=['membership_payment:42','membership','','','','','42','2026-10-28','150000.00','CANDIDATE'];
+  const port=fake({
+   append:async(_t,v)=>{appendCalls++;saved.push(v);return {row:2};},
+   readRow:async()=>values,
+   findSourceKeyAcrossEventTabs:async()=>saved.length?[{tab,row:2}]:[],
+  });
+  expect(await writeClaimedPaymentEvent(sample,tab,port)).toEqual({status:'written',tab,row:2});
+  // Simulate process crash: persisted Sheets row exists, ledger has not yet finalized.
+  // Worker must not append again even if operator manually reconciles the claim.
+  expect(await writeClaimedPaymentEvent(sample,tab,port)).toEqual({status:'needs_review',reason:'ALREADY_PRESENT'});
+  expect(appendCalls).toBe(1);
+ });
+});
