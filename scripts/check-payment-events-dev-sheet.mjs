@@ -6,14 +6,22 @@ const prod='1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E';
 const id=process.env.GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID;
 if(id!==target||id===prod)throw Error('DEV_SHEET_ID_MISMATCH');
 if(process.env.APP_ENV==='production'||process.env.NODE_ENV==='production')throw Error('PROD_CONTEXT_FORBIDDEN');
+// Accept already provisioned Google Application Default Credentials as well as
+// Hostinger-style service-account JSON. Never print credential contents.
 const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-if(!raw)throw Error('SERVICE_ACCOUNT_UNAVAILABLE');
-const credentials=JSON.parse(raw);
-if(credentials.type!=='service_account'||!credentials.private_key||!credentials.client_email)throw Error('INVALID_SERVICE_ACCOUNT');
-credentials.private_key=credentials.private_key.replace(/\\n/g,'\n');
+if(!raw && !process.env.GOOGLE_APPLICATION_CREDENTIALS)throw Error('SERVICE_ACCOUNT_UNAVAILABLE');
 const require=createRequire(new URL('../artifacts/api-server/package.json',import.meta.url));
 const {google}=require('googleapis');
-const auth=new google.auth.GoogleAuth({credentials,scopes:['https://www.googleapis.com/auth/spreadsheets.readonly']});
+let credentials;
+if(raw){
+ credentials=JSON.parse(raw);
+ if(credentials.type!=='service_account'||!credentials.private_key||!credentials.client_email)throw Error('INVALID_SERVICE_ACCOUNT');
+ credentials.private_key=credentials.private_key.replace(/\\n/g,'\n');
+}
+const auth=new google.auth.GoogleAuth({
+ ...(credentials ? {credentials} : {}),
+ scopes:['https://www.googleapis.com/auth/spreadsheets.readonly'],
+});
 const sheets=google.sheets({version:'v4',auth});
 const res=await sheets.spreadsheets.get({spreadsheetId:id,fields:'spreadsheetId,sheets(properties(title))'});
 if(res.data.spreadsheetId!==id)throw Error('SPREADSHEET_MISMATCH');
