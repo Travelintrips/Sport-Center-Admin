@@ -88,6 +88,26 @@ export default function GoogleSheets() {
 
   const [readiness,setReadiness] = useState<{tab:string;ready:boolean;reason:string|null;expectedHeaders?:string[];headerRow?:number|null;populatedFirstColumn?:number}|null>(null);
   const [readinessBusy,setReadinessBusy] = useState(false);
+  const [pendingHeader,setPendingHeader]=useState(false);
+  const [headerBusy,setHeaderBusy]=useState(false);
+  const [headerMessage,setHeaderMessage]=useState("");
+  async function createMonthHeader() {
+    setHeaderBusy(true);setHeaderMessage("");
+    try {
+      const response=await fetch("/api/admin/google-sheets/create-header",{
+        method:"POST",
+        headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+        body:JSON.stringify({month}),
+      });
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error||"Gagal membuat header");
+      setHeaderMessage(data.written?`Header 14 kolom berhasil dibuat dan diverifikasi di ${data.tab}`:`Header ${data.tab} sudah sesuai; tidak ada data diubah`);
+      await checkMonth();
+      setReconciliation(null);
+    }catch(e){setHeaderMessage(e instanceof Error?e.message:"Gagal membuat header");}
+    finally{setHeaderBusy(false);}
+  }
+
   const [readinessError,setReadinessError] = useState("");
   async function checkMonth() {
     setReadinessBusy(true);setReadiness(null);setReadinessError("");
@@ -135,6 +155,19 @@ export default function GoogleSheets() {
   }
   return (
     <>
+    <AlertDialog open={pendingHeader} onOpenChange={(open)=>{if(!headerBusy)setPendingHeader(open);}}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Buat Header Google Sheets?</AlertDialogTitle>
+          <AlertDialogDescription>Menambahkan 14 header ke A1:N1 pada tab {readiness?.tab ?? "terpilih"} hanya jika seluruh tab kosong. Data dan rumus yang sudah ada tidak akan ditimpa.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="text-xs rounded-lg border p-3 max-h-32 overflow-y-auto">{COLUMNS.join(" · ")}</div>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={headerBusy}>Batal</AlertDialogCancel>
+          <AlertDialogAction disabled={headerBusy} onClick={()=>{setPendingHeader(false);void createMonthHeader();}}>Ya, Buat Header</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <AlertDialog open={pendingSync !== null} onOpenChange={(open) => { if(!open && !syncBusy) setPendingSync(null); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -234,7 +267,9 @@ export default function GoogleSheets() {
           <div className="flex flex-wrap gap-2 items-center">
             <span>Periksa bulan: <strong>{month}</strong></span>
             <button type="button" onClick={checkMonth} disabled={readinessBusy} className="rounded-lg border px-3 py-2 font-medium disabled:opacity-50">{readinessBusy?"Memeriksa...":"Periksa Kesiapan Tab"}</button>
+            {readiness && !readiness.ready && readiness.reason === "BOOKING_HEADER_MISSING" && <button type="button" onClick={()=>setPendingHeader(true)} disabled={headerBusy || readinessBusy} className="rounded-lg bg-green-700 text-white px-3 py-2 font-medium disabled:opacity-50">{headerBusy?"Menyiapkan...":"Buat Header (Tab Kosong)"}</button>}
           </div>
+          {headerMessage&&<p role="status" className="text-green-700">{headerMessage}</p>}
           {readinessError&&<p role="alert" className="text-red-600">{readinessError}</p>}
           {readiness&&<div className="rounded-lg border p-3 space-y-2">
             <p>Tujuan: <strong>{readiness.tab}</strong></p>
