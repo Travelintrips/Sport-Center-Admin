@@ -3,6 +3,11 @@ name: Sport Center Google Sheets DEV read-only probe
 on:
   workflow_dispatch:
     inputs:
+      patch_dev_payment_mirror:
+        description: "Apply guarded payment metadata trigger patch on DEV only"
+        required: false
+        type: boolean
+        default: false
       verify_dev_database:
         description: "Read-only Supabase DEV target and payment-event readiness"
         required: false
@@ -79,3 +84,9 @@ jobs:
         env:
           SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
         run: node scripts/check-payment-events-dev-db.mjs
+
+      - name: Patch DEV payment mirror classification trigger (guarded)
+        if: ${{ inputs.patch_dev_payment_mirror == true }}
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        run: node scripts/patch-payment-mirror-dev-e2e.mjs
