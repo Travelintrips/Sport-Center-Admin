@@ -203,6 +203,14 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
       .map((row, index) => String(row[0] ?? "").trim() === orderNumber ? {tab: item.name, row: index + 1} : null)
       .filter((v): v is {tab:string;row:number} => v !== null));
     if (found.length) {
+      // A pre-existing row in a different month is not a successful sync.
+      // Never silently accept an October row for a November payment.
+      if (found.some(location => location.tab !== tab) || found.length > 1) {
+        res.status(409).json({
+          error: "Booking ditemukan di tab lain atau lebih dari satu kali; perlu rekonsiliasi manual",
+          targetTab: tab, locations: found, written: false, reason: "WRONG_MONTH_OR_DUPLICATE",
+        }); return;
+      }
       res.json({ ok: true, alreadyPresent: true, locations: found, written: false, targetTab: tab }); return;
     }
     const dest = data.find(item => item.name === tab)!;
