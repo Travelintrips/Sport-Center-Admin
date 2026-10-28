@@ -1009,6 +1009,11 @@ router.post("/memberships", async (req, res) => {
       }));
     }
     req.log.error({ err }, "Create membership error");
+    if (process.env.SPORT_CENTER_E2E_PAYMENT_EVENTS === "true" && process.env.NODE_ENV === "development") {
+      const e = err as any;
+      res.status(500).json({ error: "DEV_MEMBERSHIP_CREATION_FAILED", dbCode: String(e?.cause?.code ?? e?.code ?? "unknown"), dbConstraint: String(e?.cause?.constraint ?? e?.constraint ?? "unknown").slice(0,80) });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
