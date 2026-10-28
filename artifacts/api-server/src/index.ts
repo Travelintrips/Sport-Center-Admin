@@ -3,6 +3,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startScheduler } from "./lib/scheduler";
 import { startBookingSheetsAutoWorker } from "./lib/bookingSheetsAutoWorker";
+import { startBookingSheetsPaymentEventWorker } from "./lib/bookingSheetsPaymentEventWorker";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
@@ -1350,6 +1351,7 @@ export async function initializeRuntime(): Promise<void> {
   markStartupReady();
   startScheduler();
   startBookingSheetsAutoWorker();
+  startBookingSheetsPaymentEventWorker();
 }
 
 export { app };
