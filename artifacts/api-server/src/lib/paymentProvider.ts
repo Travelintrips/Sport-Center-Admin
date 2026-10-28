@@ -11,6 +11,8 @@ export function normalizePaymentProvider(value: unknown): PaymentProvider | null
 
 export function parseProviderPaidAt(body: Record<string, unknown>, now = new Date()): Date | null {
   const candidates = [
+    body.paymentDate,
+    body.payment_date,
     body.paidAt,
     body.paid_at,
     body.successTime,
@@ -27,7 +29,9 @@ export function parseProviderPaidAt(body: Record<string, unknown>, now = new Dat
     if (candidate === null || candidate === undefined || candidate === "") continue;
 
     let parsed: Date;
-    if (typeof candidate === "number" || (typeof candidate === "string" && /^\d{10,13}$/.test(candidate))) {
+    if (typeof candidate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
+      parsed = new Date(`${candidate}T12:00:00+07:00`);
+    } else if (typeof candidate === "number" || (typeof candidate === "string" && /^\d{10,13}$/.test(candidate))) {
       const numeric = Number(candidate);
       parsed = new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric);
     } else {
