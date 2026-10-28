@@ -37,7 +37,7 @@ try{
  const allPayments=await api('/memberships/'+m.id+'/payments','GET',null,token);
  const pending=allPayments.find(x=>x.status==='waiting_confirmation');if(!pending?.id)throw Error('MEMBERSHIP_PENDING_PROOF_NOT_FOUND');
  await db.query("update sport_center.booking_sheets_payment_event_config set enabled=true,start_at=now()-interval '30 seconds',updated_at=now() where id=true and enabled=false");activated=true;
- const confirmed=await api('/memberships/'+m.id,'PATCH',{status:'active'},token);
+ const confirmed=await api('/memberships/'+m.id,'PATCH',{status:'active',settlementProviderCode:'mandiri_direct'},token);
  if(confirmed.status!=='active')throw Error('MEMBERSHIP_CONFIRM_FAILED');
  const saved=await db.query('select status,confirmed_at from sport_center.sport_membership_payments where id=$1',[pending.id]);
  if(saved.rows[0]?.status!=='confirmed'||!saved.rows[0]?.confirmed_at)throw Error('MEMBERSHIP_NOT_CONFIRMED_IN_DB');
@@ -53,7 +53,7 @@ try{
  if(!ledger)throw Error('MEMBERSHIP_LEDGER_NOT_WRITTEN');
  const sheet=await sheets.spreadsheets.values.get({spreadsheetId:id,range:"'"+ledger.target_tab+"'!A:A"});
  if((sheet.data.values??[]).filter(x=>String(x[0]??'')===found.source_key).length!==1)throw Error('MEMBERSHIP_SHEETS_NOT_ONE');
- await api('/memberships/'+m.id,'PATCH',{status:'active'},token);
+ await api('/memberships/'+m.id,'PATCH',{status:'active',settlementProviderCode:'mandiri_direct'},token);
  const after=await sheets.spreadsheets.values.get({spreadsheetId:id,range:"'"+ledger.target_tab+"'!A:A"});
  if((after.data.values??[]).filter(x=>String(x[0]??'')===found.source_key).length!==1)throw Error('MEMBERSHIP_REPLAY_DUPLICATED');
  console.log('DEV_MEMBERSHIP_E2E_PASS',JSON.stringify({membershipId:m.id,paymentId:pending.id,ledgerRows:1,sheetRows:1,duplicates:0}));

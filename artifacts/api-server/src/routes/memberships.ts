@@ -1239,6 +1239,13 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           return;
         }
 
+        const requestedProvider = String(req.body?.settlementProviderCode ?? "").trim().toLowerCase();
+        if (!(["mandiri_direct", "paylabs"].includes(requestedProvider))) {
+          res.status(409).json({ error: "Pilih settlement provider secara eksplisit untuk konfirmasi pembayaran membership" });
+          return;
+        }
+        // Confirm only an explicitly selected settlement path; never guess from payment method.
+        paymentToConfirm = { ...paymentToConfirm, settlementProviderCode: requestedProvider };
         data.status = "active";
         data.startDate = paymentToConfirm.periodStart;
         data.endDate = paymentToConfirm.periodEnd;
@@ -1357,6 +1364,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           paymentProofUrl: membership.paymentProofUrl,
           paymentDate,
           confirmedAt,
+          settlementProviderCode: payment.settlementProviderCode,
           mutationKey,
           accountingRef: refNumber,
           updatedAt: confirmedAt,
