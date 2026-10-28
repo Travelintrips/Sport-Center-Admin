@@ -35,6 +35,7 @@ export default function GoogleSheets() {
   const [syncBusy,setSyncBusy]=useState("");
   const [pendingSync,setPendingSync]=useState<string|null>(null);
   const [syncOrderSearch,setSyncOrderSearch]=useState("");
+  const normalizedSyncOrder = /^(?:SC-)?[0-9]+$/i.test(syncOrderSearch) ? `SC-${syncOrderSearch.replace(/^SC-/i,"")}` : syncOrderSearch;
   const [syncMessage,setSyncMessage]=useState("");
   async function syncOne(orderNumber:string) {
     setSyncBusy(orderNumber);setSyncMessage("");
@@ -259,9 +260,9 @@ export default function GoogleSheets() {
             <p className="text-xs text-slate-500">Pilot manual: Sync One hanya boleh untuk satu booking personal non-grup yang lunas penuh. Jangan gunakan untuk DP, membership, atau corporate.</p>
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="sheets-sync-order" className="text-sm font-medium">Sync satu nomor booking</label>
-              <input id="sheets-sync-order" className="rounded-lg border px-3 py-2 text-sm" placeholder="Contoh: SC-1634" value={syncOrderSearch} onChange={e=>setSyncOrderSearch(e.target.value.toUpperCase().trim())}/>
-              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50" disabled={!!syncBusy || !preview.rows.some(r=>r[0]===syncOrderSearch)} onClick={()=>setPendingSync(syncOrderSearch)}>Periksa &amp; Sync One</button>
-              {syncOrderSearch && !preview.rows.some(r=>r[0]===syncOrderSearch) && <span className="text-xs text-amber-700">Booking tidak ditemukan pada preview bulan ini; tidak dapat diproses.</span>}
+              <input id="sheets-sync-order" className="rounded-lg border px-3 py-2 text-sm" placeholder="Contoh: 1634 atau SC-1634" value={syncOrderSearch} onChange={e=>setSyncOrderSearch(e.target.value.toUpperCase().trim())}/>
+              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50" disabled={!!syncBusy || !preview.rows.some(r=>r[0]===normalizedSyncOrder)} onClick={()=>setPendingSync(normalizedSyncOrder)}>Periksa &amp; Sync One</button>
+              {syncOrderSearch && !preview.rows.some(r=>r[0]===normalizedSyncOrder) && <span className="text-xs text-amber-700">Booking tidak ditemukan pada preview bulan ini; tidak dapat diproses.</span>}
             </div>
             {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
             <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Aksi</th></tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
