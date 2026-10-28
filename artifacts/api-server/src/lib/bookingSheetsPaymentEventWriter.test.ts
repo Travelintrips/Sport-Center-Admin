@@ -33,3 +33,21 @@ describe('date safety',()=>{
   await expect(writeClaimedPaymentEvent({...sample,payment_date_wib:'2026-02-31'},tab,fake())).rejects.toThrow('EVENT_DATE_INVALID');
  });
 });
+
+describe('all supported payment source types',()=>{
+ const cases:Array<{event:PaymentEventCandidate;key:string}>= [
+  {event:{...sample,source_type:'direct',source_key:'payment:11:booking:22',booking_id:22,payment_id:11,membership_payment_id:null},key:'payment:11:booking:22'},
+  {event:{...sample,source_type:'allocation',source_key:'payment:11:allocation:33:booking:22',booking_id:22,payment_id:11,allocation_id:33,membership_payment_id:null},key:'payment:11:allocation:33:booking:22'},
+  {event:{...sample,source_type:'corporate_invoice',source_key:'invoice:44:item:55:booking:22',booking_id:22,company_invoice_id:44,membership_payment_id:null},key:'invoice:44:item:55:booking:22'},
+  {event:sample,key:'membership_payment:42'},
+ ];
+ for(const {event,key} of cases){
+  it(`writes independently keyed ${event.source_type} event`,async()=>{
+   const expected=[key,event.source_type,event.booking_id,event.payment_id,event.allocation_id,event.company_invoice_id,event.membership_payment_id,event.payment_date_wib,event.amount,event.validation_status].map(v=>v==null?'':String(v));
+   let calls=0;
+   const port=fake({append:async(_tab,values)=>{expect(values).toEqual(expected);calls++;return {row:2};},readRow:async()=>expected});
+   expect(await writeClaimedPaymentEvent(event,tab,port)).toEqual({status:'written',tab,row:2});
+   expect(calls).toBe(1);
+  });
+ }
+});
