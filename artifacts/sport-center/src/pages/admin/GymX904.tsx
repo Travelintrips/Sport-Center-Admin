@@ -93,10 +93,12 @@ export default function GymX904() {
 
   const [accessNotice,setAccessNotice]=useState("");
   const [accessBusyPin,setAccessBusyPin]=useState<string|null>(null);
+  const [accessPhase,setAccessPhase]=useState<"idle"|"queued"|"claimed"|"ack"|"success"|"error">("idle");
   async function changeManualAccess(user:LanUser,op:"SUSPEND_USER"|"ACTIVATE_USER") {
     if(accessBusyPin || !userCommandCapabilities?.enabled || !userCommandCapabilities.operations.includes(op) || user.device_role!==0)return;
     if(!window.confirm((op==="SUSPEND_USER"?"Suspend":"Aktifkan")+" PIN "+user.user_pin+"?"))return;
     setAccessBusyPin(user.user_pin);
+    setAccessPhase("queued");
     setAccessNotice("Mengirim perintah PIN "+user.user_pin+"...");
     try {
       const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
@@ -105,26 +107,32 @@ export default function GymX904() {
       const commandId=String(data.command_id??"");
       if(!/^[a-f0-9-]{36}$/i.test(commandId))throw new Error("ID perintah tidak tersedia");
       setAccessNotice("PIN "+user.user_pin+": antrean diterima, menunggu ACK mesin.");
-      const deadline=Date.now()+90000;
+      const deadline=Date.now()+360000;
       let ackComplete=false;
+      let ackCompletedAt=Date.now();
       while(Date.now()<deadline){
         await new Promise<void>(resolve=>setTimeout(resolve,3000));
         const statusResponse=await fetch(API+"/admin/gym-x904/user-command/"+commandId,{headers:{Authorization:"Bearer "+token},cache:"no-store"});
         if(!statusResponse.ok)throw new Error("Tidak dapat memeriksa ACK perintah");
         const statusData=await statusResponse.json();
         const command=statusData.command;
+        const elapsed=Math.floor((Date.now()-(deadline-360000))/1000);
+        setAccessPhase(command?.state==="claimed"?"claimed":"queued");
+        setAccessNotice("PIN "+user.user_pin+": "+(command?.state==="claimed"?"sedang diproses VMSC":"menunggu giliran worker")+" · "+elapsed+" detik · ID "+commandId+". Jangan klik ulang.");
         if(command?.state==="failed"||command?.state==="cancelled")throw new Error("Mesin menolak perintah: "+String(command.error_code??command.result?.errorCode??"UNKNOWN"));
         if(command?.state==="completed"){
           if(command.result?.readBackConfirmed!==true || Number(command.result?.afterGroup)!==(op==="SUSPEND_USER"?2:1))
             throw new Error("ACK diterima tanpa pembacaan ulang grup yang benar");
+          ackCompletedAt=command.completed_at?new Date(command.completed_at).getTime():Date.now();
           ackComplete=true;break;
         }
       }
-      if(!ackComplete)throw new Error("ACK belum diterima dalam 90 detik; periksa status sebelum mengulangi perintah.");
-      setAccessNotice("ACK PIN "+user.user_pin+" berhasil. Menunggu snapshot SDK berikutnya...");
+      if(!ackComplete)throw new Error("ACK belum diterima dalam 6 menit. ID "+commandId+". Periksa status sebelum mengulangi perintah.");
+      setAccessPhase("ack");
+      setAccessNotice("PIN "+user.user_pin+": ACK berhasil. Menunggu snapshot SDK yang diambil setelah perintah selesai.");
       await refetchVerifiedAccess();
       // Snapshot is published every three minutes; never claim final success based solely on ACK.
-      const snapshotDeadline=Date.now()+220000;
+      const snapshotDeadline=Date.now()+240000;
       let snapshotConfirmed=false;
       while(Date.now()<snapshotDeadline){
         const fresh=await queryClient.fetchQuery({queryKey:["gym-x904-live-access-status"],queryFn:async()=>{
@@ -133,14 +141,16 @@ export default function GymX904() {
           return r.json();
         },staleTime:0});
         const row=fresh.users?.find((v:{user_pin:string;device_group:number;identityMatched:boolean})=>v.user_pin===user.user_pin);
-        if(row?.identityMatched && row.device_group===(op==="SUSPEND_USER"?2:1) && new Date(fresh.observedAt).getTime()>Date.now()-240000){
+        if(row?.identityMatched && row.device_group===(op==="SUSPEND_USER"?2:1) && new Date(fresh.observedAt).getTime()>Date.now()-240000 && new Date(fresh.observedAt).getTime()>ackCompletedAt){
           snapshotConfirmed=true;break;
         }
         await new Promise<void>(resolve=>setTimeout(resolve,5000));
       }
       if(!snapshotConfirmed)throw new Error("ACK berhasil, tetapi snapshot terbaru belum mengonfirmasi status. Jangan ulangi perintah sebelum dicek.");
-      setAccessNotice((op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+user.user_pin+" terkonfirmasi ACK dan snapshot SDK.");
-    }catch(e){setAccessNotice(e instanceof Error?e.message:"Perintah gagal atau belum terverifikasi");}
+      setAccessPhase("success");
+      setAccessNotice("BERHASIL: "+(op==="SUSPEND_USER"?"Suspend":"Aktivasi")+" PIN "+user.user_pin+" terkonfirmasi ACK dan snapshot SDK. Status grup "+(op==="SUSPEND_USER"?"2 (ditahan)":"1 (diizinkan)")+".");
+      await queryClient.invalidateQueries({queryKey:["gym-x904-live-access-status"]});
+    }catch(e){setAccessPhase("error");setAccessNotice(e instanceof Error?e.message:"Perintah gagal atau belum terverifikasi");}
     finally{setAccessBusyPin(null);}
   }
   const [commandMessage, setCommandMessage] = useState("");
@@ -545,7 +555,7 @@ export default function GymX904() {
         <p className="text-sm text-muted-foreground">Menu ini tidak menampilkan data contoh sebagai data mesin. Data pengguna, kartu, dan aturan hanya dapat tampil setelah pembacaan read-only, validasi identitas perangkat, dan sinkronisasi yang berhasil.</p>
         <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["gym-x904-integration"] })} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted"><RefreshCw size={14} /> Periksa status lagi</button>
       </section>}      {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
-        <h2 className="font-semibold">User yang terdaftar langsung pada Solution X904 (LAN)</h2>{accessNotice&&<p role="status" className="text-sm">{accessNotice}</p>}<p className="text-xs text-muted-foreground">Suspend otomatis belum diaktifkan. Status akses belum tersedia dalam snapshot LAN; perubahan manual hanya boleh dinyatakan berhasil setelah ACK dan pembacaan ulang grup X904.</p>
+        <h2 className="font-semibold">User yang terdaftar langsung pada Solution X904 (LAN)</h2>{accessNotice&&<div role="status" aria-live="polite" className={"rounded-lg border p-3 text-sm "+(accessPhase==="success"?"border-emerald-500/40 bg-emerald-500/10":accessPhase==="error"?"border-red-500/40 bg-red-500/10":"border-blue-500/40 bg-blue-500/10")}><p className="font-semibold">{accessPhase==="success"?"Berhasil — ACK dan snapshot terverifikasi":accessPhase==="error"?"Perintah gagal / perlu pemeriksaan":accessPhase==="ack"?"ACK diterima — verifikasi snapshot":accessPhase==="claimed"?"Sedang dijalankan worker VMSC":"Menunggu proses mesin X904"}</p><p className="mt-1">{accessNotice}</p><p className="mt-1 text-xs text-muted-foreground">Worker dapat memerlukan beberapa menit; snapshot mesin diperbarui sekitar 3 menit sekali. Jika timeout, periksa ID perintah dan jangan kirim ulang.</p></div>}<p className="text-xs text-muted-foreground">Suspend otomatis belum diaktifkan. Status akses belum tersedia dalam snapshot LAN; perubahan manual hanya boleh dinyatakan berhasil setelah ACK dan pembacaan ulang grup X904.</p>
         <p className="text-xs text-muted-foreground">Hanya snapshot terautentikasi yang selesai disimpan. Status aktivasi akun dan template biometrik tidak dibaca. PIN mesin belum otomatis dipetakan ke member Gym.</p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm">Cari nama atau PIN mesin
