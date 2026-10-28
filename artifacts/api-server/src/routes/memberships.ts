@@ -1352,15 +1352,21 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         .from(membershipPaymentsTable)
         .where(eq(membershipPaymentsTable.id, payment.id))
         .limit(1);
-      // Read-only reconciliation receipt; off by default and never writes to X904.
-      onConfirmedMembershipPaymentX904({
-        membershipId: membership.id,
-        startDate: membership.startDate,
-        endDate: membership.endDate,
-        membershipStatus: membership.status,
-        today: jakartaDateOnly(),
-      }).catch((err) => req.log.error({ err }, "[x904-membership] review receipt failed"));
       const paymentBooking = await ensureMembershipPaymentBooking(membership, confirmedPayment!);
+      // Only record the read-only X904 receipt after the canonical booking exists.
+      // Await persistence so failures are observed; no device command is involved.
+      try {
+        await onConfirmedMembershipPaymentX904({
+          membershipId: membership.id,
+          startDate: membership.startDate,
+          endDate: membership.endDate,
+          membershipStatus: membership.status,
+          today: jakartaDateOnly(),
+        });
+      } catch (err) {
+        req.log.error({ err }, "[x904-membership] review receipt failed");
+      }
+
       syncBookingRecordToBizportal(paymentBooking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );
