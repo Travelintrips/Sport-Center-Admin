@@ -41,6 +41,9 @@ try{
  if(confirmed.status!=='active')throw Error('MEMBERSHIP_CONFIRM_FAILED');
  const saved=await db.query('select status,confirmed_at from sport_center.sport_membership_payments where id=$1',[pending.id]);
  if(saved.rows[0]?.status!=='confirmed'||!saved.rows[0]?.confirmed_at)throw Error('MEMBERSHIP_NOT_CONFIRMED_IN_DB');
+ const accounting=await db.query('select p.id payment_id,b.id booking_id,b.dpp,b.ppn_rate,b.ppn_amount,b.grand_total,j.id journal_id,j.debit_amount,j.credit_revenue_amount,j.credit_ppn_amount,j.status journal_status from sport_center.sport_payments p join sport_center.sport_bookings b on b.id=p.booking_id left join sport_center.accounting_journals j on j.payment_id=p.id where p.source_membership_payment_id=$1',[pending.id]);
+ if(accounting.rows.length!==1||!accounting.rows[0].journal_id||Number(accounting.rows[0].ppn_rate)!==0||Number(accounting.rows[0].ppn_amount)!==0||Number(accounting.rows[0].credit_ppn_amount)!==0||Number(accounting.rows[0].dpp)!==Number(accounting.rows[0].grand_total)||Number(accounting.rows[0].debit_amount)!==Number(accounting.rows[0].credit_revenue_amount))throw Error('MEMBERSHIP_PERSONAL_TAX_ACCOUNTING_MISMATCH');
+ console.log('DEV_MEMBERSHIP_ZERO_TAX_JOURNAL_PASS',JSON.stringify({paymentId:pending.id,journalId:accounting.rows[0].journal_id,status:accounting.rows[0].journal_status}));
  console.log('DEV_MEMBERSHIP_PAYMENT_CONFIRMED',pending.id);
  let found,ledger;
  for(let i=0;i<25;i++){

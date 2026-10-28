@@ -237,8 +237,8 @@ function membershipBookingStatus(
 }
 
 function membershipTaxBreakdown(amount: number) {
-  const dpp = Math.round(amount / 1.11);
-  return { dpp, ppnAmount: amount - dpp };
+  // Gym memberships are personal transactions: no PPN/PPH is collected.
+  return { dpp: amount, ppnAmount: 0 };
 }
 
 async function getGymFacility(executor: DbExecutor = db) {
@@ -312,7 +312,7 @@ async function ensureMembershipPaymentBooking(
     apDiscountAmount: "0",
     grandTotal: String(amount),
     dpp: String(dpp),
-    ppnRate: "11",
+    ppnRate: "0",
     ppnAmount: String(ppnAmount),
     status,
     paymentRequiredNow: !isConfirmed,
