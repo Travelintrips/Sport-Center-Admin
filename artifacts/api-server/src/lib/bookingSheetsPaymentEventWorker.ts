@@ -53,9 +53,10 @@ async function tick():Promise<void> {
         const tab=`PAYMENT EVENTS ${MONTHS[month-1]} ${year}`;
         const result=await writeClaimedPaymentEvent(event,tab,port);
         if(result.status==='written') {
-          await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
+          const finalized=rows(await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
             set status='written',target_tab=${tab},sheet_row=${result.row},updated_at=now()
-            where source_key=${event.source_key} and status='writing'`);
+            where source_key=${event.source_key} and status='writing' returning id`));
+          if(finalized.length!==1)throw new Error("EVENT_LEDGER_FINALIZATION_FAILED");
         } else {
           await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
             set status='needs_review',last_error_code=${result.reason},updated_at=now()
