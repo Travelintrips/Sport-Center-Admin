@@ -8,7 +8,7 @@ const id=22;
 const snapshot=async()=>{const x=await db.query(`select (select count(*)::int from sport_center.sport_payments where id=22 and source_membership_payment_id=5) canonical,(select count(*)::int from public.sport_payments where source_payment_id=22) mirrors,(select count(*)::int from public.accounting_entries ae where ae.id in (select entry_id from public.sport_payments where source_payment_id=22)) entries,(select count(*)::int from sport_center.accounting_journals where payment_id=22) journals,(select count(*)::int from sport_center.accounting_journal_lines where journal_id in (select id from sport_center.accounting_journals where payment_id=22)) lines,(select status from sport_center.payment_accounting_outbox where payment_id=22) outbox,(select attempts from sport_center.payment_accounting_outbox where payment_id=22) attempts`);return x.rows[0]};
 try{
  const before=await snapshot();if(before.canonical!==1||before.outbox!=='pending'||before.attempts!==0)throw Error('FIXTURE_GUARD_FAILED');
- const {processPaymentAccountingOutbox}=await import('../artifacts/api-server/dist/targeted-accounting.mjs');
+ const {processPaymentAccountingOutbox}=require('../artifacts/api-server/dist/targeted-accounting.cjs');
  const once=await processPaymentAccountingOutbox(id);const after=await snapshot();
  console.log('DEV_TARGETED_POST_ATTEMPT',JSON.stringify({once,after}));
  if(once.claimed!==1||once.posted!==1||after.outbox!=='posted'||after.mirrors!==1||after.entries!==1||after.journals!==1)throw Error('TARGETED_POSTING_NOT_PASS');
