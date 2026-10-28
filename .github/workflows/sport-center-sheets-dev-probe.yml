@@ -117,14 +117,14 @@ jobs:
           node artifacts/api-server/dist/bootstrap.mjs > "$RUNNER_TEMP/sc-e2e-server.log" 2>&1 &
           server_pid=$!
           ready=0
-          for i in $(seq 1 35); do
+          for i in $(seq 1 75); do
             if curl -fsS --max-time 2 http://127.0.0.1:38888/api/readiness > "$RUNNER_TEMP/sc-e2e-ready.json" 2>/dev/null; then ready=1; break; fi
             if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
             sleep 2
           done
           if [ "$ready" != 1 ]; then
             grep -oE 'Error \[ERR_[A-Z_]+\]|E2E_[A-Z_]+|STARTUP_[A-Z_]+|PAYMENT_MIRROR_[A-Z_]+|Cannot find module|Cannot find package|ERR_[A-Z_]+|Runtime initialization complete|SyntaxError|TypeError' "$RUNNER_TEMP/sc-e2e-server.log" | sort -u | head -12 || :
-            node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8"); console.log("STARTUP_LOG_SHAPE",JSON.stringify({lines:s.split("\n").length,bytes:s.length,hasListening:s.includes("Listening on"),hasBootstrap:s.includes("E2E DEV direct bootstrap"),hasReady:s.includes("Runtime initialization complete"),hasError:s.includes("Error"),firstLine:(s.split("\n").find(x=>x.trim())||"").replace(/https?:\/\/\S+/g,"[URL]").slice(0,100)}))'
+            node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8"); console.log("STARTUP_LOG_SHAPE",JSON.stringify({lines:s.split("\n").length,bytes:s.length,hasListening:s.includes("Listening on"),hasBootstrap:s.includes("E2E DEV direct bootstrap"),hasReady:s.includes("Runtime initialization complete"),hasError:s.includes("Error"),markers:s.split("\n").filter(x=>/bootstrap|migration|startup|payment|storage|db\]/i.test(x)).map(x=>x.replace(/https?:\/\/\S+/g,"[URL]").replace(/postgres(?:ql)?:\/\/\S+/g,"[DB]").slice(0,90)).slice(0,12),firstLine:(s.split("\n").find(x=>x.trim())||"").replace(/https?:\/\/\S+/g,"[URL]").slice(0,100)}))'
             echo '::error::Isolated DEV API startup/readiness did not succeed' 
             exit 1
           fi
