@@ -222,7 +222,7 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
     stage = "SOURCE_LOOKUP";
     const sourcesRaw = await db.execute(sql`
       select source_key,source_type,payment_id,allocation_id,company_invoice_id,
-             amount,payment_ts,payment_date_wib,validation_status
+             amount,payment_ts,payment_date_wib::text as payment_date_wib,validation_status
       from sport_center.booking_sheets_payment_sources
       where booking_id = ${booking.id}
       order by payment_ts asc
@@ -334,10 +334,11 @@ router.post("/admin/google-sheets/sync-one", adminMiddleware, async (req, res) =
     claimed = undefined;
     res.json({ok:true,written:true,orderNumber,targetTab:tab,sheetRow,sourceKey});
   } catch (err) {
-    req.log.error({err, orderNumber, stage}, "Sheets Sync One failed");
+    const dbCode = err && typeof err === "object" && "code" in err && typeof err.code === "string" ? err.code : undefined;
+    req.log.error({err, orderNumber, stage, dbCode}, "Sheets Sync One failed");
     // Never auto-release a writing claim: a timeout can happen AFTER Google
     // accepted the append. A reconciliation must check Sheets before retry.
-    res.status(502).json({ error: "Sync One gagal; tidak akan mengulang otomatis", needsReconciliation: !!claimed, stage });
+    res.status(502).json({ error: "Sync One gagal; tidak akan mengulang otomatis", needsReconciliation: !!claimed, stage, ...(stage === "LEDGER_CLAIM" && dbCode ? { dbCode } : {}) });
   }
 });
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
