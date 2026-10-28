@@ -35,6 +35,35 @@ export default function GoogleSheets() {
   const [syncBusy,setSyncBusy]=useState("");
   const [pendingSync,setPendingSync]=useState<string|null>(null);
   const [syncOrderSearch,setSyncOrderSearch]=useState("");
+  const [pendingRecovery,setPendingRecovery]=useState<string|null>(null);
+  const [recoverBusy,setRecoverBusy]=useState(false);
+  const [recoveryHistory,setRecoveryHistory]=useState<Record<string,Array<{target_tab:string;old_sheet_row:number|null;new_sheet_row:number;created_at:string}>>>({});
+  async function recoverOne(orderNumber:string) {
+    setRecoverBusy(true);setSyncMessage("");
+    try{
+      const response=await fetch("/api/admin/google-sheets/recover-one",{
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+        body:JSON.stringify({orderNumber}),
+      });
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||"Pemulihan gagal");
+      setSyncMessage(`${orderNumber} dipulihkan di ${result.targetTab} baris ${result.sheetRow} dan diverifikasi.`);
+      await checkSyncStatus(preview?.rows.map(row=>row[0])??[orderNumber],true);
+      void readRecoveryHistory(orderNumber);
+    }catch(error){setSyncMessage(error instanceof Error?error.message:"Pemulihan gagal");}
+    finally{setRecoverBusy(false);}
+  }
+  async function readRecoveryHistory(orderNumber:string) {
+    try{
+      const response=await fetch("/api/admin/google-sheets/recovery-history?"+new URLSearchParams({orderNumber}),{
+        headers:{Authorization:`Bearer ${getToken()}`},
+      });
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error);
+      setRecoveryHistory(previous=>({...previous,[orderNumber]:data.items??[]}));
+    }catch(error){setStatusError(error instanceof Error?error.message:"Gagal membaca riwayat");}
+  }
+
   const [syncStatuses,setSyncStatuses]=useState<Record<string,{status:string;targetTab?:string|null;sheetRow?:number|null;changedColumns?:string[]}>>({});
   const [statusBusy,setStatusBusy]=useState(false);
   const [statusError,setStatusError]=useState("");
@@ -188,6 +217,22 @@ export default function GoogleSheets() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    <AlertDialog open={pendingRecovery !== null} onOpenChange={open=>{if(!recoverBusy&&!open)setPendingRecovery(null);}}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Pulihkan Baris Booking ke Google Sheets?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Booking {pendingRecovery} tercatat pernah berhasil dikirim, tetapi hilang saat pemeriksaan.
+            Server akan mengecek ulang seluruh tab PAID dan menolak pemulihan jika nomor booking masih ditemukan.
+            Booking dan pembayaran asli tidak akan diubah.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={recoverBusy}>Batal</AlertDialogCancel>
+          <AlertDialogAction disabled={recoverBusy} onClick={()=>{const order=pendingRecovery;setPendingRecovery(null);if(order)void recoverOne(order);}}>Ya, Pulihkan Satu Baris</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <AlertDialog open={pendingSync !== null} onOpenChange={(open) => { if(!open && !syncBusy) setPendingSync(null); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -288,7 +333,7 @@ export default function GoogleSheets() {
             </div>
             {statusError&&<p role="alert" className="text-sm text-red-600">{statusError}</p>}
             {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
-            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat..."}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
+            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat..."}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button>{syncStatuses[row[0]]?.status==="missing" && <button type="button" className="ml-2 rounded border border-amber-600 text-amber-800 px-2 py-1 disabled:opacity-50" disabled={recoverBusy||!!syncBusy} onClick={()=>setPendingRecovery(row[0])}>Pulihkan ke Sheets</button>}{(syncStatuses[row[0]]?.status==="synced"||syncStatuses[row[0]]?.status==="missing")&&<button type="button" className="ml-2 rounded border px-2 py-1" onClick={()=>void readRecoveryHistory(row[0])}>Riwayat</button>}{recoveryHistory[row[0]] && <div className="text-xs mt-1 text-slate-600 whitespace-normal max-w-64">{recoveryHistory[row[0]].length ? recoveryHistory[row[0]].map((entry,i)=><div key={i}>Dipulihkan: {entry.target_tab}, baris {entry.old_sheet_row??"-"} → {entry.new_sheet_row}, {new Date(entry.created_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</div>) : "Belum ada riwayat pemulihan"}</div>}</td></tr>)}</tbody></table></div>
             {!syncOrderSearch && preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
           </div>}
         </CardContent></Card>
