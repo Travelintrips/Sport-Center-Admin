@@ -27,8 +27,8 @@ try{
  if(existing.rows[0].n!==0)throw Error('NONEMPTY_DEV_PAYMENT_CANDIDATES');
  const tokenData=JSON.stringify({userId:1,role:'admin',tenantId:null,exp:Date.now()+15*60*1000});
  const token=Buffer.from(tokenData).toString('base64')+'.'+crypto.createHmac('sha256',process.env.SESSION_SECRET).update(tokenData).digest('hex');
- const companyId=24;
- const b=await api('/bookings','POST',{customerName:'E2E-DEV-CORPORATE-'+nonce,customerPhone:'0000000000',facilityId:2,bookingDate:'2026-12-05',startTime:'11:00',durationHours:1,source:'admin',customerId:null,payerType:'company',companyCustomerId:companyId,customerType:'umum',notes:'DEV SYNTHETIC CORPORATE INVOICE'},token);
+ const companyId=25;
+ const b=await api('/bookings','POST',{customerName:'E2E-DEV-CORPORATE-'+nonce,customerPhone:'0000000000',facilityId:2,bookingDate:'2026-12-06',startTime:'11:00',durationHours:1,source:'admin',customerId:null,payerType:'company',companyCustomerId:companyId,customerType:'umum',notes:'DEV SYNTHETIC CORPORATE INVOICE'},token);
  if(!b.id||b.payerType!=='company')throw Error('CORPORATE_BOOKING_INVALID');
  const invoice=await api('/company-invoices','POST',{companyCustomerId:companyId,periodMonth:'2026-12',notes:'SYNTHETIC DEV CORPORATE'},token);
  if(!invoice.id)throw Error('CORPORATE_INVOICE_INVALID');
@@ -37,6 +37,9 @@ try{
  activated=true;
  const paid=await api('/company-invoices/'+invoice.id,'PATCH',{status:'paid',paymentMethod:'Transfer Bank',paymentDate:'2026-10-29'},token);
  console.log('DEV_CORPORATE_PAID_API',paid.status);
+ const savedInvoice=await db.query('select status,paid_at from sport_center.company_invoices where id=$1',[invoice.id]);
+ console.log('DEV_CORPORATE_PERSISTENCE_CHECK',JSON.stringify({invoiceId:invoice.id,storedStatus:savedInvoice.rows[0]?.status,paidAtPresent:!!savedInvoice.rows[0]?.paid_at}));
+ if(savedInvoice.rows[0]?.status!=='paid')throw Error('CORPORATE_PAID_STATUS_NOT_PERSISTED');
  let candidates=[],ledgers=[];
  for(let i=0;i<22;i++){
   const c=await db.query('select source_key,source_type,amount,validation_status from sport_center.booking_sheets_payment_event_candidates where company_invoice_id=$1',[invoice.id]);
