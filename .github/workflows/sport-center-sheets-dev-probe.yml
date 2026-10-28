@@ -1,0 +1,53 @@
+name: Sport Center Google Sheets DEV read-only probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sheets-dev-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_ENV: development
+      NODE_ENV: development
+      SHEETS_PAYMENT_EVENTS_ENABLED: 'false'
+      GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID: 1W4m_DLxlFSwUybo1cUrx4k8Mm5MSm69fIqwet5pD5cU
+      GCP_PROJECT_ID: sport-center-506306
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check WIF configuration
+        env:
+          PROVIDER: ${{ secrets.SPORT_CENTER_DEV_WIF_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ secrets.SPORT_CENTER_DEV_WIF_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$PROVIDER" ] || [ -z "$SERVICE_ACCOUNT" ]; then
+            echo '::error::DEV Workload Identity Federation is not configured. No Google Sheets request was made.'
+            exit 1
+          fi
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.SPORT_CENTER_DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.SPORT_CENTER_DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @workspace/api-server...
+      - name: Read-only DEV spreadsheet access (no key output)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/payment-events-sa.XXXXXX")
+          trap 'rm -f "$secret_file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          if [ ! -s "$secret_file" ]; then echo '::error::Google Sheets service account secret is empty'; exit 1; fi
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/check-payment-events-dev-sheet.mjs
