@@ -1190,7 +1190,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
 
-    const { status, notes, startDate, endDate } = req.body ?? {};
+    const { status, notes, startDate, endDate, settlementProviderCode } = req.body ?? {};
     const data: {
       status?: typeof existing.status;
       notes?: string | null;
@@ -1210,6 +1210,19 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         .orderBy(desc(membershipPaymentsTable.id)).limit(1);
 
       if (paymentToConfirm) {
+        const provider = String(settlementProviderCode ?? paymentToConfirm.settlementProviderCode ?? "").trim().toLowerCase();
+        if (provider && !["mandiri_direct", "paylabs"].includes(provider)) {
+          res.status(400).json({error:"Provider settlement tidak dikenal"}); return;
+        }
+        // QRIS may settle through Mandiri or Paylabs; never derive processor from QRIS alone.
+        // A missing provider is accepted only when the database resolves exactly one
+        // owner-approved settlement config for the company and payment date.
+        if (provider) {
+          await db.update(membershipPaymentsTable)
+            .set({ settlementProviderCode: provider })
+            .where(and(eq(membershipPaymentsTable.id, paymentToConfirm.id),
+              eq(membershipPaymentsTable.status, "waiting_confirmation")));
+        }
         const role = String((req as any).user?.role ?? "");
         if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
           res.status(403).json({error:"Staff hanya dapat mengirim bukti untuk verifikasi; konfirmasi membership memerlukan role non-staff yang berwenang."});
