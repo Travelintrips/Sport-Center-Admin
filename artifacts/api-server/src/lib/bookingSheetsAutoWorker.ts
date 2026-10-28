@@ -35,8 +35,23 @@ async function tick():Promise<void> {
       .where(eq(bookingsTable.id,Number(job.booking_id))).limit(1);
     if(!booking)throw new Error("AUTO_BOOKING_MISSING");
     const result=await syncPaidBookingFromAutoQueue(booking.orderNumber,logger);
-    // Existing Sheet rows with no ledger require manual reconciliation.
-    const succeeded=result.statusCode===200 && result.body.written===true;
+    // Already-present rows are success ONLY when their exact location agrees with
+    // the durable written ledger. A manually inserted row without a ledger is NOT success.
+    let alreadyVerified=false;
+    const locations=result.body.locations;
+    if(result.statusCode===200 && result.body.alreadyPresent===true &&
+       Array.isArray(locations) && locations.length===1) {
+      const ledger=rows(await db.execute(sql`
+        select status,target_tab,sheet_row
+        from sport_center.booking_sheets_sync_ledger
+        where booking_id=${Number(job.booking_id)} and payment_id=${Number(job.payment_id)}
+        order by id desc limit 1
+      `))[0];
+      alreadyVerified=ledger?.status==="written" &&
+        ledger.target_tab===locations[0]?.tab &&
+        Number(ledger.sheet_row)===Number(locations[0]?.row);
+    }
+    const succeeded=result.statusCode===200 && (result.body.written===true || alreadyVerified);
     const state=succeeded?"written":result.statusCode===409?"blocked":"needs_review";
     const safeCode=String(result.body.reason??result.body.stage??result.statusCode).slice(0,90);
     await db.execute(sql`
