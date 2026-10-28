@@ -27,7 +27,7 @@ try{
  if(existing.rows[0].n!==0)throw Error('NONEMPTY_DEV_PAYMENT_CANDIDATES');
  const tokenData=JSON.stringify({userId:1,role:'admin',tenantId:null,exp:Date.now()+15*60*1000});
  const token=Buffer.from(tokenData).toString('base64')+'.'+crypto.createHmac('sha256',process.env.SESSION_SECRET).update(tokenData).digest('hex');
- const b=await api('/bookings','POST',{customerName:'E2E-DEV-PAYMENT-'+nonce,customerPhone:'0000000000',facilityId:2,bookingDate:'2026-11-21',startTime:'11:00',durationHours:1,source:'admin',customerType:'personal',customerId:null,notes:'DEV synthetic payment event E2E, not real income'});
+ const b=await api('/bookings','POST',{customerName:'E2E-DEV-PAYMENT-'+nonce,customerPhone:'0000000000',facilityId:2,bookingDate:'2026-11-23',startTime:'11:00',durationHours:1,source:'admin',customerType:'personal',customerId:null,notes:'DEV synthetic payment event E2E, not real income'});
  if(!b.id||Number(b.grandTotal??b.totalPrice)<=0)throw Error('BOOKING_RESPONSE_INVALID');
  console.log('DEV_BOOKING_API_CREATED',b.id);
  const full=Number(b.grandTotal??b.totalPrice);
