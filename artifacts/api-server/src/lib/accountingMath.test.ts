@@ -241,6 +241,9 @@ describe("confirmed booking payment accounting", () => {
         grossAmount: "200000",
         dppAmount: "180180",
         taxAmount: "19820",
+        debitAmount: "200000",
+        creditRevenueAmount: "180180",
+        creditPpnAmount: "19820",
       }]))
       .mockImplementationOnce(() => selectResult([{ id: 9001 }]));
 
@@ -274,6 +277,9 @@ describe("confirmed booking payment accounting", () => {
         grossAmount: "200000",
         dppAmount: "180180",
         taxAmount: "19820",
+        debitAmount: "200000",
+        creditRevenueAmount: "180180",
+        creditPpnAmount: "19820",
       }]))
       .mockImplementationOnce(() => selectResult([{ id: 9002 }]));
 
