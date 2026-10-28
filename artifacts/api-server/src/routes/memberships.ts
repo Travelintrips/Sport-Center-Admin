@@ -26,6 +26,7 @@ import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { isWithinGymGracePeriod } from "../services/gymMembershipEntitlement";
+import { onConfirmedMembershipPaymentX904 } from "../services/x904MembershipPaymentHook";
 
 const router = Router();
 
@@ -1348,6 +1349,14 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         .from(membershipPaymentsTable)
         .where(eq(membershipPaymentsTable.id, payment.id))
         .limit(1);
+      // Read-only reconciliation receipt; off by default and never writes to X904.
+      onConfirmedMembershipPaymentX904({
+        membershipId: membership.id,
+        startDate: membership.startDate,
+        endDate: membership.endDate,
+        membershipStatus: membership.status,
+        today: jakartaDateOnly(),
+      }).catch((err) => req.log.error({ err }, "[x904-membership] review receipt failed"));
       const paymentBooking = await ensureMembershipPaymentBooking(membership, confirmedPayment!);
       syncBookingRecordToBizportal(paymentBooking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
