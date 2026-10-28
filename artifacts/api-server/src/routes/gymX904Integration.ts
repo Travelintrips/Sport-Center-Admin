@@ -236,6 +236,28 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
         WHERE device_serial=${expectedSerial} AND user_pin=${userPin}
           AND state IN ('queued','claimed') LIMIT 1`);
       if(active.rows.length) return res.status(409).json({error:"USER_COMMAND_IN_PROGRESS"});
+      // All manual commands are serialized against their most recent ACK and a
+      // newer verified SDK snapshot, even after another admin logs in.
+      const previous=await db.execute(sql`SELECT command_id,command_type,state,completed_at,result
+        FROM sport_center.x904_user_commands
+        WHERE device_serial=${expectedSerial} AND user_pin=${userPin}
+          AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        ORDER BY created_at DESC LIMIT 1`);
+      if(previous.rows.length){
+        const last=previous.rows[0];
+        if(last.state==="queued"||last.state==="claimed")
+          return res.status(409).json({error:"USER_COMMAND_IN_PROGRESS",command_id:last.command_id});
+        if(last.state==="completed"){
+          const group=last.command_type==="SUSPEND_USER"?2:1;
+          const snapshots=await db.execute(sql`SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
+             WHERE device_serial=${expectedSerial} ORDER BY snapshot_id DESC LIMIT 1`);
+          const snap=snapshots.rows[0];
+          const observed=snap&&Array.isArray(snap.users)?snap.users.find((x:any)=>String(x.pin)===userPin):null;
+          if(!snap||!last.completed_at||new Date(snap.observed_at).getTime()<=new Date(last.completed_at).getTime()||
+             Number(observed?.group)!==group||last.result?.readBackConfirmed!==true)
+            return res.status(409).json({error:"PREVIOUS_COMMAND_AWAITING_VERIFIED_SNAPSHOT",command_id:last.command_id});
+        }
+      }
       const result=await db.execute(sql`INSERT INTO sport_center.x904_user_commands
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
         VALUES (${expectedSerial},${commandType},${userPin},
@@ -491,7 +513,7 @@ router.get("/admin/gym-x904/manual-access-pending",adminMiddleware,async(req,res
       SELECT DISTINCT ON (user_pin) command_id,user_pin,command_type,state,created_at,completed_at,result
       FROM sport_center.x904_user_commands
       WHERE device_serial='TDBD234200545' AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
-        AND created_at>now()-interval '30 minutes'
+        AND created_at>now()-interval '7 days'
       ORDER BY user_pin,created_at DESC
     ), snap AS (
       SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
