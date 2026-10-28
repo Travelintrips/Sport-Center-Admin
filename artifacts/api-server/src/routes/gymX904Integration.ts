@@ -480,6 +480,42 @@ router.get("/admin/gym-x904/manual-access-status",adminMiddleware,async(req,res)
 
 // VMSC claims and receipts use scoped database SECURITY DEFINER functions.
 // No public HTTP path can claim or complete a machine mutation.
+// Authoritative per-PIN outstanding state, shared by authorized owners across sessions.
+// ACK alone is insufficient: only a subsequent SDK snapshot at the expected group releases the UI lock.
+router.get("/admin/gym-x904/manual-access-pending",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor||!["owner","super_admin"].includes(actor.role))return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  try{
+    const data=await db.execute(sql`WITH recent AS (
+      SELECT DISTINCT ON (user_pin) command_id,user_pin,command_type,state,created_at,completed_at,result
+      FROM sport_center.x904_user_commands
+      WHERE device_serial='TDBD234200545' AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        AND created_at>now()-interval '30 minutes'
+      ORDER BY user_pin,created_at DESC
+    ), snap AS (
+      SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1
+    ) SELECT r.command_id,r.user_pin,r.command_type,r.state,r.created_at,r.completed_at,
+      r.result->>'readBackConfirmed' AS readback,
+      r.result->>'afterGroup' AS after_group,
+      snap.observed_at AS snapshot_at,
+      (SELECT u->>'group' FROM jsonb_array_elements(snap.users) u WHERE u->>'pin'=r.user_pin LIMIT 1) AS snapshot_group
+    FROM recent r CROSS JOIN snap`);
+    const commands=data.rows.map((r:any)=>{
+      const expected=r.command_type==="SUSPEND_USER"?2:1;
+      const verified=r.state==="completed" && r.readback==="true" && Number(r.after_group)===expected &&
+        Number(r.snapshot_group)===expected && r.completed_at &&
+        new Date(r.snapshot_at).getTime()>new Date(r.completed_at).getTime();
+      return {command_id:r.command_id,user_pin:r.user_pin,command_type:r.command_type,
+        state:r.state,created_at:r.created_at,completed_at:r.completed_at,
+        snapshot_at:r.snapshot_at,snapshot_group:r.snapshot_group,
+        verified:!!verified,blocked:!verified && !["failed","cancelled"].includes(r.state)};
+    });
+    return res.json({commands});
+  }catch{return res.status(503).json({error:"MANUAL_ACCESS_PENDING_UNAVAILABLE"});}
+});
+
 router.get("/admin/gym-x904/user-command-recent",adminMiddleware,async(req,res)=>{
   res.setHeader("Cache-Control","no-store");
   const actor=(req as any).user;
