@@ -414,8 +414,8 @@ router.post("/admin/google-sheets/recover-one", adminMiddleware, async (req, res
     try {
       await db.execute(sql`
         insert into sport_center.booking_sheets_recovery_history
-          (source_key,booking_id,order_number,target_tab,old_sheet_row,new_sheet_row)
-        values (${sourceKey},${booking.id},${orderNumber},${tab},${Number(ledger.sheet_row)||null},${sheetRow})
+          (source_key,booking_id,order_number,target_tab,old_sheet_row,new_sheet_row,admin_user_id)
+        values (${sourceKey},${booking.id},${orderNumber},${tab},${Number(ledger.sheet_row)||null},${sheetRow},${Number((req as any).user?.userId)||null})
       `);
     }catch(error){req.log.error({err:error,orderNumber},"Recovery succeeded but history insert failed");}
     res.json({ok:true,recovered:true,orderNumber,targetTab:tab,sheetRow});
