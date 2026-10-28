@@ -31,3 +31,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-28 deploy PR #321 group header lifecycle consistency.
 
 2026-10-28 retrigger after 55a03399 build completed; target group header lifecycle PR #321.
+
+2026-10-28 deploy PR #334 actual booking payment date field.
