@@ -35,6 +35,7 @@ export default function GoogleSheets() {
   const [syncBusy,setSyncBusy]=useState("");
   const [pendingSync,setPendingSync]=useState<string|null>(null);
   const [syncOrderSearch,setSyncOrderSearch]=useState("");
+  const [syncStatuses,setSyncStatuses]=useState<Record<string,{status:string;targetTab?:string|null;sheetRow?:number|null;changedColumns?:string[]}>>({});
   const [pendingBatchOrders,setPendingBatchOrders]=useState<string[]>([]);
   const [batchBusy,setBatchBusy]=useState(false);
   const [batchMessage,setBatchMessage]=useState("");
@@ -91,7 +92,7 @@ export default function GoogleSheets() {
     }catch(error){setStatusError(error instanceof Error?error.message:"Gagal membaca riwayat");}
   }
 
-  const [syncStatuses,setSyncStatuses]=useState<Record<string,{status:string;targetTab?:string|null;sheetRow?:number|null;changedColumns?:string[]}>>({});
+
   const [statusBusy,setStatusBusy]=useState(false);
   const [statusError,setStatusError]=useState("");
   async function checkSyncStatus(rows:string[],verifySheets:boolean) {
