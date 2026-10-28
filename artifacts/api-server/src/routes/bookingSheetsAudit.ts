@@ -273,6 +273,36 @@ router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, re
       if(locations.length===0)item.status="missing";
       else if(locations.length>1 || locations[0]!==Number(item.sheetRow))item.status="needs_review";
     }
+    // Compare the full booking row only after its identity and recorded position match.
+    // Read-only; differences are informational and never modify the ledger.
+    const confirmed = items.filter(item => item.status === "synced");
+    if (confirmed.length) {
+      const sheetsRows = await Promise.all(tabs.map(async tab => ({
+        tab,
+        values: (await sheets.spreadsheets.values.get({
+          spreadsheetId: TARGET_ID, range: `'${tab.replace(/'/g,"''")}'!A1:N10000`,
+          valueRenderOption: "UNFORMATTED_VALUE",
+        })).data.values ?? [],
+      })));
+      const bookings = await db.select().from(bookingsTable);
+      const facilities = await db.select().from(facilitiesTable);
+      for (const item of confirmed) {
+        const booking = bookings.find(row => row.orderNumber === item.orderNumber);
+        const tab = sheetsRows.find(t => t.tab === item.targetTab);
+        const actual = tab?.values[Number(item.sheetRow)-1];
+        if (!booking || !actual) {item.status="needs_review";continue;}
+        const facility = facilities.find(row=>row.id === booking.facilityId);
+        const dateParts = new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Jakarta",
+          day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(booking.createdAt));
+        const datePart=(type:string)=>dateParts.find(part=>part.type===type)?.value??"";
+        const createdAt=`${datePart("day")}/${datePart("month")}/${datePart("year")} ${datePart("hour")}:${datePart("minute")}:${datePart("second")} WIB`;
+        const expected=[booking.orderNumber,booking.customerName,booking.customerEmail,booking.customerPhone,
+          facility?.name??"",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
+          booking.totalPrice,booking.status,booking.notes??"",booking.adminNotes??"",createdAt];
+        const differences=BOOKING_HEADERS.filter((_,i)=>String(actual[i]??"").trim()!==String(expected[i]??"").trim());
+        if (differences.length){item.status="changed";(item as typeof item & {changedColumns?:string[]}).changedColumns=differences;}
+      }
+    }
     res.json({items,checkedSheets:true,checkedAt:new Date().toISOString()});
   } catch(error) {
     req.log.error({err:error},"Google Sheets read-only status check failed");
