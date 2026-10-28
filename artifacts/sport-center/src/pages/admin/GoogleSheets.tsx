@@ -35,6 +35,23 @@ export default function GoogleSheets() {
   const [syncBusy,setSyncBusy]=useState("");
   const [pendingSync,setPendingSync]=useState<string|null>(null);
   const [syncOrderSearch,setSyncOrderSearch]=useState("");
+  const [syncStatuses,setSyncStatuses]=useState<Record<string,{status:string;targetTab?:string|null;sheetRow?:number|null}>>({});
+  const [statusBusy,setStatusBusy]=useState(false);
+  const [statusError,setStatusError]=useState("");
+  async function checkSyncStatus(rows:string[],verifySheets:boolean) {
+    setStatusBusy(true);setStatusError("");
+    try {
+      const response=await fetch("/api/admin/google-sheets/status-check",{
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+        body:JSON.stringify({orderNumbers:[...new Set(rows)].slice(0,200),verifySheets}),
+      });
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error||"Tidak dapat membaca status");
+      setSyncStatuses(Object.fromEntries(data.items.map((item:{orderNumber:string;status:string;targetTab?:string|null;sheetRow?:number|null})=>[item.orderNumber,item])));
+    }catch(e){setStatusError(e instanceof Error?e.message:"Pemeriksaan gagal");}
+    finally{setStatusBusy(false);}
+  }
+
   const normalizedSyncOrder = /^(?:SC-)?[0-9]+$/i.test(syncOrderSearch) ? `SC-${syncOrderSearch.replace(/^SC-/i,"")}` : syncOrderSearch;
   const visiblePreviewRows = preview ? (syncOrderSearch ? preview.rows.filter(row => row[0] === normalizedSyncOrder) : preview.rows.slice(0,50)) : [];
   const [syncMessage,setSyncMessage]=useState("");
@@ -125,7 +142,7 @@ export default function GoogleSheets() {
 
   async function loadPreview() {
     const request = ++previewRequestRef.current;
-    setPreviewBusy(true);setPreviewError("");setPreview(null);setReadiness(null);setReconciliation(null);
+    setPreviewBusy(true);setPreviewError("");setPreview(null);setSyncStatuses({});setReadiness(null);setReconciliation(null);
     try {
       if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Bulan tidak valid");
       const [year,mon]=month.split("-").map(Number);
@@ -137,7 +154,7 @@ export default function GoogleSheets() {
       const parsed=parseCsv(await response.text());
       if(!parsed.length || COLUMNS.some((h,i)=>parsed[0][i]!==h) || parsed[0][14]!=="Payment Date" || parsed[0][15]!=="Payment Type" || parsed[0][16]!=="Payment ID" || parsed[0][17]!=="Group Ref" || parsed[0][18]!=="Booking Total") throw new Error("Struktur ekspor pembayaran tidak sesuai; preview dibatalkan");
       const rows=parsed.slice(1).filter(r=>r.length===19 && r[14]>=start && r[14]<=end);
-      if (request === previewRequestRef.current) setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});
+      if (request === previewRequestRef.current) {setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});void checkSyncStatus(rows.map(r=>r[0]),false);}
     }catch(e){if(request === previewRequestRef.current)setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{if(request === previewRequestRef.current)setPreviewBusy(false);}
   }
 
@@ -265,8 +282,13 @@ export default function GoogleSheets() {
               <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50" disabled={!!syncBusy || !preview.rows.some(r=>r[0]===normalizedSyncOrder)} onClick={()=>setPendingSync(normalizedSyncOrder)}>Periksa &amp; Sync One</button>
               {syncOrderSearch && !preview.rows.some(r=>r[0]===normalizedSyncOrder) && <span className="text-xs text-amber-700">Booking tidak ditemukan pada preview bulan ini; tidak dapat diproses.</span>}
             </div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <button type="button" className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" disabled={statusBusy} onClick={()=>void checkSyncStatus(preview.rows.map(r=>r[0]),true)}>{statusBusy?"Memeriksa...":"Periksa Status Sheets (Read-only)"}</button>
+              <span className="text-xs text-slate-500">Badge awal dari ledger; tombol pemeriksaan membandingkan keberadaan baris di Sheets. Tidak mengubah booking atau Sheets.</span>
+            </div>
+            {statusError&&<p role="alert" className="text-sm text-red-600">{statusError}</p>}
             {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
-            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
+            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat..."}</Badge></td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
             {!syncOrderSearch && preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
           </div>}
         </CardContent></Card>
