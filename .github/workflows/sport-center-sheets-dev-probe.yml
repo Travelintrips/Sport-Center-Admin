@@ -167,7 +167,7 @@ jobs:
           fi
           echo 'DEV_API_STARTUP_READINESS_PASS'
           if [ "$RUN_TARGETED_ACCOUNTING" = 'true' ]; then
-            pnpm --filter @workspace/api-server exec esbuild src/lib/bizportalSync.ts --bundle --platform=node --format=esm --packages=external --alias:@workspace/db=../../lib/db/src/index.ts --outfile=dist/targeted-accounting.mjs
+            pnpm --filter @workspace/api-server exec esbuild src/lib/bizportalSync.ts --bundle --platform=node --format=esm --external:pg-native --alias:@workspace/db=../../lib/db/src/index.ts --outfile=dist/targeted-accounting.mjs
             node scripts/run-targeted-accounting-dev.mjs
           fi
           if [ "$RUN_TRANSACTION" = 'true' ]; then node scripts/run-payment-event-api-dev-e2e.mjs; fi
