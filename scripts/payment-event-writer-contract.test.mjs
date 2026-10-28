@@ -22,3 +22,8 @@ test('ambiguous append never auto-retries',()=>{
  assert.match(writer,/findSourceKeyAcrossEventTabs/);
  assert.match(writer,/readRow\(tab,row\)/);
 });
+
+test('duplicate scan never truncates sheet at row 100000',()=>{
+ assert.match(google,/\!A:A/);
+ assert.doesNotMatch(google,/A1:A100000/);
+});

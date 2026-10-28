@@ -23,7 +23,7 @@ export function createPaymentEventGooglePort(): PaymentEventSheetPort {
       const tabs=(meta.data.sheets??[]).map(s=>s.properties?.title).filter((s):s is string=>!!s && EVENT_TAB.test(s));
       const results: Array<{tab:string;row:number}>=[];
       for(const tab of tabs){
-        const response=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`${quote(tab)}!A1:A100000`,valueRenderOption:"FORMATTED_VALUE"});
+        const response=await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`${quote(tab)}!A:A`,valueRenderOption:"FORMATTED_VALUE"});
         (response.data.values??[]).forEach((r,i)=>{if(String(r[0]??"").trim()===key)results.push({tab,row:i+1});});
       }
       return results;
