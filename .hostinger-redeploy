@@ -25,3 +25,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-28 second Hostinger rebuild trigger after prior queued deployment completed; target accounting fix b669a812/e2f32777.
 
 2026-10-28 Hostinger rebuild for PR #317 group-vs-individual payment accounting tax snapshot hotfix.
+
+2026-10-28 retrigger after bd5a0909 deployment completed; target PR #317 hotfix.
