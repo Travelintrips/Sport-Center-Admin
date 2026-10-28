@@ -1606,6 +1606,8 @@ export async function createJournalEntry(
     const existing = await db
       .select({
         id: accountingJournalsTable.id,
+        status: accountingJournalsTable.status,
+        bookingId: accountingJournalsTable.bookingId,
         companyId: accountingJournalsTable.companyId,
         paymentMethod: accountingJournalsTable.paymentMethod,
         paymentProvider: accountingJournalsTable.paymentProvider,
@@ -1641,22 +1643,57 @@ export async function createJournalEntry(
         .from(accountingJournalLinesTable)
         .where(eq(accountingJournalLinesTable.journalId, current.id))
         .limit(1);
+
+      // Posted journals are immutable by design. A retry must therefore be a
+      // pure idempotency check: validate the financial snapshot and return
+      // without issuing an UPDATE. Metadata enrichment for historical posted
+      // journals is handled by the dedicated, explicitly-gated migration.
+      if (current.status === "posted") {
+        if (existingLines.length === 0) {
+          throw new Error(
+            `[accounting] POSTED_JOURNAL_WITHOUT_LINES: payment=${paymentId} journal=${current.id}`,
+          );
+        }
+        if (current.bookingId != null && current.bookingId !== bookingId) {
+          throw new Error(
+            `[accounting] POSTED_JOURNAL_BOOKING_MISMATCH: payment=${paymentId} journal=${current.id} existing=${current.bookingId} expected=${bookingId}`,
+          );
+        }
+        const expectedGross = Number(paymentContext?.grossAmount ?? grandTotal);
+        const expectedDpp = Number(paymentContext?.dppAmount ?? subtotal);
+        const expectedTax = Number(paymentContext?.taxAmount ?? ppnAmount);
+        const mismatched =
+          (current.grossAmount != null && Math.abs(Number(current.grossAmount) - expectedGross) > 0.01) ||
+          (current.dppAmount != null && Math.abs(Number(current.dppAmount) - expectedDpp) > 0.01) ||
+          (current.taxAmount != null && Math.abs(Number(current.taxAmount) - expectedTax) > 0.01);
+        if (mismatched) {
+          throw new Error(
+            `[accounting] POSTED_JOURNAL_AMOUNT_MISMATCH: payment=${paymentId} journal=${current.id}`,
+          );
+        }
+        console.info(
+          `[accounting] Internal journal posted sudah valid untuk payment=${paymentId} (id=${current.id}) — retry no-op`,
+        );
+        return;
+      }
+
+      // Draft/non-posted journals may still be completed safely.
       await db
         .update(accountingJournalsTable)
         .set({
           bookingId,
-          status: existingLines.length === 0 ? "draft" : "posted",
+          status: "draft",
           companyId: paymentContext?.companyId ?? current.companyId ?? null,
           paymentMethod: paymentMethod ?? current.paymentMethod ?? null,
           paymentProvider: paymentContext?.paymentProvider ?? current.paymentProvider ?? null,
-           providerName: paymentContext?.providerName ?? current.providerName ?? null,
-           providerId: paymentContext?.providerId ?? current.providerId ?? null,
+          providerName: paymentContext?.providerName ?? current.providerName ?? null,
+          providerId: paymentContext?.providerId ?? current.providerId ?? null,
           paymentType: paymentContext?.paymentType ?? current.paymentType ?? null,
           bankAccountId: paymentContext?.bankAccountId ?? current.bankAccountId ?? null,
-           expectedSettlementDate: paymentContext?.expectedSettlementDate ?? current.expectedSettlementDate ?? null,
-           settlementStatus: paymentContext?.settlementStatus ?? current.settlementStatus ?? null,
-           mdrRate: paymentContext?.mdrRate != null ? String(paymentContext.mdrRate) : current.mdrRate ?? null,
-           mdrAmount: paymentContext?.mdrAmount != null ? String(paymentContext.mdrAmount) : current.mdrAmount ?? null,
+          expectedSettlementDate: paymentContext?.expectedSettlementDate ?? current.expectedSettlementDate ?? null,
+          settlementStatus: paymentContext?.settlementStatus ?? current.settlementStatus ?? null,
+          mdrRate: paymentContext?.mdrRate != null ? String(paymentContext.mdrRate) : current.mdrRate ?? null,
+          mdrAmount: paymentContext?.mdrAmount != null ? String(paymentContext.mdrAmount) : current.mdrAmount ?? null,
           grossAmount: String(paymentContext?.grossAmount ?? current.grossAmount ?? grandTotal),
           dppAmount: String(paymentContext?.dppAmount ?? current.dppAmount ?? subtotal),
           taxAmount: String(paymentContext?.taxAmount ?? current.taxAmount ?? ppnAmount),
@@ -1666,16 +1703,17 @@ export async function createJournalEntry(
           providerTradeNo: paymentContext?.providerTradeNo ?? current.providerTradeNo ?? null,
         })
         .where(eq(accountingJournalsTable.id, current.id));
-      console.info(
-        `[accounting] Internal journal sudah ada untuk payment=${paymentId} (id=${current.id}) — metadata diperkaya`,
-      );
+
       if (existingLines.length === 0) {
         await postJournalLines(current.id, lines);
-        await db
-          .update(accountingJournalsTable)
-          .set({ status: "posted" })
-          .where(eq(accountingJournalsTable.id, current.id));
       }
+      await db
+        .update(accountingJournalsTable)
+        .set({ status: "posted" })
+        .where(eq(accountingJournalsTable.id, current.id));
+      console.info(
+        `[accounting] Internal journal draft dilengkapi untuk payment=${paymentId} (id=${current.id})`,
+      );
       return;
     }
   }
