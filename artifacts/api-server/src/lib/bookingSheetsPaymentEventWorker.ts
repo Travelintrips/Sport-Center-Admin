@@ -78,6 +78,12 @@ async function tick():Promise<void> {
 export function startBookingSheetsPaymentEventWorker():void {
   // A deployment without both the env opt-in and DB activation cannot write any event.
   if(process.env.SHEETS_PAYMENT_EVENTS_ENABLED!=="true")return;
+  // Fail closed before scheduling: no DEV job may point to the production workbook.
+  try { createPaymentEventGooglePort(); }
+  catch (error) {
+    logger.error({err:error},"Payment event worker not started: spreadsheet isolation or credentials invalid");
+    return;
+  }
   logger.info("Payment event worker opted in; DB configuration still gates all writes");
   void tick();
   const timer=setInterval(()=>void tick(),30000);
