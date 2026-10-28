@@ -28,6 +28,16 @@ export default function GoogleSheets() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [month,setMonth] = useState("2026-10");
+  const [autoStatus,setAutoStatus]=useState<{enabled:boolean;startAt:string|null;counts:Record<string,number>}|null>(null);
+  useEffect(()=>{
+    let active=true;
+    fetch("/api/admin/google-sheets/auto-status",{
+      headers:{Authorization:`Bearer ${getToken()}`},
+    }).then(r=>r.ok?r.json():Promise.reject(new Error("Auto-sync status unavailable")))
+      .then(data=>{if(active)setAutoStatus(data);}).catch(()=>{});
+    return ()=>{active=false;};
+  },[]);
+
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
@@ -310,11 +320,11 @@ export default function GoogleSheets() {
           </h1>
           <p className="text-sm text-slate-500 mt-1">Laporan &amp; Sistem · Integrasi laporan pembayaran booking</p>
         </div>
-        <Badge variant="secondary" className="w-fit">Mode pilot manual · Auto-sync nonaktif</Badge>
+        <Badge variant={autoStatus?.enabled?"default":"secondary"} className="w-fit">{autoStatus?.enabled?"Auto-sync aktif · Personal lunas":"Auto-sync belum aktif / belum diverifikasi"}</Badge>
       </header>
       <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-900 dark:text-amber-200 flex gap-2">
         <Info className="h-5 w-5 shrink-0" />
-        <span>Sinkronisasi otomatis belum aktif. Sync One tersedia untuk satu booking personal lunas penuh; Sync Now terbatas pada pilot maksimal lima kandidat per konfirmasi admin.</span>
+        <span>{autoStatus?.enabled?"Auto-sync aktif untuk pembayaran baru personal non-grup yang lunas penuh. DP, grup, membership dan corporate tetap ditahan.":"Auto-sync belum terverifikasi aktif."} Sync One tersedia untuk satu booking; Sync Now terbatas pada maksimal lima kandidat per konfirmasi admin.</span>
       </div>
       <Card>
         <CardHeader><CardTitle className="text-lg">Spreadsheet tujuan</CardTitle></CardHeader>
@@ -354,7 +364,7 @@ export default function GoogleSheets() {
             <button type="button" onClick={loadPreview} disabled={previewBusy} className="border rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">{previewBusy?"Memuat...":"Preview Data"}</button>
           </div>
           {previewError&&<p role="alert" className="text-sm text-red-600">{previewError}</p>}
-          {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview saja. Belum ada insert, update atau pengecekan duplikasi lintas sheet; Sync Now tetap terkunci.</p>
+          {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview tidak menulis ke Sheets. Gunakan Periksa Status Sheets untuk memverifikasi baris, Sync One untuk satu booking, atau Sync Now pilot maksimal lima.</p>
             <button type="button" onClick={reconcilePreview} disabled={reconBusy} className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50">{reconBusy?"Mencocokkan...":"Cek Duplikasi Lintas Tab (Dry Run)"}</button>
             {reconError&&<p role="alert" className="text-red-600 text-sm">{reconError}</p>}
             {reconciliation&&<div className="rounded-lg border p-3 text-sm space-y-2">
@@ -401,7 +411,7 @@ export default function GoogleSheets() {
             {!readiness.ready&&<p className="text-amber-700">Alasan: {readiness.reason==="MONTH_TAB_MISSING"?"Tab belum dibuat. Buat tab manual menggunakan nama tujuan persis.":readiness.reason==="BOOKING_HEADER_MISSING"?"14 header booking belum ditemukan dalam lima baris pertama.":"Tidak dapat memvalidasi tab."}</p>}
             {readiness.ready&&<p>Baris header: {readiness.headerRow}. Sel terisi di kolom A: {readiness.populatedFirstColumn}.</p>}
             {!readiness.ready&&<p className="text-xs text-slate-500">Header A–N yang harus digunakan: {readiness.expectedHeaders?.join(" · ")}</p>}
-            <p className="text-xs text-slate-500">Hasil hanya-baca, bukan persetujuan menulis. Sync Now dan auto-sync masih terkunci.</p>
+            <p className="text-xs text-slate-500">Pemeriksaan kesiapan hanya-baca; proses penulisan tetap melewati pemeriksaan server dan antiduplikasi.</p>
           </div>}
         </CardContent></Card>
       <Card><CardHeader><CardTitle className="text-lg">Audit sumber pembayaran dan alokasi</CardTitle></CardHeader>
@@ -432,7 +442,8 @@ export default function GoogleSheets() {
           <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Clock3 className="h-5 w-5 text-slate-600" /> Kontrol dan riwayat</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
             <p>Status koneksi: <strong>Belum diverifikasi</strong></p>
-            <p>Sinkron otomatis: <strong>Belum aktif</strong></p>
+            <p>Sinkron otomatis: <strong>{autoStatus?.enabled?"Aktif · transaksi baru personal lunas":"Belum aktif / belum terverifikasi"}</strong></p>
+            {autoStatus&&<p className="text-xs text-slate-500">Antrean: {autoStatus.counts.pending??0} menunggu · {autoStatus.counts.written??0} berhasil · {(autoStatus.counts.blocked??0)+(autoStatus.counts.needs_review??0)} perlu pemeriksaan.</p>}
             <p>Riwayat sinkron: <strong>Belum tersedia</strong></p>
             <div className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-slate-400 cursor-not-allowed" aria-disabled="true"><RefreshCw className="h-4 w-4" /> Sync Now (pilot maksimal 5 pada Preview)</div>
             <p className="text-slate-500">Tahap selanjutnya: audit header dan formula tab PAID, pemetaan kolom, koneksi Google Sheets API, worker transaksi, preview, dan verifikasi end-to-end.</p>
