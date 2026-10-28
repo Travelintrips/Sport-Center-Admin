@@ -1622,6 +1622,9 @@ export async function createJournalEntry(
         grossAmount: accountingJournalsTable.grossAmount,
         dppAmount: accountingJournalsTable.dppAmount,
         taxAmount: accountingJournalsTable.taxAmount,
+        debitAmount: accountingJournalsTable.debitAmount,
+        creditRevenueAmount: accountingJournalsTable.creditRevenueAmount,
+        creditPpnAmount: accountingJournalsTable.creditPpnAmount,
         providerReference: accountingJournalsTable.providerReference,
         providerOrderId: accountingJournalsTable.providerOrderId,
         merchantTradeNo: accountingJournalsTable.merchantTradeNo,
@@ -1660,13 +1663,18 @@ export async function createJournalEntry(
           );
         }
         const expectedGross = Number(paymentContext?.grossAmount ?? grandTotal);
-        const expectedDpp = Number(paymentContext?.dppAmount ?? subtotal);
-        const expectedTax = Number(paymentContext?.taxAmount ?? ppnAmount);
-        const mismatched =
-          (current.grossAmount != null && Math.abs(Number(current.grossAmount) - expectedGross) > 0.01) ||
-          (current.dppAmount != null && Math.abs(Number(current.dppAmount) - expectedDpp) > 0.01) ||
-          (current.taxAmount != null && Math.abs(Number(current.taxAmount) - expectedTax) > 0.01);
-        if (mismatched) {
+        const headerDebit = Number(current.debitAmount ?? 0);
+        const headerCredit =
+          Number(current.creditRevenueAmount ?? 0) + Number(current.creditPpnAmount ?? 0);
+        // Legacy journals may carry stale gross/dpp/tax metadata from the
+        // primary booking of a group. The posted header and lines are the
+        // immutable financial evidence; accept the retry when those totals
+        // still equal the canonical payment amount.
+        if (
+          Math.abs(headerDebit - expectedGross) > 0.01 ||
+          Math.abs(headerCredit - expectedGross) > 0.01 ||
+          Math.abs(headerDebit - headerCredit) > 0.01
+        ) {
           throw new Error(
             `[accounting] POSTED_JOURNAL_AMOUNT_MISMATCH: payment=${paymentId} journal=${current.id}`,
           );
@@ -1870,25 +1878,39 @@ export function postConfirmedPaymentAccounting(
     const snapshotPph = Math.max(0, Number(bookingSnapshot?.pphAmount ?? 0));
     const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? snapshotPph)));
     const storedGross = Number(bookingSnapshot?.grandTotal ?? bookingSnapshot?.totalPrice ?? 0);
-    const inputGross = Math.round(Number(input.dpp ?? 0) + Number(input.ppnAmount ?? 0));
-    // A payment can be a DP or pelunasan, so its amount is not necessarily
-    // the booking total. Once a booking snapshot exists, it is the source of
-    // truth; only legacy rows without a snapshot may use caller-provided
-    // amounts.
+    const inputGross = Math.round(
+      Number(input.grossAmount ?? (Number(input.dpp ?? 0) + Number(input.ppnAmount ?? 0))),
+    );
+    // The outbox supplies a payment-level tax snapshot. This is authoritative
+    // for group payments and partial payments (DP/pelunasan), where the
+    // primary booking total is not the amount being posted.
+    const hasExplicitPaymentSnapshot =
+      input.grossAmount != null &&
+      Number.isFinite(Number(input.grossAmount)) &&
+      Number(input.grossAmount) > 0;
     const hasBookingTaxSnapshot =
       bookingSnapshot?.dpp != null ||
       bookingSnapshot?.ppnAmount != null ||
       bookingSnapshot?.grandTotal != null;
-    const snapshotGross = hasBookingTaxSnapshot
-      ? storedGross
-      : inputGross > 0
-        ? inputGross
-        : storedGross;
+    const snapshotGross = hasExplicitPaymentSnapshot
+      ? inputGross
+      : hasBookingTaxSnapshot
+        ? storedGross
+        : inputGross > 0
+          ? inputGross
+          : storedGross;
     const snapshotDpp = Math.max(
       0,
-      Number(bookingSnapshot?.dpp ?? (snapshotGross - Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0))),
+      hasExplicitPaymentSnapshot
+        ? Number(input.dpp ?? (snapshotGross - Number(input.ppnAmount ?? 0)))
+        : Number(bookingSnapshot?.dpp ?? (snapshotGross - Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0))),
     );
-    const snapshotPpn = Math.max(0, Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0));
+    const snapshotPpn = Math.max(
+      0,
+      hasExplicitPaymentSnapshot
+        ? Number(input.ppnAmount ?? 0)
+        : Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0),
+    );
     const collectedByCustomer =
       bookingSnapshot?.ppnCollectedByCustomer === true ||
       bookingSnapshot?.ppnTreatment === "collected_by_customer" ||
