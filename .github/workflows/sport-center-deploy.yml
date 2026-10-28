@@ -45,10 +45,10 @@ jobs:
               with urllib.request.urlopen(req,timeout=25) as response:
                   return response.read().decode("utf-8")
           html=get("/admin/gym-x904")
-          entry=re.search(r'/assets/index-[^"\\s]+\\.js',html)
+          entry=re.search(r'/assets/index-[^"\s]+\.js',html)
           if not entry: raise SystemExit("FAIL: missing frontend entry")
           js=get(entry.group(0))
-          chunk=re.search(r'assets/GymX904-[A-Za-z0-9_-]+\\.js',js)
+          chunk=re.search(r'assets/GymX904-[A-Za-z0-9_-]+\.js',js)
           if not chunk: raise SystemExit("FAIL: missing GymX904 chunk reference")
           bundle=get("/"+chunk.group(0))
           if "Sinkronisasi LAN via VMSC" not in bundle or "Sinkronisasi LAN via ALMANO" in bundle:
