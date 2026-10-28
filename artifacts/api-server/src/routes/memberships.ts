@@ -1210,6 +1210,11 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         .orderBy(desc(membershipPaymentsTable.id)).limit(1);
 
       if (paymentToConfirm) {
+        const role = String((req as any).user?.role ?? "");
+        if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
+          res.status(403).json({error:"Staff hanya dapat mengirim bukti untuk verifikasi; konfirmasi membership memerlukan role non-staff yang berwenang."});
+          return;
+        }
         const provider = String(settlementProviderCode ?? paymentToConfirm.settlementProviderCode ?? "").trim().toLowerCase();
         if (provider && !["mandiri_direct", "paylabs"].includes(provider)) {
           res.status(400).json({error:"Provider settlement tidak dikenal"}); return;
@@ -1222,11 +1227,6 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
             .set({ settlementProviderCode: provider })
             .where(and(eq(membershipPaymentsTable.id, paymentToConfirm.id),
               eq(membershipPaymentsTable.status, "waiting_confirmation")));
-        }
-        const role = String((req as any).user?.role ?? "");
-        if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
-          res.status(403).json({error:"Staff hanya dapat mengirim bukti untuk verifikasi; konfirmasi membership memerlukan role non-staff yang berwenang."});
-          return;
         }
         if (!paymentToConfirm.paymentProofUrl || !paymentToConfirm.paymentMethod || !["qris","transfer"].includes(paymentToConfirm.paymentMethod)) {
           res.status(409).json({error:"Konfirmasi memerlukan bukti dan metode pembayaran yang telah dikirim untuk verifikasi"});
