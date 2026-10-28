@@ -77,6 +77,7 @@ export default function AdminMemberships() {
   const [paymentDecision,setPaymentDecision] = useState<"unpaid"|"paid">("unpaid");
   const [paymentFocusMode,setPaymentFocusMode] = useState(false);
   const [paymentMethodDraft,setPaymentMethodDraft] = useState("qris");
+  const [settlementProviderDraft,setSettlementProviderDraft] = useState("");
   const [paymentFile,setPaymentFile] = useState<File|null>(null);
   const [paymentUploading,setPaymentUploading] = useState(false);
   const [paymentError,setPaymentError] = useState("");
@@ -100,7 +101,7 @@ export default function AdminMemberships() {
         const confirmResponse = await fetch(`${API}/memberships/${viewMember.id}`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "active" }),
+          body: JSON.stringify({ status: "active", settlementProviderCode: settlementProviderDraft }),
         });
         const confirmed = await confirmResponse.json();
         if (!confirmResponse.ok) {
@@ -934,11 +935,19 @@ export default function AdminMemberships() {
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="qris">QRIS</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
                     </Select>
+                    <Label>Provider settlement yang tercantum pada bukti</Label>
+                    <Select value={settlementProviderDraft} onValueChange={setSettlementProviderDraft}>
+                      <SelectTrigger><SelectValue placeholder="Pilih provider setelah verifikasi bukti" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mandiri_direct">Mandiri Direct</SelectItem>
+                        <SelectItem value="paylabs">Paylabs</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Label htmlFor="member-proof">Bukti pembayaran (gambar, maks. 10 MB)</Label>
                     <Input id="member-proof" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={e=>setPaymentFile(e.target.files?.[0]??null)}/>
                     <p className="text-xs text-muted-foreground">{getCurrentRole()==="staff" ? "Bukti akan dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan renewal langsung dikonfirmasi setelah validasi berhasil."}</p>
                     {paymentError && <p className="text-sm text-destructive">{paymentError}</p>}
-                    <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading} onClick={submitAdminMembershipProof}>
+                    <Button type="button" className="w-full" disabled={!paymentFile||paymentUploading||(getCurrentRole()!=="staff"&&!settlementProviderDraft)} onClick={submitAdminMembershipProof}>
                       {paymentUploading?"Memproses...":(getCurrentRole()==="staff"?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}
                     </Button>
                   </div>
@@ -957,10 +966,15 @@ export default function AdminMemberships() {
                       ? "Bukti pembayaran sudah diupload — siap dikonfirmasi"
                       : "Aktifkan membership secara manual (pembayaran diterima di luar sistem)"}
                   </p>
+                  <Label>Provider settlement (periksa bukti pembayaran)</Label>
+                  <Select value={settlementProviderDraft} onValueChange={setSettlementProviderDraft}>
+                    <SelectTrigger><SelectValue placeholder="Pilih provider" /></SelectTrigger>
+                    <SelectContent><SelectItem value="mandiri_direct">Mandiri Direct</SelectItem><SelectItem value="paylabs">Paylabs</SelectItem></SelectContent>
+                  </Select>
                   <Button
                     className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
-                    disabled={updateMutation.isPending}
-                    onClick={() => updateMutation.mutate({ id: viewMember.id, data: { status: "active" as any } })}
+                    disabled={updateMutation.isPending || !settlementProviderDraft}
+                    onClick={() => updateMutation.mutate({ id: viewMember.id, data: { status: "active" as any, settlementProviderCode: settlementProviderDraft } as any })}
                   >
                     <BadgeCheck size={16} />
                     Aktifkan Membership
