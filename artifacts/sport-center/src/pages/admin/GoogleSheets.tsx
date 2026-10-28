@@ -3,6 +3,7 @@ import { getToken } from "@/lib/auth";
 import { Sheet, ShieldCheck, Clock3, RefreshCw, Info, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const sheetUrl = "https://docs.google.com/spreadsheets/d/1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E/edit";
 
@@ -32,9 +33,9 @@ export default function GoogleSheets() {
   const [previewBusy,setPreviewBusy] = useState(false);
   const previewRequestRef = useRef(0);
   const [syncBusy,setSyncBusy]=useState("");
+  const [pendingSync,setPendingSync]=useState<string|null>(null);
   const [syncMessage,setSyncMessage]=useState("");
   async function syncOne(orderNumber:string) {
-    if(!window.confirm(`Kirim booking ${orderNumber} yang sudah lunas ke tab pembayaran Google Sheets? Sistem menolak grup, corporate, membership, dan DP.`))return;
     setSyncBusy(orderNumber);setSyncMessage("");
     try {
       const response=await fetch("/api/admin/google-sheets/sync-one",{
@@ -133,6 +134,33 @@ export default function GoogleSheets() {
     } finally { setBusy(false); }
   }
   return (
+    <>
+    <AlertDialog open={pendingSync !== null} onOpenChange={(open) => { if(!open && !syncBusy) setPendingSync(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Konfirmasi Sinkronisasi Booking</AlertDialogTitle>
+          <AlertDialogDescription>
+            Periksa data berikut sebelum mengirim satu booking ke Google Sheets.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-lg border bg-slate-50 dark:bg-slate-900 p-3 space-y-2">
+            <div className="flex justify-between gap-4"><span className="text-slate-500">Nomor booking</span><strong>{pendingSync}</strong></div>
+            <div className="flex justify-between gap-4"><span className="text-slate-500">Tab tujuan (filter)</span><strong>{preview?.tab ?? "-"}</strong></div>
+          </div>
+          <p className="text-amber-700 dark:text-amber-300">Hanya booking personal non-grup yang sudah lunas penuh. Pembayaran DP, membership, dan corporate akan ditolak server. Bulan tujuan sebenarnya ditentukan dari tanggal pembayaran WIB, bukan pilihan filter.</p>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={!!syncBusy}>Batal</AlertDialogCancel>
+          <AlertDialogAction disabled={!!syncBusy || !pendingSync} onClick={() => {
+            if (!pendingSync) return;
+            const order = pendingSync;
+            setPendingSync(null);
+            void syncOne(order);
+          }}>Ya, Sinkronkan</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <main className="p-5 md:p-8 space-y-6 max-w-5xl mx-auto">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -196,7 +224,7 @@ export default function GoogleSheets() {
             </div>}
             <p className="text-xs text-slate-500">Pilot manual: Sync One hanya boleh untuk satu booking personal non-grup yang lunas penuh. Jangan gunakan untuk DP, membership, atau corporate.</p>
             {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
-            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Aksi</th></tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><button type="button" onClick={()=>syncOne(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
+            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Aksi</th></tr></thead><tbody>{preview.rows.slice(0,50).map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button></td></tr>)}</tbody></table></div>
             {preview.rows.length>50&&<p className="text-xs text-slate-500">Menampilkan 50 contoh dari {preview.rows.length} booking.</p>}
           </div>}
         </CardContent></Card>
@@ -253,5 +281,6 @@ export default function GoogleSheets() {
         </Card>
       </div>
     </main>
+    </>
   );
 }
