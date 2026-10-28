@@ -3,6 +3,11 @@ name: Sport Center Google Sheets DEV read-only probe
 on:
   workflow_dispatch:
     inputs:
+      startup_dev_e2e:
+        description: "Boot isolated DEV app and verify readiness without payment writes"
+        required: false
+        type: boolean
+        default: false
       patch_dev_payment_mirror:
         description: "Apply guarded payment metadata trigger patch on DEV only"
         required: false
@@ -90,3 +95,36 @@ jobs:
         env:
           SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
         run: node scripts/patch-payment-mirror-dev-e2e.mjs
+
+      - name: Isolated DEV API startup smoke test (no transactions)
+        if: ${{ inputs.startup_dev_e2e == true }}
+        shell: bash
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
+          SPORT_CENTER_E2E_PAYMENT_EVENTS: 'true'
+          SHEETS_PAYMENT_EVENTS_ENABLED: 'true'
+          HOST: 127.0.0.1
+          PORT: '38888'
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/payment-events-runtime.XXXXXX")
+          trap 'rm -f "$secret_file"; if [ -n "${server_pid:-}" ]; then kill "$server_pid" 2>/dev/null || :; fi' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          export GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")"
+          pnpm --filter @workspace/api-server build
+          node artifacts/api-server/dist/bootstrap.mjs > "$RUNNER_TEMP/sc-e2e-server.log" 2>&1 &
+          server_pid=$!
+          ready=0
+          for i in $(seq 1 35); do
+            if curl -fsS --max-time 2 http://127.0.0.1:38888/api/readiness > "$RUNNER_TEMP/sc-e2e-ready.json" 2>/dev/null; then ready=1; break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            grep -E 'E2E_|STARTUP_|PAYMENT_MIRROR_|Runtime initialization|Readiness|startup' "$RUNNER_TEMP/sc-e2e-server.log" | tail -12 || :
+            echo '::error::Isolated DEV API startup/readiness did not succeed'
+            exit 1
+          fi
+          echo 'DEV_API_STARTUP_READINESS_PASS'
