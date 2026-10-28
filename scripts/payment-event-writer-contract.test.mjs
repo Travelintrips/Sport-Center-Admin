@@ -37,3 +37,29 @@ test('production workbook requires explicit dual environment confirmation',()=>{
  assert.match(google,/appProduction !== nodeProduction/);
  assert.match(google,/EVENT_ENVIRONMENT_MISMATCH/);
 });
+
+// Execute the DEV probe in a fresh process. It must reject unsafe contexts
+// before loading the Google library or attempting any network request.
+import {spawnSync} from 'node:child_process';
+const devId='1W4m_DLxlFSwUybo1cUrx4k8Mm5MSm69fIqwet5pD5cU';
+const prodId='1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E';
+function probe(env){
+ return spawnSync(process.execPath,['scripts/check-payment-events-dev-sheet.mjs'],{
+   env:{PATH:process.env.PATH,...env},encoding:'utf8',timeout:10000,
+ });
+}
+test('DEV probe rejects production environment before touching network',()=>{
+ const result=probe({APP_ENV:'production',NODE_ENV:'production',GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID:devId});
+ assert.notEqual(result.status,0);
+ assert.match(result.stderr,/PROD_CONTEXT_FORBIDDEN/);
+});
+test('DEV probe rejects production spreadsheet target',()=>{
+ const result=probe({APP_ENV:'development',NODE_ENV:'development',GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID:prodId});
+ assert.notEqual(result.status,0);
+ assert.match(result.stderr,/DEV_SHEET_ID_MISMATCH/);
+});
+test('DEV probe fails closed without configured Google credentials',()=>{
+ const result=probe({APP_ENV:'development',NODE_ENV:'development',GOOGLE_SHEETS_PAYMENT_EVENTS_DEV_SPREADSHEET_ID:devId});
+ assert.notEqual(result.status,0);
+ assert.match(result.stderr,/SERVICE_ACCOUNT_UNAVAILABLE/);
+});
