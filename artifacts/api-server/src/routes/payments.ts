@@ -454,10 +454,6 @@ router.post("/payments", async (req, res) => {
     // waiting_confirmation untuk verifikasi admin. Status terminal lain tetap
     // ditolak agar booking yang dibatalkan/ditolak/refunded tidak bisa dipakai
     // kembali tanpa proses admin khusus.
-    if (booking.status !== "pending_payment" && booking.status !== "expired") {
-      res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran" });
-      return;
-    }
 
     // Validasi kepemilikan: jika request membawa token, pastikan customer yang mengirim adalah pemilik booking
     const authHeader = req.headers.authorization;
@@ -523,6 +519,24 @@ router.post("/payments", async (req, res) => {
       (p) => p.paymentType === "dp" && p.status === "confirmed",
     );
     const dpAlreadyConfirmed = hasConfirmedDp || groupBookings.some((b) => b.isDpPaid);
+
+    // Some payment/accounting mirrors may have marked the booking confirmed
+    // when the DP was confirmed. Do not block the remaining settlement solely
+    // on that booking status, but never reopen a fully paid booking.
+    const confirmedAmount = groupPayments
+      .filter((p) => p.status === "confirmed")
+      .reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+    const billedAmount = groupBookings.reduce(
+      (sum, b) => sum + Number(b.grandTotal ?? b.totalPrice ?? 0), 0,
+    );
+    const canSettleConfirmedDp = booking.status === "confirmed" &&
+      hasConfirmedDp &&
+      !groupPayments.some((p) => p.status === "confirmed" && p.paymentType !== "dp") &&
+      confirmedAmount > 0 && confirmedAmount < billedAmount;
+    if (!["pending_payment", "expired"].includes(booking.status) && !canSettleConfirmedDp) {
+      res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran" });
+      return;
+    }
 
     // A second proof is only for pelunasan after the first DP proof has been
     // confirmed. Do not let an expired booking or a stale client turn a

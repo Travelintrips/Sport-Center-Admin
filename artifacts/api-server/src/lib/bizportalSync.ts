@@ -2049,12 +2049,19 @@ async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: numb
  * creates the outbox row in the same transaction as confirmation, so a
  * process crash cannot lose the accounting/mirror work.
  */
-export async function processPaymentAccountingOutbox(): Promise<{
+export async function processPaymentAccountingOutbox(targetPaymentId?: number): Promise<{
   claimed: number;
   posted: number;
   retried: number;
 }> {
-  const pool = getProdPool();
+  const isolated = targetPaymentId !== undefined;
+  if (isolated && (!Number.isSafeInteger(targetPaymentId) || targetPaymentId! <= 0 ||
+      process.env.NODE_ENV !== "development" || process.env.APP_ENV !== "development" ||
+      process.env.SPORT_CENTER_E2E_PAYMENT_EVENTS !== "true" ||
+      process.env.SUPABASE_DATABASE_URL || !process.env.SUPABASE_DATABASE_URL_DEV ||
+      !process.env.SUPABASE_DATABASE_URL_DEV.includes("xssrfshdrtdfupgqwfdw")))
+    throw new Error("TARGETED_DEV_ACCOUNTING_ISOLATION_REQUIRED");
+  const pool = isolated ? new Pool({connectionString:process.env.SUPABASE_DATABASE_URL_DEV,max:1}) : getProdPool();
   if (!pool) return { claimed: 0, posted: 0, retried: 0 };
   if (isCentralFinanceMode()) {
     // Central Finance will consume these durable events in the later cutover
@@ -2064,7 +2071,7 @@ export async function processPaymentAccountingOutbox(): Promise<{
 
   // Repair historical confirmed payments as well as events created by the
   // trigger. This is idempotent and does not disturb active processing locks.
-  await ensureMissingPaymentAccountingOutbox(pool);
+  if (!isolated) await ensureMissingPaymentAccountingOutbox(pool);
 
   const client = await pool.connect();
   let claimed: Array<{ id: number; payment_id: number }> = [];
@@ -2081,11 +2088,12 @@ export async function processPaymentAccountingOutbox(): Promise<{
               )
              )
          AND available_at <= NOW()
+         AND ($1::integer IS NULL OR payment_id = $1)
          AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '15 minutes')
        ORDER BY id
        FOR UPDATE SKIP LOCKED
        LIMIT 50
-    `);
+    `, [targetPaymentId ?? null]);
     claimed = result.rows.map((row) => ({
       id: Number(row.id),
       payment_id: Number(row.payment_id),

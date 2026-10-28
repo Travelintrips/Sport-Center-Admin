@@ -48,3 +48,25 @@ export async function writeClaimedPaymentEvent(
   } catch {return {status:"needs_review",reason:"VERIFY_FAILED"};}
   return {status:"written",tab,row};
 }
+
+/** Explicit post-crash reconciliation. It NEVER appends. A match may be used
+ * by an operator to finalize a stranded writing claim; ambiguous rows stay blocked. */
+export async function inspectStrandedPaymentEvent(
+  event: PaymentEventCandidate, port: PaymentEventSheetPort,
+): Promise<{status:"verified_existing";tab:string;row:number}|{status:"needs_review";reason:"MISSING"|"DUPLICATE"|"ROW_MISMATCH"|"READ_FAILED"}> {
+  const expected=paymentEventRow(event);
+  let matches: Array<{tab:string;row:number}>;
+  try {matches=await port.findSourceKeyAcrossEventTabs(expected[0]);}
+  catch{return {status:"needs_review",reason:"READ_FAILED"};}
+  if(matches.length===0)return {status:"needs_review",reason:"MISSING"};
+  if(matches.length!==1)return {status:"needs_review",reason:"DUPLICATE"};
+  const match=matches[0];
+  try {
+    const actual=await port.readRow(match.tab,match.row);
+    const cents=(s:string)=>{const m=/^(\d+)(?:\.(\d{1,2}))?$/.exec(s);return m?BigInt(m[1])*100n+BigInt((m[2]??"").padEnd(2,"0")):null};
+    const valid=actual.length>=expected.length&&expected.every((v,i)=>i===8
+      ? cents(String(actual[i]??""))!==null&&cents(String(actual[i]??""))===cents(v)
+      : String(actual[i]??"")===v);
+    return valid?{status:"verified_existing",tab:match.tab,row:match.row}:{status:"needs_review",reason:"ROW_MISMATCH"};
+  }catch{return {status:"needs_review",reason:"READ_FAILED"};}
+}
