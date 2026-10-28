@@ -103,7 +103,17 @@ async function initializeAfterListen(): Promise<void> {
   // Open the Hostinger-assigned port first. Network/database bootstrap happens
   // only after listen() so a slow external dependency cannot trigger the
   // platform's three-second "did not call listen" watchdog.
-  const result = await loadSecretsFromGSM();
+  // Isolated CI E2E runner receives only explicitly scoped DEV secrets.
+  // Never load the shared Secret Manager bundle in this mode.
+  const isolatedE2E = process.env.SPORT_CENTER_E2E_PAYMENT_EVENTS === "true";
+  if (isolatedE2E) {
+    const { isIsolatedPaymentEventE2E } = await import("./lib/paymentEventE2EMode");
+    if (!isIsolatedPaymentEventE2E()) throw new Error("E2E_ISOLATION_FAILED");
+    console.info("[bootstrap] E2E DEV direct bootstrap; shared GSM disabled");
+  }
+  const result = isolatedE2E
+    ? { fatal: [] as string[], loaded: [] as string[], failed: [] as string[] }
+    : await loadSecretsFromGSM();
 
   if (result.fatal.length > 0) {
     console.error("[secretLoader] Shared secret bootstrap failed:", result.fatal);
