@@ -9,6 +9,22 @@ import { recordX904MembershipReconciliation } from "./x904MembershipReconciliati
  * can be checked. Never infer ownership from the machine's display name.
  * No device access, membership suspension, or user provisioning is performed.
  */
+export function hasCanonicalConfirmedMembershipPayments(
+  confirmedPaymentIds: number[],
+  linkedRows: Array<{ id: unknown; booking_count: unknown }>,
+): boolean {
+  if (!confirmedPaymentIds.length || linkedRows.length !== confirmedPaymentIds.length) return false;
+  const expected = new Set(confirmedPaymentIds);
+  if (expected.size !== confirmedPaymentIds.length) return false;
+  const observed = new Set<string>();
+  return linkedRows.every(row => {
+    const id = String(row.id);
+    if (!expected.has(Number(id)) || observed.has(id) || Number(row.booking_count) !== 1) return false;
+    observed.add(id);
+    return true;
+  });
+}
+
 export async function onConfirmedMembershipPaymentX904(input: {
   membershipId: number;
   startDate: string;
@@ -36,8 +52,7 @@ export async function onConfirmedMembershipPaymentX904(input: {
       AND p.status = 'confirmed' AND p.amount > 0 AND p.confirmed_at IS NOT NULL
     GROUP BY p.id
   `);
-  const sourceComplete = linked.rows.length === confirmed.length
-    && linked.rows.every(row => Number(row.booking_count) === 1);
+  const sourceComplete = hasCanonicalConfirmedMembershipPayments(confirmed.map(p => p.id), linked.rows);
   if (!sourceComplete) return "review_required";
 
   // DEV has no gym_x904_access_snapshots table yet. Do not fabricate SDK
