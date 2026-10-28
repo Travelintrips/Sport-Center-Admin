@@ -2,6 +2,7 @@ import crypto from "crypto";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startScheduler } from "./lib/scheduler";
+import { startBookingSheetsAutoWorker } from "./lib/bookingSheetsAutoWorker";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
@@ -1348,6 +1349,7 @@ export async function initializeRuntime(): Promise<void> {
   // provisioning have completed. Scheduler starts only after this point.
   markStartupReady();
   startScheduler();
+  startBookingSheetsAutoWorker();
 }
 
 export { app };
