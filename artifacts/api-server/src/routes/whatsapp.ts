@@ -140,6 +140,17 @@ async function applyWaPaymentApprovalLifecycle(
       })
       .where(eq(paymentsTable.id, payment.id));
 
+    if (booking.groupRef) {
+      await tx
+        .update(bookingGroupsTable)
+        .set(
+          isDp
+            ? { status: "pending", isDpPaid: true, updatedAt: new Date() }
+            : { status: "paid", updatedAt: new Date() },
+        )
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+
     const rows = booking.groupRef
       ? await tx.select().from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
       : [booking];
