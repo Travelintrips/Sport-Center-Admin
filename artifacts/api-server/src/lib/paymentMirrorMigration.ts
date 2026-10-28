@@ -1,4 +1,5 @@
 import { db } from "@workspace/db";
+import { isIsolatedPaymentEventE2E } from "./paymentEventE2EMode";
 import { sql } from "drizzle-orm";
 import { isTransientDbError } from "./dbRetry";
 import manualProviderMirrorMigration from "../../../../scripts/patch_manual_provider_mirror_function.sql";
@@ -25,7 +26,7 @@ let startupPromise: Promise<void> | null = null;
 export function startPaymentMirrorMigration(): Promise<void> {
   if (startupPromise) return startupPromise;
 
-  startupPromise = (process.env.NODE_ENV === "production"
+  startupPromise = (process.env.NODE_ENV === "production" || isIsolatedPaymentEventE2E()
     ? db.transaction(async (tx) => {
         // Production schema provisioning remains external, but these two
         // replace-in-place functions can drift back to an older definition

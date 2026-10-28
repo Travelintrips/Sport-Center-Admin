@@ -1310,7 +1310,7 @@ export async function initializeRuntime(): Promise<void> {
   // This is a financial safety migration, not a best-effort schema migration.
   // It still completes before business traffic is marked ready, but no longer
   // blocks the platform from observing listen() within its startup deadline.
-  if (!e2e) try {
+  try {
     await withTransientDbRetry(() => startPaymentMirrorMigration(), 3);
     logger.info("Payment mirror migration verified");
   } catch (err) {
