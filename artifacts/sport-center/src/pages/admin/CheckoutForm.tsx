@@ -444,7 +444,7 @@ export default function AdminCheckoutForm() {
           <h2 className="text-2xl font-black mb-1">Booking Berhasil!</h2>
           <p className="text-muted-foreground">Order <span className="font-semibold text-foreground">{createdOrder}</span> telah dibuat.</p>
         </div>
-        <div className="w-full max-w-xl rounded-xl border p-4 space-y-3">
+        {!paymentSubmitted && <div className="w-full max-w-xl rounded-xl border p-4 space-y-3">
           <p className="font-semibold">Status pembayaran pelanggan</p>
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant={paymentChoice === "paid" ? "default" : "outline"} onClick={() => setPaymentChoice("paid")}>Sudah Dibayar</Button>
@@ -479,11 +479,12 @@ export default function AdminCheckoutForm() {
                   {paymentBusy ? "Memproses bukti..." : (getCurrentRole()==="staff" ? "Unggah Bukti & Kirim Verifikasi" : "Unggah Bukti & Konfirmasi")}
                 </Button>
               </div>)}
-        </div>
+        </div>}
+        {paymentSubmitted && <p role="status" className="text-sm font-medium text-green-700">{getCurrentRole()==="staff" ? "Bukti pembayaran berhasil dikirim untuk verifikasi." : "Bukti diterima dan pembayaran sudah dikonfirmasi."}</p>}
         <div className="flex gap-3 flex-wrap justify-center">
-          {(paymentChoice === "unpaid" || (paymentSubmitted && getCurrentRole()==="staff")) && (
+          {paymentChoice === "unpaid" && !paymentSubmitted && (
             <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>
-              {paymentSubmitted ? "Lihat & Konfirmasi Pembayaran" : "Kelola Pembayaran"}
+              Kelola Pembayaran
             </Button>
           )}
           <Button variant="outline" onClick={() => setLocation("/admin/bookings")}>Kembali ke Pemesanan</Button>
