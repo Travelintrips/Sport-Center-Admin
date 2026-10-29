@@ -57,8 +57,9 @@ export async function processX904AutomaticCommands(): Promise<void> {
         WHERE p.membership_id=${membershipId} GROUP BY p.id`);
       // No financial history cannot prove non-payment. Never suspend a legacy
       // membership on an empty payment ledger.
-      const sourcesComplete=payments.rows.length>0 && payments.rows.every(p=>p.status!=="confirmed" ||
-        (Number(p.amount)>0 && Number(p.booking_count)===1));
+      const sourcesComplete=payments.rows.length>0 && payments.rows.every(p=>
+        p.status!=="waiting_confirmation" && p.status!=="pending_payment" &&
+        (p.status!=="confirmed" || (Number(p.amount)>0 && Number(p.booking_count)===1)));
       const entitlement=resolvePaidX904Automation({
         today,membershipStart:String(m.start_date),membershipEnd:String(m.end_date),
         membershipStatus:String(m.status),paymentSourcesComplete:sourcesComplete,
