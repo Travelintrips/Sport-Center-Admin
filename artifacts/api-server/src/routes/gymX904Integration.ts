@@ -435,6 +435,55 @@ router.get("/admin/gym-x904/delete-batches/:batchId",adminMiddleware,async(req,r
  }catch{return res.status(503).json({error:"BATCH_STATUS_UNAVAILABLE"});}
 });
 
+// Membership badge evidence: a completed automatic SUSPEND_USER is insufficient
+// without a newer physical SDK snapshot confirming the correct UID in group 2.
+// Never infer machine suspension from membership expiry or an old ACK.
+router.get("/admin/gym-x904/confirmed-auto-suspensions", adminMiddleware, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const result = await db.execute(sql`
+      WITH latest AS (
+        SELECT DISTINCT ON ((payload->>'membershipId')::integer)
+          (payload->>'membershipId')::integer AS membership_id,
+          command_id, user_pin, command_type, state, completed_at,
+          result, payload
+        FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545'
+          AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
+          AND payload->>'membershipId' ~ '^[0-9]+$'
+          AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        ORDER BY (payload->>'membershipId')::integer, created_at DESC
+      ), latest_snapshot AS (
+        SELECT observed_at, users FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial='TDBD234200545'
+        ORDER BY snapshot_id DESC LIMIT 1
+      )
+      SELECT c.membership_id,c.command_id,c.user_pin,c.completed_at
+      FROM latest c CROSS JOIN latest_snapshot s
+      JOIN sport_center.x904_automatic_entitlement_events e
+        ON e.event_id::text=c.payload->>'eventId' AND e.membership_id=c.membership_id
+      JOIN sport_center.gym_x904_member_mapping mp
+        ON mp.membership_id=c.membership_id AND mp.user_pin=c.user_pin
+        AND mp.status='verified' AND mp.device_serial='TDBD234200545'
+      WHERE c.command_type='SUSPEND_USER' AND c.state='completed'
+        AND c.result->>'readBackConfirmed'='true'
+        AND e.state='processed' AND e.result->>'status'='readback_confirmed'
+        AND s.observed_at > c.completed_at
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(s.users) u
+          WHERE u->>'pin'=c.user_pin AND u->>'name'=c.payload->>'expectedName'
+            AND u->>'role'='0' AND u->>'group'='2'
+            AND u->>'enabled'='true'
+        )
+    `);
+    res.json({ confirmed: result.rows });
+  } catch (error) {
+    console.error("[x904-auto] badge-evidence-query-failed",
+      error instanceof Error ? error.message.slice(0,240) : "unknown");
+    res.status(503).json({ error: "X904_SUSPEND_EVIDENCE_UNAVAILABLE" });
+  }
+});
+
 // Expose feature readiness without exposing connector credentials or permitting writes.
 router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)=>{
   res.setHeader("Cache-Control","no-store");
