@@ -51,7 +51,23 @@ export async function processX904AutomaticCommands(): Promise<void> {
       if(entries.length!==1||entries[0].enabled!==true)return;
       const group=Number(entries[0].group);
       const command=entitlement==="active"&&group===2?"ACTIVATE_USER":entitlement==="suspended"&&group===1?"SUSPEND_USER":null;
-      if(!command)return;
+      if(!command){
+        if((entitlement==="active"&&group===1)||(entitlement==="suspended"&&group===2)){
+          await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+            SET state='processed',processed_at=now(),result='{"status":"already_correct"}'::jsonb
+            WHERE event_id=${Number(ev.event_id)}`);
+        }
+        return;
+      }
+      const previous=await tx.execute(sql`SELECT state,completed_at,result FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND user_pin='200'
+          AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        ORDER BY created_at DESC LIMIT 1`);
+      if(previous.rows.length){
+        const last=previous.rows[0];
+        if(last.state!=="completed" || (last.result as any)?.readBackConfirmed!==true ||
+          !last.completed_at || new Date(String(x.observed_at)).getTime()<=new Date(String(last.completed_at)).getTime())return;
+      }
       const pending=await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands WHERE device_serial='TDBD234200545'
         AND user_pin='200' AND state IN ('queued','claimed') LIMIT 1`);
       if(pending.rows.length)return;
