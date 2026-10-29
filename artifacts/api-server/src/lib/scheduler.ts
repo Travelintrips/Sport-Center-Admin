@@ -99,6 +99,15 @@ async function expireOverdueMemberships(): Promise<void> {
               inArray(gymMembershipsTable.status, ["active", "expired"])))
             .returning({ id: gymMembershipsTable.id });
           if (member.status === "expired") reactivated += updated.length;
+          if (updated.length) await db.execute(sql`
+            INSERT INTO sport_center.x904_automatic_entitlement_events
+              (membership_id,reason,event_key)
+            SELECT ${member.id},'PAYMENT_RECOVERY',${"x904-recovery-" + member.id + "-" + todayWIB}
+            WHERE EXISTS (SELECT 1 FROM sport_center.gym_x904_member_mapping
+              WHERE membership_id=${member.id} AND status='verified'
+              AND device_serial='TDBD234200545')
+            ON CONFLICT (event_key) DO NOTHING
+          `);
         }
         continue;
       }
@@ -144,6 +153,15 @@ async function expireOverdueMemberships(): Promise<void> {
           eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)))
         .returning({ id: gymMembershipsTable.id });
       suspended += updated.length;
+      if (updated.length) await db.execute(sql`
+        INSERT INTO sport_center.x904_automatic_entitlement_events
+          (membership_id,reason,event_key)
+        SELECT ${member.id},'DAILY_EXPIRY',${"x904-expiry-" + member.id + "-" + todayWIB}
+        WHERE EXISTS (SELECT 1 FROM sport_center.gym_x904_member_mapping
+          WHERE membership_id=${member.id} AND status='verified'
+          AND device_serial='TDBD234200545')
+        ON CONFLICT (event_key) DO NOTHING
+      `);
     }
     logger.info({ examined: memberships.length, suspended, reactivated, heldForReview },
       "[scheduler] GYM payment entitlement reconciliation");
