@@ -207,7 +207,7 @@ export default function AdminCheckoutForm() {
     try {
       const token = getToken();
       const form = new FormData();
-      form.append("proof", membershipPaymentFile);
+      if (membershipPaymentFile) form.append("proof", membershipPaymentFile);
       form.append("paymentMethod", membershipPaymentMethod);
       form.append("paymentDate", membershipPaymentDate);
       if (!membershipProofUploaded) {
