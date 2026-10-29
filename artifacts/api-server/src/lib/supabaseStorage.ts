@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
+import { isIsolatedPaymentEventE2E } from "./paymentEventE2EMode";
 import { compressImage, isCompressibleImage, replaceExtension } from "./imageCompression";
 
 // ─── Dev/Prod Storage Isolation ────────────────────────────────────────────
@@ -32,6 +33,10 @@ if (IS_DEV) {
     SERVICE_KEY = devKey;
     const ref = getProjectRef(devKey) ?? "unknown";
     storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY_DEV (dev — isolated, ref=${ref})`;
+  } else if (isIsolatedPaymentEventE2E()) {
+    // No storage credentials: isolated CI payment test cannot upload or download.
+    SERVICE_KEY = "";
+    storageProjectSource = "DISABLED_ISOLATED_PAYMENT_E2E";
   } else if (allowDevOnProdStorage) {
     const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
     SERVICE_KEY = prodKey;
@@ -117,6 +122,14 @@ export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | nul
 let client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {
+  if (isIsolatedPaymentEventE2E()) {
+    const devRef = "xssrfshdrtdfupgqwfdw";
+    const keyRef = getProjectRef(process.env.SUPABASE_SERVICE_ROLE_KEY_DEV ?? "");
+    const explicitlyConfiguredUrl = (process.env.SUPABASE_URL ?? "").trim();
+    if (keyRef !== devRef) throw new Error("E2E_STORAGE_DEV_KEY_REQUIRED");
+    if (explicitlyConfiguredUrl && new URL(explicitlyConfiguredUrl).hostname !== `${devRef}.supabase.co`)
+      throw new Error("E2E_STORAGE_DEV_URL_REQUIRED");
+  }
   const serviceKey =
     SERVICE_KEY ||
     (IS_DEV ? process.env.SUPABASE_SERVICE_ROLE_KEY_DEV : process.env.SUPABASE_SERVICE_ROLE_KEY) ||

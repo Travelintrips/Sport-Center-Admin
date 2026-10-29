@@ -2,6 +2,77 @@ name: Sport Center Google Sheets DEV read-only probe
 
 on:
   workflow_dispatch:
+    inputs:
+      targeted_accounting_dev:
+        description: "Process only canonical DEV synthetic payment 22 and verify replay"
+        required: false
+        type: boolean
+        default: false
+      membership_dev_e2e:
+        description: "DEV membership payment proof Storage and event E2E"
+        required: false
+        type: boolean
+        default: false
+      corporate_dev_e2e:
+        description: "DEV corporate invoice API payment event E2E"
+        required: false
+        type: boolean
+        default: false
+      group_dev_e2e:
+        description: "Isolated recurring group allocation real API E2E"
+        required: false
+        type: boolean
+        default: false
+      dp_dev_e2e:
+        description: "Isolated DEV DP and pelunasan E2E"
+        required: false
+        type: boolean
+        default: false
+      transaction_dev_e2e:
+        description: "Run isolated real API booking, payment, worker, ledger, Sheets, replay"
+        required: false
+        type: boolean
+        default: false
+      startup_dev_e2e:
+        description: "Boot isolated DEV app and verify readiness without payment writes"
+        required: false
+        type: boolean
+        default: false
+      patch_dev_payment_mirror:
+        description: "Apply guarded payment metadata trigger patch on DEV only"
+        required: false
+        type: boolean
+        default: false
+      verify_dev_database:
+        description: "Read-only Supabase DEV target and payment-event readiness"
+        required: false
+        type: boolean
+        default: false
+      prepare_prod_payment_tab:
+        description: "Create only empty production PAYMENT EVENTS tab/header; no transaction writes"
+        type: boolean
+        required: false
+        default: false
+      repair_sc1644_prod_duplicate:
+        description: "Guarded clear only row 3 of verified SC-1644 duplicate, PROD"
+        required: false
+        type: boolean
+        default: false
+      verify_sc1644_prod_rows:
+        description: "Read-only exact SC-1644 source keys before repair"
+        required: false
+        type: boolean
+        default: false
+      verify_prod_payment_tab:
+        description: "Read-only check PROD payment event tab/header"
+        required: false
+        type: boolean
+        default: false
+      synthetic_write_replay:
+        description: "Explicit DEV-only synthetic Google Sheets append/replay"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,3 +122,143 @@ jobs:
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           if [ ! -s "$secret_file" ]; then echo '::error::Google Sheets service account secret is empty'; exit 1; fi
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/check-payment-events-dev-sheet.mjs
+
+      - name: Prepare empty production payment event tab only (explicit opt-in)
+        if: ${{ inputs.prepare_prod_payment_tab == true }}
+        shell: bash
+        env:
+          PREPARE_PROD_PAYMENT_TAB: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/prod-tab-setup.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/prepare-prod-payment-tab.mjs
+
+      - name: Verify production event tab/header without writes
+        if: ${{ inputs.verify_prod_payment_tab == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/event-prod-readonly.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-prod-payment-tab-readonly.mjs
+
+      - name: Verify SC-1644 duplicate rows without writes
+        if: ${{ inputs.verify_sc1644_prod_rows == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/sc1644-prod-rows.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-prod-sc1644-rows-readonly.mjs
+
+      - name: Guarded clear of confirmed SC-1644 duplicate row only
+        if: ${{ inputs.repair_sc1644_prod_duplicate == true }}
+        shell: bash
+        env:
+          SC1644_REPAIR_APPROVED: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/sc1644-repair.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/clear-sc1644-duplicate-prod.mjs
+
+      - name: Synthetic payment event write/read/replay (DEV only)
+        if: ${{ inputs.synthetic_write_replay == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/payment-events-write.XXXXXX")
+          trap 'rm -f "$secret_file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/probe-payment-events-dev-write.mjs
+
+      - name: Verify Supabase DEV connection and event readiness (read-only)
+        if: ${{ inputs.verify_dev_database == true }}
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        run: node scripts/check-payment-events-dev-db.mjs
+
+      - name: Read-only reconciliation of all DEV Sheet rows versus ledger
+        if: ${{ inputs.verify_dev_database == true }}
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/payment-events-reconcile.XXXXXX")
+          trap 'rm -f "$secret_file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/reconcile-payment-events-dev-readonly.mjs
+
+      - name: Patch DEV payment mirror classification trigger (guarded)
+        if: ${{ inputs.patch_dev_payment_mirror == true }}
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        run: node scripts/patch-payment-mirror-dev-e2e.mjs
+
+      - name: Isolated DEV API startup smoke test (no transactions)
+        if: ${{ inputs.startup_dev_e2e == true || inputs.transaction_dev_e2e == true || inputs.dp_dev_e2e == true || inputs.group_dev_e2e == true || inputs.corporate_dev_e2e == true || inputs.membership_dev_e2e == true || inputs.targeted_accounting_dev == true }}
+        shell: bash
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
+          SUPABASE_SERVICE_ROLE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
+          SPORT_CENTER_E2E_PAYMENT_EVENTS: 'true'
+          SHEETS_PAYMENT_EVENTS_ENABLED: 'true'
+          HOST: 127.0.0.1
+          PORT: '38888'
+          RUN_TRANSACTION: ${{ inputs.transaction_dev_e2e }}
+          RUN_DP: ${{ inputs.dp_dev_e2e }}
+          RUN_GROUP: ${{ inputs.group_dev_e2e }}
+          RUN_CORPORATE: ${{ inputs.corporate_dev_e2e }}
+          RUN_MEMBERSHIP: ${{ inputs.membership_dev_e2e }}
+          RUN_TARGETED_ACCOUNTING: ${{ inputs.targeted_accounting_dev }}
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/payment-events-runtime.XXXXXX")
+          trap 'rm -f "$secret_file"; if [ -n "${server_pid:-}" ]; then kill "$server_pid" 2>/dev/null || :; fi' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          export GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")"
+          pnpm --filter @workspace/api-server build
+          node artifacts/api-server/dist/bootstrap.mjs > "$RUNNER_TEMP/sc-e2e-server.log" 2>&1 &
+          server_pid=$!
+          ready=0
+          for i in $(seq 1 75); do
+            if curl -fsS --max-time 2 http://127.0.0.1:38888/api/readiness > "$RUNNER_TEMP/sc-e2e-ready.json" 2>/dev/null; then ready=1; break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            grep -oE 'Error \[ERR_[A-Z_]+\]|E2E_[A-Z_]+|STARTUP_[A-Z_]+|PAYMENT_MIRROR_[A-Z_]+|Cannot find module|Cannot find package|ERR_[A-Z_]+|Runtime initialization complete|SyntaxError|TypeError' "$RUNNER_TEMP/sc-e2e-server.log" | sort -u | head -12 || :
+            node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8"); console.log("STARTUP_LOG_SHAPE",JSON.stringify({lines:s.split("\n").length,bytes:s.length,hasListening:s.includes("Listening on"),hasBootstrap:s.includes("E2E DEV direct bootstrap"),hasReady:s.includes("Runtime initialization complete"),hasError:s.includes("Error"),markers:s.split("\n").filter(x=>/bootstrap|migration|startup|payment|storage|db\]/i.test(x)).map(x=>x.replace(/https?:\/\/\S+/g,"[URL]").replace(/postgres(?:ql)?:\/\/\S+/g,"[DB]").slice(0,90)).slice(0,12),firstLine:(s.split("\n").find(x=>x.trim())||"").replace(/https?:\/\/\S+/g,"[URL]").slice(0,100)}))'
+            echo '::error::Isolated DEV API startup/readiness did not succeed' 
+            exit 1
+          fi
+          echo 'DEV_API_STARTUP_READINESS_PASS'
+          if [ "$RUN_TARGETED_ACCOUNTING" = 'true' ]; then
+            pnpm --filter @workspace/api-server exec esbuild src/lib/bizportalSync.ts --bundle --platform=node --format=cjs --external:pg-native --alias:@workspace/db=../../lib/db/src/index.ts --outfile=dist/targeted-accounting.cjs
+            node scripts/run-targeted-accounting-dev.mjs
+          fi
+          if [ "$RUN_TRANSACTION" = 'true' ]; then node scripts/run-payment-event-api-dev-e2e.mjs; fi
+          if [ "$RUN_DP" = 'true' ]; then node scripts/run-payment-event-dp-dev-e2e.mjs; fi
+          if [ "$RUN_GROUP" = 'true' ]; then node scripts/run-payment-event-group-dev-e2e.mjs; fi
+          if [ "$RUN_CORPORATE" = 'true' ]; then node scripts/run-payment-event-corporate-dev-e2e.mjs; fi
+          if [ "$RUN_MEMBERSHIP" = 'true' ]; then
+            node scripts/run-payment-event-membership-dev-e2e.mjs || {
+              node -e 'const fs=require("fs");const s=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8");console.log("MEMBERSHIP_ERROR_CLASSES",JSON.stringify({codes:[...new Set((s.match(/(?:code|sqlState|sqlstate)[^\n]{0,18}[A-Z0-9]{5}/g)||[]).map(x=>x.slice(0,45)))].slice(-8),messages:[...new Set((s.match(/(?:duplicate key|violates not-null|foreign key|does not exist|invalid input syntax|relation [^\n]{0,60}|column [^\n]{0,60}|Gagal membuat data membership)/g)||[]))].slice(-8)}))'
+              node -e 'const fs=require("fs");const lines=fs.readFileSync(process.env.RUNNER_TEMP+"/sc-e2e-server.log","utf8").split("\n");const records=lines.map(x=>{try{return JSON.parse(x)}catch{return null}}).filter(Boolean).filter(x=>String(x.msg||"").includes("Create membership error"));for(const x of records.slice(-2)){const e=x.err||x.error||{};const scrub=v=>String(v||"").replace(/postgres(?:ql)?:\/\/[^\s]+/g,"[DB]").replace(/[\w.+-]+@[\w.-]+/g,"[EMAIL]").slice(0,180);console.log("MEMBERSHIP_CREATE_ERROR",JSON.stringify({type:scrub(e.type),code:scrub(e.code),message:scrub(e.message),detail:scrub(e.detail),cause:scrub(e.cause?.message)}))}'
+              exit 1
+            }
+          fi

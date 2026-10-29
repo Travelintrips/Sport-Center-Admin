@@ -1,0 +1,111 @@
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
+import { logger } from "./logger";
+import { writeClaimedPaymentEvent } from "./bookingSheetsPaymentEventWriter";
+import { createPaymentEventGooglePort } from "./bookingSheetsPaymentEventGooglePort";
+import { paymentEventRow, type PaymentEventCandidate } from "./bookingSheetsPaymentEventContract";
+
+const MONTHS=["JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI","JULI","AGUSTUS","SEPTEMBER","OKTOBER","NOVEMBER","DESEMBER"];
+function rows(value:unknown):Record<string,unknown>[] {
+  if(Array.isArray(value))return value as Record<string,unknown>[];
+  if(value && typeof value==="object" && "rows" in value && Array.isArray((value as {rows?:unknown}).rows))
+    return (value as {rows:Record<string,unknown>[]}).rows;
+  throw new Error("Unexpected SQL response");
+}
+let running=false;
+async function tick():Promise<void> {
+  if(running)return;
+  running=true;
+  try {
+    const config=rows(await db.execute(sql`select enabled,start_at from sport_center.booking_sheets_payment_event_config where id=true`))[0];
+    if(config?.enabled!==true || !config.start_at)return;
+    const startAt=new Date(String(config.start_at));
+    if(!Number.isFinite(startAt.getTime()))throw new Error("INVALID_EVENT_START_AT");
+    // Source events must be both confirmed and after activation; no historical backfill.
+    const candidates=rows(await db.execute(sql`
+      select c.source_key,c.source_type,c.booking_id,c.payment_id,c.allocation_id,
+        c.company_invoice_id,c.membership_payment_id,c.amount::text as amount,
+        c.payment_date_wib::text as payment_date_wib,c.validation_status,c.payment_ts
+      from sport_center.booking_sheets_payment_event_candidates c
+      left join sport_center.sport_payments p on c.source_type in ('direct','allocation') and p.id=c.payment_id
+      left join sport_center.company_invoices i on c.source_type='corporate_invoice' and i.id=c.company_invoice_id
+      left join sport_center.sport_membership_payments m on c.source_type='membership' and m.id=c.membership_payment_id
+      where c.validation_status='CANDIDATE'
+        -- Membership financial bookings mirror the same membership payment; do not export twice.
+        and not (c.source_type in ('direct','allocation') and exists (
+          select 1 from sport_center.sport_bookings b
+          where b.id=c.booking_id and b.membership_payment_id is not null
+        ))
+        -- Eligibility is the admin's confirmation, NOT the earlier bank transfer date.
+        -- Keep c.payment_ts unchanged for the financial transaction date in Sheets.
+        and (case
+          when c.source_type in ('direct','allocation') then p.confirmed_at
+          when c.source_type='corporate_invoice' then i.paid_at
+          when c.source_type='membership' then m.confirmed_at
+          else null end) >= ${startAt.toISOString()}::timestamptz
+        and not exists(select 1 from sport_center.booking_sheets_payment_event_ledger l where l.source_key=c.source_key)
+      order by c.payment_ts,c.source_key limit 5
+    `));
+    const port=createPaymentEventGooglePort();
+    for(const candidate of candidates){
+      const event=candidate as unknown as PaymentEventCandidate;
+      let claimed=false;
+      try {
+        // Validate source identity, date and amount BEFORE creating a durable claim.
+        // Invalid candidates must not permanently occupy source_key in the ledger.
+        paymentEventRow(event);
+        // Durable unique claim prior to ANY Sheets operation. No automatic retries.
+        const claim=rows(await db.execute(sql`
+          insert into sport_center.booking_sheets_payment_event_ledger
+            (source_key,source_type,booking_id,payment_id,allocation_id,company_invoice_id,membership_payment_key,amount,payment_at,status,attempt_count)
+          values (${event.source_key},${event.source_type},${event.booking_id},${event.payment_id},${event.allocation_id},
+            ${event.company_invoice_id},${event.membership_payment_id==null?null:String(event.membership_payment_id)},
+            ${event.amount}::numeric,${new Date(String(candidate.payment_ts)).toISOString()}::timestamptz,'writing',1)
+          on conflict(source_key) do nothing returning id
+        `));
+        claimed=claim.length===1;
+        if(!claimed)continue;
+        const date=event.payment_date_wib;
+        const [year,month]=date.split('-').map(Number);
+        if(!year||month<1||month>12)throw new Error("INVALID_EVENT_MONTH");
+        const tab=`PAYMENT EVENTS ${MONTHS[month-1]} ${year}`;
+        const result=await writeClaimedPaymentEvent(event,tab,port);
+        if(result.status==='written') {
+          const finalized=rows(await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
+            set status='written',target_tab=${tab},sheet_row=${result.row},updated_at=now()
+            where source_key=${event.source_key} and status='writing' returning id`));
+          if(finalized.length!==1)throw new Error("EVENT_LEDGER_FINALIZATION_FAILED");
+        } else {
+          const reviewed=rows(await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
+            set status='needs_review',last_error_code=${result.reason},updated_at=now()
+            where source_key=${event.source_key} and status='writing' returning id`));
+          if(reviewed.length!==1)throw new Error("EVENT_REVIEW_FINALIZATION_FAILED");
+        }
+      } catch(error) {
+        logger.error({err:error,sourceKey:event.source_key},"Payment event requires reconciliation");
+        if(claimed) {
+          try {await db.execute(sql`update sport_center.booking_sheets_payment_event_ledger
+            set status='needs_review',last_error_code='EVENT_WORKER_ERROR',updated_at=now()
+            where source_key=${event.source_key} and status='writing'`);
+          } catch(err) {logger.error({err},"Unable to finalize payment event error");}
+        }
+        break;
+      }
+    }
+  } catch(error) {logger.error({err:error},"Payment event auto-sync unavailable");}
+  finally {running=false;}
+}
+export function startBookingSheetsPaymentEventWorker():void {
+  // A deployment without both the env opt-in and DB activation cannot write any event.
+  if(process.env.SHEETS_PAYMENT_EVENTS_ENABLED!=="true")return;
+  // Fail closed before scheduling: no DEV job may point to the production workbook.
+  try { createPaymentEventGooglePort(); }
+  catch (error) {
+    logger.error({err:error},"Payment event worker not started: spreadsheet isolation or credentials invalid");
+    return;
+  }
+  logger.info("Payment event worker opted in; DB configuration still gates all writes");
+  void tick();
+  const timer=setInterval(()=>void tick(),30000);
+  timer.unref();
+}

@@ -62,6 +62,7 @@ export default function AdminCheckoutForm() {
     amount: number;
   }>(null);
   const [membershipPaymentMethod, setMembershipPaymentMethod] = useState("qris");
+  const [membershipProofUploaded, setMembershipProofUploaded] = useState(false);
   const [membershipPaymentDate, setMembershipPaymentDate] = useState(jakartaDateOnly);
   const [membershipPaymentFile, setMembershipPaymentFile] = useState<File | null>(null);
   const [membershipPaymentBusy, setMembershipPaymentBusy] = useState(false);
@@ -196,21 +197,24 @@ export default function AdminCheckoutForm() {
   }
 
   async function submitMembershipPaymentInline() {
-    if (!membershipPaymentTarget || !membershipPaymentFile || membershipPaymentBusy || membershipPaymentDone) return;
+    if (!membershipPaymentTarget || (!membershipPaymentFile && !membershipProofUploaded) || membershipPaymentBusy || membershipPaymentDone) return;
     setMembershipPaymentBusy(true);
     try {
       const token = getToken();
       const form = new FormData();
-      form.append("proof", membershipPaymentFile);
+      if (membershipPaymentFile) form.append("proof", membershipPaymentFile);
       form.append("paymentMethod", membershipPaymentMethod);
       form.append("paymentDate", membershipPaymentDate);
-      const uploaded = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}/admin-payment-proof-upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token ?? ""}` },
-        body: form,
-      });
-      const uploadResult = await uploaded.json();
-      if (!uploaded.ok) throw Error(uploadResult.error || "Upload bukti pembayaran gagal");
+      if (!membershipProofUploaded) {
+        const uploaded = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}/admin-payment-proof-upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token ?? ""}` },
+          body: form,
+        });
+        const uploadResult = await uploaded.json();
+        if (!uploaded.ok) throw Error(uploadResult.error || "Upload bukti pembayaran gagal");
+        setMembershipProofUploaded(true);
+      }
 
       const role = getCurrentRole();
       if (role && role !== "staff") {
@@ -220,7 +224,7 @@ export default function AdminCheckoutForm() {
             Authorization: `Bearer ${token ?? ""}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ status: "active" }),
+          body: JSON.stringify({ status: "active", settlementProviderCode: "mandiri_direct" }),
         });
         const confirmedResult = await confirmed.json();
         if (!confirmed.ok) throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi membership gagal");
@@ -816,7 +820,7 @@ export default function AdminCheckoutForm() {
                       <Button
                         type="button"
                         className="w-full"
-                        disabled={!membershipPaymentFile || !membershipPaymentDate || membershipPaymentBusy}
+                        disabled={(!membershipPaymentFile && !membershipProofUploaded) || !membershipPaymentDate || membershipPaymentBusy}
                         onClick={submitMembershipPaymentInline}
                       >
                         {membershipPaymentBusy

@@ -1330,7 +1330,7 @@ function BookingDetailDrawer({
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
   onSyncCompanyInvoicePayment: (bookingId: number) => void;
-  onConfirmMembershipPayment: (membershipId: number) => void;
+  onConfirmMembershipPayment: (membershipId: number, settlementProviderCode: string) => void;
   onRejectMembershipPayment: (membershipId: number) => void;
   onClearProof: (paymentId: number) => void;
   onSyncReconciliation: (paymentId: number) => void;
@@ -2244,7 +2244,7 @@ function BookingDetailDrawer({
                           <button
                              onClick={() =>
                                pmt.isMembershipPayment
-                                 ? onConfirmMembershipPayment(pmt.membershipId)
+                                 ? onConfirmMembershipPayment(pmt.membershipId,"mandiri_direct")
                                  : pmt.isCompanyInvoicePayment
                                    ? onSyncCompanyInvoicePayment(booking.id)
                                    : onConfirmPayment(pmt.id)
@@ -3654,9 +3654,11 @@ export default function AdminBookings() {
     mutationFn: async ({
       membershipId,
       status,
+      settlementProviderCode,
     }: {
       membershipId: number;
       status: "active" | "cancelled";
+      settlementProviderCode?: string;
     }) => {
       const response = await fetch(`${API_BASE}/memberships/${membershipId}`, {
         method: "PATCH",
@@ -3664,7 +3666,7 @@ export default function AdminBookings() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...(status === "active" ? {settlementProviderCode} : {}) }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -5532,8 +5534,8 @@ export default function AdminBookings() {
            onSyncCompanyInvoicePayment={(bookingId) =>
              syncCompanyInvoicePaymentMutation.mutate(bookingId)
            }
-          onConfirmMembershipPayment={(membershipId) =>
-            membershipPaymentMutation.mutate({ membershipId, status: "active" })
+          onConfirmMembershipPayment={(membershipId, settlementProviderCode) =>
+            membershipPaymentMutation.mutate({ membershipId, status: "active", settlementProviderCode })
           }
           onRejectMembershipPayment={(membershipId) =>
             membershipPaymentMutation.mutate({ membershipId, status: "cancelled" })

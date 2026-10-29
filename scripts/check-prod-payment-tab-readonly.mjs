@@ -1,0 +1,20 @@
+import {createRequire} from 'node:module';
+const require=createRequire(new URL('../artifacts/api-server/package.json',import.meta.url));
+const {google}=require('googleapis');
+if(process.env.SHEETS_PAYMENT_EVENTS_ENABLED!=='false') throw Error('WORKER_FLAG_NOT_DISABLED');
+const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+if(!raw) throw Error('GOOGLE_CREDENTIAL_MISSING');
+const creds=JSON.parse(raw);
+creds.private_key=creds.private_key?.replace(/\\n/g,'\n');
+const auth=new google.auth.GoogleAuth({credentials:creds,scopes:['https://www.googleapis.com/auth/spreadsheets.readonly']});
+const sheets=google.sheets({version:'v4',auth});
+const id='1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E';
+const tab='PAYMENT EVENTS OKTOBER 2026';
+const meta=await sheets.spreadsheets.get({spreadsheetId:id,fields:'sheets(properties(title))'});
+const tabs=(meta.data.sheets||[]).map(x=>x.properties?.title);
+if(!tabs.includes(tab)) {console.log(JSON.stringify({ready:false,reason:'TAB_MISSING',tab,eventTabs:tabs.filter(x=>x?.startsWith('PAYMENT EVENTS'))})); process.exit(2);}
+const values=(await sheets.spreadsheets.values.get({spreadsheetId:id,range:`'${tab}'!A1:J1`,valueRenderOption:'FORMATTED_VALUE'})).data.values?.[0]||[];
+const expected=['Source Key','Source Type','Booking ID','Payment ID','Allocation ID','Company Invoice ID','Membership Payment ID','Payment Date WIB','Amount IDR','Validation Status'];
+const ready=expected.every((h,i)=>values[i]===h);
+console.log(JSON.stringify({ready,tab,headerMatches:ready,headerCount:values.length}));
+if(!ready)process.exitCode=2;
