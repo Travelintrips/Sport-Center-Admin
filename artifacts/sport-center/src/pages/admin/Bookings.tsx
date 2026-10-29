@@ -1330,7 +1330,7 @@ function BookingDetailDrawer({
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
   onSyncCompanyInvoicePayment: (bookingId: number) => void;
-  onConfirmMembershipPayment: (membershipId: number) => void;
+  onConfirmMembershipPayment: (membershipId: number, settlementProviderCode: string) => void;
   onRejectMembershipPayment: (membershipId: number) => void;
   onClearProof: (paymentId: number) => void;
   onSyncReconciliation: (paymentId: number) => void;
@@ -1386,6 +1386,7 @@ function BookingDetailDrawer({
     editablePayment?.submittedAt ??
     booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
+  const [membershipSettlementProvider,setMembershipSettlementProvider]=useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
@@ -2239,17 +2240,28 @@ function BookingDetailDrawer({
                            </button>
                          </div>
                        )}
+                      {pmt.isMembershipPayment && pmt.status === "waiting_confirmation" && pmt.proofUrl && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold">Settlement provider penerima *</label>
+                          <select value={membershipSettlementProvider} onChange={e=>setMembershipSettlementProvider(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm bg-white text-slate-900">
+                            <option value="">Pilih berdasarkan bukti settlement</option>
+                            <option value="mandiri_direct">Mandiri Direct</option>
+                            <option value="paylabs">Paylabs</option>
+                          </select>
+                          <p className="text-xs text-slate-500">Pilih jalur penerimaan sebenarnya; QRIS saja tidak menentukan provider.</p>
+                        </div>
+                      )}
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
                              onClick={() =>
                                pmt.isMembershipPayment
-                                 ? onConfirmMembershipPayment(pmt.membershipId)
+                                 ? onConfirmMembershipPayment(pmt.membershipId,membershipSettlementProvider)
                                  : pmt.isCompanyInvoicePayment
                                    ? onSyncCompanyInvoicePayment(booking.id)
                                    : onConfirmPayment(pmt.id)
                              }
-                            disabled={isUpdating}
+                            disabled={isUpdating || (pmt.isMembershipPayment && !membershipSettlementProvider)}
                             className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                           >
                             <CheckCircle2 size={13} />
@@ -3654,9 +3666,11 @@ export default function AdminBookings() {
     mutationFn: async ({
       membershipId,
       status,
+      settlementProviderCode,
     }: {
       membershipId: number;
       status: "active" | "cancelled";
+      settlementProviderCode?: string;
     }) => {
       const response = await fetch(`${API_BASE}/memberships/${membershipId}`, {
         method: "PATCH",
@@ -3664,7 +3678,7 @@ export default function AdminBookings() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${getToken() ?? ""}`,
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...(status === "active" ? {settlementProviderCode} : {}) }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -5532,8 +5546,8 @@ export default function AdminBookings() {
            onSyncCompanyInvoicePayment={(bookingId) =>
              syncCompanyInvoicePaymentMutation.mutate(bookingId)
            }
-          onConfirmMembershipPayment={(membershipId) =>
-            membershipPaymentMutation.mutate({ membershipId, status: "active" })
+          onConfirmMembershipPayment={(membershipId, settlementProviderCode) =>
+            membershipPaymentMutation.mutate({ membershipId, status: "active", settlementProviderCode })
           }
           onRejectMembershipPayment={(membershipId) =>
             membershipPaymentMutation.mutate({ membershipId, status: "cancelled" })
