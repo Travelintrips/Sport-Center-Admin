@@ -26,6 +26,7 @@ import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { isWithinGymGracePeriod } from "../services/gymMembershipEntitlement";
+import { onConfirmedMembershipPaymentX904 } from "../services/x904MembershipPaymentHook";
 
 const router = Router();
 
@@ -1363,6 +1364,15 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     // External projections are never sent before the database transaction commits.
     syncMembershipToBizportal(membership).catch(() => {});
     if (confirmedBundle) {
+      // Additive, review-only X904 receipt after atomic payment confirmation commits.
+      // Never block existing booking, accounting, or admin confirmation on this optional add-on.
+      void onConfirmedMembershipPaymentX904({
+        membershipId: membership.id,
+        startDate: membership.startDate,
+        endDate: membership.endDate,
+        membershipStatus: membership.status,
+        today: jakartaDateOnly(),
+      }).catch((err) => req.log.error({ err }, "[x904-membership] review receipt failed"));
       syncBookingRecordToBizportal(confirmedBundle.booking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );

@@ -614,4 +614,96 @@ router.get("/internal/gym-x904/diagnostics/command/:commandId", async (req,res)=
   }catch{return res.status(503).json({error:"DIAGNOSTIC_AUDIT_OR_QUERY_UNAVAILABLE"});}
 });
 
+
+/**
+ * Nonfinancial owner-approved payment simulation for X904 PIN 200 only.
+ * This intentionally does NOT insert membership payments, bookings, invoices,
+ * bank mutations, BizPortal events or Google Sheets rows.
+ * Enqueueing the physical command requires fresh authenticated SDK evidence.
+ */
+router.post("/admin/gym-x904/pin200-payment-test", adminMiddleware, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const actor=(req as any).user;
+  if(!actor || !["owner","super_admin"].includes(actor.role) ||
+     !Number.isSafeInteger(Number(actor.userId)) || Number(actor.userId)<=0)
+    return res.status(403).json({error:"AUTHORIZED_ADMIN_REQUIRED"});
+  if(process.env.GYM_X904_PIN200_NONFINANCIAL_TEST_ENABLED!=="true" ||
+     process.env.GYM_X904_USER_WRITE_ENABLED!=="true" ||
+     process.env.GYM_X904_MANUAL_ACCESS_ENABLED!=="true" ||
+     process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN!=="200")
+    return res.status(503).json({error:"NONFINANCIAL_TEST_DISABLED"});
+  const {testReference,commandType,confirmPin,simulationAccepted}=req.body??{};
+  if(typeof testReference!=="string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(testReference) ||
+     !["SUSPEND_USER","ACTIVATE_USER"].includes(commandType) ||
+     confirmPin!=="200" || simulationAccepted!==true ||
+     req.body?.amount!==undefined || req.body?.membershipId!==undefined)
+    return res.status(400).json({error:"INVALID_NONFINANCIAL_TEST_APPROVAL"});
+  const key="pin200-nonfinancial-"+createHash("sha256").update(testReference.toLowerCase()+":"+commandType).digest("hex").slice(0,48);
+  try{
+    const response=await db.transaction(async tx=>{
+      // Serialize approvals for this physical user; avoid racing another approval.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(904200)`);
+      const prior=await tx.execute(sql`SELECT command_id,state FROM sport_center.x904_user_commands
+        WHERE idempotency_key=${key} LIMIT 1`);
+      if(prior.rows.length)return {kind:"duplicate",command:prior.rows[0]};
+      const pending=await tx.execute(sql`SELECT command_id FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND user_pin='200'
+          AND state IN ('queued','claimed') LIMIT 1`);
+      if(pending.rows.length)return {kind:"held",reason:"PIN200_COMMAND_IN_PROGRESS"};
+      const identity=await tx.execute(sql`SELECT device_uid,display_name,device_role
+        FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin='200'`);
+      if(identity.rows.length!==1 || Number(identity.rows[0].device_uid)!==337 ||
+         String(identity.rows[0].display_name)!=="TEST SUSPEND X904" ||
+         Number(identity.rows[0].device_role)!==0)
+        return {kind:"held",reason:"PIN200_IDENTITY_UNVERIFIED"};
+      const snapshots=await tx.execute(sql`SELECT snapshot_id,observed_at,user_count,users
+        FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial='TDBD234200545'
+        ORDER BY snapshot_id DESC LIMIT 1`);
+      const snap=snapshots.rows[0];
+      if(!snap)return {kind:"held",reason:"SNAPSHOT_MISSING"};
+      const age=Date.now()-new Date(String(snap.observed_at)).getTime();
+      const users=Array.isArray(snap.users)?snap.users:[];
+      const matched=users.filter((u:any)=>String(u.pin)==="200" &&
+        String(u.name)==="TEST SUSPEND X904" && Number(u.role)===0);
+      if(age<0 || age>300000 || users.length!==Number(snap.user_count) ||
+         matched.length!==1 || matched[0].enabled!==true ||
+         !((commandType==="SUSPEND_USER" && Number(matched[0].group)===1) ||
+           (commandType==="ACTIVATE_USER" && Number(matched[0].group)===2)))
+        return {kind:"held",reason:"FRESH_SNAPSHOT_OR_STATE_REQUIRED"};
+      const last=await tx.execute(sql`SELECT state,completed_at,result
+        FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND user_pin='200'
+          AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
+        ORDER BY created_at DESC LIMIT 1`);
+      if(last.rows.length){
+        const previous=last.rows[0];
+        if(previous.state!=="completed" ||
+           (previous.result as any)?.readBackConfirmed!==true ||
+           !previous.completed_at ||
+           new Date(String(snap.observed_at)).getTime()<=new Date(String(previous.completed_at)).getTime())
+          return {kind:"held",reason:"PREVIOUS_COMMAND_NEEDS_VERIFIED_READBACK"};
+      }
+      const payload=JSON.stringify({expectedUid:337,expectedName:"TEST SUSPEND X904",
+        source:"NONFINANCIAL_ADMIN_PAYMENT_SIMULATION",testReference,
+        noMembershipPayment:true,noAccountingProjection:true});
+      const inserted=await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
+        (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
+        VALUES ('TDBD234200545',${commandType},'200',${payload}::jsonb,
+          ${Number(actor.userId)},${key})
+        ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
+      if(!inserted.rows.length)return {kind:"duplicate",command:null};
+      return {kind:"queued",command:inserted.rows[0]};
+    });
+    if(response.kind==="held")return res.status(409).json({error:response.reason});
+    return res.status(response.kind==="queued"?202:200).json({
+      state:response.kind,command:response.command,
+      financialTransaction:false,pin:"200",deviceUid:337});
+  }catch(reqError){
+    req.log.error({err:reqError},"[x904] isolated nonfinancial approval failed");
+    return res.status(503).json({error:"PIN200_TEST_QUEUE_UNAVAILABLE"});
+  }
+});
+
 export default router;
