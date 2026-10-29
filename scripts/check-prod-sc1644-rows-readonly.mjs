@@ -1,0 +1,16 @@
+import {createRequire} from 'node:module';
+const require=createRequire(new URL('../artifacts/api-server/package.json',import.meta.url));
+const {google}=require('googleapis');
+if(process.env.SHEETS_PAYMENT_EVENTS_ENABLED!=='false')throw Error('WORKER_GUARD_REQUIRED');
+const creds=JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON??'{}');
+creds.private_key=creds.private_key?.replace(/\\n/g,'\n');
+const auth=new google.auth.GoogleAuth({credentials:creds,scopes:['https://www.googleapis.com/auth/spreadsheets.readonly']});
+const sheets=google.sheets({version:'v4',auth});
+const spreadsheetId='1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E';
+const range="'PAYMENT EVENTS OKTOBER 2026'!A1:J4";
+const rows=(await sheets.spreadsheets.values.get({spreadsheetId,range,valueRenderOption:'UNFORMATTED_VALUE'})).data.values??[];
+const keys=rows.slice(1).map(r=>r[0]);
+const canonical=rows[1]??[];const mirrored=rows[2]??[];
+const valid=canonical[0]==='membership_payment:100' && mirrored[0]==='payment:829:booking:1691' && Number(canonical[8])===300000 && Number(mirrored[8])===300000 && keys.filter(k=>k==='membership_payment:100').length===1 && keys.filter(k=>k==='payment:829:booking:1691').length===1;
+console.log(JSON.stringify({valid,rows:rows.length,canonical:{row:2,key:canonical[0],amount:canonical[8]},duplicate:{row:3,key:mirrored[0],amount:mirrored[8]}}));
+if(!valid)process.exitCode=2;
