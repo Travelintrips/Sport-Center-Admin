@@ -390,7 +390,7 @@ export default function GoogleSheets() {
             <div className="flex justify-between gap-4"><span className="text-slate-500">Nomor booking</span><strong>{pendingSync}</strong></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">Tab tujuan (filter)</span><strong>{preview?.tab ?? "-"}</strong></div>
           </div>
-          <p className="text-amber-700 dark:text-amber-300">Hanya booking personal non-grup yang sudah lunas penuh. Pembayaran DP, membership, dan corporate akan ditolak server. Bulan tujuan sebenarnya ditentukan dari tanggal pembayaran WIB, bukan pilihan filter.</p>
+          <p className="text-amber-700 dark:text-amber-300">Booking personal lunas dan sesi anak grup dengan alokasi terverifikasi dapat diproses. DP, corporate, dan alokasi tidak lengkap ditolak server. Tab tujuan ditentukan dari tanggal pembayaran WIB.</p>
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={!!syncBusy}>Batal</AlertDialogCancel>
@@ -491,12 +491,12 @@ export default function GoogleSheets() {
               {reconciliation.duplicates?.length>0&&<p>Contoh sudah ada: {reconciliation.duplicates.slice(0,10).map((item:any)=>item.orderNumber+" ("+item.tabs.join(", ")+")").join("; ")}</p>}
               <p className="text-xs text-amber-700">Belum dapat digunakan untuk menulis: ledger pembayaran DP/grup dan uji idempotensi E2E belum selesai.</p>
             </div>}
-            <p className="text-xs text-slate-500">Pilot manual: Sync One hanya boleh untuk satu booking personal non-grup yang lunas penuh. Jangan gunakan untuk DP, membership, atau corporate.</p>
+            <p className="text-xs text-slate-500">Sync One mendukung booking personal lunas dan booking grup dengan alokasi terverifikasi. DP dan corporate tetap ditolak server.</p>
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="sheets-sync-order" className="text-sm font-medium">Sync satu nomor booking</label>
               <input id="sheets-sync-order" className="rounded-lg border px-3 py-2 text-sm" placeholder="Contoh: 1634 atau SC-1634" value={syncOrderSearch} onChange={e=>setSyncOrderSearch(e.target.value.toUpperCase().trim())}/>
-              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50" disabled={!!syncBusy || !preview.rows.some(r=>r[0]===normalizedSyncOrder)} onClick={()=>setPendingSync(normalizedSyncOrder)}>Periksa &amp; Sync One</button>
-              {syncOrderSearch && !preview.rows.some(r=>r[0]===normalizedSyncOrder) && <span className="text-xs text-amber-700">Booking tidak ditemukan pada preview bulan ini; tidak dapat diproses.</span>}
+              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50" disabled={!!syncBusy || !/^SC-[0-9]{1,12}$/.test(normalizedSyncOrder)} onClick={()=>setPendingSync(normalizedSyncOrder)}>Periksa &amp; Sync One</button>
+              {syncOrderSearch && !preview.rows.some(r=>r[0]===normalizedSyncOrder) && <span className="text-xs text-amber-700">Booking tidak ditemukan dalam preview ekspor; sesi anak booking grup tetap dapat diperiksa melalui Sync One dengan validasi server.</span>}
             </div>
             <div className="flex flex-wrap gap-2 items-center">
               <button type="button" className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" disabled={statusBusy} onClick={()=>void checkSyncStatus(preview.rows.map(r=>r[0]),true)}>{statusBusy?"Memeriksa...":"Periksa Status Sheets (Read-only)"}</button>
