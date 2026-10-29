@@ -17,6 +17,25 @@ function sqlResultRows(value: unknown): Record<string, unknown>[] {
 }
 
 const TARGET_ID = "1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E";
+// Cache verified tab names briefly across sequential PAID booking sync requests.
+// In-flight requests share one metadata lookup; a failed lookup is never cached.
+let paidTabsCache: { names: string[]; expiry: number } | null = null;
+let paidTabsPending: Promise<string[]> | null = null;
+async function cachedPaidTabs(sheets: ReturnType<typeof google.sheets>, read: <T>(operation: () => Promise<T>) => Promise<T>): Promise<string[]> {
+  if (paidTabsCache && Date.now() < paidTabsCache.expiry) return paidTabsCache.names;
+  if (!paidTabsPending) {
+    paidTabsPending = (async () => {
+      const result = await read(() => sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" }));
+      const names = (result.data.sheets ?? []).map(sheet => sheet.properties?.title)
+        .filter((name): name is string => !!name && /^PAID /.test(name));
+      if (names.length === 0 || names.length > 60) throw new Error("Invalid PAID spreadsheet metadata");
+      paidTabsCache = { names, expiry: Date.now() + 120_000 };
+      return names;
+    })().finally(() => { paidTabsPending = null; });
+  }
+  return paidTabsPending;
+}
+
 const MONTHS = ["JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"];
 export const paidTabFromWibDate = (value: Date | string): string => {
   const date = new Date(value);
@@ -661,9 +680,7 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
       }
     };
     stage = "SHEETS_METADATA";
-    const meta = await safeSheetRead(() => sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" }));
-    const paidTabs = (meta.data.sheets ?? []).map(sheet => sheet.properties?.title)
-      .filter((name): name is string => !!name && /^PAID /.test(name));
+    const paidTabs = await cachedPaidTabs(sheets, safeSheetRead);
     if (!paidTabs.includes(tab)) {
       res.status(409).json({ error: "Tab bulan pembayaran belum dibuat", targetTab: tab }); return;
     }
