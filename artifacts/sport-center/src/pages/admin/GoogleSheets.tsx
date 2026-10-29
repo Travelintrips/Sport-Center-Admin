@@ -82,7 +82,7 @@ export default function GoogleSheets() {
   const [batchBusy,setBatchBusy]=useState(false);
   const [batchMessage,setBatchMessage]=useState("");
   const allBatchCandidates=preview ? [...new Set(preview.rows.filter(row =>
-    !row[17] && Number(row[9])>0 && Number(row[18])>0 &&
+    Number(row[9])>0 && Number(row[18])>0 &&
     Number(row[9])>=Number(row[18]) && syncStatuses[row[0]]?.status==="not_synced" && eligibility[row[0]]?.eligible===true
   ).map(row=>row[0]))] : [];
   async function runPilotBatch(orders:string[]) {
@@ -487,7 +487,7 @@ export default function GoogleSheets() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className="rounded-lg border border-blue-600 px-3 py-2 text-sm font-semibold disabled:opacity-50" disabled={batchBusy||statusBusy||eligibilityBusy||!!syncBusy||!!eligibilityError||allBatchCandidates.length===0} onClick={()=>setPendingBatchOrders(allBatchCandidates)}>{batchBusy?"Sinkronisasi batch berjalan...":`Sync Semua yang Belum Sync (${allBatchCandidates.length})`}</button>
-              <span className="text-xs text-slate-500">Hanya pembayaran langsung lunas yang sudah dikonfirmasi dan lolos pemeriksaan server. Grup, corporate, membership, DP, dan status bermasalah dikecualikan otomatis.</span>
+              <span className="text-xs text-slate-500">Termasuk membership Gym yang lunas dan terkonfirmasi. Booking grup/corporate, DP dan transaksi ambigu tetap dikecualikan.</span>
             </div>
             {eligibilityError&&<p role="alert" className="text-sm text-red-600">{eligibilityError}</p>}
               {preview&&<p className="text-xs text-slate-500">Kandidat layak: {allBatchCandidates.length} dari {preview.rows.length} booking preview.</p>}

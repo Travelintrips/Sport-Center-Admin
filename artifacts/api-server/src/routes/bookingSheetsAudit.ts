@@ -367,17 +367,21 @@ router.post("/admin/google-sheets/sync-eligibility", adminMiddleware, async (req
     const rows=sqlResultRows(await db.execute(sql`
       select b.order_number,b.group_ref,b.payer_type,b.membership_id,b.membership_payment_id,
         coalesce(b.grand_total,b.total_price)::numeric as due,
+        max(mp.status) as membership_status,max(mp.confirmed_at) as membership_confirmed,
+        max(mp.amount)::numeric as membership_amount,
         count(s.source_key)::integer as event_count,
         count(s.source_key) filter(where s.source_type='direct' and s.validation_status='CANDIDATE')::integer as valid_direct_count,
         coalesce(max(s.amount) filter(where s.source_type='direct' and s.validation_status='CANDIDATE'),0)::numeric as direct_amount
       from sport_center.sport_bookings b
       left join sport_center.booking_sheets_payment_sources s on s.booking_id=b.id
+      left join sport_center.sport_membership_payments mp on mp.id=b.membership_payment_id
       where b.order_number in (${sql.join(orders.map(o=>sql`${o}`),sql`,`)})
       group by b.id,b.order_number,b.group_ref,b.payer_type,b.membership_id,b.membership_payment_id,b.grand_total,b.total_price
     `));
     const items=orders.map(order=>{
       const r=rows.find(row=>row.order_number===order);
-      const reason=!r?"BOOKING_NOT_FOUND":r.group_ref||r.payer_type==="company"||r.membership_id||r.membership_payment_id?"UNSUPPORTED_BOOKING_TYPE":
+      const reason=!r?"BOOKING_NOT_FOUND":r.group_ref||r.payer_type==="company"||(r.membership_id&&!r.membership_payment_id)?"UNSUPPORTED_BOOKING_TYPE":
+        r.membership_payment_id&&(r.membership_status!=="confirmed"||!r.membership_confirmed||Number(r.membership_amount)!==Number(r.due))?"MEMBERSHIP_NOT_CONFIRMED_OR_MISMATCH":
         Number(r.event_count)!==1||Number(r.valid_direct_count)!==1?"SOURCE_NOT_SINGLE_CONFIRMED_DIRECT":
         Number(r.due)<=0||Number(r.direct_amount)<Number(r.due)?"NOT_FULLY_PAID":null;
       return {orderNumber:order,eligible:reason===null,reason};
@@ -607,8 +611,18 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     if (!booking || Number(booking.totalPrice) <= 0) { res.status(404).json({ error: "Booking berbayar tidak ditemukan" }); return; }
     // Group allocation, installment, corporate, and membership bookings require
     // their own event-to-row accounting rules. Never silently include them in pilot.
-    if (booking.groupRef || booking.payerType === "company" || booking.membershipId || booking.membershipPaymentId) {
+    if (booking.groupRef || booking.payerType === "company" || (booking.membershipId && !booking.membershipPaymentId)) {
       res.status(409).json({ error: "Booking grup/corporate/membership belum didukung Sync One" }); return;
+    }
+    if (booking.membershipPaymentId) {
+      const canonical=sqlResultRows(await db.execute(sql`
+        select status,amount,confirmed_at from sport_center.sport_membership_payments
+        where id=${booking.membershipPaymentId} limit 1
+      `))[0];
+      if(canonical?.status!=="confirmed" || !canonical.confirmed_at ||
+        Number(canonical.amount)!==Number(booking.grandTotal??booking.totalPrice)){
+        res.status(409).json({error:"Pembayaran membership belum terkonfirmasi atau nominal berbeda"});return;
+      }
     }
     stage = "SOURCE_LOOKUP";
     const sourcesRaw = await db.execute(sql`
