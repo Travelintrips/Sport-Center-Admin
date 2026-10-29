@@ -1,3 +1,4 @@
+import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport } from "../services/x904LanWaNotifications";
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
@@ -613,6 +614,12 @@ export function startScheduler(): void {
     dispatchX904OneTimeReport().catch(err =>
       logger.error({err}, "[scheduler] X904 one-time report WhatsApp failed"));
   }, 15 * 1000);
+
+  // Safe, explicitly enabled PIN-200-only command reconciliation. Disabled by default.
+  setInterval(() => {
+    processX904AutomaticCommands().catch(err =>
+      logger.error({err},"[scheduler] X904 automatic command reconciliation failed"));
+  }, 60 * 1000);
 
   // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
