@@ -6,9 +6,19 @@ import {resolvePaidX904Automation} from "./gymMembershipEntitlement";
 /** Only explicitly allowlisted machine identities may receive automated commands. */
 export async function processX904AutomaticCommands(): Promise<void> {
   if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
+  // Roll out to verified members only under a separate explicit opt-in.
+  // Existing production configuration remains single-PIN until approved.
+  const allVerified=process.env.GYM_X904_AUTOMATIC_SCOPE==="all_verified";
   const pins=(process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS??"").split(",").map(x=>x.trim()).filter(Boolean);
-  // Explicit single-user rollout only; no bulk access mutations.
-  if(pins.length!==1 || !/^[0-9]{1,8}$/.test(pins[0]))return;
+  if(!allVerified && (pins.length!==1 || !/^[0-9]{1,8}$/.test(pins[0])))return;
+  // Only one outstanding automatic machine mutation at a time.
+  if(allVerified) {
+    const outstanding=await db.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+      WHERE device_serial='TDBD234200545'
+        AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
+        AND state IN ('queued','claimed') LIMIT 1`);
+    if(outstanding.rows.length)return;
+  }
   const actor=Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
   if(!Number.isSafeInteger(actor)||actor<=0)return;
   // A command must be attributable to the dedicated non-login system identity.
@@ -55,9 +65,17 @@ export async function processX904AutomaticCommands(): Promise<void> {
         JOIN sport_center.gym_x904_member_mapping mp ON mp.membership_id=m.id AND mp.status='verified'
         JOIN sport_center.gym_x904_lan_users u ON u.device_serial=mp.device_serial AND u.user_pin=mp.user_pin
         WHERE m.id=${membershipId} AND mp.device_serial='TDBD234200545'
-          AND mp.user_pin=${pins[0]}`);
+          ${allVerified ? sql`` : sql`AND mp.user_pin=${pins[0]}`}`);
       if(candidates.rows.length!==1)return;
       const m=candidates.rows[0];
+      const pin=String(m.user_pin);
+      if(!/^[0-9]{1,8}$/.test(pin))return;
+      if(allVerified) {
+        // A machine PIN must belong to exactly one verified membership.
+        const owners=await tx.execute(sql`SELECT count(*)::int AS count FROM sport_center.gym_x904_member_mapping
+          WHERE device_serial='TDBD234200545' AND status='verified' AND user_pin=${pin}`);
+        if(Number(owners.rows[0]?.count)!==1)return;
+      }
       if(!Number.isSafeInteger(Number(m.device_uid)) || Number(m.device_uid)<=0 ||
         !String(m.display_name).trim() || Number(m.device_role)!==0)return;
       const payments=await tx.execute(sql`SELECT p.id,p.period_start,p.period_end,p.status,p.amount,
@@ -81,7 +99,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
       if(snap.rows.length!==1)return;
       const x=snap.rows[0],users=Array.isArray(x.users)?x.users:[],age=Date.now()-new Date(String(x.observed_at)).getTime();
       if(age<0||age>300000||users.length!==Number(x.user_count))return;
-      const entries=users.filter((v:any)=>String(v.pin)===pins[0]&&String(v.name)===String(m.display_name)&&Number(v.role)===0);
+      const entries=users.filter((v:any)=>String(v.pin)===pin&&String(v.name)===String(m.display_name)&&Number(v.role)===0);
       if(entries.length!==1||entries[0].enabled!==true)return;
       const group=Number(entries[0].group);
       const command=entitlement==="active"&&group===2?"ACTIVATE_USER":entitlement==="suspended"&&group===1?"SUSPEND_USER":null;
@@ -94,7 +112,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
         return;
       }
       const previous=await tx.execute(sql`SELECT state,completed_at,result FROM sport_center.x904_user_commands
-        WHERE device_serial='TDBD234200545' AND user_pin=${pins[0]}
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
           AND command_type IN ('SUSPEND_USER','ACTIVATE_USER')
         ORDER BY created_at DESC LIMIT 1`);
       if(previous.rows.length){
@@ -103,17 +121,24 @@ export async function processX904AutomaticCommands(): Promise<void> {
           !last.completed_at || new Date(String(x.observed_at)).getTime()<=new Date(String(last.completed_at)).getTime())return;
       }
       const pending=await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands WHERE device_serial='TDBD234200545'
-        AND user_pin=${pins[0]} AND state IN ('queued','claimed') LIMIT 1`);
+        AND user_pin=${pin} AND state IN ('queued','claimed') LIMIT 1`);
       if(pending.rows.length)return;
-      const key="x904auto_"+createHash("sha256").update(String(event.rows[0].event_key)+":"+command+":"+pins[0]).digest("hex").slice(0,44);
+      const key="x904auto_"+createHash("sha256").update(String(event.rows[0].event_key)+":"+command+":"+pin).digest("hex").slice(0,44);
       const payload=JSON.stringify({expectedUid:Number(m.device_uid),expectedName:String(m.display_name),source:"AUTO_MEMBERSHIP_PAYMENT",membershipId,eventId:Number(ev.event_id)});
       await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
-        VALUES ('TDBD234200545',${command},${pins[0]},${payload}::jsonb,${actor},${key})
+        VALUES ('TDBD234200545',${command},${pin},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
       // Keep pending until the device has executed and confirmed read-back.
       // Next worker cycle resolves the event against its actual machine command.
 
     });
+    if(allVerified) {
+      // Never create a second machine command while the first awaits VMSC.
+      const queued=await db.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
+          AND state IN ('queued','claimed') LIMIT 1`);
+      if(queued.rows.length)return;
+    }
   }
 }
