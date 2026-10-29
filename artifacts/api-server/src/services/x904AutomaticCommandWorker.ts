@@ -11,6 +11,15 @@ export async function processX904AutomaticCommands(): Promise<void> {
   if(pins.length!==1 || !/^[0-9]{1,8}$/.test(pins[0]))return;
   const actor=Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
   if(!Number.isSafeInteger(actor)||actor<=0)return;
+  // A command must be attributable to the dedicated non-login system identity.
+  // Do not accept a human admin/customer numeric ID from configuration.
+  const verifiedActor=await db.execute(sql`
+    SELECT id FROM sport_center.users
+     WHERE id=${actor} AND name='X904 AUTOMATION SERVICE'
+       AND registration_source='system_x904_automation'
+       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL
+  `);
+  if(verifiedActor.rows.length!==1)return;
   const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
   const events=await db.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
     WHERE state='pending' ORDER BY event_id LIMIT 20`);
