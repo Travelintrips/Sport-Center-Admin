@@ -685,13 +685,21 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
       res.status(409).json({ error: "Tab bulan pembayaran belum dibuat", targetTab: tab }); return;
     }
     stage = "SHEETS_DUPLICATE_READ";
-    const data = await Promise.all(paidTabs.map(async name => ({
+    // One batchGet instead of simultaneous requests for every historical PAID tab.
+    // Keep scanning all tab columns to detect cross-month duplicates safely.
+    const duplicateRanges = paidTabs.map(name => `'${name.replace(/'/g,"''")}'!A1:A10000`);
+    const duplicateResult = await safeSheetRead(() => sheets.spreadsheets.values.batchGet({
+      spreadsheetId: TARGET_ID,
+      ranges: duplicateRanges,
+      valueRenderOption: "FORMATTED_VALUE",
+    }));
+    if ((duplicateResult.data.valueRanges?.length ?? 0) !== paidTabs.length) {
+      throw new Error("Sheets duplicate scan returned incomplete tabs");
+    }
+    const data = paidTabs.map((name, index) => ({
       name,
-      values: (await safeSheetRead(() => sheets.spreadsheets.values.get({
-        spreadsheetId: TARGET_ID, range: `'${name.replace(/'/g,"''")}'!A1:A10000`,
-        valueRenderOption: "FORMATTED_VALUE",
-      }))).data.values ?? [],
-    })));
+      values: duplicateResult.data.valueRanges?.[index]?.values ?? [],
+    }));
     const found = data.flatMap(item => item.values
       .map((row, index) => String(row[0] ?? "").trim() === orderNumber ? {tab: item.name, row: index + 1} : null)
       .filter((v): v is {tab:string;row:number} => v !== null));
