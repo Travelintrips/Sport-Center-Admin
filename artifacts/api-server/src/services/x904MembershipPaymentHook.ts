@@ -2,6 +2,7 @@ import { db, membershipPaymentsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { planX904MembershipReconciliation } from "./x904MembershipReconciliation";
 import { recordX904MembershipReconciliation } from "./x904MembershipReconciliationWorker";
+import { queueConfirmedX904DevTest } from "./x904PaymentTestQueue";
 
 /**
  * Persist a payment-to-X904 reconciliation receipt after canonical confirmation.
@@ -75,9 +76,14 @@ export async function onConfirmedMembershipPaymentX904(input: {
     identity: null,
   });
 
-  return recordX904MembershipReconciliation({
+  const receipt = await recordX904MembershipReconciliation({
     membershipId: input.membershipId,
     deviceSerial: "TDBD234200545",
     plan,
   });
+  // Explicit DEV-only test seam; never turn on for production traffic.
+  if (process.env.NODE_ENV !== "production" && process.env.GYM_X904_PAYMENT_TEST_QUEUE_ENABLED === "true") {
+    await queueConfirmedX904DevTest({membershipId:input.membershipId,eventKey:plan.eventKey,entitlement:plan.entitlement});
+  }
+  return receipt;
 }
