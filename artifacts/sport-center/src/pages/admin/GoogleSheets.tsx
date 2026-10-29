@@ -175,6 +175,22 @@ export default function GoogleSheets() {
 
   const [readiness,setReadiness] = useState<{tab:string;ready:boolean;reason:string|null;expectedHeaders?:string[];headerRow?:number|null;populatedFirstColumn?:number}|null>(null);
   const [readinessBusy,setReadinessBusy] = useState(false);
+  const [paymentEventCheck,setPaymentEventCheck] = useState<{tab?:string;ready:boolean;reason?:string|null;writeEnabled?:boolean}|null>(null);
+  const [paymentEventCheckBusy,setPaymentEventCheckBusy] = useState(false);
+  const [paymentEventCheckError,setPaymentEventCheckError] = useState("");
+  async function checkPaymentEventConnection() {
+    setPaymentEventCheckBusy(true);setPaymentEventCheck(null);setPaymentEventCheckError("");
+    try {
+      const response=await fetch("/api/admin/google-sheets/payment-event-readiness?"+new URLSearchParams({month}),{
+        headers:{Authorization:`Bearer ${getToken()}`},
+      });
+      const result=await response.json();
+      if(!response.ok)throw new Error(response.status===401?"Sesi admin tidak dikenali. Login ulang ke Admin Sport Center.":`HTTP ${response.status}: ${result.reason||result.error||"Pemeriksaan koneksi gagal"}`);
+      setPaymentEventCheck(result);
+    }catch(error){setPaymentEventCheckError(error instanceof Error?error.message:"Tidak dapat memeriksa koneksi");}
+    finally{setPaymentEventCheckBusy(false);}
+  }
+
   const [pendingHeader,setPendingHeader]=useState(false);
   const [headerBusy,setHeaderBusy]=useState(false);
   const [headerMessage,setHeaderMessage]=useState("");
@@ -352,6 +368,20 @@ export default function GoogleSheets() {
               <tbody>{(audit.tabs || []).map((tab:any)=><tr key={tab.name} className="border-b"><td className="p-2 font-medium">{tab.name}</td><td className="p-2">{tab.sampleHeaders?.length || 0}</td><td className="p-2">{tab.formulaCountInFirst3Rows}</td><td className="p-2">{tab.sampleHeaders?.some((r:string[])=>r[0]==="Order Number")?"Terdeteksi":"Perlu mapping"}</td></tr>)}</tbody>
             </table></div>
 
+          </div>}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-lg">Uji Koneksi Payment Events (hanya baca)</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-slate-500">Memeriksa koneksi aplikasi Hostinger ke Google Sheets pembayaran untuk bulan yang dipilih. Tidak menambah baris dan tidak mengaktifkan auto-sync.</p>
+          <button type="button" onClick={checkPaymentEventConnection} disabled={paymentEventCheckBusy} className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">{paymentEventCheckBusy?"Menguji koneksi...":"Uji Koneksi Payment Events"}</button>
+          {paymentEventCheckError&&<p role="alert" className="text-sm text-red-600">GAGAL: {paymentEventCheckError}</p>}
+          {paymentEventCheck&&<div role="status" className="text-sm space-y-1">
+            <p><strong>{paymentEventCheck.ready?"PASS — koneksi dan 10 header valid":"BELUM SIAP — periksa konfigurasi atau header"}</strong></p>
+            <p>Tab: {paymentEventCheck.tab||"Tidak diketahui"}</p>
+            {paymentEventCheck.reason&&<p>Alasan: {paymentEventCheck.reason}</p>}
+            <p>Pengujian ini tidak menulis data ke spreadsheet.</p>
           </div>}
         </CardContent>
       </Card>
