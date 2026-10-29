@@ -17,6 +17,9 @@ export async function queueConfirmedX904DevTest(input: {
   const requestedBy = Number(process.env.GYM_X904_PAYMENT_TEST_REQUESTED_BY);
   if (!Number.isSafeInteger(requestedBy) || requestedBy <= 0 ||
       !/^[a-f0-9]{64}$/.test(input.eventKey)) return "held";
+  // DEV has no authenticated SDK snapshot receiver yet. Do not attempt a
+  // missing-table lookup or confuse a receipt with a physical command.
+  if (process.env.GYM_X904_DEV_AUTHENTICATED_SNAPSHOT_READY !== "true") return "held";
   return db.transaction(async tx => {
     // If DEV lacks a real SDK snapshot, fail closed; never fabricate one.
     // Require canonical confirmed payment, exactly one booking,
