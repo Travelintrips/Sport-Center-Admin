@@ -45,28 +45,49 @@ async function expireOverdueMemberships(): Promise<void> {
     }).from(gymMembershipsTable)
       .where(inArray(gymMembershipsTable.status, ["active", "expired"]));
 
+    // Fetch canonical finance records in two bounded queries rather than 2*N
+    // sequential remote roundtrips. Legacy production runtimes intermittently
+    // fail individual reads under connection pressure.
+    if (!memberships.length) return;
+    const memberIds = memberships.map(m => m.id);
+    const allPayments = await db.select({
+      id: membershipPaymentsTable.id,
+      membershipId: membershipPaymentsTable.membershipId,
+      status: membershipPaymentsTable.status,
+      periodStart: membershipPaymentsTable.periodStart,
+      periodEnd: membershipPaymentsTable.periodEnd,
+      amount: membershipPaymentsTable.amount,
+    }).from(membershipPaymentsTable)
+      .where(inArray(membershipPaymentsTable.membershipId, memberIds));
+    const allFinancialBookings = await db.select({
+      id: bookingsTable.id,
+      membershipId: bookingsTable.membershipId,
+      membershipPaymentId: bookingsTable.membershipPaymentId,
+      status: bookingsTable.status,
+    }).from(bookingsTable)
+      .where(and(inArray(bookingsTable.membershipId, memberIds),
+        eq(bookingsTable.source, "gym_membership_payment")));
+    const paymentRowsByMember = new Map<number, typeof allPayments>();
+    const bookingRowsByMember = new Map<number, typeof allFinancialBookings>();
+    for (const payment of allPayments) {
+      const rows = paymentRowsByMember.get(payment.membershipId) ?? [];
+      rows.push(payment);
+      paymentRowsByMember.set(payment.membershipId, rows);
+    }
+    for (const booking of allFinancialBookings) {
+      if (booking.membershipId == null) continue;
+      const rows = bookingRowsByMember.get(booking.membershipId) ?? [];
+      rows.push(booking);
+      bookingRowsByMember.set(booking.membershipId, rows);
+    }
+
     let suspended = 0;
     let reactivated = 0;
     let heldForReview = 0;
     for (const member of memberships) {
       try {
-      const payments = await db.select({
-        id: membershipPaymentsTable.id,
-        status: membershipPaymentsTable.status,
-        periodStart: membershipPaymentsTable.periodStart,
-        periodEnd: membershipPaymentsTable.periodEnd,
-        amount: membershipPaymentsTable.amount,
-      }).from(membershipPaymentsTable)
-        .where(eq(membershipPaymentsTable.membershipId, member.id));
-
-      // Reconcile renewal bookings per member, not by global payment completeness.
-      const financialBookings = await db.select({
-        id: bookingsTable.id,
-        membershipPaymentId: bookingsTable.membershipPaymentId,
-        status: bookingsTable.status,
-      }).from(bookingsTable)
-        .where(and(eq(bookingsTable.membershipId, member.id),
-          eq(bookingsTable.source, "gym_membership_payment")));
+      const payments = paymentRowsByMember.get(member.id) ?? [];
+      const financialBookings = bookingRowsByMember.get(member.id) ?? [];
 
       const canonicalIds = new Set(payments.map(p => p.id));
       const hasUnlinkedFinancialBooking = financialBookings.some(b =>
