@@ -58,6 +58,11 @@ on:
         required: false
         type: boolean
         default: false
+      audit_prod_paid_oct_count:
+        description: "Read-only count and unique keys of PAID OKTOBER 2026"
+        required: false
+        type: boolean
+        default: false
       verify_sc1300_prod_paid_rows:
         description: "Read-only inspect SC-1300 across PAID tabs"
         required: false
@@ -151,6 +156,17 @@ jobs:
           trap 'rm -f "$f"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-prod-payment-tab-readonly.mjs
+
+      - name: Audit PAID October unique booking count (read-only)
+        if: ${{ inputs.audit_prod_paid_oct_count == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/paidoct.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/audit-prod-paid-oct-count.mjs
 
       - name: Inspect SC-1300 actual PAID sheet rows (read-only)
         if: ${{ inputs.verify_sc1300_prod_paid_rows == true }}
