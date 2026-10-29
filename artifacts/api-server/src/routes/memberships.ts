@@ -12,7 +12,7 @@ import {
   bookingHistoryTable,
   facilitiesTable,
 } from "@workspace/db";
-import { eq, and, ilike, desc, inArray, or } from "drizzle-orm";
+import { eq, and, ilike, desc, inArray, or, sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import {
   syncMembershipToBizportal,
