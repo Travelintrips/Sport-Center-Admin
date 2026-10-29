@@ -1321,6 +1321,20 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         const [updatedMembership] = await tx.update(gymMembershipsTable).set(data)
           .where(eq(gymMembershipsTable.id, id)).returning();
         if (!updatedMembership || !paymentBooking) throw new Error("MEMBERSHIP_ATOMIC_CONFIRM_FAILED");
+        // Durable membership-to-X904 receipt in the SAME payment transaction.
+        // Do not enqueue physical commands or touch other mapped users here.
+        await tx.execute(sql`
+          INSERT INTO sport_center.x904_automatic_entitlement_events
+            (membership_id,payment_id,reason,event_key)
+          SELECT ${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
+            ${"x904-payment-confirmed-" + updatedPayment.id}
+          WHERE EXISTS (
+            SELECT 1 FROM sport_center.gym_x904_member_mapping
+            WHERE membership_id=${id} AND status='verified'
+              AND device_serial='TDBD234200545'
+          )
+          ON CONFLICT (event_key) DO NOTHING
+        `);
         return { membership: updatedMembership, payment: updatedPayment, booking: paymentBooking, confirmedAt };
       });
       membership = result.membership;
