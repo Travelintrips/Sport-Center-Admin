@@ -238,8 +238,8 @@ function membershipBookingStatus(
 }
 
 function membershipTaxBreakdown(amount: number) {
-  const dpp = Math.round(amount / 1.11);
-  return { dpp, ppnAmount: amount - dpp };
+  // Gym memberships are personal transactions: no PPN/PPH is collected.
+  return { dpp: amount, ppnAmount: 0 };
 }
 
 async function getGymFacility(executor: DbExecutor = db) {
@@ -313,7 +313,7 @@ async function ensureMembershipPaymentBooking(
     apDiscountAmount: "0",
     grandTotal: String(amount),
     dpp: String(dpp),
-    ppnRate: "11",
+    ppnRate: "0",
     ppnAmount: String(ppnAmount),
     status,
     paymentRequiredNow: !isConfirmed,
@@ -994,7 +994,27 @@ router.post("/memberships", async (req, res) => {
     await syncToPublic(membership);
     res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice), paymentProofToken: createMembershipProofToken(membership.id, payment.id) });
   } catch (err) {
+    if (process.env.SPORT_CENTER_E2E_PAYMENT_EVENTS === "true") {
+      const e = err as any;
+      const root = e?.cause ?? e;
+      const message = String(root?.message ?? "");
+      const category = /does not exist/i.test(message) ? "MISSING_OBJECT"
+        : /duplicate|constraint|violates/i.test(message) ? "CONSTRAINT"
+        : /permission denied/i.test(message) ? "PERMISSION"
+        : /transaction/i.test(message) ? "TRANSACTION"
+        : "OTHER";
+      console.error("MEMBERSHIP_DEV_DIAG", JSON.stringify({
+        code: String(root?.code ?? "UNKNOWN").slice(0, 12),
+        category,
+        object: String(root?.table ?? root?.constraint ?? "").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 64),
+      }));
+    }
     req.log.error({ err }, "Create membership error");
+    if (process.env.SPORT_CENTER_E2E_PAYMENT_EVENTS === "true" && process.env.NODE_ENV === "development") {
+      const e = err as any;
+      res.status(500).json({ error: "DEV_MEMBERSHIP_CREATION_FAILED", dbCode: String(e?.cause?.code ?? e?.code ?? "unknown"), dbConstraint: String(e?.cause?.constraint ?? e?.constraint ?? "unknown").slice(0,80) });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1190,7 +1210,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
 
-    const { status, notes, startDate, endDate, settlementProviderCode } = req.body ?? {};
+    const { status, notes, startDate, endDate } = req.body ?? {};
     const data: {
       status?: typeof existing.status;
       notes?: string | null;
@@ -1215,24 +1235,19 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           res.status(403).json({error:"Staff hanya dapat mengirim bukti untuk verifikasi; konfirmasi membership memerlukan role non-staff yang berwenang."});
           return;
         }
-        const provider = String(settlementProviderCode ?? paymentToConfirm.settlementProviderCode ?? "").trim().toLowerCase();
-        if (provider && !["mandiri_direct", "paylabs"].includes(provider)) {
-          res.status(400).json({error:"Provider settlement tidak dikenal"}); return;
-        }
-        // QRIS may settle through Mandiri or Paylabs; never derive processor from QRIS alone.
-        // A missing provider is accepted only when the database resolves exactly one
-        // owner-approved settlement config for the company and payment date.
-        if (provider) {
-          await db.update(membershipPaymentsTable)
-            .set({ settlementProviderCode: provider })
-            .where(and(eq(membershipPaymentsTable.id, paymentToConfirm.id),
-              eq(membershipPaymentsTable.status, "waiting_confirmation")));
-        }
         if (!paymentToConfirm.paymentProofUrl || !paymentToConfirm.paymentMethod || !["qris","transfer"].includes(paymentToConfirm.paymentMethod)) {
           res.status(409).json({error:"Konfirmasi memerlukan bukti dan metode pembayaran yang telah dikirim untuk verifikasi"});
           return;
         }
 
+        // Sport Center membership accepts Mandiri QRIS and Mandiri bank transfer only.
+        // An omitted provider is safe here because the merchant has a single authorized settlement path.
+        const requestedProvider = String(req.body?.settlementProviderCode ?? "mandiri_direct").trim().toLowerCase();
+        if (requestedProvider !== "mandiri_direct") {
+          res.status(409).json({ error: "Provider tersebut tidak aktif untuk pembayaran membership Sport Center" });
+          return;
+        }
+        paymentToConfirm = { ...paymentToConfirm, settlementProviderCode: "mandiri_direct" };
         data.status = "active";
         data.startDate = paymentToConfirm.periodStart;
         data.endDate = paymentToConfirm.periodEnd;
@@ -1273,10 +1288,50 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       return;
     }
 
-    await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
-    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
-    if (!membership) { res.status(404).json({ error: "Not found" }); return; }
-
+    let membership: typeof existing;
+    let confirmedBundle: {
+      payment: typeof membershipPaymentsTable.$inferSelect;
+      booking: typeof bookingsTable.$inferSelect;
+      confirmedAt: Date;
+    } | null = null;
+    if (paymentToConfirm) {
+      // Trigger-driven payment mirroring, canonical payment, booking and entitlement
+      // must commit together. A failed provider/booking trigger rolls back ALL changes.
+      const result = await db.transaction(async (tx) => {
+        const [current] = await tx.select().from(gymMembershipsTable)
+          .where(eq(gymMembershipsTable.id, id)).for("update").limit(1);
+        const [pending] = await tx.select().from(membershipPaymentsTable)
+          .where(and(eq(membershipPaymentsTable.id, paymentToConfirm!.id), eq(membershipPaymentsTable.status, "waiting_confirmation")))
+          .for("update").limit(1);
+        if (!current || !pending) throw new Error("MEMBERSHIP_PAYMENT_STATE_CHANGED");
+        const confirmedAt = new Date();
+        const [updatedPayment] = await tx.update(membershipPaymentsTable).set({
+          status: "confirmed",
+          paymentMethod: pending.paymentMethod,
+          paymentProofUrl: pending.paymentProofUrl,
+          paymentDate: pending.paymentDate ?? jakartaDateOnly(confirmedAt),
+          confirmedAt,
+          settlementProviderCode: paymentToConfirm!.settlementProviderCode,
+          mutationKey: `SC-MBP-${pending.id}`,
+          accountingRef: `MB-${id}-P${pending.id}`,
+          updatedAt: confirmedAt,
+        }).where(eq(membershipPaymentsTable.id, pending.id)).returning();
+        // The canonical trigger executes during this update; any rejection aborts
+        // the transaction before the entitlement changes.
+        const paymentBooking = await ensureMembershipPaymentBooking(current, updatedPayment, tx);
+        const [updatedMembership] = await tx.update(gymMembershipsTable).set(data)
+          .where(eq(gymMembershipsTable.id, id)).returning();
+        if (!updatedMembership || !paymentBooking) throw new Error("MEMBERSHIP_ATOMIC_CONFIRM_FAILED");
+        return { membership: updatedMembership, payment: updatedPayment, booking: paymentBooking, confirmedAt };
+      });
+      membership = result.membership;
+      confirmedBundle = result;
+    } else {
+      await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
+      const [updatedMembership] = await db.select().from(gymMembershipsTable)
+        .where(eq(gymMembershipsTable.id, id)).limit(1);
+      if (!updatedMembership) { res.status(404).json({ error: "Not found" }); return; }
+      membership = updatedMembership;
     if ((data.startDate !== undefined || data.endDate !== undefined) && !paymentToConfirm) {
       await db
         .update(membershipPaymentsTable)
@@ -1305,69 +1360,12 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         );
     }
 
+    }
+    // External projections are never sent before the database transaction commits.
     syncMembershipToBizportal(membership).catch(() => {});
-    if (paymentToConfirm) {
-      let payment = paymentToConfirm;
-      if (!payment) {
-        let [fallbackPayment] = await db
-        .select()
-        .from(membershipPaymentsTable)
-        .where(
-          and(
-            eq(membershipPaymentsTable.membershipId, membership.id),
-            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
-          ),
-        )
-        .orderBy(desc(membershipPaymentsTable.id))
-        .limit(1);
-        payment = fallbackPayment;
-      }
-
-      if (!payment) {
-        [payment] = await db
-          .insert(membershipPaymentsTable)
-          .values({
-            membershipId: membership.id,
-            periodStart: membership.startDate,
-            periodEnd: membership.endDate,
-            months: membership.months,
-            amount: membership.totalPrice,
-            status: "pending_payment",
-            paymentMethod: membership.paymentMethod,
-            paymentProofUrl: membership.paymentProofUrl,
-          })
-          .returning();
-      }
-
-      // Canonical payment trigger requires exactly one linked booking before status becomes confirmed.
-      // Never bypass the DB guard or confirm a payment whose booking cannot be resolved.
-      await ensureMembershipPaymentBooking(membership, payment);
-      const confirmedAt = new Date();
-      const paymentDate = payment.paymentDate ?? jakartaDateOnly(confirmedAt);
-      const refNumber = `MB-${membership.id}-P${payment.id}`;
-      const mutationKey = `SC-MBP-${payment.id}`;
-      await db
-        .update(membershipPaymentsTable)
-        .set({
-          status: "confirmed",
-          paymentMethod: membership.paymentMethod,
-          paymentProofUrl: membership.paymentProofUrl,
-          paymentDate,
-          confirmedAt,
-          mutationKey,
-          accountingRef: refNumber,
-          updatedAt: confirmedAt,
-        })
-        .where(eq(membershipPaymentsTable.id, payment.id));
-
-      const [confirmedPayment] = await db
-        .select()
-        .from(membershipPaymentsTable)
-        .where(eq(membershipPaymentsTable.id, payment.id))
-        .limit(1);
-      const paymentBooking = await ensureMembershipPaymentBooking(membership, confirmedPayment!);
-      // Only record the read-only X904 receipt after the canonical booking exists.
-      // Await persistence so failures are observed; no device command is involved.
+    if (confirmedBundle) {
+      // Additive, review-only X904 receipt after atomic payment confirmation commits.
+      // Never block existing booking, accounting, or admin confirmation on this optional add-on.
       try {
         await onConfirmedMembershipPaymentX904({
           membershipId: membership.id,
@@ -1379,14 +1377,10 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       } catch (err) {
         req.log.error({ err }, "[x904-membership] review receipt failed");
       }
-
-      syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      syncBookingRecordToBizportal(confirmedBundle.booking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );
-      // Accounting is owned by the canonical sport_payments projection/outbox.
-      // Keep only the bank-mutation projection here; never create a second
-      // membership-specific journal for the same confirmed payment.
-      pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
+      pushMembershipPaymentAsBankMutation(membership, confirmedBundle.payment, confirmedBundle.confirmedAt, confirmedBundle.booking).catch(() => {});
     }
     // Also repair/sync payment bookings when an admin changes the membership
     // dates or cancels it. This keeps the order mirror consistent with the
