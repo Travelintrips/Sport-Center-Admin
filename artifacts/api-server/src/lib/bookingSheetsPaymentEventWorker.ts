@@ -31,6 +31,11 @@ async function tick():Promise<void> {
       left join sport_center.company_invoices i on c.source_type='corporate_invoice' and i.id=c.company_invoice_id
       left join sport_center.sport_membership_payments m on c.source_type='membership' and m.id=c.membership_payment_id
       where c.validation_status='CANDIDATE'
+        -- Membership financial bookings mirror the same membership payment; do not export twice.
+        and not (c.source_type in ('direct','allocation') and exists (
+          select 1 from sport_center.sport_bookings b
+          where b.id=c.booking_id and b.membership_payment_id is not null
+        ))
         -- Eligibility is the admin's confirmation, NOT the earlier bank transfer date.
         -- Keep c.payment_ts unchanged for the financial transaction date in Sheets.
         and (case
