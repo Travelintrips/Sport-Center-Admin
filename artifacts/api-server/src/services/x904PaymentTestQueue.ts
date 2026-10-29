@@ -28,6 +28,9 @@ export async function queueConfirmedX904DevTest(input: {
         AND p.amount>0 AND p.confirmed_at IS NOT NULL
       GROUP BY p.id HAVING count(b.id)=1 LIMIT 1`);
     if (!sources.rows.length) return "held";
+    // Every confirmed source must have exactly one canonical booking.
+    const total=await tx.execute(sql`SELECT count(*)::integer AS n FROM sport_center.sport_membership_payments WHERE membership_id=${input.membershipId} AND status='confirmed' AND amount>0 AND confirmed_at IS NOT NULL`);
+    if (sources.rows.length !== Number(total.rows[0]?.n)) return "held";
     const rows = await tx.execute(sql`
       SELECT map.user_pin,u.device_uid,u.display_name,u.device_role,
              a.observed_at,a.user_count,a.users
