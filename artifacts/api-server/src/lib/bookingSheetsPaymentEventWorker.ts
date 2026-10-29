@@ -23,9 +23,9 @@ async function tick():Promise<void> {
     if(!Number.isFinite(startAt.getTime()))throw new Error("INVALID_EVENT_START_AT");
     // Source events must be both confirmed and after activation; no historical backfill.
     const candidates=rows(await db.execute(sql`
-      select source_key,source_type,booking_id,payment_id,allocation_id,
-        company_invoice_id,membership_payment_id,amount::text as amount,
-        payment_date_wib::text as payment_date_wib,validation_status,payment_ts
+      select c.source_key,c.source_type,c.booking_id,c.payment_id,c.allocation_id,
+        c.company_invoice_id,c.membership_payment_id,c.amount::text as amount,
+        c.payment_date_wib::text as payment_date_wib,c.validation_status,c.payment_ts
       from sport_center.booking_sheets_payment_event_candidates c
       left join sport_center.sport_payments p on c.source_type in ('direct','allocation') and p.id=c.payment_id
       left join sport_center.company_invoices i on c.source_type='corporate_invoice' and i.id=c.company_invoice_id
