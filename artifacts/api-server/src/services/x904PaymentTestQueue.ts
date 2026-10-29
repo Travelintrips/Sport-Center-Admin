@@ -52,7 +52,7 @@ export async function queueConfirmedX904DevTest(input: {
     if (rows.rows.length !== 1) return "held";
     const x=rows.rows[0];
     const users=Array.isArray(x.users)?x.users:[];
-    const entry=users.find((v:any)=>String(v.pin)==="200" && Number(v.uid)===337 &&
+    const entry=users.find((v:any)=>String(v.pin)==="200" &&
       v.name==="TEST SUSPEND X904" && Number(v.role)===0);
     const stamp=new Date(String(x.observed_at)).getTime();
     const decision=planX904PaymentTestCommand({
