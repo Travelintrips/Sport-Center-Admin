@@ -53,6 +53,11 @@ on:
         type: boolean
         required: false
         default: false
+      repair_sc1644_prod_duplicate:
+        description: "Guarded clear only row 3 of verified SC-1644 duplicate, PROD"
+        required: false
+        type: boolean
+        default: false
       verify_sc1644_prod_rows:
         description: "Read-only exact SC-1644 source keys before repair"
         required: false
@@ -152,6 +157,19 @@ jobs:
           trap 'rm -f "$f"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-prod-sc1644-rows-readonly.mjs
+
+      - name: Guarded clear of confirmed SC-1644 duplicate row only
+        if: ${{ inputs.repair_sc1644_prod_duplicate == true }}
+        shell: bash
+        env:
+          SC1644_REPAIR_APPROVED: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/sc1644-repair.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/clear-sc1644-duplicate-prod.mjs
 
       - name: Synthetic payment event write/read/replay (DEV only)
         if: ${{ inputs.synthetic_write_replay == true }}

@@ -1,0 +1,14 @@
+import {createRequire} from 'node:module';
+const require=createRequire(new URL('../artifacts/api-server/package.json',import.meta.url));
+const {google}=require('googleapis');
+if(process.env.SC1644_REPAIR_APPROVED!=='true'||process.env.SHEETS_PAYMENT_EVENTS_ENABLED!=='false')throw Error('REPAIR_GUARD_NOT_MET');
+const creds=JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON??'{}');creds.private_key=creds.private_key?.replace(/\\n/g,'\n');
+const auth=new google.auth.GoogleAuth({credentials:creds,scopes:['https://www.googleapis.com/auth/spreadsheets']});
+const sheets=google.sheets({version:'v4',auth});
+const spreadsheetId='1ZvHAydlYhdfnDZmOCcPNKtOnj-O3-l9bY84927bYN7E';const tab='PAYMENT EVENTS OKTOBER 2026';
+const read=async()=>(await sheets.spreadsheets.values.get({spreadsheetId,range:`'${tab}'!A1:J4`,valueRenderOption:'UNFORMATTED_VALUE'})).data.values??[];
+const rows=await read();const a=rows[1]??[],b=rows[2]??[];
+if(a[0]!=='membership_payment:100'||b[0]!=='payment:829:booking:1691'||Number(a[8])!==300000||Number(b[8])!==300000)throw Error('SOURCE_ROW_MISMATCH_ABORT');
+await sheets.spreadsheets.values.clear({spreadsheetId,range:`'${tab}'!A3:J3`});
+const after=await read();if(after[1]?.[0]!=='membership_payment:100'||after[2]?.[0])throw Error('POST_CLEAR_VERIFICATION_FAILED');
+console.log(JSON.stringify({success:true,canonicalRow:2,clearedDuplicateRow:3,sourceKey:'payment:829:booking:1691',postClearVerified:true}));
