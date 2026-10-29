@@ -5,6 +5,7 @@ import { Link } from "wouter";
 import { Activity, ArrowRight, Download, Fingerprint, RefreshCw, Search, ShieldCheck, Users, Link2, DoorOpen, ScrollText, LayoutDashboard, Cpu } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import GymX904UserControl from "./GymX904UserControl";
+import GymX904Pin200Test from "./GymX904Pin200Test";
 
 interface IntegrationStatus { stored_logs?:number|null; processed_events?:number|null; pending_events?:number|null; processingLedgerReady?:boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; connectionTestedAt?: string | null; lastDurableSyncAt?: string | null; }
 interface LanStatus { synchronized: boolean; users: number; logs: number; deviceLogs?: number; lastCompleteAt?: string; }
@@ -653,7 +654,7 @@ export default function GymX904() {
       {tab === "users" && <><div className="mb-3 flex flex-wrap items-center gap-3">
         <button type="button" onClick={()=>void queryClient.invalidateQueries({queryKey:["gym-x904-lan-users"]})} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"><RefreshCw size={14}/> Muat ulang daftar tersimpan</button>
         <span className="text-xs text-muted-foreground">Memuat data database, bukan memerintahkan mesin untuk sinkronisasi baru.</span>
-      </div><GymX904UserControl key={selectedMachineUser?`${selectedMachineUser.user.device_uid}-${selectedMachineUser.action}-${selectedMachineUser.request}`:"default"} users={lanUsers?.users ?? []} initialSelection={selectedMachineUser?{user:selectedMachineUser.user,action:selectedMachineUser.action}:undefined}/></>}
+      </div><GymX904Pin200Test/><GymX904UserControl key={selectedMachineUser?`${selectedMachineUser.user.device_uid}-${selectedMachineUser.action}-${selectedMachineUser.request}`:"default"} users={lanUsers?.users ?? []} initialSelection={selectedMachineUser?{user:selectedMachineUser.user,action:selectedMachineUser.action}:undefined}/></>}
       {tab === "users" && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div><h2 className="font-semibold flex items-center gap-2"><Users size={18} />PIN yang tercatat pada log ADMS X904</h2>
         <p className="text-sm text-muted-foreground mt-1">Data nyata dari log yang sudah tersimpan di database, bukan daftar lengkap user terdaftar, bukan bukti identitas mesin. Nama, kartu, dan status enrollment memerlukan pembacaan master user dari perangkat.</p></div>
