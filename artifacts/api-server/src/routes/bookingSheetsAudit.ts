@@ -265,6 +265,32 @@ router.post("/admin/google-sheets/reconcile", adminMiddleware, async (req, res) 
     res.status(502).json({ error: "Reconciliation read failed", writeEnabled: false });
   }
 });
+// Read-only group child preview. The export route lists payment holders;
+// this supplies every confirmed allocated child, without multiplying parent revenue.
+router.get("/admin/google-sheets/group-preview",adminMiddleware,async(req,res)=>{
+  const month=String(req.query.month??"");
+  if(!MONTH_PATTERN.test(month)){res.status(400).json({error:"Bulan tidak valid"});return;}
+  try{
+    const items=sqlResultRows(await db.execute(sql`
+      select b.order_number,b.customer_name,b.customer_email,b.customer_phone,
+        b.booking_date,b.start_time,b.end_time,b.duration_hours,b.status::text as status,
+        b.notes,b.admin_notes,b.created_at,b.group_ref,b.total_price as booking_total,
+        f.name as facility_name,s.amount,s.payment_date_wib::text as payment_date_wib,
+        s.payment_id,s.allocation_id
+      from sport_center.booking_sheets_payment_sources s
+      join sport_center.sport_bookings b on b.id=s.booking_id
+      left join sport_center.sport_facilities f on f.id=b.facility_id
+      where s.source_type='allocation' and s.validation_status='CANDIDATE'
+        and b.group_ref is not null and b.group_ref<>''
+        and s.payment_date_wib >= (${month}||'-01')::date
+        and s.payment_date_wib < ((${month}||'-01')::date + interval '1 month')
+      order by b.group_ref,b.order_number
+      limit 1000
+    `));
+    res.json({month,items,readOnly:true});
+  }catch(error){req.log.error({err:error},"Group preview failed");res.status(502).json({error:"Preview booking grup gagal"});}
+});
+
 // A read-only audit of actual payment/allocation sources. Uses existing tables,
 // so PROD can diagnose partial and grouped payments before the ledger migration.
 router.get("/admin/google-sheets/payment-sources", adminMiddleware, async (req, res) => {
