@@ -775,6 +775,48 @@ export async function syncPaidBookingFromAutoQueue(orderNumber: string, log: {er
   if(!body)throw new Error("Sync One ended without response");
   return {statusCode,body};
 }
+// Read-before-ledger repair for an ambiguous post-append verification timeout.
+// Never appends, clears or changes the spreadsheet.
+router.post("/admin/google-sheets/reconcile-writing",adminMiddleware,async(req,res)=>{
+ const orderNumber=String(req.body?.orderNumber??"").trim();
+ if(!/^SC-[0-9]{1,12}$/.test(orderNumber)){res.status(400).json({error:"Nomor booking tidak valid"});return;}
+ if(!isGoogleSheetsConfigured()){res.status(503).json({error:"Google Sheets belum terkonfigurasi"});return;}
+ try{
+  const rows=sqlResultRows(await db.execute(sql`
+   select l.source_key,l.status,l.target_tab,l.amount,l.booking_id
+   from sport_center.booking_sheets_sync_ledger l
+   join sport_center.sport_bookings b on b.id=l.booking_id
+   where b.order_number=${orderNumber} and l.status='writing'
+  `));
+  if(rows.length!==1){res.status(409).json({error:"Dibutuhkan tepat satu klaim writing",count:rows.length});return;}
+  const claim=rows[0];
+  const credentials=JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+  if(typeof credentials.private_key==="string")credentials.private_key=credentials.private_key.replace(/\\n/g,"\n");
+  const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets.readonly"]});
+  const sheets=google.sheets({version:"v4",auth});
+  const meta=await sheets.spreadsheets.get({spreadsheetId:TARGET_ID,fields:"sheets(properties(title))"});
+  const tabs=(meta.data.sheets??[]).map(x=>x.properties?.title).filter((t):t is string=>!!t&&/^PAID /.test(t));
+  if(tabs.length>60||!tabs.includes(String(claim.target_tab)))throw Error("Target PAID tab missing or unsafe tab count");
+  const matches:{tab:string;row:number;amount:number}[]=[];
+  for(const tab of tabs){
+   const values=(await sheets.spreadsheets.values.get({spreadsheetId:TARGET_ID,range:`'${tab.replace(/'/g,"''")}'!A1:J10000`,valueRenderOption:"UNFORMATTED_VALUE"})).data.values??[];
+   values.forEach((v,i)=>{if(String(v[0]??"").trim()===orderNumber)matches.push({tab,row:i+1,amount:Number(v[9])});});
+  }
+  if(matches.length!==1||matches[0].tab!==claim.target_tab||matches[0].amount!==Number(claim.amount)){
+   res.status(409).json({error:"Baris unik dan nominal belum cocok; ledger tidak diubah",matches});return;
+  }
+  const verified=matches[0];
+  const updated=sqlResultRows(await db.execute(sql`
+   update sport_center.booking_sheets_sync_ledger
+   set status='written',sheet_row=${verified.row},written_at=now(),updated_at=now(),last_error_code=null
+   where source_key=${String(claim.source_key)} and status='writing' and sheet_row is null
+     and target_tab=${verified.tab} and amount=${verified.amount}
+   returning source_key,status,sheet_row
+  `));
+  if(updated.length!==1){res.status(409).json({error:"Klaim berubah selama rekonsiliasi"});return;}
+  res.json({ok:true,orderNumber,tab:verified.tab,sheetRow:verified.row,ledgerStatus:"written",appended:false});
+ }catch(error){req.log.error({err:error,orderNumber},"Sheets writing reconciliation failed");res.status(502).json({error:"Rekonsiliasi gagal; tidak dilakukan penulisan Sheet"});}
+});
 router.post("/admin/google-sheets/sync-one",adminMiddleware,syncOneHandler);
 
 router.get("/admin/google-sheets/audit", adminMiddleware, async (req, res) => {
