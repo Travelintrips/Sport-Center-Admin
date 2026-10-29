@@ -1366,17 +1366,13 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     if (confirmedBundle) {
       // Additive, review-only X904 receipt after atomic payment confirmation commits.
       // Never block existing booking, accounting, or admin confirmation on this optional add-on.
-      try {
-        await onConfirmedMembershipPaymentX904({
-          membershipId: membership.id,
-          startDate: membership.startDate,
-          endDate: membership.endDate,
-          membershipStatus: membership.status,
-          today: jakartaDateOnly(),
-        });
-      } catch (err) {
-        req.log.error({ err }, "[x904-membership] review receipt failed");
-      }
+      void onConfirmedMembershipPaymentX904({
+        membershipId: membership.id,
+        startDate: membership.startDate,
+        endDate: membership.endDate,
+        membershipStatus: membership.status,
+        today: jakartaDateOnly(),
+      }).catch((err) => req.log.error({ err }, "[x904-membership] review receipt failed"));
       syncBookingRecordToBizportal(confirmedBundle.booking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );
