@@ -49,6 +49,7 @@ async function expireOverdueMemberships(): Promise<void> {
     let reactivated = 0;
     let heldForReview = 0;
     for (const member of memberships) {
+      try {
       const payments = await db.select({
         id: membershipPaymentsTable.id,
         status: membershipPaymentsTable.status,
@@ -166,11 +167,26 @@ async function expireOverdueMemberships(): Promise<void> {
           AND device_serial='TDBD234200545')
         ON CONFLICT (event_key) DO NOTHING
       `);
+      } catch (memberError) {
+        const cause = (memberError as {cause?: {code?: string; message?: string}})?.cause;
+        logger.error({
+          membershipId: member.id,
+          error: memberError instanceof Error ? memberError.message : String(memberError),
+          dbCode: cause?.code,
+          dbCause: cause?.message?.slice(0, 400),
+        }, "[scheduler] GYM membership reconciliation row failed; continuing remaining members");
+        heldForReview++;
+      }
     }
     logger.info({ examined: memberships.length, suspended, reactivated, heldForReview },
       "[scheduler] GYM payment entitlement reconciliation");
   } catch (err) {
-    logger.error({ err }, "[scheduler] GYM payment entitlement reconciliation error");
+    const cause = (err as {cause?: {code?: string; message?: string}})?.cause;
+    logger.error({
+      error: err instanceof Error ? err.message : String(err),
+      dbCode: cause?.code,
+      dbCause: cause?.message?.slice(0, 400),
+    }, "[scheduler] GYM payment entitlement reconciliation error");
   }
 }
 
