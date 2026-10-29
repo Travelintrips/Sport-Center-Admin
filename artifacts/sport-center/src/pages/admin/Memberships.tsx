@@ -250,6 +250,18 @@ export default function AdminMemberships() {
   const today = todayStr();
 
   const { data: memberships, isLoading } = useListMemberships({});
+  const { data: autoSuspendEvidence } = useQuery<{confirmed: Array<{membership_id: number; command_id: string; completed_at: string}>}>({
+    queryKey: ["x904-confirmed-auto-suspensions"],
+    queryFn: async () => {
+      const response = await fetch(`${API}/admin/gym-x904/confirmed-auto-suspensions`, { headers: authHeaders() });
+      if (!response.ok) throw new Error("X904 status unavailable");
+      return response.json();
+    },
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const confirmedSuspendedIds = new Set((autoSuspendEvidence?.confirmed ?? []).map(item => Number(item.membership_id)));
+
 
   // A successful admin registration/renewal opens its exact Member Details record.
   // Do not infer identity from name/phone: those may be duplicated.
@@ -640,6 +652,13 @@ export default function AdminMemberships() {
                     </td>
                     <td className="px-4 py-4">
                       <StatusBadge status={m.status} />
+                      {confirmedSuspendedIds.has(Number(m.id)) && (
+                        <div className="mt-1">
+                          <Badge className="bg-red-100 text-red-800 border-red-300" title="Perintah suspend otomatis selesai dan snapshot mesin X904 sesudahnya mengonfirmasi grup 2">
+                            Suspend Otomatis X904
+                          </Badge>
+                        </div>
+                      )}
                       {(m as any).paymentMethod && (
                         <div className="text-xs text-muted-foreground mt-1">
                           {(m as any).paymentMethod === "qris" ? "QRIS" : "Transfer"}
