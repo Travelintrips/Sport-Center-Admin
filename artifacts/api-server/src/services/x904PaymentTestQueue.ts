@@ -14,9 +14,12 @@ export async function queueConfirmedX904DevTest(input: {
   if (process.env.NODE_ENV === "production" ||
       process.env.GYM_X904_PAYMENT_TEST_QUEUE_ENABLED !== "true" ||
       process.env.GYM_X904_MANUAL_ACCESS_TEST_PIN !== "200") return "disabled";
-  if (!Number.isSafeInteger(input.membershipId) || input.membershipId <= 0) return "held";
+  const requestedBy = Number(process.env.GYM_X904_PAYMENT_TEST_REQUESTED_BY);
+  if (!Number.isSafeInteger(requestedBy) || requestedBy <= 0 ||
+      !/^[a-f0-9]{64}$/.test(input.eventKey)) return "held";
   return db.transaction(async tx => {
-    // DEV-only: require canonical confirmed payment, exactly one booking,
+    // If DEV lacks a real SDK snapshot, fail closed; never fabricate one.
+    // Require canonical confirmed payment, exactly one booking,
     // owner-verified mapping and a fresh complete machine observation.
     const sources = await tx.execute(sql`
       SELECT p.id FROM sport_center.sport_membership_payments p
@@ -60,7 +63,7 @@ export async function queueConfirmedX904DevTest(input: {
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
       VALUES ('TDBD234200545',${decision.commandType},'200',
         ${JSON.stringify({expectedUid:337,expectedName:"TEST SUSPEND X904",source:"DEV_PAYMENT_TEST",membershipId:input.membershipId})}::jsonb,
-        NULL,${decision.idempotencyKey})
+        ${requestedBy},${decision.idempotencyKey})
       ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
     return result.rows.length ? "queued" : "duplicate";
   });
