@@ -647,8 +647,21 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     if (typeof creds.private_key === "string") creds.private_key = creds.private_key.replace(/\\n/g, "\n");
     const auth = new google.auth.GoogleAuth({ credentials: creds, scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
     const sheets = google.sheets({ version: "v4", auth });
+    // Retry only read-only Google Sheets requests, never the append/write call.
+    // Temporary upstream 429/500/502/503/504 errors must not strand a booking unnecessarily.
+    const safeSheetRead = async <T>(operation: () => Promise<T>): Promise<T> => {
+      for (let attempt = 0; ; attempt++) {
+        try { return await operation(); }
+        catch (error) {
+          const e = error as {code?: number;response?: {status?: number}};
+          const status = Number(e?.response?.status ?? e?.code ?? 0);
+          if (attempt >= 2 || ![429,500,502,503,504].includes(status)) throw error;
+          await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+        }
+      }
+    };
     stage = "SHEETS_METADATA";
-    const meta = await sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" });
+    const meta = await safeSheetRead(() => sheets.spreadsheets.get({ spreadsheetId: TARGET_ID, fields: "sheets(properties(title))" }));
     const paidTabs = (meta.data.sheets ?? []).map(sheet => sheet.properties?.title)
       .filter((name): name is string => !!name && /^PAID /.test(name));
     if (!paidTabs.includes(tab)) {
@@ -657,10 +670,10 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     stage = "SHEETS_DUPLICATE_READ";
     const data = await Promise.all(paidTabs.map(async name => ({
       name,
-      values: (await sheets.spreadsheets.values.get({
+      values: (await safeSheetRead(() => sheets.spreadsheets.values.get({
         spreadsheetId: TARGET_ID, range: `'${name.replace(/'/g,"''")}'!A1:A10000`,
         valueRenderOption: "FORMATTED_VALUE",
-      })).data.values ?? [],
+      }))).data.values ?? [],
     })));
     const found = data.flatMap(item => item.values
       .map((row, index) => String(row[0] ?? "").trim() === orderNumber ? {tab: item.name, row: index + 1} : null)
@@ -677,9 +690,9 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
       res.json({ ok: true, alreadyPresent: true, locations: found, written: false, targetTab: tab }); return;
     }
     stage = "SHEETS_HEADER_READ";
-    const header = await sheets.spreadsheets.values.get({
+    const header = await safeSheetRead(() => sheets.spreadsheets.values.get({
       spreadsheetId: TARGET_ID, range: `'${tab}'!A1:N1`, valueRenderOption: "FORMATTED_VALUE",
-    });
+    }));
     const headerOk = BOOKING_HEADERS.every((h, i) => header.data.values?.[0]?.[i] === h);
     // Header preparation is a separate admin action. Fail closed, never overwrite.
     const initiallyEmpty = false;
@@ -725,10 +738,10 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     if (!match) throw new Error("Append response missing row index; requires reconciliation");
     const sheetRow = Number(match[1]);
     stage = "SHEETS_VERIFY";
-    const verify = await sheets.spreadsheets.values.get({
+    const verify = await safeSheetRead(() => sheets.spreadsheets.values.get({
       spreadsheetId: TARGET_ID,range:`'${tab}'!A${sheetRow}:N${sheetRow}`,
       valueRenderOption:"FORMATTED_VALUE",
-    });
+    }));
     if (String(verify.data.values?.[0]?.[0] ?? "") !== orderNumber) {
       throw new Error("Sheet row verification failed; requires reconciliation");
     }
