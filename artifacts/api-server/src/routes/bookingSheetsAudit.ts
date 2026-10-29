@@ -355,6 +355,36 @@ router.get("/admin/google-sheets/auto-status", adminMiddleware, async (req, res)
     res.status(503).json({error:"Status auto-sync belum tersedia"});
   }
 });
+// Same eligibility gate as Sync One; read-only and independent of preview export fields.
+router.post("/admin/google-sheets/sync-eligibility", adminMiddleware, async (req,res)=>{
+  const requested=req.body?.orderNumbers;
+  if(!Array.isArray(requested)||requested.length>200||requested.some(x=>typeof x!=="string"||!/^SC-[0-9]{1,12}$/.test(x))){
+    res.status(400).json({error:"Invalid orderNumbers (max 200)"});return;
+  }
+  const orders=[...new Set(requested as string[])];
+  if(!orders.length){res.json({items:[]});return;}
+  try{
+    const rows=sqlResultRows(await db.execute(sql`
+      select b.order_number,b.group_ref,b.payer_type,b.membership_id,b.membership_payment_id,
+        coalesce(b.grand_total,b.total_price)::numeric as due,
+        count(s.source_key)::integer as event_count,
+        count(s.source_key) filter(where s.source_type='direct' and s.validation_status='CANDIDATE')::integer as valid_direct_count,
+        coalesce(max(s.amount) filter(where s.source_type='direct' and s.validation_status='CANDIDATE'),0)::numeric as direct_amount
+      from sport_center.sport_bookings b
+      left join sport_center.booking_sheets_payment_sources s on s.booking_id=b.id
+      where b.order_number in (${sql.join(orders.map(o=>sql`${o}`),sql`,`)})
+      group by b.id,b.order_number,b.group_ref,b.payer_type,b.membership_id,b.membership_payment_id,b.grand_total,b.total_price
+    `));
+    const items=orders.map(order=>{
+      const r=rows.find(row=>row.order_number===order);
+      const reason=!r?"BOOKING_NOT_FOUND":r.group_ref||r.payer_type==="company"||r.membership_id||r.membership_payment_id?"UNSUPPORTED_BOOKING_TYPE":
+        Number(r.event_count)!==1||Number(r.valid_direct_count)!==1?"SOURCE_NOT_SINGLE_CONFIRMED_DIRECT":
+        Number(r.due)<=0||Number(r.direct_amount)<Number(r.due)?"NOT_FULLY_PAID":null;
+      return {orderNumber:order,eligible:reason===null,reason};
+    });
+    res.json({items});
+  }catch(error){req.log.error({err:error},"Sheets sync eligibility failed");res.status(503).json({error:"Pemeriksaan kelayakan gagal"});}
+});
 router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, res) => {
   const orderNumbers = req.body?.orderNumbers;
   const verifySheets = req.body?.verifySheets === true;
