@@ -27,7 +27,17 @@ async function tick():Promise<void> {
         company_invoice_id,membership_payment_id,amount::text as amount,
         payment_date_wib::text as payment_date_wib,validation_status,payment_ts
       from sport_center.booking_sheets_payment_event_candidates c
-      where c.validation_status='CANDIDATE' and c.payment_ts >= ${startAt.toISOString()}::timestamptz
+      left join sport_center.sport_payments p on c.source_type in ('direct','allocation') and p.id=c.payment_id
+      left join sport_center.company_invoices i on c.source_type='corporate_invoice' and i.id=c.company_invoice_id
+      left join sport_center.sport_membership_payments m on c.source_type='membership' and m.id=c.membership_payment_id
+      where c.validation_status='CANDIDATE'
+        -- Eligibility is the admin's confirmation, NOT the earlier bank transfer date.
+        -- Keep c.payment_ts unchanged for the financial transaction date in Sheets.
+        and (case
+          when c.source_type in ('direct','allocation') then p.confirmed_at
+          when c.source_type='corporate_invoice' then i.paid_at
+          when c.source_type='membership' then m.confirmed_at
+          else null end) >= ${startAt.toISOString()}::timestamptz
         and not exists(select 1 from sport_center.booking_sheets_payment_event_ledger l where l.source_key=c.source_key)
       order by c.payment_ts,c.source_key limit 5
     `));
