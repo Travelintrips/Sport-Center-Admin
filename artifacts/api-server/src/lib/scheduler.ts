@@ -120,7 +120,10 @@ async function expireOverdueMemberships(): Promise<void> {
         continue;
       }
 
-      if (member.status !== "active" || member.endDate >= todayWIB) continue;
+      // Expired memberships may predate this integration. Reconcile them too:
+      // otherwise they never create an event because no active->expired transition occurs.
+      // Still require complete canonical financial evidence before queueing review.
+      if (!["active", "expired"].includes(member.status) || member.endDate >= todayWIB) continue;
       // Seven full WIB calendar days after the inclusive membership end date.
       // Invalid legacy dates are never auto-suspended.
       const parsedEnd = /^\d{4}-\d{2}-\d{2}$/.test(member.endDate)
@@ -148,12 +151,12 @@ async function expireOverdueMemberships(): Promise<void> {
         continue;
       }
 
-      const updated = await db.update(gymMembershipsTable)
+      const updated = member.status === "active" ? await db.update(gymMembershipsTable)
         .set({ status: "expired", updatedAt: new Date() })
         .where(and(eq(gymMembershipsTable.id, member.id),
           eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)))
-        .returning({ id: gymMembershipsTable.id });
-      suspended += updated.length;
+        .returning({ id: gymMembershipsTable.id }) : [{ id: member.id }];
+      if (member.status === "active") suspended += updated.length;
       if (updated.length) await db.execute(sql`
         INSERT INTO sport_center.x904_automatic_entitlement_events
           (membership_id,reason,event_key)
