@@ -24,6 +24,17 @@ function parseCsv(raw: string): string[][] {
   return out;
 }
 export default function GoogleSheets() {
+  const [section,setSection]=useState<"events"|"bookings"|"audit">("events");
+  const [eventStatus,setEventStatus]=useState<{enabled:boolean;startAt:string|null;counts:Record<string,number>}|null>(null);
+  const [eventStatusError,setEventStatusError]=useState("");
+  async function refreshEventStatus(){
+    try {
+      const response=await fetch("/api/admin/google-sheets/payment-events-status",{headers:{Authorization:`Bearer ${getToken()}`}});
+      if(!response.ok)throw new Error("Status Payment Events belum bisa dibaca");
+      setEventStatus(await response.json());setEventStatusError("");
+    }catch(error){setEventStatusError(error instanceof Error?error.message:"Gagal memeriksa status");}
+  }
+  useEffect(()=>{void refreshEventStatus();},[]);
   const [audit, setAudit] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -336,21 +347,27 @@ export default function GoogleSheets() {
           </h1>
           <p className="text-sm text-slate-500 mt-1">Laporan &amp; Sistem · Integrasi laporan pembayaran booking</p>
         </div>
-        <Badge variant={autoStatus?.enabled?"default":"secondary"} className="w-fit">{autoStatus?.enabled?"Auto-sync aktif · Personal lunas":"Auto-sync belum aktif / belum diverifikasi"}</Badge>
+        <Badge variant={eventStatus?.enabled?"default":"secondary"} className="w-fit">{eventStatus===null?"Status Payment Events belum terverifikasi":eventStatus.enabled?"Payment Events otomatis aktif":"Payment Events otomatis nonaktif"}</Badge>
       </header>
-      <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-900 dark:text-amber-200 flex gap-2">
-        <Info className="h-5 w-5 shrink-0" />
-        <span>{autoStatus?.enabled?"Auto-sync aktif untuk pembayaran baru personal non-grup yang lunas penuh. DP, grup, membership dan corporate tetap ditahan.":"Auto-sync belum terverifikasi aktif."} Sync One tersedia untuk satu booking; Sync Now terbatas pada maksimal lima kandidat per konfirmasi admin.</span>
+      <div className="flex flex-wrap gap-2 border-b pb-3" role="group" aria-label="Bagian integrasi Google Sheets">
+        {([ ["events","Pembayaran Otomatis"], ["bookings","Laporan Booking PAID"], ["audit","Audit & Pengaturan"] ] as const).map(([key,label])=><button key={key} type="button" onClick={()=>setSection(key)} aria-pressed={section===key} className={`rounded-lg border px-4 py-2 text-sm font-semibold ${section===key?"bg-slate-900 text-white dark:bg-white dark:text-slate-900":"hover:bg-slate-100 dark:hover:bg-slate-800"}`}>{label}</button>)}
       </div>
-      <Card>
+      {section==="events"&&<div className="rounded-xl border p-4 space-y-2 text-sm">
+        <div className="flex flex-wrap justify-between items-center gap-2"><strong>Status auto-sync Payment Events</strong><button type="button" onClick={()=>void refreshEventStatus()} className="rounded-lg border px-3 py-1.5">Perbarui Status</button></div>
+        <p>{eventStatus===null?"Belum terverifikasi":eventStatus.enabled?"Aktif — pembayaran yang dikonfirmasi diproses otomatis":"Nonaktif — pembayaran baru belum dikirim otomatis"}</p>
+        {eventStatus&&<p className="text-slate-500">Ledger: {eventStatus.counts.written??0} ditulis · {eventStatus.counts.blocked??0} diblokir · {eventStatus.counts.needs_review??0} perlu pemeriksaan</p>}
+        {eventStatusError&&<p role="alert" className="text-red-600">{eventStatusError}</p>}
+        <p className="text-slate-500">Tab PAYMENT EVENTS mencatat transaksi; tab PAID mencatat booking. Pemrosesan otomatis tidak menggunakan tombol Sync Now.</p>
+      </div>}
+      {section!=="bookings"&&<Card>
         <CardHeader><CardTitle className="text-lg">Spreadsheet tujuan</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="font-medium">Laporan paid order Sport Center</div>
           <a href={sheetUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">Buka spreadsheet <ExternalLink className="h-4 w-4" /></a>
-          <p className="text-sm text-slate-500">Koneksi Google dan izin akses spreadsheet harus divalidasi sebelum sinkronisasi diaktifkan. Tab dan rumus yang sudah ada tidak akan diubah pada tahap ini.</p>
+          <p className="text-sm text-slate-500">Satu spreadsheet untuk dua laporan berbeda: PAYMENT EVENTS (transaksi) dan PAID (ringkasan booking). Jangan menghapus tab yang sudah digunakan.</p>
         </CardContent>
-      </Card>
-      <Card>
+      </Card>}
+      {section==="audit"&&<Card>
         <CardHeader><CardTitle className="text-lg">Audit struktur spreadsheet (hanya baca)</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <button type="button" onClick={inspect} disabled={busy} className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
@@ -370,8 +387,8 @@ export default function GoogleSheets() {
 
           </div>}
         </CardContent>
-      </Card>
-      <Card>
+      </Card>}
+      {section==="events"&&<Card>
         <CardHeader><CardTitle className="text-lg">Uji Koneksi Payment Events (hanya baca)</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-slate-500">Memeriksa koneksi aplikasi Hostinger ke Google Sheets pembayaran untuk bulan yang dipilih. Tidak menambah baris dan tidak mengaktifkan auto-sync.</p>
@@ -384,8 +401,8 @@ export default function GoogleSheets() {
             <p>Pengujian ini tidak menulis data ke spreadsheet.</p>
           </div>}
         </CardContent>
-      </Card>
-      <Card><CardHeader><CardTitle className="text-lg">Preview pembayaran terkonfirmasi (tanpa menulis Sheets)</CardTitle></CardHeader>
+      </Card>}
+      {section==="bookings"&&<Card><CardHeader><CardTitle className="text-lg">Preview pembayaran terkonfirmasi (tanpa menulis Sheets)</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-slate-500">Menggunakan filter tanggal pembayaran WIB pada ekspor resmi booking. Booking yang belum memiliki bukti pembayaran sah tidak ikut.</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -424,8 +441,8 @@ export default function GoogleSheets() {
             <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat..."}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button>{syncStatuses[row[0]]?.status==="missing" && <button type="button" className="ml-2 rounded border border-amber-600 text-amber-800 px-2 py-1 disabled:opacity-50" disabled={recoverBusy||!!syncBusy} onClick={()=>setPendingRecovery(row[0])}>Pulihkan ke Sheets</button>}{(syncStatuses[row[0]]?.status==="synced"||syncStatuses[row[0]]?.status==="missing")&&<button type="button" className="ml-2 rounded border px-2 py-1" onClick={()=>void readRecoveryHistory(row[0])}>Riwayat</button>}{recoveryHistory[row[0]] && <div className="text-xs mt-1 text-slate-600 whitespace-normal max-w-64">{recoveryHistory[row[0]].length ? recoveryHistory[row[0]].map((entry,i)=><div key={i}>Dipulihkan: {entry.target_tab}, baris {entry.old_sheet_row??"-"} → {entry.new_sheet_row}, {new Date(entry.created_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</div>) : "Belum ada riwayat pemulihan"}</div>}</td></tr>)}</tbody></table></div>
             {!syncOrderSearch && <p className="text-xs text-slate-500">Menampilkan seluruh {preview.rows.length} booking pada bulan ini.</p>}
           </div>}
-        </CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-lg">Kesiapan tab bulanan sebelum sinkronisasi</CardTitle></CardHeader>
+        </CardContent></Card>}
+      {section==="audit"&&<Card><CardHeader><CardTitle className="text-lg">Kesiapan tab bulanan sebelum sinkronisasi</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-slate-500">Setiap pembayaran dipetakan ke tab bulan pembayaran WIB. Jika tab November belum dibuat manual atau belum memiliki 14 header yang benar, sistem harus menahan penulisan; tidak dialihkan ke Oktober.</p>
           <div className="flex flex-wrap gap-2 items-center">
@@ -443,8 +460,8 @@ export default function GoogleSheets() {
             {!readiness.ready&&<p className="text-xs text-slate-500">Header A–N yang harus digunakan: {readiness.expectedHeaders?.join(" · ")}</p>}
             <p className="text-xs text-slate-500">Pemeriksaan kesiapan hanya-baca; proses penulisan tetap melewati pemeriksaan server dan antiduplikasi.</p>
           </div>}
-        </CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-lg">Audit sumber pembayaran dan alokasi</CardTitle></CardHeader>
+        </CardContent></Card>}
+      {section==="audit"&&<Card><CardHeader><CardTitle className="text-lg">Audit sumber pembayaran dan alokasi</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-slate-500">Membedakan pembayaran langsung, alokasi grup, dan invoice perusahaan yang lunas berdasarkan bulan pembayaran WIB. Informasi ini untuk validasi ledger, belum mengirim data ke Sheets.</p>
           <div className="flex flex-wrap gap-3 items-center"><span>Bulan: <strong>{month}</strong></span><button type="button" onClick={auditPaymentSources} disabled={sourceBusy} className="rounded-lg border px-3 py-2 font-medium disabled:opacity-50">{sourceBusy?"Memeriksa...":"Audit Sumber Pembayaran"}</button></div>
@@ -453,8 +470,8 @@ export default function GoogleSheets() {
             <thead><tr className="border-b"><th className="p-2">Jenis sumber</th><th className="p-2">Validasi</th><th className="p-2">Event</th><th className="p-2">Nilai alokasi</th></tr></thead>
             <tbody>{(sourceAudit.breakdown||[]).map((row:any,i:number)=><tr key={i} className="border-b"><td className="p-2">{row.source_type}</td><td className="p-2">{row.validation_status}</td><td className="p-2">{row.event_count}</td><td className="p-2">{row.allocated_amount}</td></tr>)}</tbody>
           </table><p className="text-xs text-slate-500 mt-2">Event pembayaran tidak sama dengan jumlah booking unik. Pembayaran DP/grup dapat menghasilkan beberapa event.</p></div>}
-        </CardContent></Card>
-      <div className="grid md:grid-cols-2 gap-4">
+        </CardContent></Card>}
+      {section==="audit"&&<div className="grid md:grid-cols-2 gap-4">
         <Card>
           <CardHeader><CardTitle className="text-lg flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-green-600" /> Aturan sinkronisasi</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -465,21 +482,22 @@ export default function GoogleSheets() {
               <div>Booking September 2026 · Dibayar Oktober 2026</div>
               <div className="font-semibold text-green-700 dark:text-green-400 mt-1">Tujuan: PAID OKTOBER 2026</div>
             </div>
-            <p><strong>Antiduplikasi:</strong> rencana identifikasi unik berdasarkan booking, pembayaran, dan alokasi pembayaran untuk booking grup.</p>
+            <p><strong>Antiduplikasi:</strong> PAYMENT EVENTS menggunakan source key unik dan mengecualikan cerminan pembayaran membership; laporan PAID memakai ledger booking terpisah.</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Clock3 className="h-5 w-5 text-slate-600" /> Kontrol dan riwayat</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <p>Status koneksi: <strong>Belum diverifikasi</strong></p>
-            <p>Sinkron otomatis: <strong>{autoStatus?.enabled?"Aktif · transaksi baru personal lunas":"Belum aktif / belum terverifikasi"}</strong></p>
+            <p>Status koneksi: <strong>{paymentEventCheck?.ready?"Payment Events terhubung": "Gunakan Uji Koneksi di tab Pembayaran Otomatis"}</strong></p>
+            <p>Sinkron otomatis PAID (legacy): <strong>{autoStatus===null?"Belum terverifikasi":autoStatus.enabled?"Aktif":"Nonaktif"}</strong></p>
+            <p>Sinkron otomatis Payment Events: <strong>{eventStatus===null?"Belum terverifikasi":eventStatus.enabled?"Aktif":"Nonaktif"}</strong></p>
             {autoStatus&&<p className="text-xs text-slate-500">Antrean: {autoStatus.counts.pending??0} menunggu · {autoStatus.counts.written??0} berhasil · {(autoStatus.counts.blocked??0)+(autoStatus.counts.needs_review??0)} perlu pemeriksaan.</p>}
-            <p>Riwayat sinkron: <strong>Belum tersedia</strong></p>
+            <p>Riwayat Payment Events: <strong>{eventStatus?(eventStatus.counts.written??0)+" transaksi tertulis":"Belum dapat dibaca"}</strong></p>
             <div className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-slate-400 cursor-not-allowed" aria-disabled="true"><RefreshCw className="h-4 w-4" /> Sync Now (pilot maksimal 5 pada Preview)</div>
-            <p className="text-slate-500">Tahap selanjutnya: audit header dan formula tab PAID, pemetaan kolom, koneksi Google Sheets API, worker transaksi, preview, dan verifikasi end-to-end.</p>
+            <p className="text-slate-500">Tombol Sync Now hanya untuk pilot laporan booking PAID; bukan auto-sync Payment Events.</p>
           </CardContent>
         </Card>
-      </div>
+      </div>}
     </main>
     </>
   );
