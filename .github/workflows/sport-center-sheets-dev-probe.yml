@@ -58,6 +58,11 @@ on:
         required: false
         type: boolean
         default: false
+      verify_sc1300_prod_paid_rows:
+        description: "Read-only inspect SC-1300 across PAID tabs"
+        required: false
+        type: boolean
+        default: false
       verify_sc1644_prod_rows:
         description: "Read-only exact SC-1644 source keys before repair"
         required: false
@@ -146,6 +151,17 @@ jobs:
           trap 'rm -f "$f"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-prod-payment-tab-readonly.mjs
+
+      - name: Inspect SC-1300 actual PAID sheet rows (read-only)
+        if: ${{ inputs.verify_sc1300_prod_paid_rows == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/sc1300.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-prod-sc1300-paid-rows-readonly.mjs
 
       - name: Verify SC-1644 duplicate rows without writes
         if: ${{ inputs.verify_sc1644_prod_rows == true }}
