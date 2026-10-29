@@ -80,6 +80,26 @@ export default function AdminMemberships() {
   const [paymentFile,setPaymentFile] = useState<File|null>(null);
   const [paymentUploading,setPaymentUploading] = useState(false);
   const [paymentError,setPaymentError] = useState("");
+  const [confirmationProvider,setConfirmationProvider] = useState("");
+  const [confirmationBusy,setConfirmationBusy] = useState(false);
+  async function confirmExistingMembershipProof(memberId:number) {
+    if (!confirmationProvider || confirmationBusy || !["owner","admin","super_admin","finance","admin_booking"].includes(String(getCurrentRole()))) return;
+    setConfirmationBusy(true);setPaymentError("");
+    try {
+      const response=await fetch(`${API}/memberships/${memberId}`,{
+        method:"PATCH",headers:authHeaders(),body:JSON.stringify({status:"active",settlementProviderCode:confirmationProvider}),
+      });
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error||"Konfirmasi gagal");
+      setViewMember(data);
+      setConfirmationProvider("");
+      queryClient.invalidateQueries({queryKey:["membership-payments",memberId]});
+      queryClient.invalidateQueries({queryKey:getListMembershipsQueryKey()});
+      toast({title:"Pembayaran terkonfirmasi",description:"Catatan pembayaran yang sudah ada berhasil dikonfirmasi."});
+    }catch(err){setPaymentError(err instanceof Error?err.message:"Gagal mengonfirmasi pembayaran");}
+    finally{setConfirmationBusy(false);}
+  }
+
   async function submitAdminMembershipProof() {
     if(!viewMember?.id || !paymentFile || paymentUploading) return;
     setPaymentError("");
@@ -945,8 +965,23 @@ export default function AdminMemberships() {
                 </div>
               )}
               {pendingRenewalPayment?.status === "waiting_confirmation" && (
-                <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-                  Bukti renewal #{pendingRenewalPayment.id} sudah diterima dan menunggu konfirmasi.
+                <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3 space-y-3 text-sm text-yellow-800">
+                  <p>Bukti renewal #{pendingRenewalPayment.id} sudah diterima dan menunggu konfirmasi.</p>
+                  {["owner","admin","super_admin","finance","admin_booking"].includes(String(getCurrentRole())) && <>
+                    <Label>Settlement provider sesuai bukti penerimaan *</Label>
+                    <Select value={confirmationProvider} onValueChange={setConfirmationProvider}>
+                      <SelectTrigger><SelectValue placeholder="Pilih jalur penerimaan" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mandiri_direct">Mandiri Direct</SelectItem>
+                        <SelectItem value="paylabs">Paylabs</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button type="button" disabled={!confirmationProvider||confirmationBusy} onClick={()=>confirmExistingMembershipProof(viewMember.id)}>
+                      {confirmationBusy?"Mengonfirmasi...":"Konfirmasi Pembayaran yang Sudah Diunggah"}
+                    </Button>
+                    <p>Tidak mengunggah bukti ulang atau membuat tagihan baru.</p>
+                    {paymentError&&<p role="alert" className="text-red-700">{paymentError}</p>}
+                  </>}
                 </div>
               )}
               {/* Tombol konfirmasi menonjol untuk status yang butuh tindakan */}
