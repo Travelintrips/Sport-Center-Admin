@@ -50,6 +50,7 @@ export default function GoogleSheets() {
   },[]);
 
   const [preview,setPreview] = useState<{headers:string[];rows:string[][];tab:string}|null>(null);
+  const [expandedGroup,setExpandedGroup]=useState<string|null>(null);
   const [previewError,setPreviewError] = useState("");
   const [previewBusy,setPreviewBusy] = useState(false);
   const previewRequestRef = useRef(0);
@@ -312,7 +313,19 @@ export default function GoogleSheets() {
       const parsed=parseCsv(await response.text());
       if(!parsed.length || COLUMNS.some((h,i)=>parsed[0][i]!==h) || parsed[0][14]!=="Payment Date" || parsed[0][15]!=="Payment Type" || parsed[0][16]!=="Payment ID" || parsed[0][17]!=="Group Ref" || parsed[0][18]!=="Booking Total") throw new Error("Struktur ekspor pembayaran tidak sesuai; preview dibatalkan");
       const rows=parsed.slice(1).filter(r=>r.length===19 && r[14]>=start && r[14]<=end);
-      if (request === previewRequestRef.current) {setPreview({headers:[...COLUMNS],rows,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});void checkSyncStatus(rows.map(r=>r[0]),false);void checkEligibility([...new Set(rows.map(r=>r[0]))]);}
+       const groupsResponse=await fetch("/api/admin/google-sheets/group-preview?"+new URLSearchParams({month}),{headers:{Authorization:`Bearer ${getToken()}`}});
+       if(!groupsResponse.ok)throw new Error("Preview grup tidak tersedia; hasil belum lengkap");
+       const groupData=await groupsResponse.json();
+       const groupRows:string[][]=(groupData.items??[]).map((g:any)=>[
+         String(g.order_number),String(g.customer_name??""),String(g.customer_email??""),String(g.customer_phone??""),
+         String(g.facility_name??""),String(g.booking_date??""),String(g.start_time??""),String(g.end_time??""),
+         String(g.duration_hours??""),String(g.amount),String(g.status??""),String(g.notes??""),
+         String(g.admin_notes??""),String(g.created_at??""),String(g.payment_date_wib),"allocation",
+         String(g.payment_id),String(g.group_ref),String(g.booking_total)
+       ]);
+       const groupOrders=new Set(groupRows.map(r=>r[0]));
+       const combined=[...rows.filter(r=>!groupOrders.has(r[0])),...groupRows];
+      if (request === previewRequestRef.current) {setPreview({headers:[...COLUMNS],rows:combined,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});void checkSyncStatus(combined.map(r=>r[0]),false);void checkEligibility([...new Set(combined.map(r=>r[0]))]);}
     }catch(e){if(request === previewRequestRef.current)setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{if(request === previewRequestRef.current)setPreviewBusy(false);}
   }
 
@@ -511,6 +524,17 @@ export default function GoogleSheets() {
               {batchMessage&&<p role="status" className="text-sm text-blue-700">{batchMessage}</p>}
             {statusError&&<p role="alert" className="text-sm text-red-600">{statusError}</p>}
             {syncMessage&&<p role="status" className="text-sm font-medium">{syncMessage}</p>}
+            {preview.rows.some(r=>Boolean(r[17]))&&<div className="rounded-lg border p-3 space-y-2 text-sm">
+              <strong>Booking group — rincian alokasi (induk tidak dijumlahkan ulang)</strong>
+              {[...new Set(preview.rows.map(r=>r[17]).filter(Boolean))].map(group=>{
+                const children=preview.rows.filter(r=>r[17]===group);
+                const total=children.reduce((sum,r)=>sum+Number(r[9]||0),0);
+                return <div key={group} className="border rounded-md p-2">
+                  <button type="button" className="w-full text-left font-medium" onClick={()=>setExpandedGroup(expandedGroup===group?null:group)}>{expandedGroup===group?"▾":"▸"} {group} · {children.length} sesi · Rp {total.toLocaleString("id-ID")}</button>
+                  {expandedGroup===group&&<div className="mt-2 space-y-1">{children.map(child=><div key={child[0]} className="flex justify-between gap-2 border-t py-1"><span>{child[0]} · {child[4]}</span><span>Rp {Number(child[9]).toLocaleString("id-ID")} · {syncStatuses[child[0]]?.status??"Memeriksa"}</span></div>)}</div>}
+                </div>;
+              })}
+            </div>}
             <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{row[17]?.trim() && syncStatuses[row[0]]?.status==="not_synced" ? "Grup · Belum Sync" : (({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat...")}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button>{syncStatuses[row[0]]?.status==="missing" && <button type="button" className="ml-2 rounded border border-amber-600 text-amber-800 px-2 py-1 disabled:opacity-50" disabled={recoverBusy||!!syncBusy} onClick={()=>setPendingRecovery(row[0])}>Pulihkan ke Sheets</button>}{(syncStatuses[row[0]]?.status==="synced"||syncStatuses[row[0]]?.status==="missing")&&<button type="button" className="ml-2 rounded border px-2 py-1" onClick={()=>void readRecoveryHistory(row[0])}>Riwayat</button>}{recoveryHistory[row[0]] && <div className="text-xs mt-1 text-slate-600 whitespace-normal max-w-64">{recoveryHistory[row[0]].length ? recoveryHistory[row[0]].map((entry,i)=><div key={i}>Dipulihkan: {entry.target_tab}, baris {entry.old_sheet_row??"-"} → {entry.new_sheet_row}, {new Date(entry.created_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</div>) : "Belum ada riwayat pemulihan"}</div>}</td></tr>)}</tbody></table></div>
             {!syncOrderSearch && <p className="text-xs text-slate-500">Menampilkan seluruh {preview.rows.length} booking pada bulan ini.</p>}
           </div>}
