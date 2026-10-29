@@ -628,10 +628,11 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
   try {
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
     if (!booking || Number(booking.totalPrice) <= 0) { res.status(404).json({ error: "Booking berbayar tidak ditemukan" }); return; }
-    // Group allocation, installment, corporate, and membership bookings require
-    // their own event-to-row accounting rules. Never silently include them in pilot.
-    if (booking.groupRef || booking.payerType === "company" || (booking.membershipId && !booking.membershipPaymentId)) {
-      res.status(409).json({ error: "Booking grup/corporate/membership belum didukung Sync One" }); return;
+    // Corporate and unsupported membership payment structures remain excluded.
+    // Group bookings are admitted only after the confirmed parent payment and
+    // *all* its allocation rows have passed the consistency gate below.
+    if (booking.payerType === "company" || (booking.membershipId && !booking.membershipPaymentId)) {
+      res.status(409).json({ error: "Booking corporate atau tipe membership belum didukung Sync One" }); return;
     }
     if (booking.membershipPaymentId) {
       const canonical=sqlResultRows(await db.execute(sql`
@@ -652,13 +653,45 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
       order by payment_ts asc
     `);
     const sources = sqlResultRows(sourcesRaw);
-    if (sources.length !== 1 || sources[0].source_type !== "direct" || sources[0].validation_status !== "CANDIDATE") {
-      res.status(409).json({ error: "Hanya satu pembayaran langsung yang sudah terkonfirmasi yang boleh dipilotkan", eventCount: sources.length, reason: "SOURCE_NOT_SINGLE_CONFIRMED_DIRECT" }); return;
+    const isGroup = Boolean(booking.groupRef);
+    const expectedType = isGroup ? "allocation" : "direct";
+    if (sources.length !== 1 || sources[0].source_type !== expectedType || sources[0].validation_status !== "CANDIDATE") {
+      res.status(409).json({ error: "Sumber pembayaran bukan satu transaksi terkonfirmasi yang sesuai jenis booking", eventCount: sources.length, reason: "SOURCE_TYPE_OR_COUNT_MISMATCH" }); return;
     }
     const source = sources[0];
     const due = Number(booking.grandTotal ?? booking.totalPrice);
     if (!(Number(source.amount) >= due) || !(due > 0)) {
       res.status(409).json({ error: "Booking belum lunas penuh atau nilai pembayaran tidak valid" }); return;
+    }
+    if (isGroup) {
+      // Guard against reporting an allocation against the wrong group, an
+      // incomplete parent payment, or duplicate allocations. A confirmed
+      // parent is never counted again as a separate Sheets row.
+      if (booking.status !== "confirmed" || !source.payment_id || !source.allocation_id) {
+        res.status(409).json({error:"Booking grup atau alokasi belum terkonfirmasi"}); return;
+      }
+      const [proof] = sqlResultRows(await db.execute(sql`
+        select p.status::text as status,p.amount as parent_amount,
+          (select coalesce(sum(a.amount),0) from sport_center.sport_payment_allocations a where a.payment_id=p.id) as allocated_total,
+          (select count(*) from sport_center.sport_payment_allocations a where a.payment_id=p.id) as allocation_count,
+          (select count(*) from sport_center.sport_payment_allocations a
+             join sport_center.sport_bookings b on b.id=a.booking_id
+             where a.payment_id=p.id and b.group_ref=${booking.groupRef}
+               and b.status::text='confirmed') as confirmed_group_count,
+          (select count(*) from sport_center.sport_bookings b
+             where b.group_ref=${booking.groupRef}) as group_booking_count
+        from sport_center.sport_payments p where p.id=${Number(source.payment_id)}
+          and exists (select 1 from sport_center.sport_payment_allocations a
+            where a.id=${Number(source.allocation_id)} and a.payment_id=p.id and a.booking_id=${booking.id}
+              and a.amount=${Number(source.amount)})
+      `));
+      if (!proof || proof.status !== "confirmed" ||
+          Number(proof.parent_amount) <= 0 ||
+          Number(proof.allocated_total) !== Number(proof.parent_amount) ||
+          Number(proof.allocation_count) !== Number(proof.group_booking_count) ||
+          Number(proof.confirmed_group_count) !== Number(proof.group_booking_count)) {
+        res.status(409).json({error:"Alokasi grup belum lengkap, status belum confirmed, atau total tidak sama dengan pembayaran induk",reason:"GROUP_ALLOCATION_NOT_RECONCILED"}); return;
+      }
     }
     const tab = paidTabFromWibDate(String(source.payment_ts));
     stage = "SHEETS_AUTH";
@@ -728,8 +761,8 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     stage = "LEDGER_CLAIM";
     const claim = await db.execute(sql`
       insert into sport_center.booking_sheets_sync_ledger
-        (source_key,booking_id,payment_id,payment_date_wib,target_tab,amount,status,attempt_count,last_attempt_at)
-      values (${sourceKey},${booking.id},${Number(source.payment_id)},${String(source.payment_date_wib)}::date,${tab},
+        (source_key,booking_id,payment_id,allocation_id,payment_date_wib,target_tab,amount,status,attempt_count,last_attempt_at)
+      values (${sourceKey},${booking.id},${Number(source.payment_id)},${source.allocation_id ? Number(source.allocation_id) : null},${String(source.payment_date_wib)}::date,${tab},
               ${Number(source.amount)},'writing',1,now())
       on conflict (source_key) do nothing returning source_key
     `);
@@ -751,7 +784,8 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
     const createdAt = `${part("day")}/${part("month")}/${part("year")} ${part("hour")}:${part("minute")}:${part("second")} WIB`;
     const row = [booking.orderNumber,booking.customerName,booking.customerEmail,booking.customerPhone,
       fac?.name ?? "",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
-      booking.totalPrice,booking.status,booking.notes ?? "",booking.adminNotes ?? "",createdAt]
+      isGroup ? Number(source.amount) : booking.totalPrice,booking.status,
+      booking.notes ?? "",isGroup ? `Group ${booking.groupRef} · Payment ${source.payment_id} · Allocation ${source.allocation_id}` : (booking.adminNotes ?? ""),createdAt]
       .map(value => value == null ? "" : String(value));
     stage = "SHEETS_APPEND";
     const appended = await sheets.spreadsheets.values.append({
