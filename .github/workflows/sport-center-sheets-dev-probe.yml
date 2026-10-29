@@ -120,6 +120,19 @@ jobs:
           SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
         run: node scripts/check-payment-events-dev-db.mjs
 
+      - name: Read-only reconciliation of all DEV Sheet rows versus ledger
+        if: ${{ inputs.verify_dev_database == true }}
+        env:
+          SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/payment-events-reconcile.XXXXXX")
+          trap 'rm -f "$secret_file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/reconcile-payment-events-dev-readonly.mjs
+
       - name: Patch DEV payment mirror classification trigger (guarded)
         if: ${{ inputs.patch_dev_payment_mirror == true }}
         env:
