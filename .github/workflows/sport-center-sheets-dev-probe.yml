@@ -48,6 +48,11 @@ on:
         required: false
         type: boolean
         default: false
+      prepare_prod_payment_tab:
+        description: "Create only empty production PAYMENT EVENTS tab/header; no transaction writes"
+        type: boolean
+        required: false
+        default: false
       verify_prod_payment_tab:
         description: "Read-only check PROD payment event tab/header"
         required: false
@@ -107,6 +112,19 @@ jobs:
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           if [ ! -s "$secret_file" ]; then echo '::error::Google Sheets service account secret is empty'; exit 1; fi
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/check-payment-events-dev-sheet.mjs
+
+      - name: Prepare empty production payment event tab only (explicit opt-in)
+        if: ${{ inputs.prepare_prod_payment_tab == true }}
+        shell: bash
+        env:
+          PREPARE_PROD_PAYMENT_TAB: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/prod-tab-setup.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/prepare-prod-payment-tab.mjs
 
       - name: Verify production event tab/header without writes
         if: ${{ inputs.verify_prod_payment_tab == true }}
