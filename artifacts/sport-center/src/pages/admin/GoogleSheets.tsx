@@ -60,15 +60,33 @@ export default function GoogleSheets() {
   const [pendingBatchOrders,setPendingBatchOrders]=useState<string[]>([]);
   const [batchBusy,setBatchBusy]=useState(false);
   const [batchMessage,setBatchMessage]=useState("");
-  const pilotBatchCandidates=preview ? [...new Set(preview.rows.filter(row =>
+  const allBatchCandidates=preview ? [...new Set(preview.rows.filter(row =>
     !row[17] && Number(row[9])>0 && Number(row[18])>0 &&
     Number(row[9])>=Number(row[18]) && syncStatuses[row[0]]?.status==="not_synced"
-  ).map(row=>row[0]))].slice(0,5) : [];
+  ).map(row=>row[0]))] : [];
   async function runPilotBatch(orders:string[]) {
     setBatchBusy(true);setBatchMessage("");
     let completed=0,skipped=0,failed="";
     try {
-      for(const orderNumber of orders) {
+      // Read-only preflight for every requested order; enforce fail-closed if any status has changed.
+      const verified:string[]=[];
+      for(let offset=0;offset<orders.length;offset+=100){
+        const chunk=orders.slice(offset,offset+100);
+        const response=await fetch("/api/admin/google-sheets/status-check",{
+          method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+          body:JSON.stringify({orderNumbers:chunk,verifySheets:true}),
+        });
+        if(!response.ok)throw Error(`Pemeriksaan awal gagal (HTTP ${response.status}); tidak ada penulisan dilakukan.`);
+        const data=await response.json();
+        if(!data.checkedSheets)throw Error("Pemeriksaan dua arah Sheets belum dijalankan; batch dibatalkan.");
+        for(const item of data.items??[]){
+          if(item.status!=="not_synced")throw Error(`${item.orderNumber}: status ${item.status} berubah; batch dibatalkan untuk menghindari duplikasi.`);
+          verified.push(item.orderNumber);
+        }
+        setBatchMessage(`Pemeriksaan awal ${Math.min(offset+chunk.length,orders.length)}/${orders.length} booking...`);
+      }
+      if(verified.length!==orders.length)throw Error("Jumlah hasil pemeriksaan tidak cocok; batch dibatalkan.");
+      for(const orderNumber of verified) {
         const response=await fetch("/api/admin/google-sheets/sync-one",{
           method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
           body:JSON.stringify({orderNumber}),
@@ -79,7 +97,7 @@ export default function GoogleSheets() {
         setBatchMessage(`Diproses ${completed+skipped}/${orders.length}; berhasil ${completed}; dilewati ${skipped}.`);
       }
       setBatchMessage(`Batch selesai: ${completed} ditulis, ${skipped} sudah ada/tidak berubah.${failed?` Dihentikan pada ${failed}. Tidak ada retry otomatis.`:""}`);
-      await checkSyncStatus(preview?.rows.map(row=>row[0])??orders,false);
+      await checkSyncStatus(orders.slice(0,200),false);
     }catch(error){setBatchMessage(`Batch dihentikan: ${error instanceof Error?error.message:"kesalahan jaringan"}. Jangan ulangi tanpa rekonsiliasi.`);}
     finally{setBatchBusy(false);}
   }
@@ -285,15 +303,15 @@ export default function GoogleSheets() {
     <AlertDialog open={pendingBatchOrders.length>0} onOpenChange={open=>{if(!batchBusy&&!open)setPendingBatchOrders([]);}}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Sync Now — Pilot Maksimal 5 Booking</AlertDialogTitle>
+          <AlertDialogTitle>Sinkronkan Semua Booking yang Belum Sync?</AlertDialogTitle>
           <AlertDialogDescription>
-            Kirim satu per satu hanya kandidat pembayaran lunas yang belum ada di ledger. Backend memeriksa kelayakan dan antiduplikasi ulang setiap booking. Batch berhenti pada error pertama dan tidak akan mengulang otomatis.
+            Sistem terlebih dahulu memeriksa status ledger dan baris Sheets. Hanya booking personal non-grup lunas yang belum tersinkron diproses satu per satu. Jika ada kesalahan, proses berhenti tanpa retry otomatis. Jangan menutup halaman selama proses berjalan.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="rounded-lg border p-3 text-sm">{pendingBatchOrders.join(" · ")}</div>
+        <div className="rounded-lg border p-3 text-sm">Total kandidat: {pendingBatchOrders.length} booking. Contoh: {pendingBatchOrders.slice(0,12).join(" · ")}{pendingBatchOrders.length>12?" · ...":""}</div>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={batchBusy}>Batal</AlertDialogCancel>
-          <AlertDialogAction disabled={batchBusy} onClick={()=>{const orders=pendingBatchOrders;setPendingBatchOrders([]);void runPilotBatch(orders);}}>Ya, Sync Pilot Batch</AlertDialogAction>
+          <AlertDialogAction disabled={batchBusy} onClick={()=>{const orders=pendingBatchOrders;setPendingBatchOrders([]);void runPilotBatch(orders);}}>Ya, Sync Semua yang Belum Sync</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -411,7 +429,7 @@ export default function GoogleSheets() {
             <button type="button" onClick={loadPreview} disabled={previewBusy} className="border rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">{previewBusy?"Memuat...":"Preview Data"}</button>
           </div>
           {previewError&&<p role="alert" className="text-sm text-red-600">{previewError}</p>}
-          {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview tidak menulis ke Sheets. Gunakan Periksa Status Sheets untuk memverifikasi baris, Sync One untuk satu booking, atau Sync Now pilot maksimal lima.</p>
+          {preview&&<div className="space-y-2"><p className="text-sm font-medium">Tujuan: {preview.tab} · {preview.rows.length} booking berbayar</p><p className="text-xs text-amber-700">Preview tidak menulis ke Sheets. Gunakan Periksa Status Sheets untuk memverifikasi baris, Sync One untuk satu booking, atau Sync Semua hanya untuk booking yang belum tersinkron.</p>
             <button type="button" onClick={reconcilePreview} disabled={reconBusy} className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50">{reconBusy?"Mencocokkan...":"Cek Duplikasi Lintas Tab (Dry Run)"}</button>
             {reconError&&<p role="alert" className="text-red-600 text-sm">{reconError}</p>}
             {reconciliation&&<div className="rounded-lg border p-3 text-sm space-y-2">
@@ -432,7 +450,7 @@ export default function GoogleSheets() {
               <span className="text-xs text-slate-500">Badge awal dari ledger; tombol pemeriksaan membandingkan keberadaan baris di Sheets. Tidak mengubah booking atau Sheets.</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="rounded-lg border border-blue-600 px-3 py-2 text-sm font-semibold disabled:opacity-50" disabled={batchBusy||statusBusy||!!syncBusy||pilotBatchCandidates.length===0} onClick={()=>setPendingBatchOrders(pilotBatchCandidates)}>{batchBusy?"Sinkronisasi batch berjalan...":`Sync Now (Pilot ${pilotBatchCandidates.length}/5)`}</button>
+              <button type="button" className="rounded-lg border border-blue-600 px-3 py-2 text-sm font-semibold disabled:opacity-50" disabled={batchBusy||statusBusy||!!syncBusy||allBatchCandidates.length===0} onClick={()=>setPendingBatchOrders(allBatchCandidates)}>{batchBusy?"Sinkronisasi batch berjalan...":`Sync Semua yang Belum Sync (${allBatchCandidates.length})`}</button>
               <span className="text-xs text-slate-500">Hanya kandidat tanpa ledger dan bukan grup, maksimal 5 per konfirmasi. DP, corporate, membership dan error ditolak server.</span>
             </div>
             {batchMessage&&<p role="status" className="text-sm text-blue-700">{batchMessage}</p>}
@@ -493,8 +511,8 @@ export default function GoogleSheets() {
             <p>Sinkron otomatis Payment Events: <strong>{eventStatus===null?"Belum terverifikasi":eventStatus.enabled?"Aktif":"Nonaktif"}</strong></p>
             {autoStatus&&<p className="text-xs text-slate-500">Antrean: {autoStatus.counts.pending??0} menunggu · {autoStatus.counts.written??0} berhasil · {(autoStatus.counts.blocked??0)+(autoStatus.counts.needs_review??0)} perlu pemeriksaan.</p>}
             <p>Riwayat Payment Events: <strong>{eventStatus?(eventStatus.counts.written??0)+" transaksi tertulis":"Belum dapat dibaca"}</strong></p>
-            <div className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-slate-400 cursor-not-allowed" aria-disabled="true"><RefreshCw className="h-4 w-4" /> Sync Now (pilot maksimal 5 pada Preview)</div>
-            <p className="text-slate-500">Tombol Sync Now hanya untuk pilot laporan booking PAID; bukan auto-sync Payment Events.</p>
+            <div className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-slate-400 cursor-not-allowed" aria-disabled="true"><RefreshCw className="h-4 w-4" /> Sync Semua tersedia di Laporan Booking PAID</div>
+            <p className="text-slate-500">Tombol Sync Semua hanya untuk laporan booking PAID; bukan auto-sync Payment Events.</p>
           </CardContent>
         </Card>
       </div>}
