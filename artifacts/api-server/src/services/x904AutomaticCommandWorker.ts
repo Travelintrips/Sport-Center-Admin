@@ -21,6 +21,25 @@ export async function processX904AutomaticCommands(): Promise<void> {
         WHERE event_id=${Number(ev.event_id)} AND state='pending' FOR UPDATE`);
       if(event.rows.length!==1)return;
       const membershipId=Number(event.rows[0].membership_id);
+      // A queued command is not completion. Only a confirmed machine read-back
+      // may close the event; hold failures for explicit investigation.
+      const sent=await tx.execute(sql`SELECT state,result FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
+          AND payload->>'eventId'=${String(ev.event_id)}
+        ORDER BY created_at DESC LIMIT 1`);
+      if(sent.rows.length){
+        const last=sent.rows[0];
+        if(last.state==='completed' && (last.result as any)?.readBackConfirmed===true){
+          await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+            SET state='processed',processed_at=now(),result='{"status":"readback_confirmed"}'::jsonb
+            WHERE event_id=${Number(ev.event_id)}`);
+        }else if(last.state==='failed'){
+          await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+            SET state='review_required',result='{"status":"device_command_failed"}'::jsonb
+            WHERE event_id=${Number(ev.event_id)}`);
+        }
+        return;
+      }
       const candidates=await tx.execute(sql`SELECT m.start_date,m.end_date,m.status::text AS status,
         mp.user_pin,u.device_uid,u.display_name,u.device_role
         FROM sport_center.sport_memberships m
@@ -82,8 +101,9 @@ export async function processX904AutomaticCommands(): Promise<void> {
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
         VALUES ('TDBD234200545',${command},${pins[0]},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
-      await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events SET state='processed',
-        processed_at=now(),result=${JSON.stringify({command})}::jsonb WHERE event_id=${Number(ev.event_id)}`);
+      // Keep pending until the device has executed and confirmed read-back.
+      // Next worker cycle resolves the event against its actual machine command.
+
     });
   }
 }
