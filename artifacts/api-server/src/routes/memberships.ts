@@ -1239,13 +1239,14 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           return;
         }
 
-        const requestedProvider = String(req.body?.settlementProviderCode ?? "").trim().toLowerCase();
-        if (!(["mandiri_direct", "paylabs"].includes(requestedProvider))) {
-          res.status(409).json({ error: "Pilih settlement provider secara eksplisit untuk konfirmasi pembayaran membership" });
+        // Sport Center membership accepts Mandiri QRIS and Mandiri bank transfer only.
+        // An omitted provider is safe here because the merchant has a single authorized settlement path.
+        const requestedProvider = String(req.body?.settlementProviderCode ?? "mandiri_direct").trim().toLowerCase();
+        if (requestedProvider !== "mandiri_direct") {
+          res.status(409).json({ error: "Provider tersebut tidak aktif untuk pembayaran membership Sport Center" });
           return;
         }
-        // Confirm only an explicitly selected settlement path; never guess from payment method.
-        paymentToConfirm = { ...paymentToConfirm, settlementProviderCode: requestedProvider };
+        paymentToConfirm = { ...paymentToConfirm, settlementProviderCode: "mandiri_direct" };
         data.status = "active";
         data.startDate = paymentToConfirm.periodStart;
         data.endDate = paymentToConfirm.periodEnd;

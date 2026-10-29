@@ -1386,7 +1386,6 @@ function BookingDetailDrawer({
     editablePayment?.submittedAt ??
     booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
-  const [membershipSettlementProvider,setMembershipSettlementProvider]=useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
@@ -2240,28 +2239,17 @@ function BookingDetailDrawer({
                            </button>
                          </div>
                        )}
-                      {pmt.isMembershipPayment && pmt.status === "waiting_confirmation" && pmt.proofUrl && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-semibold">Settlement provider penerima *</label>
-                          <select value={membershipSettlementProvider} onChange={e=>setMembershipSettlementProvider(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm bg-white text-slate-900">
-                            <option value="">Pilih berdasarkan bukti settlement</option>
-                            <option value="mandiri_direct">Mandiri Direct</option>
-                            <option value="paylabs">Paylabs</option>
-                          </select>
-                          <p className="text-xs text-slate-500">Pilih jalur penerimaan sebenarnya; QRIS saja tidak menentukan provider.</p>
-                        </div>
-                      )}
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
                              onClick={() =>
                                pmt.isMembershipPayment
-                                 ? onConfirmMembershipPayment(pmt.membershipId,membershipSettlementProvider)
+                                 ? onConfirmMembershipPayment(pmt.membershipId,"mandiri_direct")
                                  : pmt.isCompanyInvoicePayment
                                    ? onSyncCompanyInvoicePayment(booking.id)
                                    : onConfirmPayment(pmt.id)
                              }
-                            disabled={isUpdating || (pmt.isMembershipPayment && !membershipSettlementProvider)}
+                            disabled={isUpdating}
                             className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                           >
                             <CheckCircle2 size={13} />

@@ -62,7 +62,6 @@ export default function AdminCheckoutForm() {
     amount: number;
   }>(null);
   const [membershipPaymentMethod, setMembershipPaymentMethod] = useState("qris");
-  const [membershipSettlementProvider, setMembershipSettlementProvider] = useState("");
   const [membershipProofUploaded, setMembershipProofUploaded] = useState(false);
   const [membershipPaymentDate, setMembershipPaymentDate] = useState(jakartaDateOnly);
   const [membershipPaymentFile, setMembershipPaymentFile] = useState<File | null>(null);
@@ -199,10 +198,6 @@ export default function AdminCheckoutForm() {
 
   async function submitMembershipPaymentInline() {
     if (!membershipPaymentTarget || (!membershipPaymentFile && !membershipProofUploaded) || membershipPaymentBusy || membershipPaymentDone) return;
-    if (getCurrentRole() !== "staff" && !membershipSettlementProvider) {
-      toast({ title: "Pilih settlement provider", description: "Tentukan jalur penerimaan pembayaran sebelum konfirmasi.", variant: "destructive" });
-      return;
-    }
     setMembershipPaymentBusy(true);
     try {
       const token = getToken();
@@ -229,7 +224,7 @@ export default function AdminCheckoutForm() {
             Authorization: `Bearer ${token ?? ""}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ status: "active", settlementProviderCode: membershipSettlementProvider }),
+          body: JSON.stringify({ status: "active", settlementProviderCode: "mandiri_direct" }),
         });
         const confirmedResult = await confirmed.json();
         if (!confirmed.ok) throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi membership gagal");
@@ -806,17 +801,6 @@ export default function AdminCheckoutForm() {
                           <SelectItem value="transfer">Transfer Bank</SelectItem>
                         </SelectContent>
                       </Select>
-                      {getCurrentRole() !== "staff" && <>
-                        <Label>Settlement Provider *</Label>
-                        <Select value={membershipSettlementProvider} onValueChange={setMembershipSettlementProvider}>
-                          <SelectTrigger><SelectValue placeholder="Pilih provider sesuai rekening penerima" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="mandiri_direct">Mandiri Direct</SelectItem>
-                            <SelectItem value="paylabs">Paylabs</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">Pilih berdasarkan bukti settlement; metode QRIS saja tidak menentukan provider.</p>
-                      </>}
                       <Label htmlFor="checkout-membership-payment-date">Tanggal pembayaran</Label>
                       <Input
                         id="checkout-membership-payment-date"
@@ -836,7 +820,7 @@ export default function AdminCheckoutForm() {
                       <Button
                         type="button"
                         className="w-full"
-                        disabled={(!membershipPaymentFile && !membershipProofUploaded) || !membershipPaymentDate || membershipPaymentBusy || (getCurrentRole() !== "staff" && !membershipSettlementProvider)}
+                        disabled={(!membershipPaymentFile && !membershipProofUploaded) || !membershipPaymentDate || membershipPaymentBusy}
                         onClick={submitMembershipPaymentInline}
                       >
                         {membershipPaymentBusy
