@@ -196,6 +196,14 @@ async function expireOverdueMemberships(): Promise<void> {
           dbCode: cause?.code,
           dbCause: cause?.message?.slice(0, 400),
         }, "[scheduler] GYM membership reconciliation row failed; continuing remaining members");
+        // Hostinger's runtime panel exposes the log message but drops Pino's
+        // structured context. Emit sanitized actionable fields as JSON text.
+        console.error("[gym-reconcile] member-failed " + JSON.stringify({
+          membershipId: member.id,
+          error: memberError instanceof Error ? memberError.message.slice(0, 240) : String(memberError).slice(0, 240),
+          dbCode: cause?.code ?? null,
+          dbCause: cause?.message?.slice(0, 240) ?? null,
+        }));
         heldForReview++;
       }
     }
@@ -655,7 +663,14 @@ export function startScheduler(): void {
       logger.error({err}, "[scheduler] X904 one-time report WhatsApp failed"));
   }, 15 * 1000);
 
-  // Safe, explicitly enabled PIN-200-only command reconciliation. Disabled by default.
+  // Diagnostics only: never expose actual secrets or change opt-in behavior.
+  console.info("[x904-auto] runtime-gates " + JSON.stringify({
+    enabled: process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED === "true",
+    pinsSingle81: (process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS ?? "").trim() === "81",
+    systemActor301: process.env.GYM_X904_AUTOMATIC_REQUESTED_BY === "301",
+    membershipReconciliationEnabled: process.env.GYM_MEMBERSHIP_AUTO_SUSPEND_ENABLED === "true",
+  }));
+  // Automated command reconciliation is disabled by default and PIN-allowlisted.
   setInterval(() => {
     processX904AutomaticCommands().catch(err =>
       logger.error({err},"[scheduler] X904 automatic command reconciliation failed"));
