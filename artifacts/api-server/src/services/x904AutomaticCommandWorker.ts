@@ -33,7 +33,9 @@ export async function processX904AutomaticCommands(): Promise<void> {
         count(b.id)::integer AS booking_count FROM sport_center.sport_membership_payments p
         LEFT JOIN sport_center.sport_bookings b ON b.membership_payment_id=p.id
         WHERE p.membership_id=${membershipId} GROUP BY p.id`);
-      const sourcesComplete=payments.rows.every(p=>p.status!=="confirmed" ||
+      // No financial history cannot prove non-payment. Never suspend a legacy
+      // membership on an empty payment ledger.
+      const sourcesComplete=payments.rows.length>0 && payments.rows.every(p=>p.status!=="confirmed" ||
         (Number(p.amount)>0 && Number(p.booking_count)===1));
       const entitlement=resolvePaidX904Automation({
         today,membershipStart:String(m.start_date),membershipEnd:String(m.end_date),
