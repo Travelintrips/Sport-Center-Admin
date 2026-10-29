@@ -62,3 +62,19 @@ export function resolveGymEntitlement(input: {
   // suspend them solely because their end_date is old until sources are complete.
   return "suspended";
 }
+
+/**
+ * Strict, fail-closed entitlement for AUTOMATED X904 mutations only.
+ * Unlike the legacy UI-facing status, a membership date alone cannot activate
+ * the device. Grace is a hold state, never a new activation authorization.
+ */
+export function resolvePaidX904Automation(input: Parameters<typeof resolveGymEntitlement>[0]): GymEntitlement {
+  const decision = resolveGymEntitlement(input);
+  if (decision === "review_required" || decision === "suspended") return decision;
+  const covered = input.payments.some(p =>
+    p.status === "confirmed" && p.amount > 0 &&
+    p.periodStart <= input.today && p.periodEnd >= input.today
+  );
+  if (decision === "active" && !covered) return "review_required";
+  return decision;
+}

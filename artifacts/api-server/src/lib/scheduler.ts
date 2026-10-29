@@ -1,3 +1,4 @@
+import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport } from "../services/x904LanWaNotifications";
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
@@ -99,6 +100,15 @@ async function expireOverdueMemberships(): Promise<void> {
               inArray(gymMembershipsTable.status, ["active", "expired"])))
             .returning({ id: gymMembershipsTable.id });
           if (member.status === "expired") reactivated += updated.length;
+          if (updated.length) await db.execute(sql`
+            INSERT INTO sport_center.x904_automatic_entitlement_events
+              (membership_id,reason,event_key)
+            SELECT ${member.id},'PAYMENT_RECOVERY',${"x904-recovery-" + member.id + "-" + todayWIB}
+            WHERE EXISTS (SELECT 1 FROM sport_center.gym_x904_member_mapping
+              WHERE membership_id=${member.id} AND status='verified'
+              AND device_serial='TDBD234200545')
+            ON CONFLICT (event_key) DO NOTHING
+          `);
         }
         continue;
       }
@@ -144,6 +154,15 @@ async function expireOverdueMemberships(): Promise<void> {
           eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)))
         .returning({ id: gymMembershipsTable.id });
       suspended += updated.length;
+      if (updated.length) await db.execute(sql`
+        INSERT INTO sport_center.x904_automatic_entitlement_events
+          (membership_id,reason,event_key)
+        SELECT ${member.id},'DAILY_EXPIRY',${"x904-expiry-" + member.id + "-" + todayWIB}
+        WHERE EXISTS (SELECT 1 FROM sport_center.gym_x904_member_mapping
+          WHERE membership_id=${member.id} AND status='verified'
+          AND device_serial='TDBD234200545')
+        ON CONFLICT (event_key) DO NOTHING
+      `);
     }
     logger.info({ examined: memberships.length, suspended, reactivated, heldForReview },
       "[scheduler] GYM payment entitlement reconciliation");
@@ -595,6 +614,12 @@ export function startScheduler(): void {
     dispatchX904OneTimeReport().catch(err =>
       logger.error({err}, "[scheduler] X904 one-time report WhatsApp failed"));
   }, 15 * 1000);
+
+  // Safe, explicitly enabled PIN-200-only command reconciliation. Disabled by default.
+  setInterval(() => {
+    processX904AutomaticCommands().catch(err =>
+      logger.error({err},"[scheduler] X904 automatic command reconciliation failed"));
+  }, 60 * 1000);
 
   // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
