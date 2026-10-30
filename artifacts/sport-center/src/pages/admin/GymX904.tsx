@@ -643,7 +643,7 @@ export default function GymX904() {
                   return <button type="button" title={reason}
                     disabled={!op||!permitted||!userCommandCapabilities.enabled||!userCommandCapabilities.operations?.includes(op)||!!accessBusyPin||!!outstanding||pendingLedgerError||!pendingLedger}
                     onClick={()=>{if(op)void changeManualAccess(u,op);}}
-                    className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">{op==="ACTIVATE_USER"?"Aktifkan":"Suspend"}</button>})()}
+                    className={"rounded-md border px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-40 "+(op==="ACTIVATE_USER"?"border-green-400 bg-green-50 text-green-800 hover:bg-green-100 dark:border-green-700 dark:bg-green-950 dark:text-green-300 dark:hover:bg-green-900":"border-red-400 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-700 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900")}>{op==="ACTIVATE_USER"?"Aktifkan":"Suspend"}</button>})()}
                 {userCommandCapabilities.operations?.includes("UPDATE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"UPDATE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Edit</button>}
                 {userCommandCapabilities.operations?.includes("DELETE_USER")&&<button type="button" disabled={!userCommandCapabilities.enabled||u.device_role!==0} onClick={()=>setSelectedMachineUser({user:u,action:"DELETE_USER",request:Date.now()})} className="rounded-md border px-3 py-1 text-xs disabled:opacity-40">Hapus</button>}
               </div></td>}
