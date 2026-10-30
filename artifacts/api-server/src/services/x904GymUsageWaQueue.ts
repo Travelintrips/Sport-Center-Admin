@@ -5,7 +5,8 @@ import { getCstWaGatewayMessageStatus, sendCstWaGatewayGroupMessage } from "../l
 /** One daily, cumulative report per version, using the existing first-scan source ledger. */
 export async function dispatchX904GymUsageReport(): Promise<void> {
   const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
-  if (process.env.GYM_X904_GYM_USAGE_WA_ENABLED !== "true" || !groupId) return;
+  const enabled = process.env.GYM_X904_GYM_USAGE_WA_ENABLED ?? process.env.GYM_X904_LAN_WA_ENABLED;
+  if (enabled !== "true" || !groupId) return;
   // Reconcile pending delivery before claiming any newer report version.
   const outstanding = await db.execute(sql`SELECT report_date,gateway_message_id,claimed_version
     FROM sport_center.x904_gym_usage_wa_queue
