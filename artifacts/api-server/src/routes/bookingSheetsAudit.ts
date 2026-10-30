@@ -547,6 +547,12 @@ router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, re
         })).data.values ?? [],
       })));
       const bookings = await db.select().from(bookingsTable).where(inArray(bookingsTable.orderNumber,confirmed.map(item=>item.orderNumber)));
+      const groupSources=sqlResultRows(await db.execute(sql`
+        select s.order_number,s.amount,s.payment_id,s.allocation_id
+        from sport_center.booking_sheets_payment_sources s
+        where s.source_type='allocation'
+          and s.order_number in (${sql.join(confirmed.map(item=>sql`${item.orderNumber}`),sql`,`)})
+      `));
       const facilities = await db.select().from(facilitiesTable);
       for (const item of confirmed) {
         const booking = bookings.find(row => row.orderNumber === item.orderNumber);
@@ -558,10 +564,20 @@ router.post("/admin/google-sheets/status-check", adminMiddleware, async (req, re
           day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(booking.createdAt));
         const datePart=(type:string)=>dateParts.find(part=>part.type===type)?.value??"";
         const createdAt=`${datePart("day")}/${datePart("month")}/${datePart("year")} ${datePart("hour")}:${datePart("minute")}:${datePart("second")} WIB`;
+        const groupSource=booking.groupRef
+          ? groupSources.find(row=>row.order_number===item.orderNumber &&
+              String(actual[12]??"").includes(`Allocation ${row.allocation_id}`) &&
+              String(actual[12]??"").includes(`Payment ${row.payment_id}`))
+          : undefined;
         const expected=[booking.orderNumber,booking.customerName,booking.customerEmail,booking.customerPhone,
           facility?.name??"",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
-          booking.totalPrice,booking.status,booking.notes??"",booking.adminNotes??"",createdAt];
-        const differences=BOOKING_HEADERS.filter((_,i)=>String(actual[i]??"").trim()!==String(expected[i]??"").trim());
+          groupSource ? Number(groupSource.amount) : booking.totalPrice,booking.status,booking.notes??"",
+          groupSource ? `Group ${booking.groupRef} · Payment ${groupSource.payment_id} · Allocation ${groupSource.allocation_id}` : booking.adminNotes??"",createdAt];
+        const differences=BOOKING_HEADERS.filter((_,i)=>
+          i===9 ? Math.abs(Number(actual[i])-Number(expected[i]))>0.005 ||
+            !Number.isFinite(Number(actual[i])) :
+            String(actual[i]??"").trim()!==String(expected[i]??"").trim());
+        if(booking.groupRef && !groupSource)differences.push("Group Allocation");
         if (differences.length){item.status="changed";(item as typeof item & {changedColumns?:string[]}).changedColumns=differences;}
       }
     }
