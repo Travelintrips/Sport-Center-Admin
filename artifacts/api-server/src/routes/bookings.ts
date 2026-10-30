@@ -1009,9 +1009,14 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             Number(invoice.paidAmount ?? 0) >= Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) &&
             Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) > 0 &&
             Number(invoice.remainingAmount ?? 0) <= 0;
-          const verifiedBookingPayment = booking.payerType !== "company" &&
+          const confirmedPayments = [...new Map(
             [booking.payment,...(Array.isArray(booking.payments)?booking.payments:[])]
-              .some((p:any)=>p?.status === "confirmed" && Number(p.amount)>0);
+              .filter((p:any)=>p?.id != null && p.status === "confirmed")
+              .map((p:any)=>[p.id,p])
+          ).values()];
+          const due = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+          const verifiedBookingPayment = booking.payerType !== "company" &&
+            due > 0 && confirmedPayments.reduce((sum:number,p:any)=>sum+Number(p.amount??0),0) >= due;
           if (!verifiedInvoice && !verifiedBookingPayment) return false;
         }
         if (normalizedGroup === "group" && !booking.groupRef) return false;
