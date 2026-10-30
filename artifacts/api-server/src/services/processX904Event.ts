@@ -48,6 +48,7 @@ export async function processX904Event(event: X904EventInput,
       raw.rows[0]?.verification_type !== undefined &&
       approvedCodes.includes(Number(raw.rows[0]?.verification_type));
     let status: "success" | "review_required" = "review_required";
+    let createdCheckin = false;
     // A different event on the same day is a review case, not a replay of this event ID.
     if (ordinaryDeviceUser && hasVerifiedAdmsPayload && hasIndependentTrustedEvidence && mapping.rows[0]?.status === "verified" && Number.isSafeInteger(membershipId) && membershipId > 0) {
       const member = await tx.execute(sql`SELECT id,name,email,phone,start_date,end_date,status
@@ -94,6 +95,7 @@ export async function processX904Event(event: X904EventInput,
           await tx.execute(sql`INSERT INTO sport_center.gym_checkins
             (membership_id,checkin_date,checked_in_at,notes,x904_event_id)
             VALUES (${membershipId},${day}::date,${scanOccurredAt},${`X904 event ${event.eventId}`},${event.eventId})`);
+          createdCheckin = true;
           status = "success";
         }
         }
@@ -105,7 +107,7 @@ export async function processX904Event(event: X904EventInput,
       VALUES (${event.eventId},${event.deviceSerial},${event.userPin},${status})`);
     // Enqueue only independently attested, eligible attendance. Never send WhatsApp inside the DB transaction.
     // The event ID is the primary key, preventing duplicate notifications on ingress replay.
-    if (status === "success" && process.env.GYM_X904_WA_NOTIFY_ENABLED === "true") {
+    if (createdCheckin && process.env.GYM_X904_WA_NOTIFY_ENABLED === "true") {
       await tx.execute(sql`INSERT INTO sport_center.gym_x904_wa_outbox
         (event_id,device_serial,user_pin,member_name,device_time,attendance_date,verification_method)
         SELECT ${event.eventId},${event.deviceSerial},${event.userPin},m.name,r.device_time,substring(r.device_time from 1 for 10)::date,

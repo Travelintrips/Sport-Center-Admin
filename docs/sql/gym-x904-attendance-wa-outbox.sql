@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_outbox (
  created_at timestamptz NOT NULL DEFAULT now(),
  sent_at timestamptz
 );
--- event_id uniquely identifies the notification; repeat scans on one day are valid.
+-- Only the first successful new member/day check-in creates a notification.
+-- Repeated verified scans are recorded in the event ledger but do not enqueue WA.
 CREATE INDEX IF NOT EXISTS gym_x904_wa_outbox_due_idx ON sport_center.gym_x904_wa_outbox(status,next_attempt_at);
 CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_batches (
  batch_id text PRIMARY KEY,
@@ -33,5 +34,6 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_x904_wa_batches (
 );
 CREATE INDEX IF NOT EXISTS gym_x904_wa_outbox_batch_idx ON sport_center.gym_x904_wa_outbox(batch_id);
 
--- Remove legacy one-per-member/day restriction: distinct verified scans are allowed.
+-- Legacy per-member/day index on this outbox is unnecessary: the first check-in
+-- invariant is enforced by the gym_checkins uniqueness and event processor.
 DROP INDEX IF EXISTS sport_center.gym_x904_wa_one_per_user_day_idx;
