@@ -346,8 +346,11 @@ export default function GoogleSheets() {
          String(g.admin_notes??""),String(g.created_at??""),String(g.payment_date_wib),"allocation",
          String(g.payment_id),String(g.group_ref),String(g.booking_total)
        ]);
-       const groupOrders=new Set(groupRows.map(r=>r[0]));
-       const combined=[...rows.filter(r=>!groupOrders.has(r[0])),...groupRows];
+       // The CSV export can contain partial/DP group rows that have been
+       // rejected by the authoritative group-preview endpoint. Never bring
+       // those group rows back when combining the two sources.
+       const nonGroupRows=rows.filter(r=>!String(r[17]??"").trim());
+       const combined=[...nonGroupRows,...groupRows];
       if (request === previewRequestRef.current) {setPreview({headers:[...COLUMNS],rows:combined,tab:`PAID ${MONTH_NAMES[mon-1]} ${year}`});void checkSyncStatus(combined.map(r=>r[0]),false);void checkEligibility([...new Set(combined.map(r=>r[0]))]);}
     }catch(e){if(request === previewRequestRef.current)setPreviewError(e instanceof Error?e.message:"Preview gagal");}finally{if(request === previewRequestRef.current)setPreviewBusy(false);}
   }
