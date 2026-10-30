@@ -384,6 +384,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       pageSize,
       search,
       settlement,
+      groupFilter,
+      billingFilter,
       dateFrom,
       dateTo,
     } = req.query;
@@ -955,6 +957,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const normalizedSearch = String(search ?? "").trim().toLowerCase();
       const normalizedStatus = String(status ?? "all");
       const normalizedSettlement = String(settlement ?? "all");
+      const normalizedGroup = String(groupFilter ?? "all");
+      const normalizedBilling = String(billingFilter ?? "all");
 
       const isVisibleBooking = (booking: any) =>
         booking.source !== "gym_membership" &&
@@ -993,6 +997,13 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           booking.source === "gym_membership" ||
           (booking.membershipId != null && booking.membershipPaymentId == null);
         if (isMembershipCheckIn) return false;
+        // Apply before grouping and pagination, so counts and pages stay accurate.
+        if (normalizedGroup === "group" && !booking.groupRef) return false;
+        if (normalizedGroup === "individual" && !!booking.groupRef) return false;
+        // Invoice billing status is corporate-specific; personal null status
+        // must not be mistaken for "Belum Ditagih".
+        if (["unbilled", "billed", "paid"].includes(normalizedBilling) &&
+            (booking.payerType !== "company" || booking.billingStatus !== normalizedBilling)) return false;
 
         if (normalizedStatus !== "all") {
           const statusMatches =
