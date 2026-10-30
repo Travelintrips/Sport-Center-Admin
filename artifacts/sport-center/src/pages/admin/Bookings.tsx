@@ -4463,7 +4463,7 @@ export default function AdminBookings() {
                 <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-emerald-800/80 dark:text-emerald-200/80">
                   {paymentFilter === "confirmed"
                     ? "Nilai booking dengan pembayaran lunas dan terkonfirmasi sesuai filter. Periode mengikuti tanggal booking, bukan tanggal pembayaran."
-                    : "Jumlah nilai pesanan sesuai filter, mencakup yang lunas dan belum lunas. Angka ini bukan kas yang telah diterima maupun nilai yang telah masuk Google Sheets."}
+                    : "Total nilai seluruh booking sesuai filter, termasuk booking yang sudah lunas, belum lunas, dan masih menunggu pembayaran."}
                 </p>
               </div>
             </div>
