@@ -4455,11 +4455,16 @@ export default function AdminBookings() {
               </div>
               <div>
                 <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
-                  Total Revenue ({totalBookings} booking)
+                  Total Nilai Booking Lunas ({totalBookings} booking)
                 </div>
                 <div className="text-2xl font-black text-emerald-800 dark:text-emerald-300">
                   {formatCurrency(revenueStats.total)}
                 </div>
+                <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-emerald-800/80 dark:text-emerald-200/80">
+                  {paymentFilter === "confirmed"
+                    ? "Nilai booking dengan pembayaran lunas dan terkonfirmasi sesuai filter. Periode mengikuti tanggal booking, bukan tanggal pembayaran."
+                    : "Nilai booking sesuai filter, termasuk kategori pembayaran yang ditampilkan di bawah. Ini bukan jumlah kas diterima atau total Google Sheets."}
+                </p>
               </div>
             </div>
 
