@@ -435,9 +435,35 @@ router.post("/admin/google-sheets/sync-eligibility", adminMiddleware, async (req
       where b.order_number in (${sql.join(orders.map(o=>sql`${o}`),sql`,`)})
       group by b.id,b.order_number,b.group_ref,b.payer_type,b.membership_id,b.membership_payment_id,b.grand_total,b.total_price
     `));
+    // Evaluate full group payment proof separately; the previous predicate
+    // rejected every group even though Sync One already supports full groups.
+    const groupProof=sqlResultRows(await db.execute(sql`
+      select b.order_number,
+        case when b.group_ref is not null and b.group_ref<>'' and b.status::text='confirmed'
+          and s.source_type='allocation' and s.validation_status='CANDIDATE'
+          and s.amount=coalesce(b.grand_total,b.total_price)
+          and p.status::text='confirmed' and p.payment_type='full_payment'
+          and p.amount=(select coalesce(sum(x.total_price),0) from sport_center.sport_bookings x where x.group_ref=b.group_ref)
+          and p.amount=(select coalesce(sum(a.amount),0) from sport_center.sport_payment_allocations a where a.payment_id=p.id)
+          and (select count(*) from sport_center.sport_bookings x where x.group_ref=b.group_ref)=
+              (select count(*) from sport_center.sport_payment_allocations a
+                 join sport_center.sport_bookings x on x.id=a.booking_id
+                 where a.payment_id=p.id and x.group_ref=b.group_ref and x.status::text='confirmed')
+          and exists(select 1 from sport_center.sport_payment_allocations a
+                      where a.id=s.allocation_id and a.payment_id=p.id and a.booking_id=b.id and a.amount=s.amount)
+        then true else false end as eligible
+      from sport_center.sport_bookings b
+      join sport_center.booking_sheets_payment_sources s on s.booking_id=b.id
+      left join sport_center.sport_payments p on p.id=s.payment_id
+      where b.order_number in (${sql.join(orders.map(o=>sql`${o}`),sql`,`)})
+        and b.group_ref is not null and b.group_ref<>''
+    `));
+    const approvedGroups=new Set(groupProof.filter(p=>p.eligible===true).map(p=>p.order_number));
     const items=orders.map(order=>{
       const r=rows.find(row=>row.order_number===order);
-      const reason=!r?"BOOKING_NOT_FOUND":r.group_ref||r.payer_type==="company"||(r.membership_id&&!r.membership_payment_id)?"UNSUPPORTED_BOOKING_TYPE":
+      const reason=!r?"BOOKING_NOT_FOUND":
+        r.group_ref?(approvedGroups.has(order)?null:"GROUP_NOT_FULLY_PAID_OR_UNRECONCILED"):
+        r.payer_type==="company"||(r.membership_id&&!r.membership_payment_id)?"UNSUPPORTED_BOOKING_TYPE":
         r.membership_payment_id&&(r.membership_status!=="confirmed"||!r.membership_confirmed||Number(r.membership_amount)!==Number(r.due))?"MEMBERSHIP_NOT_CONFIRMED_OR_MISMATCH":
         Number(r.event_count)!==1||Number(r.valid_direct_count)!==1?"SOURCE_NOT_SINGLE_CONFIRMED_DIRECT":
         Number(r.due)<=0||Number(r.direct_amount)<Number(r.due)?"NOT_FULLY_PAID":null;
