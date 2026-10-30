@@ -84,9 +84,13 @@ export async function processX904AutomaticCommands(): Promise<void> {
         WHERE p.membership_id=${membershipId} GROUP BY p.id`);
       // No financial history cannot prove non-payment. Never suspend a legacy
       // membership on an empty payment ledger.
-      const sourcesComplete=payments.rows.length>0 && payments.rows.every(p=>
+      // A future pending renewal cannot revoke already-confirmed access today.
+      // Keep incomplete histories fail-closed when no paid period covers today.
+      const paidToday=payments.rows.some(p=>p.status==="confirmed" && Number(p.amount)>0 &&
+        String(p.period_start)<=today && String(p.period_end)>=today && Number(p.booking_count)===1);
+      const sourcesComplete=paidToday || (payments.rows.length>0 && payments.rows.every(p=>
         p.status!=="waiting_confirmation" && p.status!=="pending_payment" &&
-        (p.status!=="confirmed" || (Number(p.amount)>0 && Number(p.booking_count)===1)));
+        (p.status!=="confirmed" || (Number(p.amount)>0 && Number(p.booking_count)===1))));
       const entitlement=resolvePaidX904Automation({
         today,membershipStart:String(m.start_date),membershipEnd:String(m.end_date),
         membershipStatus:String(m.status),paymentSourcesComplete:sourcesComplete,
