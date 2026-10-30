@@ -653,6 +653,15 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
     ].filter(Boolean).join(" — ");
 
     const result = await db.transaction(async (tx) => {
+      // Serialize manual and X904 check-ins on the same membership row.
+      // The X904 processor takes this same lock, so exactly one route wins.
+      await tx.execute(sql`SELECT id FROM sport_center.sport_memberships
+        WHERE id=${id} FOR UPDATE`);
+      const [existingUnderLock] = await tx.select({ id: gymCheckinsTable.id })
+        .from(gymCheckinsTable)
+        .where(and(eq(gymCheckinsTable.membershipId, id), eq(gymCheckinsTable.checkinDate, checkinDate)))
+        .limit(1);
+      if (existingUnderLock) throw new Error("GYM_ALREADY_CHECKED_IN");
       const [newCheckin] = await tx.insert(gymCheckinsTable)
         .values({ membershipId: id, checkinDate, notes })
         .returning();
@@ -710,6 +719,14 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
       req.log.error({ err }, "[checkin] Gagal kirim rekap WA setelah check-in")
     );
   } catch (err) {
+    // Both manual and automatic paths share the unique member/day constraint.
+    // A concurrent winner is an already-recorded visit, not a server failure.
+    if ((err instanceof Error && err.message === "GYM_ALREADY_CHECKED_IN") ||
+        (typeof err === "object" && err !== null &&
+          ("code" in err && err.code === "23505"))) {
+      res.status(409).json({ error: "Sudah check-in pada tanggal ini" });
+      return;
+    }
     req.log.error({ err }, "Check-in member error");
     res.status(500).json({ error: "Internal server error" });
   }
