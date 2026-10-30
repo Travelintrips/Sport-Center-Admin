@@ -1,4 +1,4 @@
-import {createHash} from "node:crypto";
+import {chooseX904AutomaticCommand,x904MachineCommandResult,x904AutomaticCommandKey} from "./x904AutomationDecision";
 import {db} from "@workspace/db";
 import {sql} from "drizzle-orm";
 import {resolvePaidX904Automation} from "./gymMembershipEntitlement";
@@ -48,11 +48,11 @@ export async function processX904AutomaticCommands(): Promise<void> {
         ORDER BY created_at DESC LIMIT 1`);
       if(sent.rows.length){
         const last=sent.rows[0];
-        if(last.state==='completed' && (last.result as any)?.readBackConfirmed===true){
+        if(x904MachineCommandResult(String(last.state),(last.result as any)?.readBackConfirmed===true)==='processed'){
           await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
             SET state='processed',processed_at=now(),result='{"status":"readback_confirmed"}'::jsonb
             WHERE event_id=${Number(ev.event_id)}`);
-        }else if(last.state==='failed'){
+        }else if(x904MachineCommandResult(String(last.state),(last.result as any)?.readBackConfirmed===true)==='review_required'){
           await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
             SET state='review_required',result='{"status":"device_command_failed"}'::jsonb
             WHERE event_id=${Number(ev.event_id)}`);
@@ -111,7 +111,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
         normalizeName(v.name)===normalizeName(m.display_name) && Number(v.role)===0);
       if(entries.length!==1||entries[0].enabled!==true)return;
       const group=Number(entries[0].group);
-      const command=entitlement==="active"&&group===2?"ACTIVATE_USER":entitlement==="suspended"&&group===1?"SUSPEND_USER":null;
+      const command=chooseX904AutomaticCommand(entitlement,group);
       if(!command){
         if((entitlement==="active"&&group===1)||(entitlement==="suspended"&&group===2)){
           await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
@@ -132,7 +132,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
       const pending=await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands WHERE device_serial='TDBD234200545'
         AND user_pin=${pin} AND state IN ('queued','claimed') LIMIT 1`);
       if(pending.rows.length)return;
-      const key="x904auto_"+createHash("sha256").update(String(event.rows[0].event_key)+":"+command+":"+pin).digest("hex").slice(0,44);
+      const key=x904AutomaticCommandKey(String(event.rows[0].event_key),command,pin);
       const payload=JSON.stringify({expectedUid:Number(m.device_uid),expectedName:String(m.display_name),source:"AUTO_MEMBERSHIP_PAYMENT",membershipId,eventId:Number(ev.event_id)});
       await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
