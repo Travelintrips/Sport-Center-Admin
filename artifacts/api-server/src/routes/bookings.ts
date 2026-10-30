@@ -386,6 +386,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       settlement,
       groupFilter,
       billingFilter,
+      paymentFilter,
       dateFrom,
       dateTo,
     } = req.query;
@@ -959,6 +960,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const normalizedSettlement = String(settlement ?? "all");
       const normalizedGroup = String(groupFilter ?? "all");
       const normalizedBilling = String(billingFilter ?? "all");
+      const normalizedPayment = String(paymentFilter ?? "all");
 
       const isVisibleBooking = (booking: any) =>
         booking.source !== "gym_membership" &&
@@ -998,6 +1000,24 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           (booking.membershipId != null && booking.membershipPaymentId == null);
         if (isMembershipCheckIn) return false;
         // Apply before grouping and pagination, so counts and pages stay accurate.
+        if (normalizedPayment === "confirmed") {
+          const invoice = booking.companyInvoiceId != null
+            ? companyInvoiceById.get(booking.companyInvoiceId)
+            : undefined;
+          const verifiedInvoice = booking.payerType === "company" &&
+            invoice?.status === "paid" &&
+            Boolean(invoice.paidAt) &&
+            Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) > 0;
+          const confirmedPayments = [...new Map(
+            [booking.payment,...(Array.isArray(booking.payments)?booking.payments:[])]
+              .filter((p:any)=>p?.id != null && p.status === "confirmed")
+              .map((p:any)=>[p.id,p])
+          ).values()];
+          const due = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+          const verifiedBookingPayment = booking.payerType !== "company" &&
+            due > 0 && confirmedPayments.reduce((sum:number,p:any)=>sum+Number(p.amount??0),0) >= due;
+          if (!verifiedInvoice && !verifiedBookingPayment) return false;
+        }
         if (normalizedGroup === "group" && !booking.groupRef) return false;
         if (normalizedGroup === "individual" && !!booking.groupRef) return false;
         // Invoice billing status is corporate-specific; personal null status

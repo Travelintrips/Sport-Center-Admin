@@ -3175,6 +3175,7 @@ export default function AdminBookings() {
   const [settlementFilter, setSettlementFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [billingFilter, setBillingFilter] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState("all");
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [debouncedSearch, setDebouncedSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [dateFrom, setDateFrom] = useState("");
@@ -3236,7 +3237,7 @@ export default function AdminBookings() {
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [statusFilter, settlementFilter, groupFilter, billingFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
+  }, [statusFilter, settlementFilter, groupFilter, billingFilter, paymentFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
 
   const bookingQueryKey = useMemo(
     () => [
@@ -3248,6 +3249,7 @@ export default function AdminBookings() {
       settlementFilter,
       groupFilter,
       billingFilter,
+      paymentFilter,
       debouncedSearch,
       dateFrom,
       dateTo,
@@ -3259,6 +3261,7 @@ export default function AdminBookings() {
       settlementFilter,
       groupFilter,
       billingFilter,
+      paymentFilter,
       debouncedSearch,
       dateFrom,
       dateTo,
@@ -3280,6 +3283,7 @@ export default function AdminBookings() {
         settlement: settlementFilter,
         groupFilter,
         billingFilter,
+        paymentFilter,
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (dateFrom) params.set("dateFrom", dateFrom);
@@ -4681,6 +4685,13 @@ export default function AdminBookings() {
                   {o.label}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+            <SelectTrigger aria-label="Filter pembayaran terkonfirmasi" className="h-8 w-52 text-xs rounded-lg border-slate-200 dark:border-slate-700"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Pembayaran</SelectItem>
+              <SelectItem value="confirmed">Pembayaran Terkonfirmasi</SelectItem>
             </SelectContent>
           </Select>
           <Select value={groupFilter} onValueChange={setGroupFilter}>
