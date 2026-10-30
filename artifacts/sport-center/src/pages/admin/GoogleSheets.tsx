@@ -96,6 +96,27 @@ export default function GoogleSheets() {
     problems: preview.rows.filter(row => ["missing","changed","error","needs_review"].includes(syncStatuses[row[0]]?.status ?? "")).length,
     checked: preview.rows.filter(row => Boolean(syncStatuses[row[0]]?.status)).length,
   } : null;
+  // Status from ledger and server eligibility are independent; no physical
+  // Sheets availability is inferred until the read-only verification is run.
+  const paidPreviewCategories = preview ? {
+    recorded: preview.rows.filter(row=>syncStatuses[row[0]]?.status==="synced").length,
+    ready: preview.rows.filter(row=>syncStatuses[row[0]]?.status==="not_synced" && eligibility[row[0]]?.eligible===true).length,
+    held: preview.rows.filter(row=> {
+      const status=syncStatuses[row[0]]?.status;
+      return ["missing","changed","error","needs_review"].includes(status??"") ||
+        (status==="not_synced" && eligibility[row[0]]?.eligible===false);
+    }).length,
+    checking: preview.rows.filter(row=>!syncStatuses[row[0]]?.status ||
+      (syncStatuses[row[0]]?.status==="not_synced" && eligibility[row[0]]==null)).length,
+  } : null;
+  const paidCategory=(row:string[])=>{
+    const status=syncStatuses[row[0]]?.status;
+    if(status==="synced")return "Sudah Tercatat (Ledger)";
+    if(status==="not_synced" && eligibility[row[0]]?.eligible===true)return "Layak Sync (Server)";
+    if(["missing","changed","error","needs_review"].includes(status??"") ||
+       (status==="not_synced" && eligibility[row[0]]?.eligible===false))return "Ditahan — Perlu Verifikasi";
+    return "Sedang Diperiksa";
+  };
   async function runPilotBatch(orders:string[]) {
     setBatchBusy(true);setBatchMessage("");
     let completed=0,skipped=0,failed="";
@@ -495,6 +516,13 @@ export default function GoogleSheets() {
                <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Booking grup (Sync One bertahap)</p><p className="text-xl font-semibold">{previewSummary.group}</p></div>
                <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Belum sync non-grup</p><p className="text-xl font-semibold">{previewSummary.pending}</p></div>
              </div>}
+             {paidPreviewCategories&&<div className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Status kelayakan laporan PAID">
+               <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Sudah Tercatat (Ledger)</p><p className="text-xl font-semibold">{paidPreviewCategories.recorded}</p></div>
+               <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Layak Sync (Server)</p><p className="text-xl font-semibold">{paidPreviewCategories.ready}</p></div>
+               <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Ditahan — Perlu Verifikasi</p><p className="text-xl font-semibold">{paidPreviewCategories.held}</p></div>
+               <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Sedang Diperiksa</p><p className="text-xl font-semibold">{paidPreviewCategories.checking}</p></div>
+             </div>}
+             <p className="text-xs text-slate-500">Kategori berasal dari ledger dan pemeriksaan kelayakan server. Ini belum membuktikan keberadaan baris fisik; gunakan Periksa Status Sheets (Read-only). Data ditahan tidak dapat disimpulkan belum dibayar tanpa audit pembayaran.</p>
              {previewSummary&&<p className="text-xs text-slate-500">Status tersedia untuk {previewSummary.checked} dari {previewSummary.total} booking. {previewSummary.problems>0?`${previewSummary.problems} perlu pemeriksaan (missing/changed/error/review). `:""}Angka Synced berasal dari ledger; klik Periksa Status Sheets (Read-only) untuk memastikan baris fisik. Booking grup belum termasuk Sync Semua; Sync One dapat dipakai setelah validasi alokasi pembayaran induk.</p>}<p className="text-xs text-amber-700">Preview tidak menulis ke Sheets. Gunakan Periksa Status Sheets untuk memverifikasi baris, Sync One untuk satu booking, atau Sync Semua hanya untuk booking yang belum tersinkron.</p>
             <button type="button" onClick={reconcilePreview} disabled={reconBusy} className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50">{reconBusy?"Mencocokkan...":"Cek Duplikasi Lintas Tab (Dry Run)"}</button>
             {reconError&&<p role="alert" className="text-red-600 text-sm">{reconError}</p>}
@@ -535,7 +563,7 @@ export default function GoogleSheets() {
                 </div>;
               })}
             </div>}
-            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{row[17]?.trim() && syncStatuses[row[0]]?.status==="not_synced" ? "Grup · Belum Sync" : (({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat...")}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button>{syncStatuses[row[0]]?.status==="missing" && <button type="button" className="ml-2 rounded border border-amber-600 text-amber-800 px-2 py-1 disabled:opacity-50" disabled={recoverBusy||!!syncBusy} onClick={()=>setPendingRecovery(row[0])}>Pulihkan ke Sheets</button>}{(syncStatuses[row[0]]?.status==="synced"||syncStatuses[row[0]]?.status==="missing")&&<button type="button" className="ml-2 rounded border px-2 py-1" onClick={()=>void readRecoveryHistory(row[0])}>Riwayat</button>}{recoveryHistory[row[0]] && <div className="text-xs mt-1 text-slate-600 whitespace-normal max-w-64">{recoveryHistory[row[0]].length ? recoveryHistory[row[0]].map((entry,i)=><div key={i}>Dipulihkan: {entry.target_tab}, baris {entry.old_sheet_row??"-"} → {entry.new_sheet_row}, {new Date(entry.created_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</div>) : "Belum ada riwayat pemulihan"}</div>}</td></tr>)}</tbody></table></div>
+            <div className="overflow-x-auto max-h-80"><table className="text-xs whitespace-nowrap border-collapse"><thead><tr>{preview.headers.map(h=><th className="border p-2 text-left" key={h}>{h}</th>)}<th className="border p-2">Kategori PAID</th><th className="border p-2">Status Sync</th><th className="border p-2">Aksi</th></tr></thead><tbody>{visiblePreviewRows.map((row,i)=><tr key={row[0]+"-"+i}>{row.slice(0,14).map((value,n)=><td className="border p-2" key={n}>{value}</td>)}<td className="border p-2">{paidCategory(row)}{eligibility[row[0]]?.reason&&paidCategory(row)==="Ditahan — Perlu Verifikasi"&&<span className="block text-amber-700 max-w-56 whitespace-normal">{eligibility[row[0]].reason}</span>}</td><td className="border p-2"><Badge variant={syncStatuses[row[0]]?.status==="synced"?"default":syncStatuses[row[0]]?.status==="missing"||syncStatuses[row[0]]?.status==="error"?"destructive":"secondary"}>{row[17]?.trim() && syncStatuses[row[0]]?.status==="not_synced" ? "Grup · Belum Sync" : (({synced:"Synced",missing:"Missing in Sheets",needs_review:"Perlu Cek",changed:"Changed",error:"Error",not_synced:"Belum Sync"} as Record<string,string>)[syncStatuses[row[0]]?.status]??"Memuat...")}</Badge>{syncStatuses[row[0]]?.status==="changed"&&<span className="block text-amber-700 text-xs whitespace-normal max-w-52" title={syncStatuses[row[0]].changedColumns?.join(", ")}>Berbeda: {syncStatuses[row[0]].changedColumns?.join(", ")}</span>}</td><td className="border p-2"><button type="button" onClick={()=>setPendingSync(row[0])} disabled={!!syncBusy} className="rounded border px-2 py-1 disabled:opacity-50">{syncBusy===row[0]?"Memproses...":"Sync One"}</button>{syncStatuses[row[0]]?.status==="missing" && <button type="button" className="ml-2 rounded border border-amber-600 text-amber-800 px-2 py-1 disabled:opacity-50" disabled={recoverBusy||!!syncBusy} onClick={()=>setPendingRecovery(row[0])}>Pulihkan ke Sheets</button>}{(syncStatuses[row[0]]?.status==="synced"||syncStatuses[row[0]]?.status==="missing")&&<button type="button" className="ml-2 rounded border px-2 py-1" onClick={()=>void readRecoveryHistory(row[0])}>Riwayat</button>}{recoveryHistory[row[0]] && <div className="text-xs mt-1 text-slate-600 whitespace-normal max-w-64">{recoveryHistory[row[0]].length ? recoveryHistory[row[0]].map((entry,i)=><div key={i}>Dipulihkan: {entry.target_tab}, baris {entry.old_sheet_row??"-"} → {entry.new_sheet_row}, {new Date(entry.created_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})}</div>) : "Belum ada riwayat pemulihan"}</div>}</td></tr>)}</tbody></table></div>
             {!syncOrderSearch && <p className="text-xs text-slate-500">Menampilkan seluruh {preview.rows.length} booking pada bulan ini.</p>}
           </div>}
         </CardContent></Card>}
