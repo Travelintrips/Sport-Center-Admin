@@ -368,7 +368,7 @@ router.post("/internal/gym-x904/wa-delivery-ack", async (req, res) => {
         WHERE gateway_message_id=${messageId} AND status='pending_ack'
         RETURNING batch_id`);
       if (!batch.rows.length) {
-        if (process.env.GYM_X904_LAN_WA_ENABLED !== "true") return 0;
+        // Final signed ACKs must be accepted even when new digest sending is disabled.
         const digest = await tx.execute(sql`UPDATE sport_center.gym_x904_lan_wa_batches
           SET status='sent',sent_at=coalesce(sent_at,now()),locked_until=NULL,last_error=NULL
           WHERE gateway_message_id=${messageId} AND status='pending_ack'
