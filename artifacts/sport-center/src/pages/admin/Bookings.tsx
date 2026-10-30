@@ -252,7 +252,7 @@ const STATUS_CONFIG: Record<
     pill: "border-blue-200 dark:border-blue-800",
   },
   confirmed: {
-    label: "Dikonfirmasi",
+    label: "Dikonfirmasi (Booking)",
     color: "text-emerald-700 dark:text-emerald-300",
     bg: "bg-emerald-100 dark:bg-emerald-900/30",
     icon: CheckCircle2,
@@ -300,7 +300,7 @@ const FILTER_OPTIONS = [
   { value: "pending_payment", label: "Menunggu Pembayaran" },
   { value: "waiting_confirmation", label: "Perlu Verifikasi" },
   { value: "paid",            label: "Pembayaran Selesai" },
-  { value: "confirmed",       label: "Dikonfirmasi" },
+  { value: "confirmed",       label: "Dikonfirmasi (Booking)" },
   { value: "completed",       label: "Selesai" },
   { value: "cancelled",       label: "Dibatalkan" },
   { value: "refunded",        label: "Pengembalian Dana" },
@@ -5195,6 +5195,22 @@ export default function AdminBookings() {
                              isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                            />
                          )}
+                        {(b.status === "confirmed" || b.status === "completed") && (
+                          <div className="mt-1 text-[10px] font-semibold">
+                            {b.payerType === "company" ? (
+                              b.billingStatus === "paid" && Number(b.companyInvoiceTotal ?? 0) > 0
+                                ? <span className="text-emerald-700">Pembayaran invoice terkonfirmasi</span>
+                                : b.billingStatus === "paid"
+                                  ? <span className="text-red-600">Pembayaran perlu rekonsiliasi</span>
+                                  : <span className="text-amber-700">Booking disetujui · Invoice belum lunas</span>
+                            ) : (
+                              [b.payment,...(Array.isArray(b.payments)?b.payments:[]),...groupPayments]
+                                .some((p:any)=>p?.status === "confirmed")
+                                ? <span className="text-emerald-700">Pembayaran terkonfirmasi</span>
+                                : <span className="text-amber-700">Booking disetujui · Pembayaran belum terverifikasi</span>
+                            )}
+                          </div>
+                        )}
                         {b.status === "paid" && b.payment?.proofUrl && (
                           <div className="text-[10px] text-blue-500 mt-0.5 font-medium">
                             Bukti diterima ↗
