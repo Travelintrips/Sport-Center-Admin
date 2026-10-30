@@ -1,3 +1,4 @@
+import { reconcileX904MissedPaidCheckins } from "../services/x904MissedCheckinReconcile";
 import { dispatchX904PemakaianRefresh } from "../services/x904PemakaianRefresh";
 import { dispatchX904GymUsageReport } from "../services/x904GymUsageWaQueue";
 import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
@@ -676,6 +677,13 @@ export function startScheduler(): void {
   setInterval(() => {
     dispatchX904PemakaianRefresh().catch(err =>
       logger.error({err}, "[scheduler] X904 Pemakaian refresh failed"));
+  }, 60 * 1000);
+
+  // Catch legitimate paid scan events missed during mapping/renewal/late LAN sync.
+  // Manual check-ins are preserved; do not create a second check-in for the day.
+  setInterval(() => {
+    reconcileX904MissedPaidCheckins().catch(err =>
+      logger.error({err}, "[scheduler] X904 paid check-in reconciliation failed"));
   }, 60 * 1000);
 
   // Lookup only, no send: old X904 LAN message status every five minutes.
