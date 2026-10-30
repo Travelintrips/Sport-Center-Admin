@@ -4,7 +4,10 @@ import { getCstWaGatewayMessageStatus, sendCstWaGatewayGroupMessage } from "../l
 
 /** One daily, cumulative report per version, using the existing first-scan source ledger. */
 export async function dispatchX904GymUsageReport(): Promise<void> {
-  const groupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "").trim();
+  const configuredGroupId = String(process.env.GYM_X904_WA_GROUP_ID ?? "95862c59-6b11-4d86-bea0-e69546c827d6").trim();
+  // The approved legacy group JID cannot be passed to Gateway's UUID groupId selector.
+  const groupId = configuredGroupId === "120363428216180040@g.us"
+    ? "95862c59-6b11-4d86-bea0-e69546c827d6" : configuredGroupId;
   const enabled = process.env.GYM_X904_GYM_USAGE_WA_ENABLED ?? process.env.GYM_X904_LAN_WA_ENABLED;
   if (enabled !== "true" || !groupId) return;
   // Reconcile pending delivery before claiming any newer report version.
