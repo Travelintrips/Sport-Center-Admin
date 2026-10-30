@@ -103,7 +103,12 @@ export async function processX904AutomaticCommands(): Promise<void> {
       if(snap.rows.length!==1)return;
       const x=snap.rows[0],users=Array.isArray(x.users)?x.users:[],age=Date.now()-new Date(String(x.observed_at)).getTime();
       if(age<0||age>300000||users.length!==Number(x.user_count))return;
-      const entries=users.filter((v:any)=>String(v.pin)===pin&&String(v.name)===String(m.display_name)&&Number(v.role)===0);
+      // Machine names may differ only by casing/spacing from synchronized user rows.
+      // PIN, enrolled UID, role and unique verified mapping are checked separately.
+      // Access snapshots do not expose UID; never infer it from the snapshot.
+      const normalizeName=(value:unknown)=>String(value??'').trim().replace(/\s+/g,' ').toLocaleUpperCase('id-ID');
+      const entries=users.filter((v:any)=>String(v.pin)===pin &&
+        normalizeName(v.name)===normalizeName(m.display_name) && Number(v.role)===0);
       if(entries.length!==1||entries[0].enabled!==true)return;
       const group=Number(entries[0].group);
       const command=entitlement==="active"&&group===2?"ACTIVATE_USER":entitlement==="suspended"&&group===1?"SUSPEND_USER":null;
