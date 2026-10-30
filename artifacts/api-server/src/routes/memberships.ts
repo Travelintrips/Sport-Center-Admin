@@ -25,7 +25,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
-import { isWithinGymGracePeriod } from "../services/gymMembershipEntitlement";
+import { isWithinGymGracePeriod, resolveGymRenewalStart } from "../services/gymMembershipEntitlement";
 
 const router = Router();
 
@@ -1047,16 +1047,10 @@ router.post("/memberships/:id/renew", async (req, res) => {
       res.status(400).json({ error: "Selesaikan pembayaran yang sedang berjalan sebelum memperpanjang. Status saat ini: " + existing.status }); return;
     }
 
-    const todayStr = new Date().toISOString().split("T")[0]!;
-    let newStartDate: string;
-    if (existing.status === "active" && existing.endDate >= todayStr) {
-      // Masih aktif — mulai setelah endDate lama
-      const d = new Date(existing.endDate);
-      d.setDate(d.getDate() + 1);
-      newStartDate = d.toISOString().split("T")[0]!;
-    } else {
-      newStartDate = todayStr;
-    }
+    // Renew every member from the prior expiry, including the seven-day grace.
+    // Jakarta-local calendar date avoids a midnight UTC rollover on Hostinger.
+    const todayStr = jakartaDateOnly();
+    const newStartDate = resolveGymRenewalStart(existing.status, existing.endDate, todayStr);
 
     const startD = new Date(`${newStartDate}T00:00:00Z`);
     const targetMonthIndex = startD.getUTCMonth() + months;

@@ -63,6 +63,18 @@ export function resolveGymEntitlement(input: {
   return "suspended";
 }
 
+/** Renewal always starts after the previous expiry while active or in grace.
+ * A lapsed record beyond grace restarts on the Jakarta-local request date.
+ * This is a pure calendar rule shared by every gym membership renewal.
+ */
+export function resolveGymRenewalStart(status: string, previousEnd: string, today: string): string {
+  if (!validDay(previousEnd) || !validDay(today)) throw new Error('INVALID_RENEWAL_DATE');
+  if (status === 'active' && isWithinGymGracePeriod(previousEnd, today)) {
+    return new Date(Date.parse(previousEnd + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+  }
+  return today;
+}
+
 /**
  * Strict, fail-closed entitlement for AUTOMATED X904 mutations only.
  * Unlike the legacy UI-facing status, a membership date alone cannot activate
