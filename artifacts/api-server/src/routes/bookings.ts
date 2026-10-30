@@ -952,6 +952,57 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       };
     });
 
+    // Read only: reconcile parent payments against all child allocations.
+    // A confirmed parent counts as paid for a child only when every allocation
+    // belongs to a confirmed booking and the parent amount balances exactly.
+    const validGroupAllocationByBooking = new Map<number, number>();
+    if (paginationRequested && bookingIds.length > 0) {
+      const allocationRows = (await db.execute(sql`
+        select a.payment_id,a.booking_id,a.amount,p.amount as parent_amount,
+               p.status::text as parent_status,b.status::text as child_status
+        from sport_center.sport_payment_allocations a
+        join sport_center.sport_payments p on p.id=a.payment_id
+        join sport_center.sport_bookings b on b.id=a.booking_id
+        where a.payment_id in (
+          select distinct payment_id from sport_center.sport_payment_allocations
+          where booking_id in (${sql.join(bookingIds.map(id=>sql`${id}`),sql`, `)})
+        )
+      `)) as any;
+      const rows = allocationRows.rows ?? allocationRows;
+      const byPayment = new Map<number, any[]>();
+      for (const row of rows) {
+        const id=Number(row.payment_id);
+        byPayment.set(id,[...(byPayment.get(id)??[]),row]);
+      }
+      for (const allocationList of byPayment.values()) {
+        const parent=allocationList[0];
+        if (parent.parent_status !== "confirmed" ||
+            allocationList.some((row:any)=>row.child_status!=="confirmed") ||
+            Math.abs(allocationList.reduce((sum:number,row:any)=>sum+Number(row.amount),0)-Number(parent.parent_amount))>0.005)
+          continue;
+        for (const row of allocationList)
+          validGroupAllocationByBooking.set(Number(row.booking_id),
+            (validGroupAllocationByBooking.get(Number(row.booking_id))??0)+Number(row.amount));
+      }
+    }
+
+    const isBookingFullyPaid = (booking:any) => {
+      if (booking.payerType === "company") {
+        const invoice=booking.companyInvoiceId != null ? companyInvoiceById.get(booking.companyInvoiceId) : undefined;
+        return invoice?.status === "paid" && Boolean(invoice.paidAt) &&
+          Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)>0;
+      }
+      const payments = [...new Map(
+        [booking.payment,...(Array.isArray(booking.payments)?booking.payments:[])]
+          .filter((p:any)=>p?.id != null && p.status==="confirmed")
+          .map((p:any)=>[p.id,p])
+      ).values()];
+      const due=Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+      const confirmedDirect=payments.reduce((sum:number,p:any)=>sum+Number(p.amount??0),0);
+      const allocations=validGroupAllocationByBooking.get(Number(booking.id))??0;
+      return due>0 && confirmedDirect+allocations>=due-0.005;
+    };
+
     let responseRows = result;
 
     if (paginationRequested) {
@@ -1000,24 +1051,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           (booking.membershipId != null && booking.membershipPaymentId == null);
         if (isMembershipCheckIn) return false;
         // Apply before grouping and pagination, so counts and pages stay accurate.
-        if (normalizedPayment === "confirmed") {
-          const invoice = booking.companyInvoiceId != null
-            ? companyInvoiceById.get(booking.companyInvoiceId)
-            : undefined;
-          const verifiedInvoice = booking.payerType === "company" &&
-            invoice?.status === "paid" &&
-            Boolean(invoice.paidAt) &&
-            Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) > 0;
-          const confirmedPayments = [...new Map(
-            [booking.payment,...(Array.isArray(booking.payments)?booking.payments:[])]
-              .filter((p:any)=>p?.id != null && p.status === "confirmed")
-              .map((p:any)=>[p.id,p])
-          ).values()];
-          const due = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
-          const verifiedBookingPayment = booking.payerType !== "company" &&
-            due > 0 && confirmedPayments.reduce((sum:number,p:any)=>sum+Number(p.amount??0),0) >= due;
-          if (!verifiedInvoice && !verifiedBookingPayment) return false;
-        }
+        if (normalizedPayment === "confirmed" && !isBookingFullyPaid(booking)) return false;
         if (normalizedGroup === "group" && !booking.groupRef) return false;
         if (normalizedGroup === "individual" && !!booking.groupRef) return false;
         // Invoice billing status is corporate-specific; personal null status
@@ -1081,11 +1115,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         booking.grandTotal != null
           ? Number(booking.grandTotal)
           : Number(booking.totalPrice);
-      const revenueLunas = filteredResult.filter((booking: any) =>
-        booking.payerType === "company"
-          ? booking.billingStatus === "paid"
-          : booking.status === "confirmed" || booking.status === "completed"
-      );
+      const revenueLunas = filteredResult.filter(isBookingFullyPaid);
       const revenueCompanyOutstanding = filteredResult.filter((booking: any) =>
         booking.payerType === "company" &&
         (booking.status === "confirmed" || booking.status === "completed") &&
