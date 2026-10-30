@@ -1,3 +1,4 @@
+import { dispatchX904GymUsageReport } from "../services/x904GymUsageWaQueue";
 import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport, reconcileX904LegacyLanDelivery } from "../services/x904LanWaNotifications";
@@ -662,6 +663,11 @@ export function startScheduler(): void {
     dispatchX904OneTimeReport().catch(err =>
       logger.error({err}, "[scheduler] X904 one-time report WhatsApp failed"));
   }, 15 * 1000);
+
+  // The opt-in daily Gym usage worker respects durable version leases and Gateway ACK.
+  setInterval(() => {
+    dispatchX904GymUsageReport().catch(err => logger.error({err}, "[scheduler] X904 Gym usage delivery failed"));
+  }, 60 * 1000);
 
   // Lookup only, no send: old X904 LAN message status every five minutes.
   setInterval(() => {
