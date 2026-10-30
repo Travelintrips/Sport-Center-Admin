@@ -1,6 +1,12 @@
 ﻿import {createHash} from "node:crypto";
 import type {GymEntitlement} from "./gymMembershipEntitlement";
 
+/** Stable payment-event identity; the transactional INSERT has a unique event_key. */
+export function x904PaymentConfirmedEventKey(paymentId:number):string {
+  if(!Number.isSafeInteger(paymentId)||paymentId<=0)throw new Error('INVALID_PAYMENT_ID');
+  return 'x904-payment-confirmed-'+paymentId;
+}
+
 /** Pure machine-command policy. It never writes to the database or device. */
 export function chooseX904AutomaticCommand(entitlement: GymEntitlement, group: number): "ACTIVATE_USER"|"SUSPEND_USER"|null {
   if(entitlement==="active" && group===2)return "ACTIVATE_USER";

@@ -26,6 +26,7 @@ import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { isWithinGymGracePeriod, resolveGymRenewalStart } from "../services/gymMembershipEntitlement";
+import { x904PaymentConfirmedEventKey } from "../services/x904AutomationDecision";
 
 const router = Router();
 
@@ -1338,7 +1339,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
           INSERT INTO sport_center.x904_automatic_entitlement_events
             (membership_id,payment_id,reason,event_key)
           VALUES (${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
-            ${"x904-payment-confirmed-" + updatedPayment.id})
+            ${x904PaymentConfirmedEventKey(updatedPayment.id)})
           ON CONFLICT (event_key) DO NOTHING
         `);
         return { membership: updatedMembership, payment: updatedPayment, booking: paymentBooking, confirmedAt };
