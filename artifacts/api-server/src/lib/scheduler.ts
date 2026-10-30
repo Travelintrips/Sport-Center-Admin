@@ -584,6 +584,44 @@ async function checkConnections(): Promise<void> {
   }
 }
 
+// X904 auto check-ins enqueue one durable daily report update, never one WA per scan.
+let x904GymUsageDispatchRunning = false;
+async function dispatchX904GymUsageReport(): Promise<void> {
+  if (process.env.X904_GYM_USAGE_WA_AUTO_ENABLED !== "true" || x904GymUsageDispatchRunning) return;
+  x904GymUsageDispatchRunning = true;
+  let reportDate: string | null = null;
+  try {
+    // Claim and persist BEFORE calling gateway: ambiguous failures must not auto-replay.
+    const claimed = await db.execute(sql`
+      with candidate as (
+        select report_date from sport_center.x904_gym_usage_wa_queue
+        where version > claimed_version
+          and last_event_at <= now() - interval '2 minutes'
+          and (last_sent_at is null or last_sent_at <= now() - interval '15 minutes')
+        order by report_date desc limit 1 for update skip locked
+      )
+      update sport_center.x904_gym_usage_wa_queue q
+      set claimed_version=q.version, claim_at=now(), updated_at=now()
+      from candidate c where q.report_date=c.report_date
+      returning q.report_date::text as report_date
+    `);
+    reportDate = String(claimed.rows[0]?.report_date ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) return;
+    await sendRekapPemakaianToAdmin(reportDate);
+    await db.execute(sql`
+      update sport_center.x904_gym_usage_wa_queue
+      set first_sent_at=coalesce(first_sent_at,now()), last_sent_at=now(),
+          last_error=null, updated_at=now()
+      where report_date=${reportDate}::date
+    `);
+    logger.info({reportDate}, "[x904-gym-usage] report dispatched");
+  } catch (err) {
+    logger.error({err,reportDate}, "[x904-gym-usage] dispatch requires review; no blind replay");
+  } finally {
+    x904GymUsageDispatchRunning = false;
+  }
+}
+
 // ─── Daily Rekap Pemakaian ke Grup WA Admin ────────────────────────────────
 // Dikirim setiap hari jam 08:00 WIB (01:00 UTC), sekali per hari.
 let lastRekapSentDate = "";
@@ -685,6 +723,7 @@ export function startScheduler(): void {
     await sendReminderH1();
     await sendDayOfReminder();
     await runNightlyBankAudit();
+    await dispatchX904GymUsageReport();
     await sendDailyRekap();
     await sendNightlyRekap();
     await checkConnections();
