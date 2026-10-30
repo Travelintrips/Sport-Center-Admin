@@ -5,6 +5,7 @@ import { isIsolatedPaymentEventE2E } from "./lib/paymentEventE2EMode";
 import { startScheduler } from "./lib/scheduler";
 import { startBookingSheetsAutoWorker } from "./lib/bookingSheetsAutoWorker";
 import { startBookingSheetsPaymentEventWorker } from "./lib/bookingSheetsPaymentEventWorker";
+import { startX904AutomaticCommandWorker } from "./services/x904AutomaticCommandWorker";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
@@ -1355,6 +1356,8 @@ export async function initializeRuntime(): Promise<void> {
   if (!e2e) {
     startScheduler();
     startBookingSheetsAutoWorker();
+    // The X904 worker is inert unless separately enabled and allowlisted.
+    startX904AutomaticCommandWorker();
   }
   startBookingSheetsPaymentEventWorker();
 }
