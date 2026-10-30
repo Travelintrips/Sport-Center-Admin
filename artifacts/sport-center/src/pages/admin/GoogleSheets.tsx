@@ -221,6 +221,7 @@ export default function GoogleSheets() {
   const normalizedSyncOrder = /^(?:SC-)?[0-9]+$/i.test(syncOrderSearch) ? `SC-${syncOrderSearch.replace(/^SC-/i,"")}` : syncOrderSearch;
   const visiblePreviewRows = preview ? (syncOrderSearch ? preview.rows.filter(row => row[0] === normalizedSyncOrder) : preview.rows) : [];
   const [syncMessage,setSyncMessage]=useState("");
+  const [syncSuccess,setSyncSuccess]=useState<{orderNumber:string;targetTab:string;sheetRow:number}|null>(null);
   async function syncOne(orderNumber:string) {
     setSyncBusy(orderNumber);setSyncMessage("");
     try {
@@ -230,9 +231,20 @@ export default function GoogleSheets() {
       });
       const result=await response.json();
       if(!response.ok)throw new Error(result.error||"Sinkronisasi gagal");
-      setSyncMessage(result.written
-        ?`${orderNumber} berhasil diverifikasi di ${result.targetTab} baris ${result.sheetRow}`
-        :`${orderNumber} tidak ditulis ulang: ${result.alreadyPresent?"sudah ada di Sheets":"tidak ada perubahan"}`);
+      // A successful write is not a verified physical Sheets row until read-back.
+      const check=await fetch("/api/admin/google-sheets/status-check",{
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${getToken()}`},
+        body:JSON.stringify({orderNumbers:[orderNumber],verifySheets:true}),
+      });
+      const checked=await check.json();
+      const verified=checked.items?.find((item:{orderNumber:string})=>item.orderNumber===orderNumber);
+      if(check.ok && verified?.status==="synced" && verified.targetTab && Number(verified.sheetRow)>0) {
+        setSyncStatuses(previous=>({...previous,[orderNumber]:verified}));
+        setSyncSuccess({orderNumber,targetTab:verified.targetTab,sheetRow:Number(verified.sheetRow)});
+        setSyncMessage("");
+      }else{
+        setSyncMessage(`${orderNumber}: proses sync selesai, tetapi verifikasi baris fisik Sheets belum berhasil. Jalankan Periksa Status Sheets (Read-only); jangan sync ulang dahulu.`);
+      }
     }catch(e){setSyncMessage(e instanceof Error?e.message:"Sinkronisasi gagal");}
     finally{setSyncBusy("");}
   }
@@ -416,7 +428,18 @@ export default function GoogleSheets() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-    <AlertDialog open={pendingSync !== null} onOpenChange={(open) => { if(!open && !syncBusy) setPendingSync(null); }}>
+    <AlertDialog open={syncSuccess!==null} onOpenChange={open=>{if(!open)setSyncSuccess(null);}}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Sinkronisasi Google Sheets Berhasil</AlertDialogTitle>
+          <AlertDialogDescription>
+            Booking <strong>{syncSuccess?.orderNumber}</strong> berhasil diverifikasi pada tab <strong>{syncSuccess?.targetTab}</strong>, baris <strong>{syncSuccess?.sheetRow}</strong>. Status sudah diperbarui menjadi Synced tanpa memuat ulang halaman.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter><AlertDialogAction onClick={()=>setSyncSuccess(null)}>Tutup</AlertDialogAction></AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+        <AlertDialog open={pendingSync !== null} onOpenChange={(open) => { if(!open && !syncBusy) setPendingSync(null); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Konfirmasi Sinkronisasi Booking</AlertDialogTitle>
