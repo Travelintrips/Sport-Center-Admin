@@ -4463,7 +4463,7 @@ export default function AdminBookings() {
                 <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-emerald-800/80 dark:text-emerald-200/80">
                   {paymentFilter === "confirmed"
                     ? "Nilai booking dengan pembayaran lunas dan terkonfirmasi sesuai filter. Periode mengikuti tanggal booking, bukan tanggal pembayaran."
-                    : "Nilai booking sesuai filter, termasuk kategori pembayaran yang ditampilkan di bawah. Ini bukan jumlah kas diterima atau total Google Sheets."}
+                    : "Jumlah nilai pesanan sesuai filter, mencakup yang lunas dan belum lunas. Angka ini bukan kas yang telah diterima maupun nilai yang telah masuk Google Sheets."}
                 </p>
               </div>
             </div>
@@ -4528,6 +4528,7 @@ export default function AdminBookings() {
               )}
             </div>
           </div>
+          {paymentFilter !== "confirmed" && <p className="mt-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">Keterangan: <strong>Booking Lunas</strong> = nominal booking dalam kategori lunas; <strong>Perusahaan Belum Lunas</strong> = nilai booking perusahaan yang tagihannya belum berstatus lunas (termasuk belum/sudah ditagih); <strong>Menunggu Konfirmasi</strong> = bukti atau pembayaran menanti verifikasi; <strong>Menunggu Pembayaran</strong> = booking belum memiliki pelunasan terkonfirmasi. Angka dalam kurung adalah jumlah booking per kategori, bukan jumlah transaksi bank.</p>}
         </motion.div>
       )}
 
