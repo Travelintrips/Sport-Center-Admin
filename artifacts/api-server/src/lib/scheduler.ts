@@ -1,3 +1,4 @@
+import { dispatchX904PemakaianRefresh } from "../services/x904PemakaianRefresh";
 import { dispatchX904GymUsageReport } from "../services/x904GymUsageWaQueue";
 import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
@@ -667,6 +668,14 @@ export function startScheduler(): void {
   // The opt-in daily Gym usage worker respects durable version leases and Gateway ACK.
   setInterval(() => {
     dispatchX904GymUsageReport().catch(err => logger.error({err}, "[scheduler] X904 Gym usage delivery failed"));
+  }, 60 * 1000);
+
+  // X904 first-checkin creates a durable version, but the ordinary Pemakaian
+  // report was only refreshed by manual checkins/bookings. Poll this version
+  // separately, preserving the existing manual check-in notification path.
+  setInterval(() => {
+    dispatchX904PemakaianRefresh().catch(err =>
+      logger.error({err}, "[scheduler] X904 Pemakaian refresh failed"));
   }, 60 * 1000);
 
   // Lookup only, no send: old X904 LAN message status every five minutes.
