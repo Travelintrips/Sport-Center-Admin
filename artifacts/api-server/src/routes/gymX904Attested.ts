@@ -120,8 +120,12 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
     const outcome=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
     return res.json({ok:true,accepted:1,outcome});
   } catch(error) {
-    console.error("[x904] authenticated VMSC proof rejected",error instanceof Error?error.message:"UNKNOWN");
-    return res.status(409).json({error:"Attestation could not be committed"});
+    const detail=error instanceof Error?error.message:"UNKNOWN";
+    console.error("[x904] authenticated VMSC proof rejected",detail);
+    // Expose only documented, non-sensitive rejection reasons after signed proof verification.
+    const safeReasons=["X904_LAN_SNAPSHOT_NOT_MATCHED","X904_EVENT_ID_CONFLICT","X904_EVIDENCE_CONFLICT"];
+    const reason=safeReasons.includes(detail)?detail:"ATTESTATION_COMMIT_FAILED";
+    return res.status(409).json({error:"Attestation could not be committed",reason});
   }
 });
 export default router;
