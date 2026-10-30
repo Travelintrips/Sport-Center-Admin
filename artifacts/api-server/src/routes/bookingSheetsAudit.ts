@@ -280,8 +280,20 @@ router.get("/admin/google-sheets/group-preview",adminMiddleware,async(req,res)=>
       from sport_center.booking_sheets_payment_sources s
       join sport_center.sport_bookings b on b.id=s.booking_id
       left join sport_center.sport_facilities f on f.id=b.facility_id
+      join sport_center.sport_payments p on p.id=s.payment_id
       where s.source_type='allocation' and s.validation_status='CANDIDATE'
         and b.group_ref is not null and b.group_ref<>''
+        and b.status::text='confirmed'
+        and p.status::text='confirmed' and p.payment_type='full_payment'
+        and p.amount=(select coalesce(sum(x.total_price),0)
+                      from sport_center.sport_bookings x where x.group_ref=b.group_ref)
+        and p.amount=(select coalesce(sum(a.amount),0)
+                      from sport_center.sport_payment_allocations a where a.payment_id=p.id)
+        and (select count(*) from sport_center.sport_bookings x where x.group_ref=b.group_ref)=
+            (select count(*) from sport_center.sport_payment_allocations a
+             join sport_center.sport_bookings x on x.id=a.booking_id
+             where a.payment_id=p.id and x.group_ref=b.group_ref and x.status::text='confirmed')
+        and s.amount=b.total_price
         and s.payment_date_wib >= (${month}||'-01')::date
         and s.payment_date_wib < ((${month}||'-01')::date + interval '1 month')
       order by b.group_ref,b.order_number
@@ -697,7 +709,8 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
         res.status(409).json({error:"Booking grup atau alokasi belum terkonfirmasi"}); return;
       }
       const [proof] = sqlResultRows(await db.execute(sql`
-        select p.status::text as status,p.amount as parent_amount,
+        select p.status::text as status,p.payment_type,p.amount as parent_amount,
+          (select coalesce(sum(b.total_price),0) from sport_center.sport_bookings b where b.group_ref=${booking.groupRef}) as group_total,
           (select coalesce(sum(a.amount),0) from sport_center.sport_payment_allocations a where a.payment_id=p.id) as allocated_total,
           (select count(*) from sport_center.sport_payment_allocations a where a.payment_id=p.id) as allocation_count,
           (select count(*) from sport_center.sport_payment_allocations a
@@ -711,7 +724,8 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
             where a.id=${Number(source.allocation_id)} and a.payment_id=p.id and a.booking_id=${booking.id}
               and a.amount=${Number(source.amount)})
       `));
-      if (!proof || proof.status !== "confirmed" ||
+      if (!proof || proof.status !== "confirmed" || proof.payment_type !== "full_payment" ||
+          Number(proof.parent_amount) !== Number(proof.group_total) ||
           Number(proof.parent_amount) <= 0 ||
           Number(proof.allocated_total) !== Number(proof.parent_amount) ||
           Number(proof.allocation_count) !== Number(proof.group_booking_count) ||
