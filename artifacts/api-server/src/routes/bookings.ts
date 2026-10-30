@@ -1149,6 +1149,11 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       res.setHeader("X-Revenue-Waiting-Count", String(revenueWaiting.length));
       res.setHeader("X-Revenue-Pending-Count", String(revenuePending.length));
 
+      const groupRefsInFilter = new Set(filteredResult.map((b:any)=>String(b.groupRef??"").trim()).filter(Boolean));
+      res.setHeader("X-Group-Count",String(groupRefsInFilter.size));
+      res.setHeader("X-Group-Sessions",String(filteredResult.filter((b:any)=>Boolean(String(b.groupRef??"").trim())).length));
+      res.setHeader("X-Individual-Sessions",String(filteredResult.filter((b:any)=>!String(b.groupRef??"").trim()).length));
+
       const representatives: typeof filteredResult = [];
       const seenDisplayKeys = new Set<string>();
       for (const booking of filteredResult) {

@@ -91,6 +91,8 @@ export default function GoogleSheets() {
   const previewSummary = preview ? {
     total: preview.rows.length,
     group: preview.rows.filter(row => Boolean(row[17]?.trim())).length,
+    uniqueGroups: new Set(preview.rows.map(row=>row[17]?.trim()).filter(Boolean)).size,
+    individual: preview.rows.filter(row=>!row[17]?.trim()).length,
     synced: preview.rows.filter(row => syncStatuses[row[0]]?.status === "synced").length,
     pending: preview.rows.filter(row => !row[17]?.trim() && syncStatuses[row[0]]?.status === "not_synced").length,
     problems: preview.rows.filter(row => ["missing","changed","error","needs_review"].includes(syncStatuses[row[0]]?.status ?? "")).length,
@@ -513,7 +515,7 @@ export default function GoogleSheets() {
              {previewSummary&&<div className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Ringkasan preview dan status ledger">
                <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Total preview</p><p className="text-xl font-semibold">{previewSummary.total}</p></div>
                <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Synced (status ledger)</p><p className="text-xl font-semibold">{previewSummary.synced}</p></div>
-               <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Booking grup (Sync One bertahap)</p><p className="text-xl font-semibold">{previewSummary.group}</p></div>
+               <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Sesi anak group (preview)</p><p className="text-xl font-semibold">{previewSummary.group}</p></div>
                <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Belum sync non-grup</p><p className="text-xl font-semibold">{previewSummary.pending}</p></div>
              </div>}
              {paidPreviewCategories&&<div className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Status kelayakan laporan PAID">
@@ -523,6 +525,7 @@ export default function GoogleSheets() {
                <div className="rounded-lg border p-3"><p className="text-xs text-slate-500">Sedang Diperiksa</p><p className="text-xl font-semibold">{paidPreviewCategories.checking}</p></div>
              </div>}
              <p className="text-xs text-slate-500">Kategori berasal dari ledger dan pemeriksaan kelayakan server. Ini belum membuktikan keberadaan baris fisik; gunakan Periksa Status Sheets (Read-only). Data ditahan tidak dapat disimpulkan belum dibayar tanpa audit pembayaran.</p>
+             {previewSummary&&<p className="text-xs font-medium">Rincian preview: {previewSummary.uniqueGroups} group unik · {previewSummary.group} sesi anak · {previewSummary.individual} sesi non-group · total {previewSummary.total} sesi booking. Group induk tidak dihitung tambahan.</p>}
              {previewSummary&&<p className="text-xs text-slate-500">Status tersedia untuk {previewSummary.checked} dari {previewSummary.total} booking. {previewSummary.problems>0?`${previewSummary.problems} perlu pemeriksaan (missing/changed/error/review). `:""}Angka Synced berasal dari ledger; klik Periksa Status Sheets (Read-only) untuk memastikan baris fisik. Booking grup belum termasuk Sync Semua; Sync One dapat dipakai setelah validasi alokasi pembayaran induk.</p>}<p className="text-xs text-amber-700">Preview tidak menulis ke Sheets. Gunakan Periksa Status Sheets untuk memverifikasi baris, Sync One untuk satu booking, atau Sync Semua hanya untuk booking yang belum tersinkron.</p>
             <button type="button" onClick={reconcilePreview} disabled={reconBusy} className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50">{reconBusy?"Mencocokkan...":"Cek Duplikasi Lintas Tab (Dry Run)"}</button>
             {reconError&&<p role="alert" className="text-red-600 text-sm">{reconError}</p>}
