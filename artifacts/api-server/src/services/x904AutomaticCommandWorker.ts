@@ -84,9 +84,13 @@ export async function processX904AutomaticCommands(): Promise<void> {
         WHERE p.membership_id=${membershipId} GROUP BY p.id`);
       // No financial history cannot prove non-payment. Never suspend a legacy
       // membership on an empty payment ledger.
-      const sourcesComplete=payments.rows.length>0 && payments.rows.every(p=>
+      // A future pending renewal cannot revoke already-confirmed access today.
+      // Keep incomplete histories fail-closed when no paid period covers today.
+      const paidToday=payments.rows.some(p=>p.status==="confirmed" && Number(p.amount)>0 &&
+        String(p.period_start)<=today && String(p.period_end)>=today && Number(p.booking_count)===1);
+      const sourcesComplete=paidToday || (payments.rows.length>0 && payments.rows.every(p=>
         p.status!=="waiting_confirmation" && p.status!=="pending_payment" &&
-        (p.status!=="confirmed" || (Number(p.amount)>0 && Number(p.booking_count)===1)));
+        (p.status!=="confirmed" || (Number(p.amount)>0 && Number(p.booking_count)===1))));
       const entitlement=resolvePaidX904Automation({
         today,membershipStart:String(m.start_date),membershipEnd:String(m.end_date),
         membershipStatus:String(m.status),paymentSourcesComplete:sourcesComplete,
@@ -99,7 +103,12 @@ export async function processX904AutomaticCommands(): Promise<void> {
       if(snap.rows.length!==1)return;
       const x=snap.rows[0],users=Array.isArray(x.users)?x.users:[],age=Date.now()-new Date(String(x.observed_at)).getTime();
       if(age<0||age>300000||users.length!==Number(x.user_count))return;
-      const entries=users.filter((v:any)=>String(v.pin)===pin&&String(v.name)===String(m.display_name)&&Number(v.role)===0);
+      // Machine names may differ only by casing/spacing from synchronized user rows.
+      // PIN, enrolled UID, role and unique verified mapping are checked separately.
+      // Access snapshots do not expose UID; never infer it from the snapshot.
+      const normalizeName=(value:unknown)=>String(value??'').trim().replace(/\s+/g,' ').toLocaleUpperCase('id-ID');
+      const entries=users.filter((v:any)=>String(v.pin)===pin &&
+        normalizeName(v.name)===normalizeName(m.display_name) && Number(v.role)===0);
       if(entries.length!==1||entries[0].enabled!==true)return;
       const group=Number(entries[0].group);
       const command=entitlement==="active"&&group===2?"ACTIVATE_USER":entitlement==="suspended"&&group===1?"SUSPEND_USER":null;

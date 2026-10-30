@@ -70,7 +70,9 @@ export async function processX904Event(event: X904EventInput,
       const todayWib = `${part("year")}-${part("month")}-${part("day")}`;
       if (!timestampTrusted || !/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
-      } else if (m?.status === "active" && String(m.start_date) <= day && String(m.end_date) >= day) {
+      } else if (m?.status === "active") {
+        // The latest membership row may already describe the NEXT renewal.
+        // Payment periods, not mutable membership dates, authorize this scan day.
         // Active status alone is not proof that the current month's fee was paid.
         // Fail closed if there is no confirmed payment covering the scan date.
         const paid = await tx.execute(sql`SELECT id FROM sport_center.sport_membership_payments
