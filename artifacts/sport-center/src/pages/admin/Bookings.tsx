@@ -3145,6 +3145,9 @@ type BookingPageData = {
   items: any[];
   totalRows: number;
   totalBookings: number;
+  groupCount: number;
+  groupSessions: number;
+  individualSessions: number;
   page: number;
   pageSize: number;
   totalPages: number;
@@ -3307,6 +3310,9 @@ export default function AdminBookings() {
         items: Array.isArray(items) ? items : [],
         totalRows: numberHeader("X-Total-Count"),
         totalBookings: numberHeader("X-Total-Bookings"),
+        groupCount: numberHeader("X-Group-Count"),
+        groupSessions: numberHeader("X-Group-Sessions"),
+        individualSessions: numberHeader("X-Individual-Sessions"),
         page: numberHeader("X-Page", page),
         pageSize: numberHeader("X-Page-Size", pageSize),
         totalPages: Math.max(1, numberHeader("X-Total-Pages", 1)),
@@ -3354,6 +3360,9 @@ export default function AdminBookings() {
   }, [bookingPage, bookings, debouncedSearch, calendarBookingOpened]);
   const totalRows = bookingPage?.totalRows ?? 0;
   const totalBookings = bookingPage?.totalBookings ?? 0;
+  const groupCount = bookingPage?.groupCount ?? 0;
+  const groupSessions = bookingPage?.groupSessions ?? 0;
+  const individualSessions = bookingPage?.individualSessions ?? 0;
   const totalPages = bookingPage?.totalPages ?? 1;
   const paginationItems = useMemo<Array<number | "ellipsis">>(() => {
     if (totalPages <= 7) {
@@ -4532,7 +4541,8 @@ export default function AdminBookings() {
         </motion.div>
       )}
 
-      {/* WA Belum Terkirim Panel */}
+      <p className="text-xs text-slate-600 dark:text-slate-300">Rincian sesuai filter: <strong>{groupCount} group</strong> berisi <strong>{groupSessions} sesi anak</strong>, ditambah <strong>{individualSessions} sesi non-group</strong>. Angka sesi dihitung per booking, sedangkan tabel menggabungkan group menjadi satu baris ringkasan. Total sesi: <strong>{groupSessions+individualSessions}</strong>.</p>
+            {/* WA Belum Terkirim Panel */}
       {!waUnnotifiedLoading && waUnnotified.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -6 }}
@@ -4745,7 +4755,7 @@ export default function AdminBookings() {
             <span className="text-xs text-slate-400">
               {bookingsError
                 ? "Data tidak tersedia"
-                : `${totalRows} baris · ${totalBookings} booking`}
+                : `${totalRows} baris ringkasan · ${totalBookings} sesi booking`}
             </span>
             <Select
               value={String(pageSize)}
