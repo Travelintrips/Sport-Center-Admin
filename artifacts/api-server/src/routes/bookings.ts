@@ -3275,11 +3275,6 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       const durationHours = Math.round(
         (timeToMinutes(nextEndTime) - timeToMinutes(nextStartTime)) / 60,
       );
-      const membershipPaymentDateField =
-        linkedMembershipPayment?.status === "confirmed" ||
-        linkedMembershipPayment?.confirmedAt != null
-          ? "confirmedAt"
-          : "submittedAt";
       const [booking] = await tx
         .update(bookingsTable)
         .set({
@@ -3306,7 +3301,7 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
           .update(paymentsTable)
           .set({
             paidAt: paymentTimestamp,
-            confirmedAt: paymentTimestamp,
+            // Confirmation time is an immutable event, not the historical payment date.
             updatedAt: new Date(),
           })
           .where(eq(paymentsTable.id, payment.id));
@@ -3314,12 +3309,10 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       if (linkedMembershipPayment && paymentTimestamp) {
         await tx
           .update(membershipPaymentsTable)
-          .set({
-            ...(membershipPaymentDateField === "confirmedAt"
-              ? { confirmedAt: paymentTimestamp }
-              : { submittedAt: paymentTimestamp }),
-            updatedAt: new Date(),
-          })
+          // Update only the date of payment. Do not rewrite confirmation timestamps
+          // or updatedAt: those fields trigger a full canonical settlement rebuild
+          // that can conflict with already-posted accounting entries.
+          .set({ paymentDate: paymentDate! })
           .where(eq(membershipPaymentsTable.id, linkedMembershipPayment.id));
       }
       if (companyInvoicePayment && paymentTimestamp && companyInvoice) {
@@ -3366,16 +3359,14 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
             }
           : paymentTimestamp
             ? payment
-              ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp }
+              ? { ...payment, paidAt: paymentTimestamp }
               : undefined
             : payment,
         membershipPayment:
           paymentTimestamp && linkedMembershipPayment
             ? {
                 ...linkedMembershipPayment,
-                ...(membershipPaymentDateField === "confirmedAt"
-                  ? { confirmedAt: paymentTimestamp }
-                  : { submittedAt: paymentTimestamp }),
+                paymentDate: paymentDate!,
               }
             : linkedMembershipPayment,
         paymentDate: paymentTimestamp ?? before.paidAt ?? companyInvoicePayment?.paidAt ?? null,
