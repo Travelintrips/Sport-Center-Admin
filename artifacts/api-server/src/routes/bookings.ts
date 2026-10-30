@@ -1006,9 +1006,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             : undefined;
           const verifiedInvoice = booking.payerType === "company" &&
             invoice?.status === "paid" &&
-            Number(invoice.paidAmount ?? 0) >= Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) &&
-            Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) > 0 &&
-            Number(invoice.remainingAmount ?? 0) <= 0;
+            Boolean(invoice.paidAt) &&
+            Number(invoice.grandTotal ?? invoice.totalAmount ?? 0) > 0;
           const confirmedPayments = [...new Map(
             [booking.payment,...(Array.isArray(booking.payments)?booking.payments:[])]
               .filter((p:any)=>p?.id != null && p.status === "confirmed")
