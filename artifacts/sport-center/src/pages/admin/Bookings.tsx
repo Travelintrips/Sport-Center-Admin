@@ -3173,6 +3173,8 @@ export default function AdminBookings() {
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [settlementFilter, setSettlementFilter] = useState("all");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [billingFilter, setBillingFilter] = useState("all");
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [debouncedSearch, setDebouncedSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [dateFrom, setDateFrom] = useState("");
@@ -3234,7 +3236,7 @@ export default function AdminBookings() {
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [statusFilter, settlementFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
+  }, [statusFilter, settlementFilter, groupFilter, billingFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
 
   const bookingQueryKey = useMemo(
     () => [
@@ -3244,6 +3246,8 @@ export default function AdminBookings() {
       pageSize,
       statusFilter,
       settlementFilter,
+      groupFilter,
+      billingFilter,
       debouncedSearch,
       dateFrom,
       dateTo,
@@ -3253,6 +3257,8 @@ export default function AdminBookings() {
       pageSize,
       statusFilter,
       settlementFilter,
+      groupFilter,
+      billingFilter,
       debouncedSearch,
       dateFrom,
       dateTo,
@@ -3272,6 +3278,8 @@ export default function AdminBookings() {
         pageSize: String(pageSize),
         status: statusFilter,
         settlement: settlementFilter,
+        groupFilter,
+        billingFilter,
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (dateFrom) params.set("dateFrom", dateFrom);
@@ -4673,6 +4681,23 @@ export default function AdminBookings() {
                   {o.label}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={groupFilter} onValueChange={setGroupFilter}>
+            <SelectTrigger className="h-8 w-36 text-xs rounded-lg border-slate-200 dark:border-slate-700" aria-label="Filter Group"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Booking</SelectItem>
+              <SelectItem value="group">Group</SelectItem>
+              <SelectItem value="individual">Non-Group</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={billingFilter} onValueChange={setBillingFilter}>
+            <SelectTrigger className="h-8 w-40 text-xs rounded-lg border-slate-200 dark:border-slate-700" aria-label="Filter Status Tagihan"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Tagihan</SelectItem>
+              <SelectItem value="unbilled">Belum Ditagih</SelectItem>
+              <SelectItem value="billed">Sudah Ditagih</SelectItem>
+              <SelectItem value="paid">Lunas (Invoice)</SelectItem>
             </SelectContent>
           </Select>
           <div className="flex items-center gap-1.5">
