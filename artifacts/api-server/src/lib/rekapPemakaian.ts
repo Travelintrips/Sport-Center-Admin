@@ -248,13 +248,13 @@ export function formatRekapWhatsapp(
 const _rekapLastSentAt = new Map<string, number>(); // tanggal → timestamp ms
 const REKAP_DEBOUNCE_MS = 60_000; // 60 detik
 
-export async function sendRekapPemakaianToAdmin(tanggalBooking: string): Promise<void> {
+export async function sendRekapPemakaianToAdmin(tanggalBooking: string): Promise<boolean> {
   const now = Date.now();
   const lastSent = _rekapLastSentAt.get(tanggalBooking) ?? 0;
   if (now - lastSent < REKAP_DEBOUNCE_MS) {
     logger.info({ tanggalBooking, sisaDetik: Math.ceil((REKAP_DEBOUNCE_MS - (now - lastSent)) / 1000) },
       "[REKAP] Dilewati — rekap baru saja dikirim (debounce 60 detik)");
-    return;
+    return false;
   }
   _rekapLastSentAt.set(tanggalBooking, now);
 
@@ -263,5 +263,11 @@ export async function sendRekapPemakaianToAdmin(tanggalBooking: string): Promise
 
   // Kirim ke semua admin phones + grup WA (grup bisa dimasukkan ke adminWaPhones di settings DB)
   // Format grup: XXXXXXXX@g.us — cukup tambahkan ke kolom adminWaPhones di halaman settings
-  await sendWAToAdmins(msg);
+  try {
+    await sendWAToAdmins(msg);
+    return true;
+  } catch (err) {
+    _rekapLastSentAt.delete(tanggalBooking);
+    throw err;
+  }
 }
