@@ -4455,7 +4455,7 @@ export default function AdminBookings() {
               </div>
               <div>
                 <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
-                  Total Nilai Booking Lunas ({totalBookings} booking)
+                  {paymentFilter === "confirmed" ? "Total Nilai Booking Lunas" : "Total Nilai Booking"} ({totalBookings} booking)
                 </div>
                 <div className="text-2xl font-black text-emerald-800 dark:text-emerald-300">
                   {formatCurrency(revenueStats.total)}
