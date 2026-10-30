@@ -1,3 +1,4 @@
+import { getCstWaGatewayMessageStatus } from "../lib/cstWaGateway";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendCstWaGatewayGroupMessage, listCstWaGatewayGroups } from "../lib/cstWaGateway";
@@ -273,5 +274,21 @@ export async function dispatchX904AuthorizedRealScanTest(): Promise<void> {
         WHERE event_id=${eventId} AND status='sending'
       `);
     }
+  }
+}
+
+/** Read-only Gateway status reconciliation; never dispatches or retries old messages. */
+export async function reconcileX904LegacyLanDelivery(): Promise<void> {
+  const rows = await db.execute(sql`SELECT event_id,gateway_message_id
+    FROM sport_center.gym_x904_lan_wa_outbox
+    WHERE status='pending_ack' AND gateway_message_id IS NOT NULL
+    ORDER BY created_at LIMIT 20`);
+  for (const row of rows.rows) {
+    const messageId = String(row.gateway_message_id);
+    const state = await getCstWaGatewayMessageStatus(messageId);
+    if (state !== 'delivered' && state !== 'read') continue;
+    await db.execute(sql`UPDATE sport_center.gym_x904_lan_wa_outbox
+      SET status='sent',sent_at=COALESCE(sent_at,now()),locked_until=NULL,last_error=NULL
+      WHERE event_id=${String(row.event_id)} AND gateway_message_id=${messageId} AND status='pending_ack'`);
   }
 }

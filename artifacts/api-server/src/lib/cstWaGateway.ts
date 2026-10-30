@@ -168,6 +168,16 @@ export async function syncCstWaGatewayGroups(deviceId: string): Promise<{ status
   };
 }
 
+export async function getCstWaGatewayMessageStatus(messageId: string): Promise<string | null> {
+  if (!/^[a-zA-Z0-9_:.@-]{8,180}$/.test(messageId)) return null;
+  const response = await gatewayFetch(`/v1/messages/${encodeURIComponent(messageId)}`, {method: "GET"});
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`CST WA Gateway status lookup HTTP_${response.status}`);
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  if (body?.messageId !== messageId || typeof body.status !== "string") return null;
+  return body.status.toLowerCase();
+}
+
 export async function sendCstWaGatewayGroupMessage(input: {
   groupId: string;
   text: string;

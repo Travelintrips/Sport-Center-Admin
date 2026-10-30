@@ -1,6 +1,6 @@
 import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
-import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport } from "../services/x904LanWaNotifications";
+import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport, reconcileX904LegacyLanDelivery } from "../services/x904LanWaNotifications";
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
@@ -662,6 +662,12 @@ export function startScheduler(): void {
     dispatchX904OneTimeReport().catch(err =>
       logger.error({err}, "[scheduler] X904 one-time report WhatsApp failed"));
   }, 15 * 1000);
+
+  // Lookup only, no send: old X904 LAN message status every five minutes.
+  setInterval(() => {
+    reconcileX904LegacyLanDelivery().catch(err =>
+      logger.error({err}, "[scheduler] X904 LAN ACK reconciliation failed"));
+  }, 5 * 60 * 1000);
 
   // Diagnostics only: never expose actual secrets or change opt-in behavior.
   console.info("[x904-auto] runtime-gates " + JSON.stringify({
