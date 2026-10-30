@@ -48,6 +48,21 @@ export const paidTabFromWibDate = (value: Date | string): string => {
 };
 
 const BOOKING_HEADERS = ["Order Number","Customer Name","Customer Email","Customer Phone","Facility","Date","Start Time","End Time","Duration (hours)","Total Price","Status","Notes","Admin Notes","Created At"];
+// Keep the underlying price numeric so Sheets SUM and accounting formulas work.
+async function ensurePaidPriceFormat(sheets: ReturnType<typeof google.sheets>, tab: string) {
+  const metadata=await sheets.spreadsheets.get({
+    spreadsheetId:TARGET_ID,fields:"sheets(properties(sheetId,title)),properties(locale)"
+  });
+  const sheet=metadata.data.sheets?.find(item=>item.properties?.title===tab);
+  if(sheet?.properties?.sheetId==null)throw new Error("PAID tab sheetId unavailable");
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId:TARGET_ID,requestBody:{requests:[{repeatCell:{
+      range:{sheetId:sheet.properties.sheetId,startRowIndex:1,startColumnIndex:9,endColumnIndex:10},
+      cell:{userEnteredFormat:{numberFormat:{type:"NUMBER",pattern:"#,##0"}}},
+      fields:"userEnteredFormat.numberFormat"
+    }}]}
+  });
+}
 const MONTH_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 export function monthTarget(month: string): string {
   if (!MONTH_PATTERN.test(month)) throw new Error("Invalid payment month");
@@ -636,7 +651,9 @@ router.post("/admin/google-sheets/recover-one", adminMiddleware, async (req, res
     const created=`${part("day")}/${part("month")}/${part("year")} ${part("hour")}:${part("minute")}:${part("second")} WIB`;
     const row=[booking.orderNumber,booking.customerName,booking.customerEmail,booking.customerPhone,
       facility?.name??"",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
-      booking.totalPrice,booking.status,booking.notes??"",booking.adminNotes??"",created].map(v=>v==null?"":String(v));
+      booking.totalPrice,booking.status,booking.notes??"",booking.adminNotes??"",created].map((v,i)=>i===9?Number(v):v==null?"":String(v));
+    stage="SHEETS_RESTORE_PRICE_FORMAT";
+    await ensurePaidPriceFormat(sheets,tab);
     stage="SHEETS_RESTORE_APPEND";
     const response=await sheets.spreadsheets.values.append({spreadsheetId:TARGET_ID,
       range:`'${tab}'!A:N`,insertDataOption:"INSERT_ROWS",valueInputOption:"RAW",requestBody:{values:[row]}});
@@ -852,7 +869,9 @@ async function syncOneHandler(req: Request, res: Response): Promise<void> {
       fac?.name ?? "",booking.bookingDate,booking.startTime,booking.endTime,booking.durationHours,
       isGroup ? Number(source.amount) : booking.totalPrice,booking.status,
       booking.notes ?? "",isGroup ? `Group ${booking.groupRef} · Payment ${source.payment_id} · Allocation ${source.allocation_id}` : (booking.adminNotes ?? ""),createdAt]
-      .map(value => value == null ? "" : String(value));
+      .map((value,index) => index===9 ? Number(value) : value == null ? "" : String(value));
+    stage = "SHEETS_PRICE_FORMAT";
+    await ensurePaidPriceFormat(sheets,tab);
     stage = "SHEETS_APPEND";
     const appended = await sheets.spreadsheets.values.append({
       spreadsheetId: TARGET_ID, range: `'${tab}'!A:N`, valueInputOption: "RAW",
