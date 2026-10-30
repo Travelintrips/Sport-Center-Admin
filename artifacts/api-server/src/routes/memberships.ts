@@ -1343,13 +1343,8 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         await tx.execute(sql`
           INSERT INTO sport_center.x904_automatic_entitlement_events
             (membership_id,payment_id,reason,event_key)
-          SELECT ${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
-            ${"x904-payment-confirmed-" + updatedPayment.id}
-          WHERE EXISTS (
-            SELECT 1 FROM sport_center.gym_x904_member_mapping
-            WHERE membership_id=${id} AND status='verified'
-              AND device_serial='TDBD234200545'
-          )
+          VALUES (${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
+            ${"x904-payment-confirmed-" + updatedPayment.id})
           ON CONFLICT (event_key) DO NOTHING
         `);
         return { membership: updatedMembership, payment: updatedPayment, booking: paymentBooking, confirmedAt };
