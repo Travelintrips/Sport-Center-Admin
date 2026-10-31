@@ -2128,6 +2128,11 @@ function BookingDetailDrawer({
                           )}
                         </div>
                       )}
+                      {booking.companyInvoicePaymentProofUrl && pmt.isCompanyInvoicePayment && (
+                        <a href={booking.companyInvoicePaymentProofUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">
+                          Lihat bukti transfer invoice perusahaan
+                        </a>
+                      )}
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase tracking-wide">
                           Metode Pembayaran
@@ -2183,6 +2188,11 @@ function BookingDetailDrawer({
                           );
                         })()}
                       </div>
+                      {pmt.isCompanyInvoicePayment && pmt.proofUrl ? (
+                        <a href={pmt.proofUrl} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-600 underline">
+                          Buka bukti transfer invoice
+                        </a>
+                      ) : null}
                       {pmt.proofUrl && (
                         <>
                           <ProofImage
