@@ -7,7 +7,7 @@ test('browser preview declares no network and no form destination', () => {
  assert.match(html,/form-action 'none'/);
  assert.doesNotMatch(html,/<form\b|fetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource|<iframe\b/i);
 });
-test('mobile preview rejects non-test PIN and oversized images', () => {
+test('mobile preview rejects non-test PIN, caps source images, and compresses locally', () => {
  assert.match(html,/pin\.value!=='500'/);
  assert.match(html,/file\.size<100\|\|file\.size>50000/);
  assert.match(html,/STAGED_OFFLINE_ONLY/);
