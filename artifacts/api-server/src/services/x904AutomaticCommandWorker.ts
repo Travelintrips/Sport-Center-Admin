@@ -20,7 +20,7 @@ export function startX904AutomaticCommandWorker(): void {
 }
 
 /** Only explicitly allowlisted machine identities may receive automated commands. */
-export async function processX904AutomaticCommands(): Promise<void> {
+export async function processX904AutomaticCommands(store: Pick<typeof db,'execute'|'transaction'> = db): Promise<void> {
   if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
   // Roll out to verified members only under a separate explicit opt-in.
   // Existing production configuration remains single-PIN until approved.
@@ -29,7 +29,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
   if(!allVerified && (pins.length!==1 || !/^[0-9]{1,8}$/.test(pins[0])))return;
   // Only one outstanding automatic machine mutation at a time.
   if(allVerified) {
-    const outstanding=await db.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+    const outstanding=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
       WHERE device_serial='TDBD234200545'
         AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
         AND state IN ('queued','claimed') LIMIT 1`);
@@ -39,7 +39,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
   if(!Number.isSafeInteger(actor)||actor<=0)return;
   // A command must be attributable to the dedicated non-login system identity.
   // Do not accept a human admin/customer numeric ID from configuration.
-  const verifiedActor=await db.execute(sql`
+  const verifiedActor=await store.execute(sql`
     SELECT id FROM sport_center.users
      WHERE id=${actor} AND name='X904 AUTOMATION SERVICE'
        AND registration_source='system_x904_automation'
@@ -47,10 +47,10 @@ export async function processX904AutomaticCommands(): Promise<void> {
   `);
   if(verifiedActor.rows.length!==1)return;
   const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
-  const events=await db.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
+  const events=await store.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
     WHERE state='pending' ORDER BY event_id LIMIT 20`);
   for(const ev of events.rows){
-    await db.transaction(async tx=>{
+    await store.transaction(async tx=>{
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904201)`);
       const event=await tx.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
         WHERE event_id=${Number(ev.event_id)} AND state='pending' FOR UPDATE`);
@@ -160,7 +160,7 @@ export async function processX904AutomaticCommands(): Promise<void> {
     });
     if(allVerified) {
       // Never create a second machine command while the first awaits VMSC.
-      const queued=await db.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+      const queued=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
         WHERE device_serial='TDBD234200545' AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
           AND state IN ('queued','claimed') LIMIT 1`);
       if(queued.rows.length)return;
