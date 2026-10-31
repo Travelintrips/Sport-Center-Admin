@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>Pratinjau Foto Wajah — Offline X904</title>
+<style>body{font:16px system-ui,Arial;margin:0;background:#f5f7fa;color:#182536}.wrap{max-width:620px;margin:3rem auto;padding:1.6rem;background:white;border-radius:16px;box-shadow:0 3px 18px #0001}h1{font-size:1.4rem}p{line-height:1.5}label{display:block;margin:1rem 0 .4rem;font-weight:600}input{padding:.7rem;border:1px solid #999;border-radius:8px;max-width:100%;box-sizing:border-box}button{border:0;border-radius:8px;background:#192b45;color:white;padding:.8rem 1.2rem;margin-top:1rem}button:disabled{opacity:.4}#result{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:1rem;background:#eef2f7;padding:1rem;border-radius:8px}.note{color:#814c00}</style></head>
+<body><main class="wrap"><h1>Pratinjau Unggah Foto Wajah (Offline)</h1>
+<p class="note"><strong>Mode aman — belum mengirim foto.</strong> Halaman ini tidak mempunyai koneksi server, antrean, gateway, SDK, atau tombol kirim ke perangkat. Untuk pengujian sintetis PIN 500 saja.</p>
+<label for="pin">PIN uji</label><input id="pin" value="500" inputmode="numeric" maxlength="8" autocomplete="off">
+<label for="photo">Pilih JPEG dari HP</label><input id="photo" type="file" accept="image/jpeg,.jpg" capture="user">
+<p>Maksimum 50.000 byte. Nama harus <code>verify_biophoto_9_500.jpg</code>. Foto tidak disimpan dan tidak keluar dari browser.</p>
+<button id="validate" type="button">Validasi lokal</button><div id="result" role="status" aria-live="polite">Belum divalidasi.</div>
+</main><script>
+'use strict';
+const pin=document.getElementById('pin'),photo=document.getElementById('photo'),out=document.getElementById('result');
+const reject=(reason)=>{out.textContent='DITOLAK: '+reason;};
+document.getElementById('validate').addEventListener('click',async()=>{
+ const file=photo.files?.[0];if(pin.value!=='500')return reject('TEST_PIN_ONLY');
+ if(!file)return reject('FILE_MISSING');
+ if(file.name!=='verify_biophoto_9_500.jpg')return reject('FILENAME_MISMATCH');
+ if(file.size<100||file.size>50000)return reject('SIZE_INVALID');
+ try{
+  const bytes=new Uint8Array(await file.arrayBuffer());
+  if(bytes[0]!==255||bytes[1]!==216||bytes[2]!==255||bytes.at(-2)!==255||bytes.at(-1)!==217)return reject('NOT_JPEG');
+  // Full image decode occurs only within browser; validation remains provisional until server-side gate is integrated.
+  const bitmap=await createImageBitmap(file);const dimensions=bitmap.width+' × '+bitmap.height;bitmap.close();
+  const digest=await crypto.subtle.digest('SHA-256',bytes);const sha=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  out.textContent='STAGED_OFFLINE_ONLY\nPIN: 500\nUkuran: '+file.size+' byte\nDimensi: '+dimensions+'\nSHA-256: '+sha+'\nPengiriman X904: NONAKTIF\nPenyimpanan server: TIDAK ADA';
+ }catch{reject('DECODE_OR_HASH_FAILED (gunakan HTTPS atau localhost untuk fitur hash jika browser membatasi file lokal)');}
+});
+</script></body></html>
