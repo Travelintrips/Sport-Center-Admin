@@ -25,7 +25,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
   const [name,setName]=useState(initialSelection?.user.display_name ?? "");
   const [confirmPin,setConfirmPin]=useState("");
   const [busy,setBusy]=useState(false);
-  const [bulkPins,setBulkPins]=useState<string[]>([]);
+  const [bulkPins,setBulkPins]=useState<string[]>(initialSelection?.action==="DELETE_USER" && initialSelection.user.device_role===0 ? [initialSelection.user.user_pin] : []);
   const [bulkResults,setBulkResults]=useState<string[]>([]);
   const [bulkSearch,setBulkSearch]=useState("");
   const [bulkConfirm,setBulkConfirm]=useState(false);
@@ -120,7 +120,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
     finally{setBusy(false);}
   }
   return <section className="rounded-xl border bg-card p-5 space-y-3" aria-label="Kontrol pengguna X904">
-    <h3 className="font-semibold">Kelola pengguna mesin X904</h3>
+    <h3 id="x904-edit-user" className="font-semibold scroll-mt-20">Kelola pengguna mesin X904</h3>
     <p className="text-sm text-muted-foreground">Hanya Owner / Super Admin. Operasi berlaku untuk akun mesin, bukan pembayaran, membership, atau histori absensi.</p>
     <div className="grid gap-3 sm:grid-cols-3">
       <label className="text-sm">Operasi
@@ -155,7 +155,7 @@ export default function GymX904UserControl({users,initialSelection}:{users:Devic
       {busy?"Mengirim...":action==="CREATE_USER"?"Tambah pengguna":action==="UPDATE_USER"?"Simpan perubahan":"Hapus pengguna"}
     </button>
 
-    {capabilities.operations.includes("DELETE_USER")&&<div className="rounded-xl border p-4 space-y-4">
+    {capabilities.operations.includes("DELETE_USER")&&<div id="x904-delete-users" className="rounded-xl border p-4 space-y-4 scroll-mt-20">
       <div>
         <h4 className="text-sm font-semibold">Hapus pengguna (satu atau beberapa)</h4>
         <p className="text-xs text-muted-foreground">Pilih satu atau beberapa pengguna, lalu konfirmasi. Semua penghapusan menggunakan antrean massal terverifikasi dan berhenti jika ACK gagal atau belum diterima.</p>

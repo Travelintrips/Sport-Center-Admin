@@ -51,6 +51,13 @@ export default function GymX904() {
   const [machineRoleFilter, setMachineRoleFilter] = useState("all");
   const [tab, setTab] = useState<GymTab>("dashboard");
   const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
+  useEffect(()=>{
+    if(!selectedMachineUser)return;
+    const target=selectedMachineUser.action==="DELETE_USER"?"x904-delete-users":"x904-edit-user";
+    const timer=window.setTimeout(()=>document.getElementById(target)?.scrollIntoView({behavior:"smooth",block:"start"}),100);
+    return ()=>window.clearTimeout(timer);
+  },[selectedMachineUser]);
+
   const queryClient = useQueryClient();
   const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;manualAccessAllEnabled?:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER"|"SUSPEND_USER"|"ACTIVATE_USER">}>({
     queryKey:["gym-x904-user-capabilities"],
