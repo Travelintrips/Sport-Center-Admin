@@ -10,7 +10,8 @@
     "start": "NODE_OPTIONS=--trace-deprecation node --enable-source-maps ./dist/bootstrap.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand --testPathIgnorePatterns=src/lib/paylabs.test.ts",
-    "test:ci": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand --testPathIgnorePatterns='src/lib/paylabs.test.ts|src/routes/__tests__/whatsappDurationRuntime.test.ts'",
+    "test:ci": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand --testPathIgnorePatterns='src/lib/paylabs.test.ts|src/routes/__tests__/whatsappDurationRuntime.test.ts|src/services/x904RealPg.integration.test.ts'",
+    "test:x904-real-pg": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand src/services/x904RealPg.integration.test.ts",
     "test:db-integration": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand src/routes/__tests__/whatsappDurationRuntime.test.ts"
   },
   "dependencies": {
