@@ -2483,6 +2483,7 @@ export async function syncStatusToBizportal(
     ppnRate?: number;
     ppnAmount?: number;
   },
+  options?: { preservePaymentStatus?: boolean },
 ): Promise<void> {
   if (!shouldRunLegacyFinanceWrites()) return;
   const pool = getProdPool();
@@ -2495,7 +2496,7 @@ export async function syncStatusToBizportal(
       await pool.query(
         `UPDATE sport_center.sport_bookings_sync
          SET status            = $2,
-             payment_status    = $3,
+             payment_status    = CASE WHEN $18 THEN payment_status ELSE $3 END,
              payment_proof_url = COALESCE($4, payment_proof_url),
              payment_proof_at  = COALESCE($5, payment_proof_at),
               total_price       = CASE WHEN $11 THEN $12 ELSE total_price END,
@@ -2524,6 +2525,7 @@ export async function syncStatusToBizportal(
            amountOverride?.dppNilaiLain ?? null,
            amountOverride?.ppnAmount ?? null,
            amountOverride?.grandTotal ?? null,
+           options?.preservePaymentStatus === true,
         ]
       );
     }, `syncStatus:${orderNumber}`);
