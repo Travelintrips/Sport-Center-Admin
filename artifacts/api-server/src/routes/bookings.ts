@@ -1098,6 +1098,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             booking.customerName,
             booking.companyName,
             booking.orderNumber,
+            booking.groupRef,
             booking.facilityName,
             booking.customerPhone,
           ];
