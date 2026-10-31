@@ -146,7 +146,7 @@ async function sendWA(
         logWaSend(
           cleanPhone,
           message,
-          "sent",
+          "failed",
           `${dispatchMode} — tidak dikirim ke CST WA Gateway`,
           ctx,
         ).catch(() => {});
@@ -218,7 +218,7 @@ async function sendWA(
       logWaSend(
         cleanPhone,
         message,
-        "sent",
+        "failed",
         `${dispatchMode} — tidak dikirim ke Fonnte`,
         ctx,
       ).catch(() => {});
