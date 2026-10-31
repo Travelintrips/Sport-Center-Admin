@@ -891,6 +891,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         companyInvoicePphAmount: invoice?.pphAmount == null ? null : Number(invoice.pphAmount),
         companyInvoiceNetAmount: invoice?.netAmount == null ? null : Number(invoice.netAmount),
         companyInvoicePaymentMethod: invoice?.paymentMethod ?? null,
+        companyInvoicePaymentProofUrl: invoice?.paymentProofUrl ?? null,
+        companyInvoiceStatus: invoice?.status ?? null,
         paidAt: b.paidAt ?? invoice?.paidAt ?? null,
         companyName: b.companyCustomerId ? (companyNameById[b.companyCustomerId] ?? "") : null,
         totalPrice: Number(b.totalPrice),

@@ -1680,6 +1680,24 @@ function BookingDetailDrawer({
             </div>
           </div>
 
+          {/* Invoice-level proof is evidence, not a payment confirmation. */}
+          {booking.payerType === "company" && (booking as any).companyInvoicePaymentProofUrl && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-1 dark:border-amber-900 dark:bg-amber-950/10">
+              <div className="text-sm font-semibold">Bukti transfer tagihan perusahaan</div>
+              <a
+                href={(booking as any).companyInvoicePaymentProofUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 underline"
+              >
+                Lihat bukti transfer {(booking as any).companyInvoiceNumber || ""}
+              </a>
+              <div className="text-xs text-amber-800 dark:text-amber-300">
+                Bukti transfer telah diunggah. Status pelunasan harus diverifikasi dengan mutasi bank dan data invoice.
+              </div>
+            </div>
+          )}
+
           {/* Event Discount Banner */}
           {(booking as any).bookingType === "event" && (
             <div className="flex items-center gap-3 p-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20">
@@ -2128,6 +2146,11 @@ function BookingDetailDrawer({
                           )}
                         </div>
                       )}
+                      {booking.companyInvoicePaymentProofUrl && pmt.isCompanyInvoicePayment && (
+                        <a href={booking.companyInvoicePaymentProofUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">
+                          Lihat bukti transfer invoice perusahaan
+                        </a>
+                      )}
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase tracking-wide">
                           Metode Pembayaran
@@ -2183,6 +2206,11 @@ function BookingDetailDrawer({
                           );
                         })()}
                       </div>
+                      {pmt.isCompanyInvoicePayment && pmt.proofUrl ? (
+                        <a href={pmt.proofUrl} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-600 underline">
+                          Buka bukti transfer invoice
+                        </a>
+                      ) : null}
                       {pmt.proofUrl && (
                         <>
                           <ProofImage
