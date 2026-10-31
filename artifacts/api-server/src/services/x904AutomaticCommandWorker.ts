@@ -58,7 +58,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
       const membershipId=Number(event.rows[0].membership_id);
       // A queued command is not completion. Only a confirmed machine read-back
       // may close the event; hold failures for explicit investigation.
-      const sent=await tx.execute(sql`SELECT state,result FROM sport_center.x904_user_commands
+      const sent=await tx.execute(sql`SELECT state,result,created_at,completed_at,count(*) OVER()::int AS attempt_count FROM sport_center.x904_user_commands
         WHERE device_serial='TDBD234200545' AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
           AND payload->>'eventId'=${String(ev.event_id)}
         ORDER BY created_at DESC LIMIT 1`);
@@ -68,12 +68,23 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
           await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
             SET state='processed',processed_at=now(),result='{"status":"readback_confirmed"}'::jsonb
             WHERE event_id=${Number(ev.event_id)}`);
+          return;
         }else if(x904MachineCommandResult(String(last.state),(last.result as any)?.readBackConfirmed===true)==='review_required'){
-          await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
-            SET state='review_required',result='{"status":"device_command_failed"}'::jsonb
-            WHERE event_id=${Number(ev.event_id)}`);
-        }
-        return;
+          // Retry only definite DEVICE_BUSY (no device mutation acknowledged).
+          // Any ambiguous failure requires human review: never blindly replay a door command.
+          const retryable=String((last.result as any)?.errorCode)==="DEVICE_BUSY" &&
+            (last.result as any)?.readBackConfirmed===false && !!last.completed_at;
+          const count=Number(last.attempt_count);
+          if(!retryable || !Number.isSafeInteger(count) || count>=3){
+            await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+              SET state='review_required',result=${JSON.stringify({status:"device_command_failed_or_retry_exhausted"})}::jsonb
+              WHERE event_id=${Number(ev.event_id)}`);
+            return;
+          }
+          // One minute minimum cooldown; the next fresh snapshot must independently
+          // establish that the member remains in suspended Group 2.
+          if(Date.now()-new Date(String(last.completed_at)).getTime()<60_000)return;
+        }else{return;}
       }
       const candidates=await tx.execute(sql`SELECT m.start_date,m.end_date,m.status::text AS status,
         mp.user_pin,u.device_uid,u.display_name,u.device_role
@@ -142,13 +153,20 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
         ORDER BY created_at DESC LIMIT 1`);
       if(previous.rows.length){
         const last=previous.rows[0];
-        if(last.state!=="completed" || (last.result as any)?.readBackConfirmed!==true ||
+        const retryBusy=sent.rows.length>0 && String(sent.rows[0].state)==="failed" &&
+          String((sent.rows[0].result as any)?.errorCode)==="DEVICE_BUSY" &&
+          (sent.rows[0].result as any)?.readBackConfirmed===false;
+        if(retryBusy){
+          if(!last.completed_at || new Date(String(x.observed_at)).getTime()<=new Date(String(last.completed_at)).getTime())return;
+        }else if(last.state!=="completed" || (last.result as any)?.readBackConfirmed!==true ||
           !last.completed_at || new Date(String(x.observed_at)).getTime()<=new Date(String(last.completed_at)).getTime())return;
       }
       const pending=await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands WHERE device_serial='TDBD234200545'
         AND user_pin=${pin} AND state IN ('queued','claimed') LIMIT 1`);
       if(pending.rows.length)return;
-      const key=x904AutomaticCommandKey(String(event.rows[0].event_key),command,pin);
+      const attempt=sent.rows.length ? Number(sent.rows[0].attempt_count)+1 : 1;
+      // One stable idempotency key per bounded retry attempt.
+      const key=x904AutomaticCommandKey(String(event.rows[0].event_key)+':attempt:'+attempt,command,pin);
       const payload=JSON.stringify({expectedUid:Number(m.device_uid),expectedName:String(m.display_name),source:"AUTO_MEMBERSHIP_PAYMENT",membershipId,eventId:Number(ev.event_id)});
       await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
