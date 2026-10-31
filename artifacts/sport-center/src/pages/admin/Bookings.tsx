@@ -2211,12 +2211,22 @@ function BookingDetailDrawer({
                           Buka bukti transfer invoice
                         </a>
                       ) : null}
+                      {pmt.isCompanyInvoicePayment && (booking.companyInvoicePaymentProofUrl || pmt.proofUrl) ? (
+                        <div className="space-y-2">
+                          <div className="text-xs font-medium text-slate-500">Bukti Transfer Invoice</div>
+                          <a href={booking.companyInvoicePaymentProofUrl || pmt.proofUrl} target="_blank" rel="noopener noreferrer" className="block rounded-lg border p-2">
+                            <img src={booking.companyInvoicePaymentProofUrl || pmt.proofUrl} alt="Bukti transfer invoice perusahaan" className="w-full max-h-52 object-contain" />
+                          </a>
+                        </div>
+                      ) : null}
                       {pmt.proofUrl && (
                         <>
-                          <ProofImage
-                            paymentId={pmt.id}
-                            membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
-                          />
+                          {!pmt.isCompanyInvoicePayment && (
+                            <ProofImage
+                              paymentId={pmt.id}
+                              membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
+                            />
+                          )}
                           {paymentDate && (
                             <Button
                               type="button"
