@@ -162,6 +162,9 @@ jobs:
           }
           Write-Output 'X904_DURABLE_WORKER_POWERSHELL_PARSE_PASS'
 
+      - name: Verify X904 offline face anti-dispatch contracts (no devices)
+        run: node --test scripts/x904-offline-face-intake/integration-contract.test.mjs scripts/x904-offline-face-intake/phone-preview.test.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
