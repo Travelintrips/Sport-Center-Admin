@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>Pratinjau Foto Wajah — Offline X904</title>
+<style>body{font:16px system-ui,Arial;margin:0;background:#f5f7fa;color:#182536}.wrap{max-width:620px;margin:3rem auto;padding:1.6rem;background:white;border-radius:16px;box-shadow:0 3px 18px #0001}h1{font-size:1.4rem}p{line-height:1.5}label{display:block;margin:1rem 0 .4rem;font-weight:600}input{padding:.7rem;border:1px solid #999;border-radius:8px;max-width:100%;box-sizing:border-box}button{border:0;border-radius:8px;background:#192b45;color:white;padding:.8rem 1.2rem;margin-top:1rem}button:disabled{opacity:.4}#result{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:1rem;background:#eef2f7;padding:1rem;border-radius:8px}.note{color:#814c00}</style></head>
+<body><main class="wrap"><h1>Pratinjau Unggah Foto Wajah (Offline)</h1>
+<p class="note"><strong>Mode aman — belum mengirim foto.</strong> Halaman ini tidak mempunyai koneksi server, antrean, gateway, SDK, atau tombol kirim ke perangkat. Untuk pengujian sintetis PIN 500 saja.</p>
+<label for="pin">PIN uji</label><input id="pin" value="500" inputmode="numeric" maxlength="8" autocomplete="off">
+<label for="photo">Pilih JPEG dari HP</label><input id="photo" type="file" accept="image/jpeg,.jpg" capture="user">
+<p>JPEG dari HP akan otomatis dikecilkan di browser hingga maksimal 50.000 byte. Nama file bebas. Gunakan hanya gambar sintetis, bukan foto orang. Foto tidak disimpan dan tidak keluar dari browser.</p>
+<button id="validate" type="button">Validasi lokal</button><div id="result" role="status" aria-live="polite">Belum divalidasi.</div>
+</main><script>
+'use strict';
+const pin=document.getElementById('pin'),photo=document.getElementById('photo'),out=document.getElementById('result');
+const reject=(reason)=>{out.textContent='DITOLAK: '+reason;};
+const toBlob=(canvas,quality)=>new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));
+async function compressJPEG(file){
+ if(file.size<100||file.size>20000000)throw Error('INPUT_SIZE_INVALID');
+ const head=new Uint8Array(await file.slice(0,3).arrayBuffer());
+ if(head[0]!==255||head[1]!==216||head[2]!==255)throw Error('NOT_JPEG');
+ const bitmap=await createImageBitmap(file);
+ try {
+  if(!bitmap.width||!bitmap.height||bitmap.width*bitmap.height>24000000)throw Error('DIMENSIONS_INVALID');
+  let scale=Math.min(1,1280/Math.max(bitmap.width,bitmap.height));
+  for(let pass=0;pass<8;pass++){
+   const canvas=document.createElement('canvas');
+   canvas.width=Math.max(1,Math.round(bitmap.width*scale));
+   canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+   const ctx=canvas.getContext('2d');
+   if(!ctx)throw Error('CANVAS_UNAVAILABLE');
+   ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+   for(const quality of [0.82,0.68,0.52,0.36,0.22]){
+    const blob=await toBlob(canvas,quality);
+    if(blob&&blob.size>=100&&blob.size<=50000){
+     const data=new Uint8Array(await blob.arrayBuffer());
+     if(data[0]!==255||data[1]!==216||data[2]!==255||data.at(-2)!==255||data.at(-1)!==217)throw Error('JPEG_ENCODE_INVALID');
+     return {data,width:canvas.width,height:canvas.height};
+    }
+   }
+   scale*=0.7;
+  }
+  throw Error('COMPRESSION_LIMIT');
+ }finally{bitmap.close();}
+}
+document.getElementById('validate').addEventListener('click',async()=>{
+ const file=photo.files?.[0];
+ if(pin.value!=='500')return reject('TEST_PIN_ONLY');
+ if(!file)return reject('FILE_MISSING');
+ if(!/\\.jpe?g$/i.test(file.name))return reject('EXTENSION_INVALID');
+ out.textContent='Memproses foto secara lokal...';
+ try{
+  const {data,width,height}=await compressJPEG(file);
+  const digest=await crypto.subtle.digest('SHA-256',data);
+  const sha=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  out.textContent='STAGED_OFFLINE_ONLY\\nPIN: 500\\nUkuran asli: '+file.size+' byte\\nUkuran hasil: '+data.length+' byte\\nDimensi hasil: '+width+' × '+height+'\\nSHA-256 hasil: '+sha+'\\nPengiriman X904: NONAKTIF\\nPenyimpanan server: TIDAK ADA';
+ }catch(e){reject(e instanceof Error?e.message:'DECODE_OR_COMPRESS_FAILED');}
+});
+</script></body></html>
