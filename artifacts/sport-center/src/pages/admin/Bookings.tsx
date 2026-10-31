@@ -3215,6 +3215,7 @@ export default function AdminBookings() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [settlementFilter, setSettlementFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [facilityFilter, setFacilityFilter] = useState("all");
   const [billingFilter, setBillingFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
@@ -3291,6 +3292,7 @@ export default function AdminBookings() {
       groupFilter,
       billingFilter,
       paymentFilter,
+      facilityFilter,
       debouncedSearch,
       dateFrom,
       dateTo,
@@ -3309,6 +3311,16 @@ export default function AdminBookings() {
     ],
   );
 
+  const { data: activeFacilities = [] } = useQuery<Array<{ id: number; name: string; isActive: boolean }>>({
+    queryKey: ["admin-bookings-active-facilities"],
+    queryFn: async () => {
+      const response = await fetch("/api/facilities?activeOnly=true");
+      if (!response.ok) throw new Error("Gagal memuat fasilitas aktif");
+      return response.json();
+    },
+    staleTime: 60_000,
+  });
+
   const {
     data: bookingPage,
     isLoading,
@@ -3326,6 +3338,7 @@ export default function AdminBookings() {
         billingFilter,
         paymentFilter,
       });
+      if (facilityFilter !== "all") params.set("facilityId", facilityFilter);
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
@@ -4754,6 +4767,15 @@ export default function AdminBookings() {
               <SelectItem value="all">Semua Booking</SelectItem>
               <SelectItem value="group">Group</SelectItem>
               <SelectItem value="individual">Non-Group</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={facilityFilter} onValueChange={(value) => { setFacilityFilter(value); setPage(1); }}>
+            <SelectTrigger className="h-8 w-44 text-xs rounded-lg border-slate-200 dark:border-slate-700" aria-label="Filter Fasilitas Aktif"><SelectValue placeholder="Semua Fasilitas" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Fasilitas</SelectItem>
+              {[...activeFacilities].sort((a, b) => a.name.localeCompare(b.name, "id")).map((facility) => (
+                <SelectItem key={facility.id} value={String(facility.id)}>{facility.name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={billingFilter} onValueChange={setBillingFilter}>
