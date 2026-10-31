@@ -3,6 +3,22 @@ import {db} from "@workspace/db";
 import {sql} from "drizzle-orm";
 import {resolvePaidX904Automation} from "./gymMembershipEntitlement";
 
+/** Start only under explicit production opt-in; never run in isolated E2E mode. */
+export function startX904AutomaticCommandWorker(): void {
+  if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
+  let running=false;
+  const tick=async()=>{
+    if(running)return;
+    running=true;
+    try { await processX904AutomaticCommands(); }
+    catch(error) { console.error('[x904-automatic] worker cycle failed',error instanceof Error?error.message:String(error)); }
+    finally {running=false;}
+  };
+  void tick();
+  const interval=setInterval(()=>void tick(),60_000);
+  interval.unref();
+}
+
 /** Only explicitly allowlisted machine identities may receive automated commands. */
 export async function processX904AutomaticCommands(): Promise<void> {
   if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
