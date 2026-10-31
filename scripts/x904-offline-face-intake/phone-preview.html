@@ -7,7 +7,7 @@
 <p class="note"><strong>Mode aman — belum mengirim foto.</strong> Halaman ini tidak mempunyai koneksi server, antrean, gateway, SDK, atau tombol kirim ke perangkat. Untuk pengujian sintetis PIN 500 saja.</p>
 <label for="pin">PIN uji</label><input id="pin" value="500" inputmode="numeric" maxlength="8" autocomplete="off">
 <label for="photo">Pilih JPEG dari HP</label><input id="photo" type="file" accept="image/jpeg,.jpg" capture="user">
-<p>Maksimum 50.000 byte. Nama harus <code>verify_biophoto_9_500.jpg</code>. Foto tidak disimpan dan tidak keluar dari browser.</p>
+<p>Maksimum 50.000 byte. Nama file JPEG boleh berbeda pada setiap HP. Gunakan hanya gambar sintetis, bukan foto orang. Foto tidak disimpan dan tidak keluar dari browser.</p>
 <button id="validate" type="button">Validasi lokal</button><div id="result" role="status" aria-live="polite">Belum divalidasi.</div>
 </main><script>
 'use strict';
@@ -16,7 +16,7 @@ const reject=(reason)=>{out.textContent='DITOLAK: '+reason;};
 document.getElementById('validate').addEventListener('click',async()=>{
  const file=photo.files?.[0];if(pin.value!=='500')return reject('TEST_PIN_ONLY');
  if(!file)return reject('FILE_MISSING');
- if(file.name!=='verify_biophoto_9_500.jpg')return reject('FILENAME_MISMATCH');
+ if(!/\.jpe?g$/i.test(file.name))return reject('EXTENSION_INVALID');
  if(file.size<100||file.size>50000)return reject('SIZE_INVALID');
  try{
   const bytes=new Uint8Array(await file.arrayBuffer());
