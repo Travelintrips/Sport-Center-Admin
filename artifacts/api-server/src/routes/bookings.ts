@@ -2861,7 +2861,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
 
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
-      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, null, beforeUpdate).catch(() => {});
+      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, null, beforeUpdate, undefined, { preservePaymentStatus: true }).catch(() => {});
       // Booking status updates must not create financial events or payment-confirmed
       // notifications. Those are owned by the verified payment confirmation path.
 
