@@ -3279,7 +3279,7 @@ export default function AdminBookings() {
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [statusFilter, settlementFilter, groupFilter, billingFilter, paymentFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
+  }, [statusFilter, settlementFilter, groupFilter, facilityFilter, billingFilter, paymentFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
 
   const bookingQueryKey = useMemo(
     () => [
@@ -3305,6 +3305,7 @@ export default function AdminBookings() {
       groupFilter,
       billingFilter,
       paymentFilter,
+      facilityFilter,
       debouncedSearch,
       dateFrom,
       dateTo,
