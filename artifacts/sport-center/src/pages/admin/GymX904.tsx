@@ -102,7 +102,7 @@ export default function GymX904() {
       const r=await fetch(API+"/admin/gym-x904/manual-access-pending",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
       if(!r.ok)throw new Error("Tidak dapat membaca antrean mesin");
       return r.json();
-    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:12000
+    },enabled:tab==="users"&&!!userCommandCapabilities?.allowed,retry:false,refetchInterval:30000
   });
   const lockedMachinePin=(pin:string)=>pendingLedger?.commands.find(c=>c.user_pin===pin&&c.blocked);
   const machineSnapshotFresh=!!machineAccess?.observedAt &&
@@ -233,7 +233,7 @@ export default function GymX904() {
       if (!response.ok) throw new Error("Status perintah tidak tersedia");
       return response.json();
     },
-    refetchInterval: 15000,
+    refetchInterval: tab === "dashboard" || tab === "device" ? 30000 : false,
   });
   const requestReadStatus = async () => {
     const token = getToken();
@@ -277,7 +277,7 @@ export default function GymX904() {
       return response.json();
     },
     enabled: tab === "device" || tab === "audit" || tab === "dashboard",
-    refetchInterval: 10000,
+    refetchInterval: 30000,
     retry: 1,
   });
   const { data: admsAudit, isError: admsAuditError } = useQuery<AdmsAuditResult>({
