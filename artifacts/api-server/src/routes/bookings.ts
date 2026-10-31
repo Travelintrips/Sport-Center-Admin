@@ -9,7 +9,6 @@ import { calculateEventDiscount } from "../lib/bookingPricing";
 
 import {
   notifyBookingCreated,
-  notifyPaymentConfirmed,
   notifyBookingCancelled,
   notifyCompanyBookingCreated,
   notifyDpPaid,
@@ -18,13 +17,12 @@ import {
   notifyAdminBookingApprovalRequest,
   notifyPaymentProofUploaded,
 } from "../lib/notifications";
-import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { createWaToken } from "../lib/waTokens";
 
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
-import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateBookingWithholdingTax, calculateWithholdingTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
@@ -2863,46 +2861,9 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
 
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
-      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null, beforeUpdate).catch(() => {});
-      // Push bank mutation saat admin langsung override status ke "confirmed" (idempotent via mutationKey)
-      if (status === "confirmed" && !["confirmed", "completed"].includes(beforeUpdate.status ?? "")) {
-        pushConfirmedPaymentAsBankMutation(beforeUpdate, new Date()).catch(() => {});
-      }
-
-      // Kirim WA notification ke customer saat status berubah ke confirmed ATAU langsung ke completed
-      const isConfirming =
-        (status === "confirmed" && beforeUpdate.status !== "confirmed") ||
-        (status === "completed" && !["confirmed", "completed"].includes(beforeUpdate.status ?? ""));
-      if (isConfirming) {
-        const [facility] = await db
-          .select({ name: facilitiesTable.name })
-          .from(facilitiesTable)
-          .where(eq(facilitiesTable.id, beforeUpdate.facilityId))
-          .limit(1);
-        logger.info({ orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone, toStatus: status }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
-        notifyPaymentConfirmed({
-          customerName: beforeUpdate.customerName,
-          customerPhone: beforeUpdate.customerPhone,
-          orderNumber: beforeUpdate.orderNumber,
-          facilityName: facility?.name ?? "",
-          bookingDate: beforeUpdate.bookingDate,
-          startTime: beforeUpdate.startTime,
-          endTime: beforeUpdate.endTime,
-          totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
-          bookingId: beforeUpdate.id,
-          groupRef: beforeUpdate.groupRef,
-        }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone }, "[WA] notifyPaymentConfirmed (direct) error"));
-
-        // Kirim invoice PDF ke customer via email & WA (fire-and-forget)
-        // Jika booking bagian dari grup, kirim invoice gabungan
-        if (beforeUpdate.groupRef) {
-          sendGroupInvoiceToCustomer(beforeUpdate.groupRef, { userName: "admin-direct" })
-            .catch((err) => logger.error({ err, groupRef: beforeUpdate.groupRef }, "[InvoiceDelivery] Gagal kirim invoice grup setelah admin confirm"));
-        } else {
-          sendInvoiceToCustomer(beforeUpdate.orderNumber, { userName: "admin-direct" })
-            .catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah admin confirm"));
-        }
-      }
+      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, null, beforeUpdate).catch(() => {});
+      // Booking status updates must not create financial events or payment-confirmed
+      // notifications. Those are owned by the verified payment confirmation path.
 
       // Kirim WA notification ke customer saat booking dibatalkan
       if (status === "cancelled" && beforeUpdate.status !== "cancelled") {
