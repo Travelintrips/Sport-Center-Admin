@@ -118,6 +118,8 @@ export default function WaBookingForm() {
   const [uploadingProof, setUploadingProof] = useState(false);
   const [proofScanning, setProofScanning] = useState(false);
   const [proofOcrPreview, setProofOcrPreview] = useState<BookingProofOcrPreview | null>(null);
+  const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("pin");
+  const [x904IdentityValue, setX904IdentityValue] = useState("");
 
   const [form, setForm] = useState({
     customerName: "",
@@ -396,6 +398,10 @@ export default function WaBookingForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (gymWalkIn && !x904IdentityValue.trim()) {
+      setError("Masukkan PIN X904 atau pilih kartu VIS001–VIS006.");
+      return;
+    }
     if (paymentOptions.length > 0 && !form.paymentMethod) {
       setError("Pilih metode pembayaran: QRIS atau Transfer Bank.");
       return;
@@ -414,6 +420,7 @@ export default function WaBookingForm() {
           durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
+          ...(gymWalkIn && x904IdentityValue.trim() ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         }),
       });
       const data = await resp.json();
@@ -561,16 +568,25 @@ export default function WaBookingForm() {
               <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Data Pemesan</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="name" className="text-sm font-semibold">Nama Lengkap *</Label>
-                <Input
-                  id="name"
-                  placeholder="Contoh: Budi Santoso"
-                  value={form.customerName}
-                  onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
-                  required
-                />
-              </div>
+              {gymWalkIn ? (
+                <div className="space-y-1 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <Label className="text-sm font-semibold">Nama sesuai data X904</Label>
+                  <p className="text-xs text-blue-800">
+                    Nama akan diambil otomatis dari inventaris mesin setelah PIN atau kartu VIS terverifikasi. Petugas tidak perlu mengetik nama.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label htmlFor="name" className="text-sm font-semibold">Nama Lengkap *</Label>
+                  <Input
+                    id="name"
+                    placeholder="Contoh: Budi Santoso"
+                    value={form.customerName}
+                    onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
+                    required
+                  />
+                </div>
+              )}
               <div className="space-y-1">
                 <Label htmlFor="phone" className="text-sm font-semibold">Nomor WhatsApp *</Label>
                 <div className="relative">
@@ -586,6 +602,37 @@ export default function WaBookingForm() {
                 </div>
                 <p className="text-xs text-gray-500">Format: 628xxx (tanpa + atau 0 di depan)</p>
               </div>
+              {gymWalkIn && (
+                <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50/50 p-3">
+                  <div>
+                    <Label className="text-sm font-semibold">Identitas akses X904 (nonmember)</Label>
+                    <p className="text-xs text-gray-500 mt-1">Pilih PIN mesin atau kartu pengunjung VIS001–VIS006. Identitas diverifikasi sebelum akses otomatis diproses.</p>
+                  </div>
+                  <Select value={x904IdentityType} onValueChange={(v) => { setX904IdentityType(v as "pin" | "card"); setX904IdentityValue(""); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pin">PIN X904</SelectItem>
+                      <SelectItem value="card">Kartu pengunjung VIS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {x904IdentityType === "pin" ? (
+                    <div className="space-y-1">
+                      <Label htmlFor="x904-pin">PIN mesin</Label>
+                      <Input id="x904-pin" inputMode="numeric" pattern="[0-9]{1,8}" maxLength={8} placeholder="Masukkan PIN X904" value={x904IdentityValue} onChange={(e) => setX904IdentityValue(e.target.value.replace(/\D/g, ""))} />
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <Label htmlFor="x904-card">Nomor kartu</Label>
+                      <Select value={x904IdentityValue} onValueChange={setX904IdentityValue}>
+                        <SelectTrigger id="x904-card"><SelectValue placeholder="Pilih VIS001–VIS006" /></SelectTrigger>
+                        <SelectContent>
+                          {["VIS001","VIS002","VIS003","VIS004","VIS005","VIS006"].map((card) => <SelectItem key={card} value={card}>{card}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
