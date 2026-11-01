@@ -12,3 +12,6 @@ describe('X904 nonmember 12-hour paid access policy',()=>{
   test('role 14 never receives an automatic command',()=>expect(decideNonmemberX904Access({...base,deviceRole:14,currentGroup:1,now:new Date(confirmed.getTime()+NONMEMBER_ACCESS_MS)})).toBe('hold'));
   test('unknown machine group never receives command',()=>expect(decideNonmemberX904Access({...base,currentGroup:255})).toBe('hold'));
 });
+
+  test.each(['237','79','12'])('protected PIN %s can still auto-activate after confirmed payment', (userPin) => expect(decideNonmemberX904Access({...base,userPin})).toBe('activate'));
+  test('role 14 remains exempt from automatic suspend but paid activation is still allowed',()=>expect(decideNonmemberX904Access({...base,deviceRole:14})).toBe('activate'));
