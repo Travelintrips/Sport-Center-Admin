@@ -210,7 +210,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       if (inFlight.rows.length) return;
       const priorCount = Number((await tx.execute(sql`SELECT count(*)::int AS n
         FROM sport_center.x904_user_commands
-        WHERE device_serial=${DEVICE} AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
+        WHERE device_serial=${DEVICE} AND command_type=${commandType}
+          AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
           AND payload->>'accessId'=${String(a.access_id)}`)).rows[0]?.n ?? 0);
       if (priorCount >= MAX_ATTEMPTS) {
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
