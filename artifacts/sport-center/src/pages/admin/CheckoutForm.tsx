@@ -146,7 +146,7 @@ export default function AdminCheckoutForm() {
     paymentChoice !== null &&
     formPaymentValid &&
     repeatFormValid &&
-    (!isCompanyPayer || (!isGuest && selectedCustomer?.accountType === "company")) &&
+    (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && selectedCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
   );
 
@@ -422,10 +422,6 @@ export default function AdminCheckoutForm() {
     }
   }
 
-  async function submitBookingPayment() {
-    if (!createdBookingId || !paymentProof || paymentBusy || paymentSubmitted) return;
-    await recordBookingPayment(createdBookingId, createdBookingAmount, paymentProof, bookingPaymentDate, paidMethod);
-  }
 
   // Auto-compute endTime whenever startTime or duration changes
   const computedEndTime = (() => {
@@ -474,6 +470,10 @@ export default function AdminCheckoutForm() {
     }
     if (paymentChoice !== "paid" && paymentChoice !== "unpaid") {
       toast({ title: "Pilih Sudah Bayar atau Belum Bayar", variant: "destructive" });
+      return;
+    }
+    if (isCompanyPayer && paymentChoice === "paid") {
+      toast({ title: "Pembayaran perusahaan mengikuti proses invoice", description: "Pilih Belum Bayar untuk membuat booking perusahaan.", variant: "destructive" });
       return;
     }
     if (paymentChoice === "paid" && (!paymentProof || !bookingPaymentDate || bookingPaymentDate > jakartaDateOnly())) {
@@ -683,32 +683,7 @@ export default function AdminCheckoutForm() {
               <Button type="button" variant="outline" onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder ?? "")}`)}>Periksa Detail Pemesanan</Button>
             </div>
           )}
-          {false && <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">Unggah bukti pembayaran. OCR membantu pengecekan metode, tetapi tidak otomatis mengonfirmasi uang diterima.</p>
-                <Label>Metode Pembayaran</Label>
-                <Select value={paidMethod} onValueChange={setPaidMethod}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Transfer Bank">Transfer Bank</SelectItem>
-                    <SelectItem value="QRIS">QRIS Mandiri Direct</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Label htmlFor="booking-payment-date">Tanggal Pembayaran *</Label>
-                <Input
-                  id="booking-payment-date"
-                  type="date"
-                  value={bookingPaymentDate}
-                  max={jakartaDateOnly()}
-                  onChange={e => setBookingPaymentDate(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">Isi sesuai tanggal transaksi pada bukti pembayaran. Tanggal pembuatan booking dan waktu konfirmasi admin tetap tercatat terpisah.</p>
-                <Label htmlFor="booking-payment-proof">Bukti pembayaran *</Label>
-                <Input id="booking-payment-proof" type="file" accept="image/*,.pdf" onChange={e => setPaymentProof(e.target.files?.[0] ?? null)} />
-                <p className="text-sm">Nominal booking: <strong>{formatRupiah(createdBookingAmount)}</strong></p>
-                <Button type="button" className="w-full" disabled={paymentBusy || !paymentProof || !bookingPaymentDate || !createdBookingId || !(createdBookingAmount > 0)} onClick={submitBookingPayment}>
-                  {paymentBusy ? "Memproses bukti..." : (getCurrentRole()==="staff" ? "Unggah Bukti & Kirim Verifikasi" : "Unggah Bukti & Konfirmasi")}
-                </Button>
-              </div>}
+
         </div>
         <div className="flex gap-3 flex-wrap justify-center">
           {(paymentChoice === "unpaid" || (paymentSubmitted && getCurrentRole()==="staff")) && (
@@ -1032,7 +1007,7 @@ export default function AdminCheckoutForm() {
               <div className="rounded-lg border p-4 space-y-3">
                 <p className="font-semibold">Status pembayaran</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant={paymentChoice === "paid" ? "default" : "outline"} aria-pressed={paymentChoice === "paid"} onClick={() => setPaymentChoice("paid")}>Sudah Bayar</Button>
+                  <Button type="button" disabled={isCompanyPayer} variant={paymentChoice === "paid" ? "default" : "outline"} aria-pressed={paymentChoice === "paid"} onClick={() => setPaymentChoice("paid")}>Sudah Bayar</Button>
                   <Button type="button" variant={paymentChoice === "unpaid" ? "default" : "outline"} aria-pressed={paymentChoice === "unpaid"} onClick={() => setPaymentChoice("unpaid")}>Belum Bayar</Button>
                 </div>
                 {paymentChoice === "paid" ? (
@@ -1062,7 +1037,11 @@ export default function AdminCheckoutForm() {
                     {paymentProof && <p className="text-xs text-muted-foreground">File dipilih: {paymentProof.name}</p>}
                   </div>
                 ) : paymentChoice === "unpaid" ? (
-                  <p className="text-sm text-muted-foreground">Booking akan dibuat tanpa record pembayaran. Status pembayaran tetap menunggu pembayaran dan bisa dikelola kemudian.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isCompanyPayer
+                      ? "Tagihan perusahaan mengikuti alur invoice perusahaan. Tidak ada pembayaran langsung yang dicatat pada saat booking."
+                      : "Booking akan dibuat tanpa record pembayaran. Status pembayaran tetap menunggu pembayaran dan bisa dikelola kemudian."}
+                  </p>
                 ) : (
                   <p className="text-sm text-muted-foreground">Pilih Sudah Bayar atau Belum Bayar untuk melanjutkan.</p>
                 )}
