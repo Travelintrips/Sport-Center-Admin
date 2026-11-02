@@ -18,8 +18,11 @@ Scope: source review of X904-related routers under `artifacts/api-server/src/rou
 - New face preview only reads local File objects, decodes in browser and hashes bytes. No storage, queue, network or machine dispatch.
 
 ## Limits / release gates
-- No physical Android/iPhone browser session available for verified on-device capture. DO NOT report physical PASS.
+- Physical Android browser test: PASS based on supplied handset screenshot. Result: STAGED_OFFLINE_ONLY; original 1,037,085 bytes; compressed 37,338 bytes; output 720 × 1280; SHA-256 displayed.
+- Physical iPhone browser test: PASS based on supplied iPhone/Safari screenshot. Result: STAGED_OFFLINE_ONLY; original 1,635,720 bytes; compressed 36,533 bytes; output 960 × 1280; SHA-256 displayed.
+- Laptop browser test: PASS based on supplied screenshot. Result: STAGED_OFFLINE_ONLY; original 56,732 bytes; compressed 43,847 bytes; output 864 × 1152.
+- These screenshots prove the browser workflow and local compression path; they do not independently prove that the selected image content was synthetic, nor do they include a captured network trace or before/after database queue census.
 - The HTML stand-alone preview and integrated React page are for synthetic JPEG data only. No real gym member photo may be staged.
-- Mobile verification requires tester with physical devices: visit HTTPS preview under authenticated admin route; check camera permission, image choice and validation; test valid, wrong PIN, wrong filename, >50KB, corrupt JPEG; inspect network panel/proxy and confirm no photo bytes posted to server; after tests, verify `sport_center.x904_user_commands` count/state unchanged (read-only pre/post). Use synthesized test image only.
+- Remaining mobile security verification: capture a network trace/proxy showing no photo bytes leave the browser and compare `sport_center.x904_user_commands` read-only count/state before and after the test. Verify test fixtures are synthetic only; do not use member photos.
 - No deployment/merge while firmware ZMM510-NF24VB-Ver1.4.15 photo ingestion and recovery remain NO-GO. Keep `X904_SEND_ENABLED=false`.
 - This code review cannot prove every endpoint or worker installed outside this repo and VMSC tree. A cross-service inventory and actual physical mobile browser verification are still release blockers.
