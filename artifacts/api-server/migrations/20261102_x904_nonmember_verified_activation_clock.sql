@@ -11,10 +11,11 @@ BEGIN
   FROM pg_constraint c
   WHERE c.conrelid = 'sport_center.x904_nonmember_daily_access'::regclass
     AND c.contype = 'c'
+    AND c.conname = 'x904_nonmember_daily_access_check'
     AND pg_get_constraintdef(c.oid) LIKE '%expires_at%'
     AND pg_get_constraintdef(c.oid) LIKE '%confirmed_at%'
     AND pg_get_constraintdef(c.oid) LIKE '%12:00:00%'
-  ORDER BY c.oid LIMIT 1;
+  LIMIT 1;
   IF old_check IS NULL THEN
     RAISE EXCEPTION 'Expected original nonmember 12h constraint missing; migration aborted';
   END IF;
