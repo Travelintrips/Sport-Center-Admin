@@ -174,10 +174,11 @@ jobs:
       - name: Booking CSV regression contracts (no production access)
         run: node --test scripts/booking-csv-regression.test.mjs
 
-      # Sport Center has no provisioned DEV application/database. Keep live DB
-      # integration opt-in; all code safety/unit/type/build gates still run.
-      - name: X904 database E2E (only with explicitly provisioned isolated environment)
-        if: ${{ vars.SPORT_CENTER_X904_DEV_E2E_ENABLED == 'true' }}
+      # X904 DEV E2E uses only the separately validated CST-DEV project.
+      # The test assigns a synthetic device serial and asserts the command queue
+      # count is unchanged; it never connects to VMSC or any physical X904.
+      - name: X904 database E2E (isolated CST-DEV; no device dispatch)
+        if: ${{ env.SUPABASE_DATABASE_URL_DEV != '' }}
         env:
           NODE_ENV: development
         run: |
