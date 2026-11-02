@@ -520,6 +520,7 @@ export default function AdminCheckoutForm() {
         payerType: corporate ? "company" : "personal",
         ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
         source: "admin",
+        adminPaymentChoice: paymentChoice,
         notes: notes || undefined,
       };
       const res = repeatEnabled

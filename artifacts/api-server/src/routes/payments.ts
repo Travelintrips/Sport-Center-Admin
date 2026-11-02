@@ -8,13 +8,15 @@ import {
   bookingGroupsTable,
   bankMutationsTable,
   bankReconciliationMatchesTable,
+  usersTable,
 } from "@workspace/db";
 import { eq, and, ne, inArray, or, sql } from "drizzle-orm";
 import { adminMiddleware, verifyToken } from "../lib/auth";
+import { isSessionCurrent } from "../lib/roleAuthorization";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notifications";
+import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminBookingReport } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
@@ -457,11 +459,21 @@ router.post("/payments", async (req, res) => {
 
     // Validasi kepemilikan: jika request membawa token, pastikan customer yang mengirim adalah pemilik booking
     const authHeader = req.headers.authorization;
+    let uploadActor: { userId: number; role: string } | null = null;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
       if (payload?.userId) {
+        const [account] = await db.select({
+          role: usersTable.role,
+          status: usersTable.accountStatus,
+        }).from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1);
+        if (!isSessionCurrent(payload.role, account ?? null)) {
+          res.status(401).json({ error: "Hak akses akun berubah. Silakan login kembali." });
+          return;
+        }
+        uploadActor = { userId: payload.userId, role: payload.role };
         const isOwner = booking.customerId === payload.userId || booking.bookedByUserId === payload.userId;
-        const isAdmin = !!payload.role && payload.role !== "customer";
+        const isAdmin = payload.role !== "customer";
         if (!isOwner && !isAdmin) {
           res.status(403).json({ error: "Tidak diizinkan mengupload bukti untuk booking ini" });
           return;
@@ -803,22 +815,34 @@ router.post("/payments", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId))
       .limit(1);
 
-    // Generate single review token so admin gets ONE link (proof + approve/reject in one page)
-    const APP_URL = await getBaseUrl();
-    const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
-    notifyPaymentProofUploaded({
-      bookingId: booking.id,
-      groupRef: booking.groupRef,
-      customerName: booking.customerName,
-      customerPhone: booking.customerPhone,
-      orderNumber: booking.orderNumber,
-      facilityName: facility?.name ?? "",
-      bookingDate: booking.bookingDate,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
-    });
+    // Admin who creates the booking and has payment-confirmation authority
+    // must not receive a redundant "Bukti Pembayaran Masuk" approval request.
+    // Staff, customers, and customer-originated bookings retain the review flow.
+    const adminSelfServicePayment = booking.source === "admin" &&
+      Boolean(uploadActor) &&
+      uploadActor!.userId === booking.bookedByUserId &&
+      uploadActor!.role !== "staff" &&
+      uploadActor!.role !== "customer";
+    if (!adminSelfServicePayment) {
+      const APP_URL = await getBaseUrl();
+      const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
+      notifyPaymentProofUploaded({
+        bookingId: booking.id,
+        groupRef: booking.groupRef,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facility?.name ?? "",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+        reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
+      }).catch((err) => logger.error(
+        { err, bookingId: booking.id, paymentId: payment.id },
+        "[WA] Payment proof verification alert failed",
+      ));
+    }
     syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
 
     // Rekap otomatis jika booking hari ini
@@ -2346,6 +2370,23 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             );
           }
 
+        }
+
+        if (
+          booking.source === "admin" &&
+          requesterRole !== "staff" &&
+          !bookingAlreadyConfirmed
+        ) {
+          notifyAdminBookingReport({
+            bookingId: booking.id,
+            paymentStatus: "paid",
+            paymentMethod: payment.paymentMethod,
+            paymentDate: payment.paidAt ?? payment.confirmedAt ?? new Date(),
+            proofUrl: payment.proofUrl,
+          }).catch((err) => logger.error(
+            { err, bookingId: booking.id, paymentId: payment.id },
+            "[WA] Admin booking paid report failed",
+          ));
         }
 
         await logAudit({
