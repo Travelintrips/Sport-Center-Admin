@@ -511,6 +511,14 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           groupRef: string | null;
           additionalCharges: typeof bookingsTable.$inferSelect.additionalCharges;
         }>);
+    // Fetch every booking in each referenced group, not only rows surviving
+    // the date/facility filter. Group payment obligations span all sessions.
+    const fullGroupBookingsPromise = groupRefs.length > 0
+      ? db
+          .select()
+          .from(bookingsTable)
+          .where(inArray(bookingsTable.groupRef, groupRefs))
+      : Promise.resolve([] as (typeof bookingsTable.$inferSelect)[]);
     const groupsPromise = groupRefs.length > 0
       ? db
           .select()
@@ -521,18 +529,21 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             return [];
           })
       : Promise.resolve([] as (typeof bookingGroupsTable.$inferSelect)[]);
-    const allPaymentsPromise = bookingIds.length > 0
-      ? db
-          .select()
-          .from(paymentsTable)
-          .where(inArray(paymentsTable.bookingId, bookingIds))
-      : Promise.resolve([] as (typeof paymentsTable.$inferSelect)[]);
-
-    const [groupChargeRows, groups, allPayments] = await Promise.all([
+    const [groupChargeRows, groups, fullGroupBookings] = await Promise.all([
       groupChargeRowsPromise,
       groupsPromise,
-      allPaymentsPromise,
+      fullGroupBookingsPromise,
     ]);
+    const paymentLookupBookingIds = [...new Set([
+      ...bookingIds,
+      ...fullGroupBookings.map((booking) => booking.id),
+    ])];
+    const allPayments = paymentLookupBookingIds.length > 0
+      ? await db
+          .select()
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, paymentLookupBookingIds))
+      : [];
     const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
     for (const row of groupChargeRows) {
       if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
@@ -548,8 +559,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       groupNetTotalPayment: number;
     }>();
     if (groupRefs.length > 0) {
-      const bookingsByGroupRef = new Map<string, typeof bookings>();
-      for (const booking of bookings) {
+      const bookingsByGroupRef = new Map<string, typeof fullGroupBookings>();
+      for (const booking of fullGroupBookings) {
         if (!booking.groupRef) continue;
         const current = bookingsByGroupRef.get(booking.groupRef) ?? [];
         current.push(booking);
@@ -631,13 +642,13 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .where(and(
             or(
               inArray(bankMutationsTable.matchedPaymentId, paymentIds),
-              inArray(bankMutationsTable.matchedOrderId, bookingIds),
+              inArray(bankMutationsTable.matchedOrderId, paymentLookupBookingIds),
             ),
             inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
           ));
         reconciledPaymentIds = getReconciledPaymentIds(
           allPayments,
-          bookings,
+          [...bookings, ...fullGroupBookings],
           reconciledMutations,
         );
       } catch (err) {
@@ -764,6 +775,20 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       if (!paymentsByBookingId[p.bookingId]) paymentsByBookingId[p.bookingId] = [];
       paymentsByBookingId[p.bookingId].push(p);
     }
+    const groupRefByBookingId = new Map(
+      fullGroupBookings
+        .filter((booking) => Boolean(booking.groupRef))
+        .map((booking) => [booking.id, booking.groupRef as string]),
+    );
+    const paymentsByGroupRef = new Map<string, typeof allPayments>();
+    for (const payment of allPayments) {
+      const groupRef = groupRefByBookingId.get(payment.bookingId);
+      if (!groupRef) continue;
+      paymentsByGroupRef.set(groupRef, [
+        ...(paymentsByGroupRef.get(groupRef) ?? []),
+        payment,
+      ]);
+    }
 
     const result = bookings.map((b) => {
       const facility = facilityById.get(b.facilityId);
@@ -847,14 +872,15 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         canUsePaylabsLegacyLabel
         ? { ...payment, paymentMethod: selectedPaylabsLabel }
         : payment;
-      const paymentRowsForResponse = companyInvoicePayment ? [companyInvoicePayment] : bPayments;
-      const paymentsForResponse = paymentRowsForResponse.map((p) => {
+      const serializePaymentForResponse = (p: (typeof allPayments)[number] | typeof companyInvoicePayment) => {
+        if (!p) return null;
         const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
+        const paymentPaylabsCode = paylabsMethodByBookingId.get(p.bookingId)?.trim().toLowerCase();
         const isPaylabsQris = p.paymentProvider === "paylabs" &&
           (paymentCode === "qris" || paymentCode === "paylabs - qris");
         const isDirectQris = p.paymentProvider === "mandiri_direct" && paymentCode === "qris";
         const isPaylabsPayment = p.paymentProvider === "paylabs"
-          || paymentCode === transactionPaylabsCode
+          || paymentCode === paymentPaylabsCode
           || paylabsLabels.some((method) =>
             String(method.id ?? "").trim().toLowerCase() === paymentCode,
           );
@@ -874,7 +900,16 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           isBankReconciled,
           isSettledOutsideBankReconciliation: isSettled && !isBankReconciled,
         };
-      });
+      };
+      const paymentRowsForResponse = companyInvoicePayment ? [companyInvoicePayment] : bPayments;
+      const paymentsForResponse = paymentRowsForResponse
+        .map((p) => serializePaymentForResponse(p))
+        .filter(Boolean);
+      const groupPaymentsForResponse = b.groupRef
+        ? (paymentsByGroupRef.get(b.groupRef) ?? [])
+            .map((p) => serializePaymentForResponse(p))
+            .filter(Boolean)
+        : [];
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       const bookingWithholding = calculateBookingWithholdingTax(b);
@@ -940,6 +975,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
              }
            : null,
         payments: paymentsForResponse,
+        groupPayments: groupPaymentsForResponse,
         membershipPayment: membershipPayment
           ? { ...membershipPayment, amount: Number(membershipPayment.amount) }
           : null,

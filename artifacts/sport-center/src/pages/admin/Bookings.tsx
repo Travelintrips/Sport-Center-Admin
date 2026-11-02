@@ -4960,13 +4960,15 @@ export default function AdminBookings() {
                        ),
                      ];
                      const groupStatus = isMultiSessionGroup ? getGroupStatus(groupRows) : b.status;
-                    const groupPayments = isMultiSessionGroup
-                      ? groupRows.flatMap((row: any) => [
-                          ...(Array.isArray(row.payments) ? row.payments : []),
-                          row.membershipPayment,
-                          row.payment,
-                        ]).filter(Boolean)
-                      : [];
+                    const groupPayments = b.groupRef && Array.isArray(b.groupPayments)
+                      ? b.groupPayments
+                      : isMultiSessionGroup
+                        ? groupRows.flatMap((row: any) => [
+                            ...(Array.isArray(row.payments) ? row.payments : []),
+                            row.membershipPayment,
+                            row.payment,
+                          ]).filter(Boolean)
+                        : [];
                     // A group payment is duplicated onto each session for legacy compatibility.
                     // The admin correction is written to the canonical/representative booking payment,
                     // so the group row must prefer that payment instead of picking the latest timestamp
@@ -5028,34 +5030,59 @@ export default function AdminBookings() {
                         ? companyInvoiceNetTotal
                         : 0;
                      const groupTaxSummary = isMultiSessionGroup ? getGroupInvoiceTax(groupRows) : null;
-                    // Payment state comes from unique confirmed payment rows, never booking status.
-                    // Group payment rows may repeat on legacy child rows; dedupe by stable payment ID.
-                    const paymentRowsForTruth = isMultiSessionGroup
-                      ? groupRows.flatMap((row: any) => [
-                          ...(Array.isArray(row.payments) ? row.payments : []),
-                          row.membershipPayment,
-                          row.payment,
-                        ]).filter(Boolean)
-                      : [b.membershipPayment, ...(Array.isArray(b.payments) ? b.payments : []), b.payment]
-                          .filter(Boolean);
-                    const uniqueConfirmedPayments = [...new Map(
-                      paymentRowsForTruth
-                        .filter((payment: any) => payment?.id != null && payment.status === "confirmed")
-                        .map((payment: any) => [String(payment.id), payment]),
-                    ).values()] as any[];
+                    // Use the full group payment set supplied by the API. It includes payments
+                    // whose representative booking is outside the current date filter.
+                    const paymentCandidatesForTruth = b.groupRef && Array.isArray(b.groupPayments)
+                      ? b.groupPayments.map((payment: any) => ({ payment, kind: "sport" as const }))
+                      : (isMultiSessionGroup
+                          ? groupRows.flatMap((row: any) => [
+                              ...(Array.isArray(row.payments) ? row.payments : []),
+                              row.payment,
+                            ].filter(Boolean).map((payment: any) => ({ payment, kind: "sport" as const })))
+                          : [
+                              ...(Array.isArray(b.payments) ? b.payments : []),
+                              b.payment,
+                            ].filter(Boolean).map((payment: any) => ({ payment, kind: "sport" as const })));
+                    const membershipPaymentCandidates = (isMultiSessionGroup ? groupRows : [b])
+                      .map((row: any) => row.membershipPayment)
+                      .filter(Boolean)
+                      .map((payment: any) => ({ payment, kind: "membership" as const }));
+                    const uniquePaymentRepresentations = new Map<string, any>();
+                    for (const candidate of [...paymentCandidatesForTruth, ...membershipPaymentCandidates]) {
+                      const payment = candidate.payment;
+                      if (payment?.id == null) continue;
+                      const sourceMembershipPaymentId =
+                        payment.sourceMembershipPaymentId ?? payment.source_membership_payment_id;
+                      const identity = candidate.kind === "membership"
+                        ? `membership:${payment.id}`
+                        : sourceMembershipPaymentId != null
+                          ? `membership:${sourceMembershipPaymentId}`
+                          : `sport:${payment.id}`;
+                      const existing = uniquePaymentRepresentations.get(identity);
+                      // Keep the sport-payment mirror when available because it carries
+                      // settlement and bank-reconciliation enrichment for the source payment.
+                      if (!existing || (candidate.kind === "sport" && sourceMembershipPaymentId != null)) {
+                        uniquePaymentRepresentations.set(identity, payment);
+                      }
+                    }
+                    const uniquePaymentRowsForTruth = [...uniquePaymentRepresentations.values()];
+                    const uniqueConfirmedPayments = uniquePaymentRowsForTruth
+                      .filter((payment: any) => payment.status === "confirmed");
                     const paymentRecordedAmount = uniqueConfirmedPayments.reduce(
                       (sum: number, payment: any) => sum + Math.max(0, Number(payment.amount ?? 0)),
                       0,
                     );
-                    const paymentDueAmount = isMultiSessionGroup
-                      ? (isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
-                          ? companyInvoiceNetTotal
-                          : Number(groupTaxSummary?.grandTotal ??
-                              groupRows.reduce((sum: number, row: any) =>
-                                sum + Number(row.grandTotal ?? row.totalPrice ?? 0), 0)))
-                      : (b.payerType === "company" && Number(b.companyInvoiceTotal ?? 0) > 0
-                          ? Number(b.companyInvoiceTotal)
-                          : Number(b.grandTotal ?? b.totalPrice ?? 0));
+                    const paymentDueAmount = isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
+                      ? companyInvoiceNetTotal
+                      : b.payerType === "company" && Number(b.companyInvoiceTotal ?? 0) > 0
+                        ? Number(b.companyInvoiceTotal)
+                        : b.groupRef && Number(b.groupTotalPayment ?? 0) > 0
+                          ? Number(b.groupTotalPayment)
+                          : isMultiSessionGroup
+                            ? Number(groupTaxSummary?.grandTotal ??
+                                groupRows.reduce((sum: number, row: any) =>
+                                  sum + Number(row.grandTotal ?? row.totalPrice ?? 0), 0))
+                            : Number(b.grandTotal ?? b.totalPrice ?? 0);
                     const paymentRemainingAmount = Math.max(0, paymentDueAmount - paymentRecordedAmount);
                     const paymentIsFullyCovered = paymentDueAmount > 0 &&
                       paymentRecordedAmount >= paymentDueAmount - 0.005;
@@ -5303,7 +5330,7 @@ export default function AdminBookings() {
                             <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
                               <AlertCircle size={11} /> Dibayar sebagian
                             </span>
-                          ) : paymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
+                          ) : uniquePaymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
                               <Clock size={11} /> Menunggu verifikasi
                             </span>
