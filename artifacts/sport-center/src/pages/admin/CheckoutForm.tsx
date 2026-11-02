@@ -748,6 +748,42 @@ export default function AdminCheckoutForm() {
                 </Select>
               </div>}
             </div>
+            {isWalkIn && <p className="text-sm text-muted-foreground rounded-lg border p-3">
+              Gym reguler menggunakan tarif per kunjungan, tanpa durasi atau pilihan slot jam.
+              Member Gym menggunakan alur Membership terpisah agar kunjungan tidak ditagih ulang.
+            </p>}
+            </>}
+            {!isMembership && !isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Pilih Jam Mulai</Label>
+                <span className="text-xs text-muted-foreground">Durasi {duration} jam</span>
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                <span>● Tersedia</span><span>◯ Tidak tersedia</span><span className="text-orange-600">● Dipilih</span>
+              </div>
+              {slotState === "loading" && <p className="text-sm">Memeriksa ketersediaan...</p>}
+              {slotState === "error" && <p className="text-sm text-destructive">Pemeriksaan gagal; booking tidak dapat disimpan.</p>}
+              {slotState === "ready" && <div className="space-y-3">
+                {[
+                  { label: "Pagi", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) < 12) },
+                  { label: "Siang", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) >= 12 && Number(x.time.slice(0,2)) < 17) },
+                  { label: "Sore & Malam", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) >= 17) },
+                ].filter((section) => section.rows.length > 0).map((section) => <div key={section.label}>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">{section.label}</p>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {section.rows.map((slot) => <Button key={slot.time} type="button" size="sm"
+                      disabled={!slot.available} title={slot.reason ?? (slot.available ? "Tersedia" : "Tidak tersedia")}
+                      className={startTime.slice(11,16) === slot.time.slice(0,5) ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}
+                      variant={startTime.slice(11,16) === slot.time.slice(0,5) ? "default" : "outline"}
+                      onClick={() => setStartTime(selectedDate + "T" + slot.time.slice(0,5))}>
+                      {slot.time.slice(0,5)}
+                    </Button>)}
+                  </div>
+                </div>)}
+                {slotOptions.length === 0 && <p className="text-sm">Tidak ada slot dalam jam operasional.</p>}
+              </div>}
+              <p className="text-xs text-muted-foreground">Status slot dihitung untuk seluruh durasi. Server memeriksa ulang saat menyimpan.</p>
+            </div>}
             {!isMembership && !isWalkIn && selectedFacilityId && selectedDate && startTime && (
               <div className={repeatEnabled ? "rounded-lg border border-primary/40 bg-primary/5 p-4 space-y-4" : "rounded-lg border p-4 space-y-3"}>
                 <div className="flex items-start gap-3">
@@ -802,11 +838,6 @@ export default function AdminCheckoutForm() {
               </div>
             )}
 
-            {isWalkIn && <p className="text-sm text-muted-foreground rounded-lg border p-3">
-              Gym reguler menggunakan tarif per kunjungan, tanpa durasi atau pilihan slot jam.
-              Member Gym menggunakan alur Membership terpisah agar kunjungan tidak ditagih ulang.
-            </p>}
-            </>}
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
               <Select value={bookingKind} onValueChange={setBookingKind}>
@@ -830,50 +861,61 @@ export default function AdminCheckoutForm() {
               {isMembership && <p className="text-xs text-muted-foreground">Kelola pendaftaran, perpanjangan, pembayaran, atau kunjungan member langsung dari halaman ini.</p>}
             </div>
 
-            {!isMembership && !isWalkIn && selectedFacilityId && selectedDate && <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Pilih Jam Mulai</Label>
-                <span className="text-xs text-muted-foreground">Durasi {duration} jam</span>
+            {!isMembership && selectedFacilityId && selectedDate &&
+              (repeatEnabled ? (repeatPreviewCurrent && Boolean(repeatPreview)) : (isWalkIn || slotValid)) && (
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
+                <p className="font-semibold">Ringkasan Booking</p>
+                {repeatEnabled && repeatPreview ? (
+                  <>
+                    <p>{facility?.name} · {startTime.slice(11,16)} – {computedEndTime.slice(11,16)} · {duration} jam per sesi</p>
+                    <div className="flex justify-between gap-3"><span>Tarif per sesi</span><strong>{formatRupiah(repeatPreview.pricePerSession)}</strong></div>
+                    <div className="flex justify-between gap-3"><span>Jumlah sesi</span><strong>{repeatCount} sesi ({repeatType === "weekly" ? "mingguan" : "bulanan"})</strong></div>
+                    <div className="border-t pt-2 space-y-1.5">
+                      <p className="font-medium">Jadwal seluruh sesi</p>
+                      {repeatPreview.dates.map((row) => (
+                        <div key={row.date} className="flex items-center justify-between gap-3 text-xs">
+                          <span>{new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(new Date(row.date + "T12:00:00+07:00"))}</span>
+                          <span className={row.available ? "text-green-700 font-medium" : "text-red-700 font-medium"}>
+                            {row.available ? "Tersedia" : (row.reason || "Tidak tersedia")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between gap-3 border-t pt-2"><span>Subtotal seluruh sesi</span><strong>{formatRupiah(repeatPreview.pricePerSession * repeatCount)}</strong></div>
+                    {bookingKind === "event" && (
+                      <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(Math.round(repeatPreview.pricePerSession * 0.214) * repeatCount)}</span></div>
+                    )}
+                    <div className="flex justify-between gap-3 font-semibold text-base">
+                      <span>{isCompanyPayer ? "Estimasi sebelum pajak perusahaan" : "Estimasi Total Pembayaran"}</span>
+                      <strong>{formatRupiah(Math.max(0, repeatPreview.pricePerSession * repeatCount - (bookingKind === "event" ? Math.round(repeatPreview.pricePerSession * 0.214) * repeatCount : 0)))}</strong>
+                    </div>
+                    {!repeatAllAvailable && (
+                      <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                        Ada tanggal yang belum tersedia. Booking belum dapat disimpan sampai seluruh sesi lolos pemeriksaan.
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {isCompanyPayer
+                        ? "Estimasi ini belum termasuk perhitungan pajak dan potongan perusahaan. Nilai final dihitung server untuk setiap sesi."
+                        : "Estimasi berdasarkan tarif dan diskon yang berlaku. Server memeriksa ulang ketersediaan dan menghitung nilai final saat disimpan."}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p>{selectedDate} · {isWalkIn ? "Gym per kunjungan (tanpa durasi)" : startTime.slice(11,16) + " – " + computedEndTime.slice(11,16) + " (" + duration + " jam)"}</p>
+                    <div className="flex justify-between gap-3"><span>{isWalkIn ? "Tarif per kunjungan" : "Tarif per jam"}</span><strong>{formatRupiah(Number(facility?.pricePerHour ?? 0))}</strong></div>
+                    {!isWalkIn && <div className="flex justify-between gap-3"><span>Durasi</span><span>{duration} jam</span></div>}
+                    <div className="flex justify-between gap-3"><span>Subtotal</span><strong>{formatRupiah(estimatedBase)}</strong></div>
+                    {bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
+                    <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Total Pembayaran"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
+                    {isCompanyPayer ? <>
+                      <p className="text-muted-foreground">DPP, PPN, dan PPh mengikuti konfigurasi perusahaan serta kalkulasi backend; jumlah ini bukan angka invoice final.</p>
+                      <p className="text-muted-foreground">Status setelah dibuat: menunggu approval perusahaan atau belum ditagihkan, sesuai akun.</p>
+                    </> : <p className="text-muted-foreground">Pajak (Personal / Umum): Rp0</p>}
+                  </>
+                )}
               </div>
-              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                <span>● Tersedia</span><span>◯ Tidak tersedia</span><span className="text-orange-600">● Dipilih</span>
-              </div>
-              {slotState === "loading" && <p className="text-sm">Memeriksa ketersediaan...</p>}
-              {slotState === "error" && <p className="text-sm text-destructive">Pemeriksaan gagal; booking tidak dapat disimpan.</p>}
-              {slotState === "ready" && <div className="space-y-3">
-                {[
-                  { label: "Pagi", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) < 12) },
-                  { label: "Siang", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) >= 12 && Number(x.time.slice(0,2)) < 17) },
-                  { label: "Sore & Malam", rows: slotOptions.filter((x) => Number(x.time.slice(0,2)) >= 17) },
-                ].filter((section) => section.rows.length > 0).map((section) => <div key={section.label}>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">{section.label}</p>
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                    {section.rows.map((slot) => <Button key={slot.time} type="button" size="sm"
-                      disabled={!slot.available} title={slot.reason ?? (slot.available ? "Tersedia" : "Tidak tersedia")}
-                      className={startTime.slice(11,16) === slot.time.slice(0,5) ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}
-                      variant={startTime.slice(11,16) === slot.time.slice(0,5) ? "default" : "outline"}
-                      onClick={() => setStartTime(selectedDate + "T" + slot.time.slice(0,5))}>
-                      {slot.time.slice(0,5)}
-                    </Button>)}
-                  </div>
-                </div>)}
-                {slotOptions.length === 0 && <p className="text-sm">Tidak ada slot dalam jam operasional.</p>}
-              </div>}
-              <p className="text-xs text-muted-foreground">Status slot dihitung untuk seluruh durasi. Server memeriksa ulang saat menyimpan.</p>
-            </div>}
-            {!isMembership && selectedFacilityId && selectedDate && (isWalkIn || slotValid) && <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
-              <p className="font-semibold">Ringkasan Booking</p>
-              <p>{selectedDate} · {isWalkIn ? "Gym per kunjungan (tanpa durasi)" : startTime.slice(11,16) + " – " + computedEndTime.slice(11,16) + " (" + duration + " jam)"}</p>
-              <div className="flex justify-between gap-3"><span>{isWalkIn ? "Tarif per kunjungan" : "Tarif per jam"}</span><strong>{formatRupiah(Number(facility?.pricePerHour ?? 0))}</strong></div>
-              {!isWalkIn && <div className="flex justify-between gap-3"><span>Durasi</span><span>{duration} jam</span></div>}
-              <div className="flex justify-between gap-3"><span>Subtotal</span><strong>{formatRupiah(estimatedBase)}</strong></div>
-              {bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
-              <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Total Pembayaran"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
-              {isCompanyPayer ? <>
-                <p className="text-muted-foreground">DPP, PPN, dan PPh mengikuti konfigurasi perusahaan serta kalkulasi backend; jumlah ini bukan angka invoice final.</p>
-                <p className="text-muted-foreground">Status setelah dibuat: menunggu approval perusahaan atau belum ditagihkan, sesuai akun.</p>
-              </> : <p className="text-muted-foreground">Pajak (Personal / Umum): Rp0</p>}
-            </div>}
+            )}
             {/* Notes */}
             <div className="space-y-2">
               <Label htmlFor="notes">Catatan (Opsional)</Label>
