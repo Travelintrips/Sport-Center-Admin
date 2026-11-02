@@ -4993,6 +4993,41 @@ export default function AdminBookings() {
                     const listPayment = isMultiSessionGroup
                       ? groupPayment
                       : (b.membershipPayment ?? b.payment);
+                    const listPaymentDate =
+                      listPayment?.paidAt ??
+                      listPayment?.confirmedAt ??
+                      listPayment?.submittedAt ??
+                      b.paidAt ??
+                      listPayment?.updatedAt ??
+                      listPayment?.createdAt;
+                    const isMembershipPayment = Boolean(b.membershipPayment);
+                    const isBankReconciled = Boolean(
+                      listPayment?.isBankReconciled ||
+                      (Array.isArray(b.payments) && b.payments.some((payment: any) => payment.isBankReconciled)),
+                    );
+                    const isSettledOutsideBankReconciliation = Boolean(
+                      listPayment?.isSettledOutsideBankReconciliation ||
+                      (Array.isArray(b.payments) &&
+                        b.payments.some((payment: any) => payment.isSettledOutsideBankReconciliation)),
+                    );
+                     const bookingTax = getBookingInvoiceTax(b);
+                      const isPaidCompanyInvoice =
+                        b.payerType === "company" &&
+                        b.billingStatus === "paid" &&
+                        Number(b.companyInvoiceTotal ?? 0) > 0;
+                      const companyInvoiceNetTotal = Number(
+                        b.companyInvoiceNetAmount ?? b.companyInvoiceTotal ?? 0,
+                      );
+                      // For one corporate invoice, show the single cash amount
+                      // expected in bank reconciliation across all facilities.
+                      const sessionDisplayTotal =
+                        isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
+                          ? companyInvoiceNetTotal
+                          : bookingTax.netAmount;
+                      const companyInvoiceDisplayTotal = isPaidCompanyInvoice
+                        ? companyInvoiceNetTotal
+                        : 0;
+                     const groupTaxSummary = isMultiSessionGroup ? getGroupInvoiceTax(groupRows) : null;
                     // Payment state comes from unique confirmed payment rows, never booking status.
                     // Group payment rows may repeat on legacy child rows; dedupe by stable payment ID.
                     const paymentRowsForTruth = isMultiSessionGroup
@@ -5031,41 +5066,6 @@ export default function AdminBookings() {
                         : uniqueConfirmedPayments.every((payment: any) => payment.isSettledOutsideBankReconciliation)
                           ? "Settled di luar rekonsiliasi bank"
                           : "Settlement bank belum terverifikasi";
-                    const listPaymentDate =
-                      listPayment?.paidAt ??
-                      listPayment?.confirmedAt ??
-                      listPayment?.submittedAt ??
-                      b.paidAt ??
-                      listPayment?.updatedAt ??
-                      listPayment?.createdAt;
-                    const isMembershipPayment = Boolean(b.membershipPayment);
-                    const isBankReconciled = Boolean(
-                      listPayment?.isBankReconciled ||
-                      (Array.isArray(b.payments) && b.payments.some((payment: any) => payment.isBankReconciled)),
-                    );
-                    const isSettledOutsideBankReconciliation = Boolean(
-                      listPayment?.isSettledOutsideBankReconciliation ||
-                      (Array.isArray(b.payments) &&
-                        b.payments.some((payment: any) => payment.isSettledOutsideBankReconciliation)),
-                    );
-                     const bookingTax = getBookingInvoiceTax(b);
-                      const isPaidCompanyInvoice =
-                        b.payerType === "company" &&
-                        b.billingStatus === "paid" &&
-                        Number(b.companyInvoiceTotal ?? 0) > 0;
-                      const companyInvoiceNetTotal = Number(
-                        b.companyInvoiceNetAmount ?? b.companyInvoiceTotal ?? 0,
-                      );
-                      // For one corporate invoice, show the single cash amount
-                      // expected in bank reconciliation across all facilities.
-                      const sessionDisplayTotal =
-                        isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
-                          ? companyInvoiceNetTotal
-                          : bookingTax.netAmount;
-                      const companyInvoiceDisplayTotal = isPaidCompanyInvoice
-                        ? companyInvoiceNetTotal
-                        : 0;
-                     const groupTaxSummary = isMultiSessionGroup ? getGroupInvoiceTax(groupRows) : null;
                      const groupDisplayTotal = isMultiSessionGroup
                         ? isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
                           ? companyInvoiceNetTotal
