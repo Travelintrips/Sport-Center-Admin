@@ -8,7 +8,7 @@ if (!url || !url.includes("127.0.0.1:55444/x904_nonmember")) throw new Error("NO
 const pool = new pg.Pool({ connectionString: url, max: 2 });
 const db = drizzle(pool);
 const run = (query: string) => pool.query(query);
-const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY"] as const;
+const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY","GYM_X904_NONMEMBER_ONLY_PIN"] as const;
 const oldEnv = envKeys.map(key => process.env[key]);
 const migration = readFileSync("migrations/20261031_x904_nonmember_daily_access.sql","utf8");
 const activationClockMigration = readFileSync("migrations/20261102_x904_nonmember_verified_activation_clock.sql","utf8");
@@ -223,4 +223,15 @@ test("VIS006 existing Group 1 must not receive automatic suspend before paid act
   await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+100));
   expect(await commandFor('SUSPEND_USER',8)).toBeUndefined();
   expect((await run("SELECT activated_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008")).rows[0].activated_at).toBeNull();
+});
+
+test("VIS006 rollout guard rejects invalid PIN and excludes all other PINs", async () => {
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = 'invalid';
+  await processX904NonmemberDailyAccess(db as any,new Date());
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = '15';
+  const prior=(await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin <> '15'")).rows[0].n;
+  await processX904NonmemberDailyAccess(db as any,new Date());
+  const after=(await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin <> '15'")).rows[0].n;
+  expect(after).toBe(prior);
+  delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
 });

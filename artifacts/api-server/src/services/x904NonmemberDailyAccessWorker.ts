@@ -32,6 +32,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       process.env.GYM_X904_MANUAL_ACCESS_ENABLED !== "true" ||
       process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return;
 
+  // Optional controlled rollout: when configured, no other PIN may be processed.
+  const testPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  if (testPin !== undefined && !/^[0-9]{1,8}$/.test(testPin)) return;
+
   const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
   if (!Number.isSafeInteger(actor) || actor <= 0) return;
   const identity = await store.execute(sql`SELECT id FROM sport_center.users
@@ -67,6 +71,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           !String(a.verified_name ?? "").trim()) return;
 
       const pin = String(a.user_pin);
+      if (testPin !== undefined && pin !== testPin) return;
       const shouldBeActive = a.payment_status === "confirmed" &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
         (a.activated_at == null || now.getTime() < new Date(String(a.expires_at)).getTime());
