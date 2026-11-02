@@ -3246,6 +3246,12 @@ export default function AdminBookings() {
   const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100 | 200 | 300>(25);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedGroupRef, setSelectedGroupRef] = useState<string | null>(null);
+  const [tableCancellation, setTableCancellation] = useState<{
+    bookingId: number;
+    groupCount: number;
+    isGroup: boolean;
+  } | null>(null);
+  const [tableCancellationReason, setTableCancellationReason] = useState("");
   // Paginated group rows are summaries. Always load the authoritative booking
   // detail, including payment rows linked to *any* member of the group.
   useEffect(() => {
@@ -3669,6 +3675,8 @@ export default function AdminBookings() {
         const refreshed = await refetchBookings();
         if (variables?.data?.status === "cancelled") {
           setSelectedBooking(null);
+          setTableCancellation(null);
+          setTableCancellationReason("");
           toast({
             title: "Pembatalan berhasil",
             description: (data as any)?.groupRef
@@ -4096,6 +4104,20 @@ export default function AdminBookings() {
     }
     return m;
   }, [filtered]);
+
+  const openTableCancellation = (bookingId: number, groupCount = 1, isGroup = false) => {
+    setTableCancellation({ bookingId, groupCount, isGroup });
+    setTableCancellationReason("");
+  };
+
+  const confirmTableCancellation = () => {
+    const reason = tableCancellationReason.trim();
+    if (!tableCancellation || !reason || updateBookingMutation.isPending) return;
+    updateBookingMutation.mutate({
+      id: tableCancellation.bookingId,
+      data: { status: "cancelled" as any, adminNotes: reason },
+    });
+  };
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
@@ -5413,6 +5435,12 @@ export default function AdminBookings() {
                                   bookingId={(groupVerificationRow ?? b).id}
                                   status={groupStatus}
                                   onUpdate={(_id, status) => {
+                                    if (status === "cancelled") {
+                                      // The API detects groupRef and cancels every sibling
+                                      // atomically; do not issue one request per session.
+                                      openTableCancellation((groupVerificationRow ?? b).id, groupRows.length, true);
+                                      return;
+                                    }
                                     groupRows.forEach((row: any) => {
                                       if (row.status !== status) {
                                         updateBookingMutation.mutate({ id: row.id, data: { status: status as any } });
@@ -5428,9 +5456,13 @@ export default function AdminBookings() {
                               <InlineStatusSelect
                                 bookingId={b.id}
                                 status={b.status}
-                                onUpdate={(id, status) =>
-                                  updateBookingMutation.mutate({ id, data: { status: status as any } })
-                                }
+                                onUpdate={(id, status) => {
+                                  if (status === "cancelled") {
+                                    openTableCancellation(id, 1, false);
+                                    return;
+                                  }
+                                  updateBookingMutation.mutate({ id, data: { status: status as any } });
+                                }}
                                 isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                               />
                             )}
@@ -5809,6 +5841,70 @@ export default function AdminBookings() {
            onUpdateAdditionalCharges={handleAdditionalChargesUpdate}
         />
       )}
+
+      <Dialog
+        open={Boolean(tableCancellation)}
+        onOpenChange={(open) => {
+          if (!open && !updateBookingMutation.isPending) {
+            setTableCancellation(null);
+            setTableCancellationReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <XCircle size={18} />
+              Konfirmasi Pembatalan {tableCancellation?.isGroup ? "Grup" : "Booking"}
+            </DialogTitle>
+          </DialogHeader>
+          {tableCancellation && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {tableCancellation.isGroup
+                  ? `Seluruh ${tableCancellation.groupCount} sesi dalam grup akan dibatalkan dalam satu transaksi.`
+                  : "Booking ini akan dibatalkan."}
+                {" "}Server tetap memeriksa pembayaran, invoice, dan status final sebelum memproses pembatalan.
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-red-600">Note / Alasan Pembatalan (wajib)</label>
+                <Textarea
+                  value={tableCancellationReason}
+                  onChange={(event) => setTableCancellationReason(event.target.value)}
+                  placeholder="Tuliskan alasan pembatalan..."
+                  rows={4}
+                  maxLength={2000}
+                  disabled={updateBookingMutation.isPending}
+                />
+                <p className="text-xs text-slate-500">
+                  Wajib diisi, maksimal 2.000 karakter. Catatan disimpan pada booking dan riwayat pembatalan.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={updateBookingMutation.isPending}
+                  onClick={() => {
+                    setTableCancellation(null);
+                    setTableCancellationReason("");
+                  }}
+                >
+                  Kembali
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={!tableCancellationReason.trim() || updateBookingMutation.isPending}
+                  onClick={confirmTableCancellation}
+                >
+                  {updateBookingMutation.isPending ? "Memproses..." : "Konfirmasi Pembatalan"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <VerifyIdDialog booking={verifyBooking} onClose={() => setVerifyBooking(null)} />
 
