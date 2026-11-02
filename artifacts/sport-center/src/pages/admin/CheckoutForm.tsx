@@ -15,7 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft, RefreshCw, CalendarDays, XCircle } from "lucide-react";
 import { getToken, getCurrentRole } from "@/lib/auth";
 
 function jakartaDateOnly(): string {
@@ -78,6 +79,22 @@ export default function AdminCheckoutForm() {
   const [bookingPaymentDate, setBookingPaymentDate] = useState(jakartaDateOnly);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+  const [repeatEnabled, setRepeatEnabled] = useState(false);
+  const [repeatType, setRepeatType] = useState<"weekly" | "monthly">("weekly");
+  const [repeatCount, setRepeatCount] = useState(4);
+  const [repeatPreview, setRepeatPreview] = useState<null | {
+    dates: Array<{ date: string; available: boolean; reason: string | null }>;
+    validCount: number;
+    pricePerSession: number;
+    totalPrice: number;
+  }>(null);
+  const [repeatCheckState, setRepeatCheckState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [repeatPreviewKey, setRepeatPreviewKey] = useState("");
+  const [repeatError, setRepeatError] = useState("");
+  const [createdRecurringGroupRef, setCreatedRecurringGroupRef] = useState<string | null>(null);
+  const [createdRecurringOrders, setCreatedRecurringOrders] = useState<string[]>([]);
+  const [createdRecurringSkipped, setCreatedRecurringSkipped] = useState<string[]>([]);
+  const [createdRecurringTotal, setCreatedRecurringTotal] = useState(0);
 
   const { data: facilitiesData } = useListFacilities();
   const { data: customersData } = useListCustomers();
@@ -103,6 +120,9 @@ export default function AdminCheckoutForm() {
   const estimatedBeforeTax = Math.max(0, estimatedBase - estimatedEventDiscount);
   const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const slotValid = isMembership || (isWalkIn ? Boolean(selectedDate) : slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16)));
+  const repeatCurrentKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
+  const repeatAllAvailable = Boolean(repeatPreview && repeatPreview.dates.length === repeatCount && repeatPreview.dates.every((row) => row.available));
+  const repeatPreviewCurrent = repeatPreviewKey === repeatCurrentKey && repeatCheckState === "ready";
 
   useEffect(() => {
     if (!selectedFacilityId || !selectedDate || isWalkIn || !Number.isInteger(Number(duration)) || Number(duration) < 1) {
@@ -129,6 +149,47 @@ export default function AdminCheckoutForm() {
     });
     return () => controller.abort();
   }, [selectedFacilityId, selectedDate, duration, isWalkIn]);
+
+  useEffect(() => {
+    if (!repeatEnabled) {
+      setRepeatPreview(null); setRepeatCheckState("idle"); setRepeatPreviewKey(""); setRepeatError("");
+      return;
+    }
+    if (!selectedFacilityId || !selectedDate || !startTime || isWalkIn || !Number.isInteger(Number(duration)) || Number(duration) < 1) {
+      setRepeatPreview(null); setRepeatCheckState("idle"); setRepeatPreviewKey("");
+      return;
+    }
+    const controller = new AbortController();
+    const previewKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
+    setRepeatCheckState("loading"); setRepeatPreview(null); setRepeatPreviewKey(""); setRepeatError("");
+    fetch("/api/bookings/recurring/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + (getToken() ?? "") },
+      body: JSON.stringify({
+        facilityId: Number(selectedFacilityId), startDate: selectedDate, startTime: startTime.slice(11, 16),
+        durationHours: Number(duration), repeatType, repeatCount,
+      }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw Error(data.error || "Preview jadwal berulang gagal diperiksa");
+      return data;
+    }).then((data) => {
+      if (controller.signal.aborted) return;
+      setRepeatPreview({
+        dates: Array.isArray(data.dates) ? data.dates : [],
+        validCount: Number(data.validCount ?? 0),
+        pricePerSession: Number(data.pricePerSession ?? 0),
+        totalPrice: Number(data.totalPrice ?? 0),
+      });
+      setRepeatPreviewKey(previewKey); setRepeatCheckState("ready");
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setRepeatError(error instanceof Error ? error.message : "Preview jadwal berulang gagal diperiksa");
+      setRepeatCheckState("error"); setRepeatPreview(null); setRepeatPreviewKey("");
+    });
+    return () => controller.abort();
+  }, [repeatEnabled, selectedFacilityId, selectedDate, startTime, duration, repeatType, repeatCount, isWalkIn]);
 
   useEffect(() => {
     if (!isMembership) return;
@@ -366,34 +427,71 @@ export default function AdminCheckoutForm() {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
+    if (repeatEnabled) {
+      if (isWalkIn) { toast({ title: "Booking berulang hanya tersedia untuk fasilitas dengan slot waktu", variant: "destructive" }); return; }
+      if (repeatCount < 2 || repeatCount > 52) { toast({ title: "Jumlah sesi berulang harus antara 2 sampai 52", variant: "destructive" }); return; }
+      if (!repeatPreviewCurrent || !repeatPreview) { toast({ title: "Preview jadwal berulang belum siap", description: "Tunggu pemeriksaan semua tanggal selesai sebelum menyimpan.", variant: "destructive" }); return; }
+      if (!repeatAllAvailable) {
+        const unavailable = repeatPreview.dates.filter((row) => !row.available).map((row) => row.date);
+        toast({ title: "Ada jadwal yang bentrok atau tidak tersedia", description: unavailable.join(", ") || "Periksa kembali preview jadwal.", variant: "destructive" });
+        return;
+      }
+    }
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
-        body: JSON.stringify({
-          customerId: guestBooking ? null : Number(selectedCustomerId),
-          customerName: isGuest ? guestName.trim() : selectedCustomer.name,
-          customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
-          customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
-          facilityId: Number(selectedFacilityId),
-          bookingDate: selectedDate,
-          ...(!isWalkIn ? { startTime: startTime.slice(11, 16), durationHours: Number(duration) } : { numberOfPeople: 1 }),
-          bookingType: bookingKind === "event" ? "event" : "regular",
-          payerType: corporate ? "company" : "personal",
-          ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
-          source: "admin",
-          notes: notes || undefined,
-        }),
-      });
+      const bookingPayload = {
+        customerId: guestBooking ? null : Number(selectedCustomerId),
+        customerName: isGuest ? guestName.trim() : selectedCustomer.name,
+        customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
+        customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
+        facilityId: Number(selectedFacilityId),
+        ...(!isWalkIn ? { startTime: startTime.slice(11, 16), durationHours: Number(duration) } : { numberOfPeople: 1 }),
+        bookingType: bookingKind === "event" ? "event" : "regular",
+        payerType: corporate ? "company" : "personal",
+        ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
+        source: "admin",
+        notes: notes || undefined,
+      };
+      const res = repeatEnabled
+        ? await fetch("/api/bookings/recurring", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+            body: JSON.stringify({
+              ...bookingPayload, startDate: selectedDate, repeatType, repeatCount,
+              specificDates: repeatPreview!.dates.map((row) => row.date),
+            }),
+          })
+        : await fetch("/api/bookings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+            body: JSON.stringify({ ...bookingPayload, bookingDate: selectedDate }),
+          });
 
       const data = await res.json();
 
       if (!res.ok) {
         toast({ title: "Booking gagal", description: data.error ?? "Terjadi kesalahan", variant: "destructive" });
+        return;
+      }
+
+      if (repeatEnabled) {
+        const createdRows = Array.isArray(data.created) ? data.created : [];
+        const orders = createdRows.map((row: any) => String(row.orderNumber ?? "").trim()).filter(Boolean);
+        if (orders.length === 0) {
+          toast({
+            title: "Tidak ada sesi booking yang berhasil dibuat",
+            description: Array.isArray(data.skipped) && data.skipped.length ? `Jadwal dilewati: ${data.skipped.join(", ")}` : "Periksa kembali ketersediaan jadwal.",
+            variant: "destructive",
+          });
+          return;
+        }
+        setCreatedRecurringOrders(orders);
+        setCreatedRecurringGroupRef(typeof data.groupRef === "string" ? data.groupRef : null);
+        setCreatedRecurringSkipped(Array.isArray(data.skipped) ? data.skipped : []);
+        setCreatedRecurringTotal(Number(data.grandTotal ?? repeatPreview?.totalPrice ?? 0));
+        setCreatedOrder(orders[0]);
+        setPaymentChoice("unpaid");
+        toast({ title: `${orders.length} sesi booking berhasil dibuat`, description: data.groupRef ? `Grup ${data.groupRef} dibuat untuk jadwal berulang.` : "Periksa hasil booking sebelum mencatat pembayaran." });
         return;
       }
 
@@ -433,6 +531,34 @@ export default function AdminCheckoutForm() {
       setIsSubmitting(false);
     }
   };
+
+  if (createdOrder && createdRecurringOrders.length > 0) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 px-4 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="mx-auto w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
+            <CheckCircle2 className="text-green-600 w-10 h-10" />
+          </div>
+          <h2 className="text-2xl font-black">Booking Berulang Berhasil Dibuat</h2>
+          <p className="text-muted-foreground">{createdRecurringOrders.length} sesi berhasil dibuat.</p>
+        </div>
+        <Card>
+          <CardHeader><CardTitle>Ringkasan Grup Booking</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {createdRecurringGroupRef && <div className="flex items-center justify-between gap-3"><span className="text-sm text-muted-foreground">Group ID</span><strong className="font-mono">{createdRecurringGroupRef}</strong></div>}
+            <div className="flex items-center justify-between gap-3"><span className="text-sm text-muted-foreground">Total seluruh sesi</span><strong>{formatRupiah(createdRecurringTotal)}</strong></div>
+            <div className="border-t pt-3 space-y-2">
+              <p className="text-sm font-semibold">Nomor booking</p>
+              {createdRecurringOrders.map((order) => <div key={order} className="flex items-center justify-between rounded-md border px-3 py-2"><span className="font-mono font-semibold">{order}</span><span className="text-xs text-green-700">Dibuat</span></div>)}
+            </div>
+            {createdRecurringSkipped.length > 0 && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold flex items-center gap-2"><XCircle size={15} /> Sebagian tanggal tidak dibuat</p><p className="mt-1">Periksa tanggal berikut: {createdRecurringSkipped.join(", ")}</p></div>}
+            <p className="text-xs text-muted-foreground">Pembayaran belum otomatis lunas. Buka menu Pemesanan untuk memeriksa tagihan grup dan mencatat satu pembayaran beserta bukti transfer/QRIS.</p>
+          </CardContent>
+          <CardFooter><Button type="button" onClick={() => setLocation("/admin/bookings")}>Buka Pemesanan</Button></CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   if (createdOrder) {
     return (
@@ -618,6 +744,60 @@ export default function AdminCheckoutForm() {
                 </Select>
               </div>}
             </div>
+            {!isMembership && !isWalkIn && selectedFacilityId && selectedDate && startTime && (
+              <div className={repeatEnabled ? "rounded-lg border border-primary/40 bg-primary/5 p-4 space-y-4" : "rounded-lg border p-4 space-y-3"}>
+                <div className="flex items-start gap-3">
+                  <Checkbox id="admin-repeat-booking" checked={repeatEnabled} onCheckedChange={(checked) => setRepeatEnabled(Boolean(checked))} />
+                  <div className="space-y-1">
+                    <Label htmlFor="admin-repeat-booking" className="font-semibold flex items-center gap-2 cursor-pointer"><RefreshCw size={16} /> Booking Berulang</Label>
+                    <p className="text-xs text-muted-foreground">Buat beberapa sesi dengan fasilitas, hari, dan jam yang sama dalam satu grup booking.</p>
+                  </div>
+                </div>
+                {repeatEnabled && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>Tipe Pengulangan</Label>
+                        <Select value={repeatType} onValueChange={(value: "weekly" | "monthly") => setRepeatType(value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="weekly">Mingguan (setiap hari yang sama)</SelectItem>
+                            <SelectItem value="monthly">Bulanan (tanggal yang sama)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="admin-repeat-count">Jumlah Sesi (termasuk tanggal pertama)</Label>
+                        <Input id="admin-repeat-count" type="number" min={2} max={52} value={repeatCount}
+                          onChange={(event) => setRepeatCount(Math.min(52, Math.max(2, Number.parseInt(event.target.value, 10) || 2)))} />
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-background border p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold flex items-center gap-2"><CalendarDays size={15} /> Preview Jadwal</p>
+                        {repeatCheckState === "loading" && <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 size={13} className="animate-spin" /> Memeriksa...</span>}
+                        {repeatCheckState === "ready" && repeatPreviewCurrent && <span className={repeatAllAvailable ? "text-xs font-semibold text-green-700" : "text-xs font-semibold text-amber-700"}>{repeatPreview?.validCount ?? 0}/{repeatPreview?.dates.length ?? 0} tersedia</span>}
+                      </div>
+                      {repeatCheckState === "error" && <p className="text-sm text-destructive">{repeatError}</p>}
+                      {repeatCheckState === "idle" && <p className="text-sm text-muted-foreground">Pilih tanggal dan jam mulai untuk memeriksa sesi.</p>}
+                      {repeatPreview && repeatPreviewCurrent && (
+                        <div className="space-y-1.5">
+                          {repeatPreview.dates.map((row) => (
+                            <div key={row.date} className="flex items-center justify-between gap-3 text-sm border-b last:border-0 py-1.5">
+                              <span>{new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(new Date(row.date + "T12:00:00+07:00"))}</span>
+                              {row.available ? <span className="text-green-700 font-medium">Tersedia</span> : <span className="text-red-700 font-medium text-right">{row.reason || "Tidak tersedia"}</span>}
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between gap-3 border-t pt-2 text-sm"><span>Estimasi subtotal seluruh sesi</span><strong>{formatRupiah(repeatPreview.totalPrice)}</strong></div>
+                          <p className="text-xs text-muted-foreground">Harga akhir dan pajak dihitung ulang server. Preview tidak menyimpan booking.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {isWalkIn && <p className="text-sm text-muted-foreground rounded-lg border p-3">
               Gym reguler menggunakan tarif per kunjungan, tanpa durasi atau pilihan slot jam.
               Member Gym menggunakan alur Membership terpisah agar kunjungan tidak ditagih ulang.
