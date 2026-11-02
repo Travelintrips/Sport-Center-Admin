@@ -433,10 +433,7 @@ async function buildGroupSummary(groupRef: string | null | undefined, currentOrd
 
     const totalStr = group ? `Rp ${Number(group.totalPayment).toLocaleString("id-ID")}` : "";
 
-    return (
-      `\n\n📦 *Booking ini bagian dari keranjang ${rows.length} lapangan:*\n${lines}` +
-      (totalStr ? `\n\n💰 *Total Semua Sesi: ${totalStr}*` : "")
-    );
+    return `\n\n📋 *DETAIL SELURUH SESI (${rows.length}):*\n${lines}`;
   } catch (err) {
     logger.error({ err, groupRef }, "[WA] buildGroupSummary failed");
     return "";
