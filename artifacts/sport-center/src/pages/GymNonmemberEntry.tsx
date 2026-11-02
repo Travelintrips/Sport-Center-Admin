@@ -21,7 +21,7 @@ export default function GymNonmemberEntry() {
           setError(gym.length ? "Ada lebih dari satu fasilitas Gym. Hubungi petugas untuk memilih fasilitas." : "Fasilitas Gym harian belum tersedia.");
           return;
         }
-        window.location.replace("/wa/booking/" + encodeURIComponent(String(gym[0].id)));
+        window.location.replace("/wa/booking/" + encodeURIComponent(String(gym[0].id)) + "?nonmember=1");
       })
       .catch(() => { if (active) setError("Tidak dapat memuat fasilitas Gym. Silakan coba lagi."); });
     return () => { active = false; };
