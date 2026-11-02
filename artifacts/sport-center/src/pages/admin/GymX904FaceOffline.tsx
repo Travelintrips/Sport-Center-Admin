@@ -37,7 +37,9 @@ export default function GymX904FaceOffline() {
       } finally { bitmap.close(); }
       if(!output) return rejected("COMPRESSION_LIMIT");
       if(output[0]!==255||output[1]!==216||output[2]!==255||output.at(-2)!==255||output.at(-1)!==217) return rejected("JPEG_ENCODE_INVALID");
-      const digest=await crypto.subtle.digest("SHA-256",output);
+      const digestBuffer=new ArrayBuffer(output.byteLength);
+      new Uint8Array(digestBuffer).set(output);
+      const digest=await crypto.subtle.digest("SHA-256",digestBuffer);
       const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
       setResult({status:"STAGED_OFFLINE_ONLY",detail:`Ukuran asli: ${file.size} byte\nUkuran hasil: ${output.length} byte\nDimensi hasil: ${width} × ${height}\nSHA-256 hasil: ${hash}\nTidak disimpan ke server, tidak dikirim ke X904.`});
     } catch { rejected("DECODE_OR_COMPRESS_FAILED"); }
