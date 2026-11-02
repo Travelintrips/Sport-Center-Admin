@@ -1518,10 +1518,15 @@ function BookingDetailDrawer({
         setCancellationNoteError("Alasan pembatalan wajib diisi sebelum menyimpan.");
         return;
       }
+      if (action === "cancelled") {
+        // Keep the reason and confirmation visible while the request is pending.
+        // On success the mutation closes the drawer; on error the admin can retry.
+        onUpdateStatus(action, cancellationReason.trim());
+        setCancellationNoteError("");
+        return;
+      }
       if (action === "completed" || action === "refunded") {
         onUpdateStatus(action, adminNotes);
-      } else if (action === "cancelled") {
-        onUpdateStatus(action, cancellationReason.trim());
       }
       setCancellationNoteError("");
       setConfirmAction(null);
@@ -2529,10 +2534,10 @@ function BookingDetailDrawer({
                     <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAction(confirmAction)}
-                      disabled={isUpdating}
+                      disabled={isUpdating || (confirmAction === "cancelled" && !cancellationReason.trim())}
                       className="flex-1 h-8 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
                     >
-                      {isUpdating ? "Menyimpan..." : `Simpan → ${STATUS_CONFIG[confirmAction as BookingStatus]?.label ?? confirmAction}`}
+                      {isUpdating ? "Memproses pembatalan..." : confirmAction === "cancelled" ? "Konfirmasi Pembatalan" : `Simpan → ${STATUS_CONFIG[confirmAction as BookingStatus]?.label ?? confirmAction}`}
                     </button>
                     <button
                       onClick={() => setConfirmAction(null)}
@@ -2546,23 +2551,6 @@ function BookingDetailDrawer({
               </div>
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">
-                <p className="text-xs text-slate-400">
-                  Atau gunakan tombol cepat (klik dua kali untuk konfirmasi):
-                </p>
-
-                {booking.status !== "cancelled" && booking.status !== "refunded" && (
-                  <ActionButton
-                    action="cancelled"
-                    label={isMultiSessionGroup ? `Batalkan Seluruh Grup (${groupBookings.length} sesi)` : "Batalkan Booking"}
-                    description={isMultiSessionGroup ? "Batalkan seluruh sesi dalam satu transaksi; alasan wajib." : "Ubah status menjadi Dibatalkan; alasan wajib."}
-                    icon={XCircle}
-                    confirmAction={confirmAction}
-                    onClick={() => handleAction("cancelled")}
-                    isUpdating={isUpdating}
-                    variant="danger"
-                  />
-                )}
-
                 {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
                   <ActionButton
                     action="refunded"
