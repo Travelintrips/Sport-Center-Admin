@@ -775,6 +775,20 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       if (!paymentsByBookingId[p.bookingId]) paymentsByBookingId[p.bookingId] = [];
       paymentsByBookingId[p.bookingId].push(p);
     }
+    const groupRefByBookingId = new Map(
+      fullGroupBookings
+        .filter((booking) => Boolean(booking.groupRef))
+        .map((booking) => [booking.id, booking.groupRef as string]),
+    );
+    const paymentsByGroupRef = new Map<string, typeof allPayments>();
+    for (const payment of allPayments) {
+      const groupRef = groupRefByBookingId.get(payment.bookingId);
+      if (!groupRef) continue;
+      paymentsByGroupRef.set(groupRef, [
+        ...(paymentsByGroupRef.get(groupRef) ?? []),
+        payment,
+      ]);
+    }
 
     const result = bookings.map((b) => {
       const facility = facilityById.get(b.facilityId);
@@ -858,14 +872,15 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         canUsePaylabsLegacyLabel
         ? { ...payment, paymentMethod: selectedPaylabsLabel }
         : payment;
-      const paymentRowsForResponse = companyInvoicePayment ? [companyInvoicePayment] : bPayments;
-      const paymentsForResponse = paymentRowsForResponse.map((p) => {
+      const serializePaymentForResponse = (p: (typeof allPayments)[number] | typeof companyInvoicePayment) => {
+        if (!p) return null;
         const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
+        const paymentPaylabsCode = paylabsMethodByBookingId.get(p.bookingId)?.trim().toLowerCase();
         const isPaylabsQris = p.paymentProvider === "paylabs" &&
           (paymentCode === "qris" || paymentCode === "paylabs - qris");
         const isDirectQris = p.paymentProvider === "mandiri_direct" && paymentCode === "qris";
         const isPaylabsPayment = p.paymentProvider === "paylabs"
-          || paymentCode === transactionPaylabsCode
+          || paymentCode === paymentPaylabsCode
           || paylabsLabels.some((method) =>
             String(method.id ?? "").trim().toLowerCase() === paymentCode,
           );
@@ -885,7 +900,16 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           isBankReconciled,
           isSettledOutsideBankReconciliation: isSettled && !isBankReconciled,
         };
-      });
+      };
+      const paymentRowsForResponse = companyInvoicePayment ? [companyInvoicePayment] : bPayments;
+      const paymentsForResponse = paymentRowsForResponse
+        .map((p) => serializePaymentForResponse(p))
+        .filter(Boolean);
+      const groupPaymentsForResponse = b.groupRef
+        ? (paymentsByGroupRef.get(b.groupRef) ?? [])
+            .map((p) => serializePaymentForResponse(p))
+            .filter(Boolean)
+        : [];
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       const bookingWithholding = calculateBookingWithholdingTax(b);
@@ -951,6 +975,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
              }
            : null,
         payments: paymentsForResponse,
+        groupPayments: groupPaymentsForResponse,
         membershipPayment: membershipPayment
           ? { ...membershipPayment, amount: Number(membershipPayment.amount) }
           : null,
