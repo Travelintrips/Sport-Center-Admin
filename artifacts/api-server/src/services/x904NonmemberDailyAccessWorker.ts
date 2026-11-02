@@ -10,7 +10,20 @@ const RETRY_DELAY_MS = 60_000;
 const MAX_ATTEMPTS = 3;
 
 export function startX904NonmemberAccessWorker(): void {
-  if (process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true") return;
+  const enabled = process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true";
+  const onlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  const validPin = onlyPin === undefined || /^[0-9]{1,8}$/.test(onlyPin);
+  const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
+  const validActor = Number.isSafeInteger(actor) && actor > 0;
+  console.info("[x904-nonmember] worker startup", JSON.stringify({
+    enabled,
+    onlyPin: validPin ? (onlyPin ?? null) : "INVALID",
+    actor: validActor ? actor : "INVALID",
+    manualAccessEnabled: process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true",
+    userWriteEnabled: process.env.GYM_X904_USER_WRITE_ENABLED === "true",
+    intervalMs: 60000,
+  }));
+  if (!enabled || !validPin || !validActor) return;
   let running = false;
   const tick = async () => {
     if (running) return;
