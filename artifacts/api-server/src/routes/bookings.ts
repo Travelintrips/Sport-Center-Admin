@@ -2862,17 +2862,6 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           .select({ id: paymentsTable.id, bookingId: paymentsTable.bookingId, status: paymentsTable.status })
           .from(paymentsTable)
           .where(inArray(paymentsTable.bookingId, bookingIds));
-        const activePayments = paymentRows.filter((payment) =>
-          ["pending", "confirmed", "waiting_confirmation", "processing"].includes(String(payment.status)),
-        );
-        if (activePayments.length > 0) {
-          const hasConfirmed = activePayments.some((payment) => payment.status === "confirmed");
-          return {
-            kind: "payment_exists" as const,
-            hasConfirmed,
-            paymentCount: activePayments.length,
-          };
-        }
 
         const membershipPaymentIds = [...new Set(
           activeRows.map((row) => row.membershipPaymentId).filter((value): value is number => value != null),
