@@ -111,6 +111,7 @@ const AdminEvents = lazy(() => import("@/pages/admin/Events"));
 
 // WhatsApp Booking Flow Pages (standalone, no auth)
 const WaBookingForm = lazy(() => import("@/pages/wa/BookingForm"));
+const GymNonmemberEntry = lazy(() => import("@/pages/GymNonmemberEntry"));
 const WaBookingStatus = lazy(() => import("@/pages/wa/BookingStatus"));
 const WaProofUpload = lazy(() => import("@/pages/wa/ProofUpload"));
 const WaUploadRedirect = lazy(() => import("@/pages/wa/UploadRedirect"));
@@ -248,6 +249,9 @@ function Router() {
       <Route path="/admin/corporate-subscriptions" component={AdminRouter} />
       <Route path="/admin/events" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
+
+      {/* Additional public nonmember entry; existing checkout and booking routes remain unchanged. */}
+      <Route path="/gym/nonmember" component={GymNonmemberEntry} />
 
       {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
       <Route path="/wa/booking/:facilityId" component={WaBookingForm} />
