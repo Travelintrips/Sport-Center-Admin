@@ -72,6 +72,14 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         (a.activated_at == null || now.getTime() < new Date(String(a.expires_at)).getTime());
       const targetGroup = shouldBeActive ? 1 : 2;
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
+      // A cancelled payment without verified activation must never suspend a
+      // pre-existing Group 1 user (including a member sharing this PIN).
+      if (!shouldBeActive && a.activated_at == null) {
+        await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+          SET access_state='review_required'
+          WHERE access_id=${Number(a.access_id)} AND access_state <> 'review_required'`);
+        return;
+      }
       if (targetGroup === 2 && isX904AutoSuspendExempt(pin, 0)) {
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required'

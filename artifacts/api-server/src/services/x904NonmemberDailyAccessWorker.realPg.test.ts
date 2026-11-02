@@ -196,3 +196,18 @@ test("completed SUSPEND ACK cannot be reused as ACTIVATE ACK", async () => {
   expect(state.access_state).not.toBe('active');
   expect(state.activated_at).toBeNull();
 });
+
+test("cancelled payment cannot suspend pre-existing Group 1 without verified activation", async () => {
+  await run("INSERT INTO sport_center.sport_bookings VALUES(9007)");
+  await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','pin','PIN:504','504',504,'EXISTING GROUP ONE',9007)");
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9107,9007,'pending')");
+  await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=now() WHERE id=9107");
+  await run("UPDATE sport_center.sport_payments SET status='cancelled' WHERE id=9107");
+  const start=new Date((await run("SELECT confirmed_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9007")).rows[0].confirmed_at);
+  await addSnapshot(new Date(start.getTime()-1000),'504','EXISTING GROUP ONE',1);
+  await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+100));
+  expect(await commandFor('SUSPEND_USER',7)).toBeUndefined();
+  const state=(await run("SELECT access_state,activated_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9007")).rows[0];
+  expect(state.access_state).toBe('review_required');
+  expect(state.activated_at).toBeNull();
+});
