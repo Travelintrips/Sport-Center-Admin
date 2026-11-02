@@ -26,3 +26,19 @@ Scope: source review of X904-related routers under `artifacts/api-server/src/rou
 - Remaining mobile security verification: capture a network trace/proxy showing no photo bytes leave the browser and compare `sport_center.x904_user_commands` read-only count/state before and after the test. Verify test fixtures are synthetic only; do not use member photos.
 - No deployment/merge while firmware ZMM510-NF24VB-Ver1.4.15 photo ingestion and recovery remain NO-GO. Keep `X904_SEND_ENABLED=false`.
 - This code review cannot prove every endpoint or worker installed outside this repo and VMSC tree. A cross-service inventory and actual physical mobile browser verification are still release blockers.
+
+
+## 2026-11-02 follow-up evidence (read-only)
+- VPS headless Chromium test against the public standalone preview using a generated synthetic JPEG fixture completed:
+  - Input fixture: 1,687,683 bytes.
+  - Result: `STAGED_OFFLINE_ONLY`.
+  - Output: 37,677 bytes, 470 × 627.
+  - SHA-256 displayed: `88e54cf96ef2980da8263cc99fa8b9ed9acaa58df7808bc738cb2585b5eaa672`.
+  - Network capture: 7 requests were observed while loading the raw.githack intermediary (preview document and provider/interstitial requests, including ethicalads). After the actual preview app document had loaded, selecting and compressing the synthetic file produced **0 additional requests**; no POST/request body containing photo bytes was observed. The intermediary's unrelated pre-app requests mean the entire navigation is not literally zero-network.
+  - Result: browser-app photo-processing network isolation PASS in this headless VPS test; physical Android-specific network trace remains NOT VERIFIED.
+- Read-only PROD queue census:
+  - Before snapshot: 2026-11-02 08:23:35.231788 UTC; counts = ACTIVATE_USER 4 completed + 1 failed, DELETE_USER 3 cancelled + 7 completed + 2 failed, SUSPEND_USER 14 completed (31 total).
+  - After snapshot: 2026-11-02 08:26:27.566443 UTC; same counts in every category; `created_since_baseline=0` for all command types/states.
+  - Result: no new `sport_center.x904_user_commands` rows observed in the interval. This is temporal evidence around the VPS browser test; it is not proof about the earlier physical handset screenshots.
+- No queue payloads, PINs, or member data were selected in these census queries.
+- X904 database E2E remains SKIPPED; no device command was issued and no settings were changed.
