@@ -19,7 +19,7 @@ export function evaluateBookingCancellation(input: {
   groupStatus?: string | null;
 }): BookingCancellationDecision {
   if (input.bookingStatuses.some((status) =>
-    ["completed", "refunded", "expired", "rejected", "paid", "confirmed", "waiting_confirmation"].includes(status),
+    ["completed", "refunded", "expired", "rejected"].includes(status),
   )) {
     return { allowed: false, kind: "terminal_status" };
   }
@@ -32,6 +32,12 @@ export function evaluateBookingCancellation(input: {
     ["pending", "waiting_confirmation", "processing"].includes(status),
   )) {
     return { allowed: false, kind: "payment_pending" };
+  }
+
+  if (input.bookingStatuses.some((status) =>
+    ["paid", "confirmed", "waiting_confirmation"].includes(status),
+  )) {
+    return { allowed: false, kind: "terminal_status" };
   }
 
   if (input.membershipPaymentStatuses.some((status) => status !== "cancelled")) {
