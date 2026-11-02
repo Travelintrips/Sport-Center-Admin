@@ -79,6 +79,8 @@ export default function AdminCheckoutForm() {
   const [bookingPaymentDate, setBookingPaymentDate] = useState(jakartaDateOnly);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+  const [createdPaymentId, setCreatedPaymentId] = useState<number | null>(null);
+  const [createdPaymentError, setCreatedPaymentError] = useState("");
   const [repeatEnabled, setRepeatEnabled] = useState(false);
   const [repeatType, setRepeatType] = useState<"weekly" | "monthly">("weekly");
   const [repeatCount, setRepeatCount] = useState(4);
@@ -123,6 +125,30 @@ export default function AdminCheckoutForm() {
   const repeatCurrentKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
   const repeatAllAvailable = Boolean(repeatPreview && repeatPreview.dates.length === repeatCount && repeatPreview.dates.every((row) => row.available));
   const repeatPreviewCurrent = repeatPreviewKey === repeatCurrentKey && repeatCheckState === "ready";
+  const customerFormValid = isGuest
+    ? Boolean(guestName.trim() && /^\\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\\s()-]/g, "")))
+    : Boolean(selectedCustomer?.name && selectedCustomer?.phone);
+  const formPaymentValid = paymentChoice === "unpaid" ||
+    (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
+      (paidMethod === "Transfer Bank" || paidMethod === "QRIS")));
+  const repeatFormValid = !repeatEnabled ||
+    (!isWalkIn && repeatCount >= 2 && repeatCount <= 52 && repeatPreviewCurrent && repeatAllAvailable);
+  // bookingKind has a valid default; it is intentionally not an additional
+  // explicit-completion requirement for enabling the submit button.
+  const canSubmitBooking = Boolean(
+    selectedCustomerId &&
+    customerFormValid &&
+    selectedFacilityId &&
+    activeFacilities.some((item: any) => String(item.id) === selectedFacilityId) &&
+    selectedDate &&
+    slotValid &&
+    !isSubmitting &&
+    paymentChoice !== null &&
+    formPaymentValid &&
+    repeatFormValid &&
+    (!isCompanyPayer || (!isGuest && selectedCustomer?.accountType === "company")) &&
+    (isCompanyPayer || selectedCustomer?.accountType !== "company")
+  );
 
   useEffect(() => {
     if (!selectedFacilityId || !selectedDate || isWalkIn || !Number.isInteger(Number(duration)) || Number(duration) < 1) {
@@ -316,53 +342,89 @@ export default function AdminCheckoutForm() {
     }
   }
 
-  async function submitBookingPayment() {
-    if (!createdBookingId || !paymentProof || paymentBusy || paymentSubmitted) return;
+  async function recordBookingPayment(
+    bookingId: number,
+    amount: number,
+    proof: File,
+    paymentDate: string,
+    method: string,
+  ): Promise<boolean> {
+    if (!bookingId || !(amount > 0) || !proof || !paymentDate || paymentBusy) return false;
     setPaymentBusy(true);
+    setCreatedPaymentError("");
     try {
-      const fileForm = new FormData();
-      fileForm.append("proof", paymentProof);
-      const headers = {Authorization: "Bearer " + (getToken() ?? "")};
-      const uploaded = await fetch("/api/payments/proof-upload", {method:"POST",headers,body:fileForm});
-      const fileResult = await uploaded.json();
-      if (!uploaded.ok) throw Error(fileResult.error || "Upload bukti gagal");
-      const detected = String(fileResult.ocrScan?.paymentMethod ?? "").toLowerCase();
-      if (fileResult.ocrScan?.confidence === "high" && detected &&
-          ((detected === "qris") !== (paidMethod === "QRIS"))) {
-        throw Error("Metode terpilih tidak sesuai OCR. Periksa bukti lalu pilih metode yang benar sebelum mengirim ulang.");
+      const headers = { Authorization: "Bearer " + (getToken() ?? "") };
+      let paymentId = createdPaymentId;
+
+      // If the payment row already exists but confirmation failed, retry only
+      // the confirmation. Never create a second financial payment row.
+      if (!paymentId) {
+        const fileForm = new FormData();
+        fileForm.append("proof", proof);
+        const uploaded = await fetch("/api/payments/proof-upload", { method: "POST", headers, body: fileForm });
+        const fileResult = await uploaded.json();
+        if (!uploaded.ok) throw Error(fileResult.error || "Upload bukti gagal");
+
+        const detected = String(fileResult.ocrScan?.paymentMethod ?? "").toLowerCase();
+        if (fileResult.ocrScan?.confidence === "high" && detected &&
+          ((detected === "qris") !== (method === "QRIS"))) {
+          throw Error("Metode terpilih tidak sesuai OCR. Periksa bukti lalu pilih metode yang benar.");
+        }
+
+        const payload = {
+          bookingId,
+          amount,
+          paymentType: "full_payment",
+          paymentMethod: method,
+          ...(method === "QRIS" ? { paymentProvider: "mandiri_direct" } : {}),
+          paymentDate,
+          proofUrl: fileResult.objectPath ?? fileResult.url,
+          ocrScanToken: fileResult.ocrScanToken,
+        };
+        const saved = await fetch("/api/payments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify(payload),
+        });
+        const result = await saved.json();
+        if (!saved.ok) throw Error(result.error || "Gagal mencatat pembayaran");
+        paymentId = Number(result.id);
+        if (!Number.isInteger(paymentId) || paymentId <= 0) {
+          throw Error("Bukti terkirim, tetapi ID pembayaran tidak diterima. Periksa Detail Pemesanan sebelum mengirim ulang.");
+        }
+        setCreatedPaymentId(paymentId);
       }
-      const payload = {
-        bookingId:createdBookingId, amount:createdBookingAmount, paymentType:"full_payment",
-        paymentMethod:paidMethod,
-        ...(paidMethod === "QRIS" ? {paymentProvider:"mandiri_direct"} : {}),
-        paymentDate:bookingPaymentDate,
-        proofUrl:fileResult.objectPath ?? fileResult.url,
-        ocrScanToken:fileResult.ocrScanToken,
-      };
-      const saved = await fetch("/api/payments", {method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(payload)});
-      const result = await saved.json();
-      if (!saved.ok) throw Error(result.error || "Gagal mencatat pembayaran");
 
       const currentRole = getCurrentRole();
       if (currentRole && currentRole !== "staff") {
-        const confirmed = await fetch(`/api/payments/${result.id}`, {
+        const confirmed = await fetch(`/api/payments/${paymentId}`, {
           method: "PATCH",
-          headers: {"Content-Type":"application/json", ...headers},
+          headers: { "Content-Type": "application/json", ...headers },
           body: JSON.stringify({ status: "confirmed" }),
         });
         const confirmedResult = await confirmed.json();
-        if (!confirmed.ok) {
-          throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
-        }
+        if (!confirmed.ok) throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
         setPaymentSubmitted(true);
-        toast({title:"Pembayaran dikonfirmasi",description:"Bukti tersimpan dan booking telah selesai dikonfirmasi."});
+        toast({ title: "Pembayaran dikonfirmasi", description: "Satu pembayaran tercatat untuk booking/grup." });
       } else {
         setPaymentSubmitted(true);
-        toast({title:"Bukti pembayaran dicatat",description:"Menunggu verifikasi oleh admin/finance."});
+        toast({ title: "Bukti pembayaran dicatat", description: "Menunggu verifikasi admin/finance." });
       }
-    } catch(err) {
-      toast({title:"Pembayaran belum tercatat",description:err instanceof Error ? err.message : "Silakan periksa bukti",variant:"destructive"});
-    } finally {setPaymentBusy(false);}
+      setCreatedPaymentError("");
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Silakan periksa bukti pembayaran.";
+      setCreatedPaymentError(message);
+      toast({ title: "Booking dibuat, pembayaran perlu diperiksa", description: message, variant: "destructive" });
+      return false;
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function submitBookingPayment() {
+    if (!createdBookingId || !paymentProof || paymentBusy || paymentSubmitted) return;
+    await recordBookingPayment(createdBookingId, createdBookingAmount, paymentProof, bookingPaymentDate, paidMethod);
   }
 
   // Auto-compute endTime whenever startTime or duration changes
@@ -408,6 +470,14 @@ export default function AdminCheckoutForm() {
 
     if (!slotValid) {
       toast({ title: "Slot tidak tersedia atau belum diperiksa", variant: "destructive" });
+      return;
+    }
+    if (paymentChoice !== "paid" && paymentChoice !== "unpaid") {
+      toast({ title: "Pilih Sudah Bayar atau Belum Bayar", variant: "destructive" });
+      return;
+    }
+    if (paymentChoice === "paid" && (!paymentProof || !bookingPaymentDate || bookingPaymentDate > jakartaDateOnly())) {
+      toast({ title: "Bukti pembayaran dan tanggal transaksi wajib diisi dengan benar", variant: "destructive" });
       return;
     }
     const corporate = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
@@ -485,13 +555,26 @@ export default function AdminCheckoutForm() {
           });
           return;
         }
+        const firstCreatedBookingId = Number(createdRows[0]?.id);
+        const actualGroupTotal = Number(data.grandTotal ?? repeatPreview?.totalPrice ?? 0);
+        if (!Number.isInteger(firstCreatedBookingId) || firstCreatedBookingId <= 0) {
+          toast({ title: "Booking tersimpan, ID booking tidak diterima", description: "Periksa menu Pemesanan sebelum mengulang pembuatan agar tidak duplikat.", variant: "destructive" });
+          return;
+        }
         setCreatedRecurringOrders(orders);
         setCreatedRecurringGroupRef(typeof data.groupRef === "string" ? data.groupRef : null);
         setCreatedRecurringSkipped(Array.isArray(data.skipped) ? data.skipped : []);
-        setCreatedRecurringTotal(Number(data.grandTotal ?? repeatPreview?.totalPrice ?? 0));
+        setCreatedRecurringTotal(actualGroupTotal);
+        setCreatedBookingId(firstCreatedBookingId);
+        setCreatedBookingAmount(actualGroupTotal);
         setCreatedOrder(orders[0]);
-        setPaymentChoice("unpaid");
-        toast({ title: `${orders.length} sesi booking berhasil dibuat`, description: data.groupRef ? `Grup ${data.groupRef} dibuat untuk jadwal berulang.` : "Periksa hasil booking sebelum mencatat pembayaran." });
+        setPaymentSubmitted(false);
+        setCreatedPaymentId(null);
+        if (paymentChoice === "paid" && paymentProof) {
+          await recordBookingPayment(firstCreatedBookingId, actualGroupTotal, paymentProof, bookingPaymentDate, paidMethod);
+        } else {
+          toast({ title: `${orders.length} sesi booking berhasil dibuat`, description: data.groupRef ? `Grup ${data.groupRef} dibuat; belum ada record pembayaran.` : "Booking dibuat tanpa pembayaran." });
+        }
         return;
       }
 
@@ -504,14 +587,17 @@ export default function AdminCheckoutForm() {
         toast({ title: "Booking tersimpan, respons nomor order tidak lengkap", description: "Periksa menu Pemesanan sebelum mencoba lagi agar tidak membuat booking ganda.", variant: "destructive" });
         return;
       }
+      const actualBookingAmount = Number(created.grandTotal ?? created.totalPrice ?? 0);
       setCreatedOrder(order);
       setCreatedBookingId(bookingId);
-      setCreatedBookingAmount(Number(created.grandTotal ?? created.totalPrice ?? 0));
-      setPaymentChoice(null);
-      setPaymentProof(null);
-      setBookingPaymentDate(jakartaDateOnly());
+      setCreatedBookingAmount(actualBookingAmount);
       setPaymentSubmitted(false);
-      toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}` });
+      setCreatedPaymentId(null);
+      if (paymentChoice === "paid" && paymentProof) {
+        await recordBookingPayment(bookingId, actualBookingAmount, paymentProof, bookingPaymentDate, paidMethod);
+      } else {
+        toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}. Status: belum dibayar; belum ada record pembayaran.` });
+      }
 
       // Reset form
       setSelectedCustomerId("");
@@ -552,11 +638,21 @@ export default function AdminCheckoutForm() {
               {createdRecurringOrders.map((order) => <div key={order} className="flex items-center justify-between rounded-md border px-3 py-2"><span className="font-mono font-semibold">{order}</span><span className="text-xs text-green-700">Dibuat</span></div>)}
             </div>
             {createdRecurringSkipped.length > 0 && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold flex items-center gap-2"><XCircle size={15} /> Sebagian tanggal tidak dibuat</p><p className="mt-1">Periksa tanggal berikut: {createdRecurringSkipped.join(", ")}</p></div>}
-            <p className="text-xs text-muted-foreground">
-              {createdRecurringGroupRef
-                ? "Pembayaran belum otomatis lunas. Buka grup di menu Pemesanan untuk memeriksa tagihan dan mencatat satu pembayaran grup beserta bukti transfer/QRIS."
-                : "Tidak terbentuk grup karena hanya satu sesi yang berhasil dibuat. Buka booking tersebut di menu Pemesanan untuk memeriksa dan mencatat pembayarannya."}
-            </p>
+            <div className="rounded-md border p-3 space-y-2">
+              <p className="font-semibold text-sm">Status pembayaran</p>
+              {paymentChoice === "unpaid" ? (
+                <p className="text-sm text-muted-foreground">Belum dibayar. Tidak ada record pembayaran yang dibuat. Pembayaran dapat dikelola kemudian dari menu Pemesanan.</p>
+              ) : paymentSubmitted ? (
+                <p className="text-sm font-medium text-green-700">{getCurrentRole() === "staff" ? "Bukti tercatat dan menunggu verifikasi admin/finance." : "Bukti tercatat dan pembayaran dikonfirmasi."}</p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-amber-700">Booking sudah dibuat, tetapi pembayaran belum selesai diproses. Periksa Detail Pemesanan sebelum mencoba mengirim ulang.</p>
+                  {createdPaymentError && <p className="text-xs text-destructive">{createdPaymentError}</p>}
+                  <Button type="button" variant="outline" onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder ?? "")}`)}>Periksa Detail Pemesanan</Button>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Untuk grup, satu bukti pembayaran dicatat terhadap satu booking perwakilan; alokasi dan tagihan dihitung untuk seluruh Group ID.</p>
+            </div>
           </CardContent>
           <CardFooter><Button type="button" onClick={() => setLocation("/admin/bookings")}>Buka Pemesanan</Button></CardFooter>
         </Card>
@@ -575,15 +671,19 @@ export default function AdminCheckoutForm() {
           <p className="text-muted-foreground">Order <span className="font-semibold text-foreground">{createdOrder}</span> telah dibuat.</p>
         </div>
         <div className="w-full max-w-xl rounded-xl border p-4 space-y-3">
-          <p className="font-semibold">Status pembayaran pelanggan</p>
-          <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant={paymentChoice === "paid" ? "default" : "outline"} onClick={() => setPaymentChoice("paid")}>Sudah Dibayar</Button>
-            <Button type="button" variant={paymentChoice === "unpaid" ? "default" : "outline"} onClick={() => setPaymentChoice("unpaid")}>Belum Dibayar</Button>
-          </div>
-          {paymentChoice === "unpaid" && <p className="text-sm text-muted-foreground">Booking tetap menunggu pembayaran. Tidak ada pembayaran baru yang dicatat.</p>}
-          {paymentChoice === "paid" && (paymentSubmitted ?
-            <p className="text-sm font-medium text-green-700">{getCurrentRole()==="staff" ? "Bukti diterima untuk verifikasi. Status lunas belum ditetapkan." : "Bukti diterima dan pembayaran sudah dikonfirmasi."}</p>
-            : <div className="space-y-3">
+          <p className="font-semibold">Status pembayaran</p>
+          {paymentChoice === "unpaid" ? (
+            <p className="text-sm text-muted-foreground">Belum dibayar. Tidak ada record pembayaran yang dibuat.</p>
+          ) : paymentSubmitted ? (
+            <p className="text-sm font-medium text-green-700">{getCurrentRole() === "staff" ? "Bukti tercatat dan menunggu verifikasi admin/finance." : "Bukti tercatat dan pembayaran dikonfirmasi."}</p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-amber-700">Booking berhasil dibuat tetapi pembayaran belum selesai. Periksa Detail Pemesanan sebelum mengirim ulang.</p>
+              {createdPaymentError && <p className="text-xs text-destructive">{createdPaymentError}</p>}
+              <Button type="button" variant="outline" onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder ?? "")}`)}>Periksa Detail Pemesanan</Button>
+            </div>
+          )}
+          {false && <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">Unggah bukti pembayaran. OCR membantu pengecekan metode, tetapi tidak otomatis mengonfirmasi uang diterima.</p>
                 <Label>Metode Pembayaran</Label>
                 <Select value={paidMethod} onValueChange={setPaidMethod}>
@@ -608,7 +708,7 @@ export default function AdminCheckoutForm() {
                 <Button type="button" className="w-full" disabled={paymentBusy || !paymentProof || !bookingPaymentDate || !createdBookingId || !(createdBookingAmount > 0)} onClick={submitBookingPayment}>
                   {paymentBusy ? "Memproses bukti..." : (getCurrentRole()==="staff" ? "Unggah Bukti & Kirim Verifikasi" : "Unggah Bukti & Konfirmasi")}
                 </Button>
-              </div>)}
+              </div>}
         </div>
         <div className="flex gap-3 flex-wrap justify-center">
           {(paymentChoice === "unpaid" || (paymentSubmitted && getCurrentRole()==="staff")) && (
@@ -928,6 +1028,47 @@ export default function AdminCheckoutForm() {
               />
             </div>
 
+            {!isMembership && (
+              <div className="rounded-lg border p-4 space-y-3">
+                <p className="font-semibold">Status pembayaran</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant={paymentChoice === "paid" ? "default" : "outline"} aria-pressed={paymentChoice === "paid"} onClick={() => setPaymentChoice("paid")}>Sudah Bayar</Button>
+                  <Button type="button" variant={paymentChoice === "unpaid" ? "default" : "outline"} aria-pressed={paymentChoice === "unpaid"} onClick={() => setPaymentChoice("unpaid")}>Belum Bayar</Button>
+                </div>
+                {paymentChoice === "paid" ? (
+                  <div className="space-y-3 border-t pt-3">
+                    <p className="text-xs text-muted-foreground">Bukti dan tanggal transaksi akan dicatat setelah booking/grup berhasil dibuat. Pembayaran grup hanya dibuat satu record dengan total seluruh sesi.</p>
+                    <div className="space-y-1.5">
+                      <Label>Metode Pembayaran *</Label>
+                      <Select value={paidMethod} onValueChange={setPaidMethod}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Transfer Bank">Transfer Bank</SelectItem>
+                          <SelectItem value="QRIS">QRIS Mandiri Direct</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="checkout-payment-date">Tanggal Pembayaran *</Label>
+                      <Input id="checkout-payment-date" type="date" value={bookingPaymentDate} max={jakartaDateOnly()}
+                        onChange={(event) => setBookingPaymentDate(event.target.value)} required />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="checkout-payment-proof">Bukti Pembayaran *</Label>
+                      <Input id="checkout-payment-proof" type="file" accept="image/*,.pdf"
+                        onChange={(event) => setPaymentProof(event.target.files?.[0] ?? null)} required />
+                      <p className="text-xs text-muted-foreground">OCR membantu pemeriksaan metode, tetapi tidak menggantikan verifikasi dana masuk.</p>
+                    </div>
+                    {paymentProof && <p className="text-xs text-muted-foreground">File dipilih: {paymentProof.name}</p>}
+                  </div>
+                ) : paymentChoice === "unpaid" ? (
+                  <p className="text-sm text-muted-foreground">Booking akan dibuat tanpa record pembayaran. Status pembayaran tetap menunggu pembayaran dan bisa dikelola kemudian.</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Pilih Sudah Bayar atau Belum Bayar untuk melanjutkan.</p>
+                )}
+              </div>
+            )}
+
             {isMembership && <div className="rounded-lg border p-4 space-y-3">
               <p className="font-semibold">Pengelolaan Member Gym</p>
               <Label>Tindakan Membership</Label>
@@ -1076,7 +1217,7 @@ export default function AdminCheckoutForm() {
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            {!isMembership && <Button type="submit" className="w-full h-11 text-base font-bold" disabled={isSubmitting || !slotValid}>
+            {!isMembership && <Button type="submit" className="w-full h-11 text-base font-bold" disabled={!canSubmitBooking}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking"
