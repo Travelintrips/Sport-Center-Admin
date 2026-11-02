@@ -42,3 +42,14 @@ Scope: source review of X904-related routers under `artifacts/api-server/src/rou
   - Result: no new `sport_center.x904_user_commands` rows observed in the interval. This is temporal evidence around the VPS browser test; it is not proof about the earlier physical handset screenshots.
 - No queue payloads, PINs, or member data were selected in these census queries.
 - X904 database E2E remains SKIPPED; no device command was issued and no settings were changed.
+
+
+## Physical Android Chrome network trace — 2026-11-02
+- Captured on ALMANO Windows workstation using ADB 37.0.1 and Chrome remote debugging against the connected handset.
+- Android-reported identity: manufacturer Xiaomi, model `23108RN04Y`, Android 15; user described the handset as Realme C3, so the actual connected device identity does not match that description and must not be represented as a Realme C3 test.
+- Synthetic JPEG was generated inside Android Chrome; no gallery picker or personal photo was read.
+- Fixture: 1,005,770 bytes; local output: 44,370 bytes; dimensions 488 × 627; status `STAGED_OFFLINE_ONLY`; SHA-256 was computed in the page.
+- Recorded browser requests from the time the preview document was ready through synthetic file selection and local validation: 0 additional requests.
+- JSON trace saved on ALMANO at `%USERPROFILE%\OneDrive\Dokumen\X904-Android-NetworkTrace-2026-11-02T14-02-10-743Z.json` (809 bytes). It stores request metadata only, not request bodies, cookies, headers or image bytes.
+- ADB remote-debugging port-forward tcp:9222 was removed after capture.
+- Result: physical Android Chrome local-processing network isolation PASS for this actual connected Xiaomi handset. Realme C3-specific result: NOT VERIFIED until that exact device is connected and identified.
