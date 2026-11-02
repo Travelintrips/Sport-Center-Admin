@@ -296,14 +296,14 @@ const STATUS_CONFIG: Record<
 };
 
 const FILTER_OPTIONS = [
-  { value: "all",             label: "Semua Status" },
-  { value: "pending_payment", label: "Menunggu Pembayaran" },
-  { value: "waiting_confirmation", label: "Perlu Verifikasi" },
-  { value: "paid",            label: "Pembayaran Selesai" },
-  { value: "confirmed",       label: "Dikonfirmasi (Booking)" },
-  { value: "completed",       label: "Selesai" },
-  { value: "cancelled",       label: "Dibatalkan" },
-  { value: "refunded",        label: "Pengembalian Dana" },
+  { value: "all", label: "Semua Status" },
+  { value: "waiting_admin_approval", label: "Menunggu Persetujuan" },
+  { value: "confirmed", label: "Dikonfirmasi" },
+  { value: "completed", label: "Selesai" },
+  { value: "cancelled", label: "Dibatalkan" },
+  { value: "rejected", label: "Ditolak" },
+  { value: "expired", label: "Kedaluwarsa" },
+  { value: "refunded", label: "Pengembalian Dana" },
 ];
 
 const SETTLEMENT_FILTER_OPTIONS = [
@@ -3990,17 +3990,9 @@ export default function AdminBookings() {
         (b.membershipId != null && b.membershipPaymentId == null);
       if (isMembershipCheckIn) return false;
 
-      if (statusFilter !== "all") {
-        const match =
-          statusFilter === "completed"
-            ? b.status === "completed" || b.status === "confirmed"
-            : statusFilter === "waiting_confirmation"
-            ? b.status === "waiting_confirmation" || b.status === "paid"
-            : statusFilter === "cancelled"
-            ? b.status === "cancelled" || b.status === "refunded"
-            : b.status === statusFilter;
-        if (!match) return false;
-      }
+      // This filter describes booking workflow only. Payment review states
+      // belong exclusively to the separate payment filter.
+      if (statusFilter !== "all" && b.status !== statusFilter) return false;
       const isSettled = bookingHasPaymentFlag(b, "isSettled");
       const isBankReconciled = bookingHasPaymentFlag(b, "isBankReconciled");
       const isSettledOutsideBankReconciliation = bookingHasPaymentFlag(
@@ -4030,9 +4022,7 @@ export default function AdminBookings() {
     const sorted = matching.sort(
       (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-    return statusFilter === "waiting_confirmation"
-      ? dedupePaymentConfirmationBookings(sorted)
-      : sorted;
+    return statusFilter === "all" ? sorted : sorted;
   }, [bookings, statusFilter, settlementFilter, search, dateFrom, dateTo]);
 
   // Source sessions remain separate for audit/detail, but the main table shows
@@ -4756,10 +4746,16 @@ export default function AdminBookings() {
             </SelectContent>
           </Select>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-            <SelectTrigger aria-label="Filter pembayaran terkonfirmasi" className="h-8 w-52 text-xs rounded-lg border-slate-200 dark:border-slate-700"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="Filter Status Pembayaran" className="h-8 w-52 text-xs rounded-lg border-slate-200 dark:border-slate-700"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Semua Pembayaran</SelectItem>
+              <SelectItem value="unpaid">Belum Dibayar</SelectItem>
+              <SelectItem value="waiting_verification">Menunggu Verifikasi</SelectItem>
+              <SelectItem value="partial">Dibayar Sebagian / DP</SelectItem>
               <SelectItem value="confirmed">Lunas (nominal terbayar mencukupi)</SelectItem>
+              <SelectItem value="rejected">Ditolak</SelectItem>
+              <SelectItem value="refunded">Dikembalikan</SelectItem>
+              <SelectItem value="needs_review">Perlu Pemeriksaan</SelectItem>
             </SelectContent>
           </Select>
           <Select value={groupFilter} onValueChange={setGroupFilter}>
