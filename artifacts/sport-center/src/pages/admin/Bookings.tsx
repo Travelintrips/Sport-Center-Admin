@@ -4759,7 +4759,7 @@ export default function AdminBookings() {
             <SelectTrigger aria-label="Filter pembayaran terkonfirmasi" className="h-8 w-52 text-xs rounded-lg border-slate-200 dark:border-slate-700"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Semua Pembayaran</SelectItem>
-              <SelectItem value="confirmed">Pembayaran Terkonfirmasi</SelectItem>
+              <SelectItem value="confirmed">Lunas (nominal terbayar mencukupi)</SelectItem>
             </SelectContent>
           </Select>
           <Select value={groupFilter} onValueChange={setGroupFilter}>
@@ -5028,6 +5028,44 @@ export default function AdminBookings() {
                         ? companyInvoiceNetTotal
                         : 0;
                      const groupTaxSummary = isMultiSessionGroup ? getGroupInvoiceTax(groupRows) : null;
+                    // Payment state comes from unique confirmed payment rows, never booking status.
+                    // Group payment rows may repeat on legacy child rows; dedupe by stable payment ID.
+                    const paymentRowsForTruth = isMultiSessionGroup
+                      ? groupRows.flatMap((row: any) => [
+                          ...(Array.isArray(row.payments) ? row.payments : []),
+                          row.membershipPayment,
+                          row.payment,
+                        ]).filter(Boolean)
+                      : [b.membershipPayment, ...(Array.isArray(b.payments) ? b.payments : []), b.payment]
+                          .filter(Boolean);
+                    const uniqueConfirmedPayments = [...new Map(
+                      paymentRowsForTruth
+                        .filter((payment: any) => payment?.id != null && payment.status === "confirmed")
+                        .map((payment: any) => [String(payment.id), payment]),
+                    ).values()] as any[];
+                    const paymentRecordedAmount = uniqueConfirmedPayments.reduce(
+                      (sum: number, payment: any) => sum + Math.max(0, Number(payment.amount ?? 0)),
+                      0,
+                    );
+                    const paymentDueAmount = isMultiSessionGroup
+                      ? (isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
+                          ? companyInvoiceNetTotal
+                          : Number(groupTaxSummary?.grandTotal ??
+                              groupRows.reduce((sum: number, row: any) =>
+                                sum + Number(row.grandTotal ?? row.totalPrice ?? 0), 0)))
+                      : (b.payerType === "company" && Number(b.companyInvoiceTotal ?? 0) > 0
+                          ? Number(b.companyInvoiceTotal)
+                          : Number(b.grandTotal ?? b.totalPrice ?? 0));
+                    const paymentRemainingAmount = Math.max(0, paymentDueAmount - paymentRecordedAmount);
+                    const paymentIsFullyCovered = paymentDueAmount > 0 &&
+                      paymentRecordedAmount >= paymentDueAmount - 0.005;
+                    const paymentSettlementLabel = uniqueConfirmedPayments.length === 0
+                      ? null
+                      : uniqueConfirmedPayments.every((payment: any) => payment.isBankReconciled)
+                        ? "Rekonsiliasi bank cocok"
+                        : uniqueConfirmedPayments.every((payment: any) => payment.isSettledOutsideBankReconciliation)
+                          ? "Settled di luar rekonsiliasi bank"
+                          : "Settlement bank belum terverifikasi";
                      const groupDisplayTotal = isMultiSessionGroup
                         ? isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
                           ? companyInvoiceNetTotal
@@ -5256,114 +5294,137 @@ export default function AdminBookings() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                         {isMultiSessionGroup ? (
-                           groupStatus ? (
-                             <InlineStatusSelect
-                               bookingId={(groupVerificationRow ?? b).id}
-                               status={groupStatus}
-                               onUpdate={(_id, status) => {
-                                 groupRows.forEach((row: any) => {
-                                   if (row.status !== status) {
-                                     updateBookingMutation.mutate({ id: row.id, data: { status: status as any } });
-                                   }
-                                 });
-                               }}
-                               isUpdating={updateBookingMutation.isPending}
-                             />
-                           ) : (
-                             <span className="text-xs font-semibold text-slate-500">Campuran</span>
-                           )
-                         ) : (
-                           <InlineStatusSelect
-                             bookingId={b.id}
-                             status={b.status}
-                             onUpdate={(id, status) =>
-                               updateBookingMutation.mutate({ id, data: { status: status as any } })
-                             }
-                             isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
-                           />
-                         )}
-                        {(b.status === "confirmed" || b.status === "completed") && (
-                          <div className="mt-1 text-[10px] font-semibold">
-                            {b.payerType === "company" ? (
-                              b.billingStatus === "paid" && Number(b.companyInvoiceTotal ?? 0) > 0
-                                ? <span className="text-emerald-700">Pembayaran invoice terkonfirmasi</span>
-                                : b.billingStatus === "paid"
-                                  ? <span className="text-red-600">Pembayaran perlu rekonsiliasi</span>
-                                  : <span className="text-amber-700">Booking disetujui · Invoice belum lunas</span>
-                            ) : (
-                              [b.payment,...(Array.isArray(b.payments)?b.payments:[]),...groupPayments]
-                                .some((p:any)=>p?.status === "confirmed")
-                                ? <span className="text-emerald-700">Pembayaran terkonfirmasi</span>
-                                : <span className="text-amber-700">Booking disetujui · Pembayaran belum terverifikasi</span>
-                            )}
+                        <div className="min-w-[175px] space-y-1">
+                          {paymentIsFullyCovered ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                              <CheckCircle2 size={11} /> Lunas
+                            </span>
+                          ) : paymentRecordedAmount > 0 ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                              <AlertCircle size={11} /> Dibayar sebagian
+                            </span>
+                          ) : paymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                              <Clock size={11} /> Menunggu verifikasi
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                              <AlertCircle size={11} /> Belum ada pembayaran sah
+                            </span>
+                          )}
+                          <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                            Terbayar: {formatCurrency(paymentRecordedAmount)}
                           </div>
-                        )}
-                        {b.status === "paid" && b.payment?.proofUrl && (
-                          <div className="text-[10px] text-blue-500 mt-0.5 font-medium">
-                            Bukti diterima ↗
+                          <div className="text-[10px] text-slate-500">
+                            Tagihan: {formatCurrency(paymentDueAmount)}
                           </div>
-                        )}
+                          {paymentRemainingAmount > 0.005 && paymentRecordedAmount > 0 && (
+                            <div className="text-[10px] font-semibold text-amber-700">
+                              Sisa: {formatCurrency(paymentRemainingAmount)}
+                            </div>
+                          )}
+                          {paymentDueAmount > 0 && paymentRecordedAmount > paymentDueAmount + 0.005 && (
+                            <div className="text-[10px] font-semibold text-red-600">
+                              Kelebihan: {formatCurrency(paymentRecordedAmount - paymentDueAmount)}
+                            </div>
+                          )}
+                          {paymentSettlementLabel && (
+                            <div className="text-[10px] text-slate-500">
+                              Bank: {paymentSettlementLabel}
+                            </div>
+                          )}
+                          {(b.status === "confirmed" || b.status === "completed") && !paymentIsFullyCovered && (
+                            <div className="text-[10px] text-amber-700">
+                              Booking disetujui; belum lunas
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                         {isMultiSessionGroup && groupPendingRows.length > 0 ? (
-                          isGroupVerificationRow ? (
-                            <button
-                               onClick={() => setSelectedBooking(groupVerificationRow ?? b)}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/40 transition-colors"
-                              title="Verifikasi satu kali untuk seluruh sesi dalam grup"
-                            >
-                              <CreditCard size={11} />
-                              Verifikasi Grup
-                              <span className="text-[10px] opacity-70">({groupRows.length} sesi)</span>
-                            </button>
+                        <div className="flex flex-col items-start gap-2">
+                          <div>
+                            {isMultiSessionGroup ? (
+                              groupStatus ? (
+                                <InlineStatusSelect
+                                  bookingId={(groupVerificationRow ?? b).id}
+                                  status={groupStatus}
+                                  onUpdate={(_id, status) => {
+                                    groupRows.forEach((row: any) => {
+                                      if (row.status !== status) {
+                                        updateBookingMutation.mutate({ id: row.id, data: { status: status as any } });
+                                      }
+                                    });
+                                  }}
+                                  isUpdating={updateBookingMutation.isPending}
+                                />
+                              ) : (
+                                <span className="text-xs font-semibold text-slate-500">Status booking campuran</span>
+                              )
+                            ) : (
+                              <InlineStatusSelect
+                                bookingId={b.id}
+                                status={b.status}
+                                onUpdate={(id, status) =>
+                                  updateBookingMutation.mutate({ id, data: { status: status as any } })
+                                }
+                                isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
+                              />
+                            )}
+                          </div>
+                          {isMultiSessionGroup && groupPendingRows.length > 0 ? (
+                            isGroupVerificationRow ? (
+                              <button
+                                onClick={() => setSelectedBooking(groupVerificationRow ?? b)}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/40 transition-colors"
+                                title="Verifikasi satu kali untuk seluruh sesi dalam grup"
+                              >
+                                <CreditCard size={11} />
+                                Verifikasi Grup
+                                <span className="text-[10px] opacity-70">({groupRows.length} sesi)</span>
+                              </button>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800"
+                                title="Sesi ini ikut terverifikasi saat pembayaran grup dikonfirmasi"
+                              >
+                                <Users size={11} />
+                                Ikut Grup
+                              </span>
+                            )
+                          ) : (b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
+                            <InlineCheckInSelect
+                              booking={b}
+                              onCheckIn={(id) => checkInMutation.mutate({ id })}
+                              onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
+                              isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
+                              isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
+                            />
+                          ) : b.status === "pending_payment" ? (
+                            b.isDpPaid ? (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
+                                <CreditCard size={11} /> Sisa DP
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                <Clock size={11} /> Menunggu Bayar
+                              </span>
+                            )
+                          ) : b.status === "waiting_confirmation" || b.status === "paid" ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+                              <CreditCard size={11} /> Verifikasi
+                            </span>
+                          ) : b.status === "cancelled" ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                              <XCircle size={11} /> Dibatalkan
+                            </span>
+                          ) : b.status === "refunded" ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-purple-50 text-purple-700 dark:bg-purple-900/20 dark:text-purple-400">
+                              <RotateCcw size={11} /> Refund
+                            </span>
                           ) : (
-                            <span
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800"
-                              title="Sesi ini ikut terverifikasi saat pembayaran grup dikonfirmasi"
-                            >
-                              <Users size={11} />
-                              Ikut Grup
-                            </span>
-                          )
-                        ) : (b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
-                          <InlineCheckInSelect
-                            booking={b}
-                            onCheckIn={(id) => checkInMutation.mutate({ id })}
-                            onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
-                            isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
-                            isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
-                          />
-                        ) : b.status === "pending_payment" ? (
-                          b.isDpPaid ? (
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
-                              <CreditCard size={11} />
-                              Sisa DP
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
-                              <Clock size={11} />
-                              Menunggu Bayar
-                            </span>
-                          )
-                        ) : b.status === "waiting_confirmation" || b.status === "paid" ? (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
-                            <CreditCard size={11} />
-                            Verifikasi
-                          </span>
-                        ) : b.status === "cancelled" ? (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">
-                            <XCircle size={11} />
-                            Dibatalkan
-                          </span>
-                        ) : b.status === "refunded" ? (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800">
-                            <RotateCcw size={11} />
-                            Refund
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
-                        )}
+                            <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
