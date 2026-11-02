@@ -16,6 +16,7 @@ import {
   notifyRecurringBookingGroupCreated,
   notifyAdminBookingApprovalRequest,
   notifyPaymentProofUploaded,
+  notifyAdminBookingReport,
 } from "../lib/notifications";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { createWaToken } from "../lib/waTokens";
@@ -1412,6 +1413,7 @@ router.post("/bookings", async (req, res) => {
     }
     const customerPhone: string = normalizePhone(normalizedCustomerPhone);
     const bookingSource: string = req.body.source || "";
+    const adminPaymentChoice = req.body.adminPaymentChoice === "paid" ? "paid" : "unpaid";
     const rawBookingType = req.body.bookingType;
     const bookingType: "regular" | "event" = rawBookingType === "event" ? "event" : "regular";
     const isEvent = bookingType === "event";
@@ -1738,6 +1740,7 @@ router.post("/bookings", async (req, res) => {
       orderNumber,
       customerId: effectiveCustomerId,
       bookedByUserId: loggedInUserId,
+      source: bookingSource || "web",
       customerName,
       customerEmail: customerEmail || "",
       customerPhone,
@@ -1941,7 +1944,13 @@ router.post("/bookings", async (req, res) => {
         uploadProofUrl: proofUrl || undefined,
         statusUrl: statusUrl || undefined,
         groupRef: incomingGroupRef,
+        adminReport: !(isAdminRequest && bookingSource === "admin"),
       }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
+
+      if (isAdminRequest && bookingSource === "admin" && adminPaymentChoice === "unpaid") {
+        notifyAdminBookingReport({ bookingId: booking.id, paymentStatus: "unpaid" })
+          .catch((err) => console.error("[WA] admin unpaid booking report failed:", err));
+      }
 
       // Notifikasi admin jika booking berasal dari link Mina AI
       if (bookingSource === "mina") {
@@ -1965,7 +1974,7 @@ router.post("/bookings", async (req, res) => {
 
       // ─── Kirim WA approval link ke semua admin untuk setiap booking baru ──────
       try {
-        if (appUrl) {
+        if (appUrl && !(isAdminRequest && bookingSource === "admin")) {
           const approvalToken = await createWaToken(booking.id, "approve_booking", 1);
           notifyAdminBookingApprovalRequest({
             orderNumber: booking.orderNumber,
@@ -2220,6 +2229,7 @@ router.post("/bookings/recurring", async (req, res) => {
 
     // customerId hanya boleh dipercaya dari body ketika request datang dari admin/operator.
     const recurringSource = String(rawSource ?? "").trim().slice(0, 32);
+    const adminPaymentChoice = req.body.adminPaymentChoice === "paid" ? "paid" : "unpaid";
     // Match the single-booking admin flow: a guest booking must remain
     // unlinked instead of accidentally inheriting the operator's user ID.
     const isAdminGuestBooking = isAdminRequest && recurringSource === "admin" && bodyCustomerId == null;
@@ -2565,24 +2575,32 @@ router.post("/bookings/recurring", async (req, res) => {
       triggerRekapIfToday(today);
     }
 
-    // Endpoint recurring membuat beberapa booking sekaligus, jadi kirim satu
-    // notifikasi admin yang merangkum semua sesi agar tidak terpecah/hilang.
-    notifyRecurringBookingGroupCreated({
-      customerName: String(customerName),
-      customerPhone,
-      groupRef,
-      totalPayment: grandTotalAmount,
-      sessions: created.map((b: any) => ({
-        orderNumber: String(b.orderNumber),
-        facilityName: String(b.facilityName ?? facility.name),
-        bookingDate: String(b.bookingDate),
-        startTime: String(b.startTime),
-        endTime: String(b.endTime),
-        durationHours: Number(b.durationHours),
-        totalPrice: Number(b.grandTotal ?? b.totalPrice),
-      })),
-      skippedDates: skipped,
-    }).catch((err) => console.error("[WA] notifyRecurringBookingGroupCreated error:", err));
+    // Admin-created paid bookings report only after payment is confirmed.
+    // Admin-created unpaid bookings get one complete BOOKING BARU report now.
+    if (isAdminRequest && recurringSource === "admin") {
+      if (adminPaymentChoice === "unpaid" && created[0]?.id) {
+        notifyAdminBookingReport({ bookingId: Number(created[0].id), paymentStatus: "unpaid" })
+          .catch((err) => console.error("[WA] admin unpaid group report failed:", err));
+      }
+    } else {
+      // Customer-originated recurring bookings retain the existing admin report.
+      notifyRecurringBookingGroupCreated({
+        customerName: String(customerName),
+        customerPhone,
+        groupRef,
+        totalPayment: grandTotalAmount,
+        sessions: created.map((b: any) => ({
+          orderNumber: String(b.orderNumber),
+          facilityName: String(b.facilityName ?? facility.name),
+          bookingDate: String(b.bookingDate),
+          startTime: String(b.startTime),
+          endTime: String(b.endTime),
+          durationHours: Number(b.durationHours),
+          totalPrice: Number(b.grandTotal ?? b.totalPrice),
+        })),
+        skippedDates: skipped,
+      }).catch((err) => console.error("[WA] notifyRecurringBookingGroupCreated error:", err));
+    }
 
     res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: grandTotalAmount, totalDpp, totalPpnAmount: totalPpn, groupRef });
   } catch (err) {
