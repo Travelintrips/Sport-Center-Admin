@@ -8,12 +8,15 @@ if(!u.username.endsWith(".xssrfshdrtdfupgqwfdw")) throw Error("WRONG_PROJECT");
 const {db,pool}=await import("@workspace/db");
 const {sql}=await import("drizzle-orm");
 const {processX904Event}=await import("../services/processX904Event");
-const serial="TDBD234200545",pin=String(100000+randomBytes(4).readUInt32BE(0)%900000),eventId=randomBytes(32).toString("hex"),secondEventId=randomBytes(32).toString("hex");
+const serial="X904-DEV-ISOLATED-ONLY",pin=String(100000+randomBytes(4).readUInt32BE(0)%900000),eventId=randomBytes(32).toString("hex"),secondEventId=randomBytes(32).toString("hex");
 const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
 const field=(n:string)=>parts.find(p=>p.type===n)?.value;
 const day=field("year")+"-"+field("month")+"-"+field("day");
 let membershipId: number | null = null;
 const marker="X904 event "+eventId;
+const queueBeforeResult=await db.execute(sql`SELECT count(*)::int AS total FROM sport_center.x904_user_commands`);
+const queueCountBefore=Number(queueBeforeResult.rows[0]?.total);
+if(!Number.isSafeInteger(queueCountBefore)||queueCountBefore<0) throw Error("X904_QUEUE_BASELINE_FAILED");
 // DEV fixture only: the synthetic event uses code 1. Production stays fail-closed.
 const originalTrustedCodes=process.env.GYM_X904_TRUSTED_VERIFICATION_CODES;
 process.env.GYM_X904_TRUSTED_VERIFICATION_CODES="1";
@@ -89,6 +92,10 @@ try{
   if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_membership_payments WHERE membership_id=${membershipId} AND amount=0 AND period_start=${day} AND period_end=${day}`);
   if(membershipId!==null) await db.execute(sql`DELETE FROM sport_center.sport_memberships WHERE id=${membershipId} AND notes=${`X904 E2E ${eventId}`}`);
   console.log('X904_FIXTURE_CLEANUP=PASS');
+  const queueAfterResult=await db.execute(sql`SELECT count(*)::int AS total FROM sport_center.x904_user_commands`);
+  const queueCountAfter=Number(queueAfterResult.rows[0]?.total);
+  if(!Number.isSafeInteger(queueCountAfter)||queueCountAfter!==queueCountBefore) throw Error("X904_QUEUE_MUTATED_DURING_EVENT_E2E");
+  console.log("X904_QUEUE_ISOLATION=PASS;before="+queueCountBefore+";after="+queueCountAfter);
  } catch(error) { console.error('X904_FIXTURE_CLEANUP_FAILED',error instanceof Error?error.message:String(error)); process.exitCode=1; }
  finally {if(originalTrustedCodes===undefined) delete process.env.GYM_X904_TRUSTED_VERIFICATION_CODES;
   else process.env.GYM_X904_TRUSTED_VERIFICATION_CODES=originalTrustedCodes;
