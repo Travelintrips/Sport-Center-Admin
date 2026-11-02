@@ -1387,6 +1387,7 @@ function BookingDetailDrawer({
     booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [cancellationNoteError, setCancellationNoteError] = useState("");
+  const [cancellationReason, setCancellationReason] = useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
@@ -1513,17 +1514,20 @@ function BookingDetailDrawer({
 
   const handleAction = (action: string) => {
     if (confirmAction === action) {
-      if (action === "cancelled" && !adminNotes.trim()) {
+      if (action === "cancelled" && !cancellationReason.trim()) {
         setCancellationNoteError("Alasan pembatalan wajib diisi sebelum menyimpan.");
         return;
       }
-      if (action === "completed" || action === "cancelled" || action === "refunded") {
-        onUpdateStatus(action, adminNotes.trim());
+      if (action === "completed" || action === "refunded") {
+        onUpdateStatus(action, adminNotes);
+      } else if (action === "cancelled") {
+        onUpdateStatus(action, cancellationReason.trim());
       }
       setCancellationNoteError("");
       setConfirmAction(null);
     } else {
       setCancellationNoteError("");
+      if (action === "cancelled") setCancellationReason("");
       setConfirmAction(action);
     }
   };
@@ -2443,25 +2447,15 @@ function BookingDetailDrawer({
           {/* Admin Notes */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-              {confirmAction === "cancelled" ? "Alasan Pembatalan (wajib)" : "Catatan Admin (internal)"}
+              Catatan Admin (internal)
             </label>
             <Textarea
               value={adminNotes}
-              onChange={(e) => {
-                setAdminNotes(e.target.value);
-                if (e.target.value.trim()) setCancellationNoteError("");
-              }}
-              placeholder={confirmAction === "cancelled" ? "Tuliskan alasan pembatalan yang akan tercatat di semua sesi..." : "Catatan internal admin..."}
+              onChange={(e) => setAdminNotes(e.target.value)}
+              placeholder="Catatan internal admin..."
               rows={2}
               className="text-sm rounded-xl border-slate-200 dark:border-slate-700 resize-none"
             />
-            {confirmAction === "cancelled" && (
-              <p className={cancellationNoteError ? "text-xs text-red-600" : "text-xs text-amber-700"}>
-                {cancellationNoteError || (booking.groupRef && groupBookings.length > 1
-                  ? `Alasan ini akan dicatat pada seluruh ${groupBookings.length} sesi grup.`
-                  : "Alasan ini akan dicatat pada histori booking dan catatan admin.")}
-              </p>
-            )}
             <button
               onClick={() => onUpdateStatus(booking.status, adminNotes)}
               disabled={isUpdating}
@@ -2508,8 +2502,31 @@ function BookingDetailDrawer({
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-2 mt-2"
+                    className="flex flex-col gap-2 mt-2"
                   >
+                    {confirmAction === "cancelled" && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-red-600">Note / Alasan Pembatalan (wajib)</label>
+                        <Textarea
+                          value={cancellationReason}
+                          onChange={(event) => {
+                            setCancellationReason(event.target.value);
+                            if (event.target.value.trim()) setCancellationNoteError("");
+                          }}
+                          placeholder={isMultiSessionGroup
+                            ? "Alasan ini akan dicatat pada semua sesi dalam grup..."
+                            : "Tuliskan alasan pembatalan booking..."}
+                          rows={3}
+                          maxLength={2000}
+                        />
+                        <p className={cancellationNoteError ? "text-xs text-red-600" : "text-xs text-muted-foreground"}>
+                          {cancellationNoteError || (isMultiSessionGroup
+                            ? `Wajib diisi. Catatan akan dicatat ke ${groupBookings.length} sesi dan histori masing-masing.`
+                            : "Wajib diisi. Catatan akan dicatat pada booking dan booking_history.")}
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAction(confirmAction)}
                       disabled={isUpdating}
@@ -2523,6 +2540,7 @@ function BookingDetailDrawer({
                     >
                       Batal
                     </button>
+                    </div>
                   </motion.div>
                 )}
               </div>
