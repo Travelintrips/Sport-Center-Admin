@@ -147,6 +147,26 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         ORDER BY created_at DESC LIMIT 1`);
       if (prior.rows.length) {
         const last = prior.rows[0] as any;
+        if (last.command_type === "ACTIVATE_USER" && !shouldBeActive &&
+            (last.state === "queued" || last.state === "claimed")) {
+          if (last.state === "queued") {
+            // Queued jobs can be cancelled atomically before the VMSC claim.
+            // The claim function must only select state='queued'.
+            const cancelled = await tx.execute(sql`UPDATE sport_center.x904_user_commands
+              SET state='failed', completed_at=${now},
+                  result=jsonb_build_object('readBackConfirmed',false,
+                    'errorCode','PAYMENT_REVOKED_BEFORE_CLAIM')
+              WHERE command_id=${String(last.command_id)}::uuid AND state='queued'
+              RETURNING command_id`);
+            if (cancelled.rows.length === 1) return;
+          }
+          // A claimed job may already be at the door. Do not mark it failed or
+          // enqueue a conflicting suspend until the executor reports ACK.
+          await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+            SET access_state='review_required'
+            WHERE access_id=${Number(a.access_id)}`);
+          return;
+        }
         if (last.state === "queued" || last.state === "claimed") return;
         if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true) {
           if (last.command_type !== commandType) {
