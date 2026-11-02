@@ -15,6 +15,20 @@ jobs:
   build-test:
     name: Build & Test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: x904-ci-local-only
+          POSTGRES_DB: x904_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d x904_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     env:
       NODE_ENV: test
@@ -174,13 +188,27 @@ jobs:
       - name: Booking CSV regression contracts (no production access)
         run: node --test scripts/booking-csv-regression.test.mjs
 
-      # X904 app-level DEV E2E is opt-in until the GitHub DEV DB secret authenticates.
-      # Direct CST-DEV queue SQL E2E is verified separately via the Supabase MCP.
-      # The opt-in must only be enabled after the repository DEV DB secret is repaired.
-      - name: X904 database E2E (isolated CST-DEV; no device dispatch)
-        if: ${{ vars.SPORT_CENTER_X904_DEV_E2E_ENABLED == 'true' }}
+      # Fully disposable PostgreSQL service: no Supabase credentials, no VMSC worker, no physical X904.
+      - name: Prepare isolated X904 E2E schema
+        env:
+          X904_E2E_LOCAL_DATABASE_URL: postgres://postgres:x904-ci-local-only@127.0.0.1:5432/x904_e2e
+          X904_E2E_SCHEMA_FILE: ${{ github.workspace }}/scripts/x904-offline-face-intake/e2e-schema.sql
+        run: |
+          pnpm --filter @workspace/api-server exec node --input-type=module -e '
+            import pg from "pg";
+            import fs from "node:fs";
+            const client = new pg.Client({ connectionString: process.env.X904_E2E_LOCAL_DATABASE_URL });
+            await client.connect();
+            await client.query(fs.readFileSync(process.env.X904_E2E_SCHEMA_FILE, "utf8"));
+            await client.end();
+            console.log("X904_LOCAL_POSTGRES_SCHEMA_READY");
+          '
+
+      - name: X904 application database E2E (ephemeral PostgreSQL; no dispatch)
         env:
           NODE_ENV: development
+          X904_E2E_LOCAL: "true"
+          X904_E2E_LOCAL_DATABASE_URL: postgres://postgres:x904-ci-local-only@127.0.0.1:5432/x904_e2e
         run: |
           pnpm --filter @workspace/api-server exec esbuild src/scripts/test-x904-e2e.ts --bundle --platform=node --format=esm --external:pg --outfile=.x904-e2e-ci.mjs
           pnpm --filter @workspace/api-server exec node .x904-e2e-ci.mjs
