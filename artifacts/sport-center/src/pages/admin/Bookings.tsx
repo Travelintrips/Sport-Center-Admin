@@ -4960,13 +4960,15 @@ export default function AdminBookings() {
                        ),
                      ];
                      const groupStatus = isMultiSessionGroup ? getGroupStatus(groupRows) : b.status;
-                    const groupPayments = isMultiSessionGroup
-                      ? groupRows.flatMap((row: any) => [
-                          ...(Array.isArray(row.payments) ? row.payments : []),
-                          row.membershipPayment,
-                          row.payment,
-                        ]).filter(Boolean)
-                      : [];
+                    const groupPayments = b.groupRef && Array.isArray(b.groupPayments)
+                      ? b.groupPayments
+                      : isMultiSessionGroup
+                        ? groupRows.flatMap((row: any) => [
+                            ...(Array.isArray(row.payments) ? row.payments : []),
+                            row.membershipPayment,
+                            row.payment,
+                          ]).filter(Boolean)
+                        : [];
                     // A group payment is duplicated onto each session for legacy compatibility.
                     // The admin correction is written to the canonical/representative booking payment,
                     // so the group row must prefer that payment instead of picking the latest timestamp
@@ -5328,7 +5330,7 @@ export default function AdminBookings() {
                             <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
                               <AlertCircle size={11} /> Dibayar sebagian
                             </span>
-                          ) : paymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
+                          ) : uniquePaymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
                               <Clock size={11} /> Menunggu verifikasi
                             </span>
