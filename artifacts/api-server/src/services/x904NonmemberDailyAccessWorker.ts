@@ -113,7 +113,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         return;
       }
 
-      const prior = await tx.execute(sql`SELECT command_id,state,result,completed_at,created_at,attempts
+      const prior = await tx.execute(sql`SELECT command_id,command_type,state,result,completed_at,created_at,attempts
         FROM sport_center.x904_user_commands
         WHERE device_serial=${DEVICE} AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
           AND payload->>'accessId'=${String(a.access_id)}
@@ -122,8 +122,16 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         const last = prior.rows[0] as any;
         if (last.state === "queued" || last.state === "claimed") return;
         if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true) {
+          if (last.command_type !== commandType) {
+            if (currentGroup === targetGroup && shouldBeActive) {
+              await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
+              return;
+            }
+            // Opposite transition can proceed only after a verified activation.
+          }
           if (!last.completed_at || observedAt.getTime() <= new Date(String(last.completed_at)).getTime()) return;
-          if (currentGroup === targetGroup) {
+          if (currentGroup === targetGroup && last.command_type === commandType) {
             if (shouldBeActive) {
               const ackGroup = Number((last.result as any)?.afterGroup);
               const ackUid = Number((last.result as any)?.deviceUid);

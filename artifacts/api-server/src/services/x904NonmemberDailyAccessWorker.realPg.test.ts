@@ -177,3 +177,22 @@ test("cancelled payment before activation never queues activation", async () => 
   expect(state.access_state).not.toBe("active");
   expect(state.activated_at).toBeNull();
 });
+
+test("completed SUSPEND ACK cannot be reused as ACTIVATE ACK", async () => {
+  await run("INSERT INTO sport_center.sport_bookings VALUES(9006)");
+  await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','pin','PIN:503','503',503,'SUSPEND ACK',9006)");
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9106,9006,'pending')");
+  await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=now() WHERE id=9106");
+  const start=new Date((await run("SELECT confirmed_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9006")).rows[0].confirmed_at);
+  const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9006")).rows[0].access_id);
+  const ackAt=new Date(start.getTime()+2000);
+  await run(`INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,completed_at,result)
+    VALUES('TDBD234200545','SUSPEND_USER','503',
+      jsonb_build_object('source','AUTO_NONMEMBER_GYM_12H','accessId',${accessId}),301,'negative-suspend-ack-${accessId}','completed',
+      '${ackAt.toISOString()}',jsonb_build_object('readBackConfirmed',true,'deviceUid',503,'afterGroup',1))`);
+  await addSnapshot(new Date(ackAt.getTime()+1000),'503','SUSPEND ACK',1);
+  await processX904NonmemberDailyAccess(db as any,new Date(ackAt.getTime()+2000));
+  const state=(await run("SELECT access_state,activated_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9006")).rows[0];
+  expect(state.access_state).not.toBe('active');
+  expect(state.activated_at).toBeNull();
+});
