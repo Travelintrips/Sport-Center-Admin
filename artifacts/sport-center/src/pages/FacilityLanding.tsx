@@ -140,6 +140,7 @@ export default function FacilityLanding() {
               <p className="mb-8 max-w-xl text-lg font-medium leading-relaxed text-muted-foreground">
                 {landing.intro}
               </p>
+              {landing.slug === "gym" && <p className="mb-4"><Link href="/gym/nonmember" className="inline-flex rounded-full bg-orange-600 px-6 py-3 font-bold text-white hover:bg-orange-700">Akses Harian Gym Nonmember — Bayar & Unggah Bukti</Link></p>}
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Button asChild size="lg" className="h-13 rounded-full px-7 font-black shadow-lg shadow-primary/20">
                   <Link href={landing.facilityHref}>
