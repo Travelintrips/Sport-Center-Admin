@@ -249,7 +249,7 @@ test("payment revoked after ACTIVATE_USER queued cancels command before claim", 
   expect(cmd).toBeDefined();
   await run("UPDATE sport_center.sport_payments SET status='cancelled' WHERE id=9191");
   await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+200));
-  const state = (await run("SELECT state,result->>'errorCode' error FROM sport_center.x904_user_commands WHERE command_id=$1",[cmd.command_id])).rows[0];
+  const state = (await run("SELECT state,result->>'errorCode' error FROM sport_center.x904_user_commands WHERE command_id='${cmd.command_id}'"))).rows[0];
   expect(state).toMatchObject({state:"failed",error:"PAYMENT_REVOKED_BEFORE_CLAIM"});
 });
 
@@ -263,9 +263,9 @@ test("payment revoked after claim is flagged for review without forging ACK", as
   await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+100));
   const accessId = Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9092")).rows[0].access_id);
   const cmd = await commandFor("ACTIVATE_USER",accessId);
-  await run("UPDATE sport_center.x904_user_commands SET state='claimed' WHERE command_id=$1",[cmd.command_id]);
+  await run("UPDATE sport_center.x904_user_commands SET state='claimed' WHERE command_id='${cmd.command_id}'"));
   await run("UPDATE sport_center.sport_payments SET status='cancelled' WHERE id=9192");
   await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+200));
   expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9092")).rows[0].access_state).toBe("review_required");
-  expect((await run("SELECT state FROM sport_center.x904_user_commands WHERE command_id=$1",[cmd.command_id])).rows[0].state).toBe("claimed");
+  expect((await run("SELECT state FROM sport_center.x904_user_commands WHERE command_id='${cmd.command_id}'"))).rows[0].state).toBe("claimed");
 });
