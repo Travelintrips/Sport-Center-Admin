@@ -97,6 +97,7 @@ export default function WaBookingForm() {
   const search = useSearch();
   const searchParams = new URLSearchParams(search);
   const phoneFromWA = searchParams.get("phone") ?? "";
+  const dedicatedNonmember = searchParams.get("nonmember") === "1";
   const dateFromWA = searchParams.get("date") ?? "";
   const startTimeFromWA = searchParams.get("startTime") ?? "";
   const durationFromWA = searchParams.get("duration") ?? "1";
@@ -398,6 +399,18 @@ export default function WaBookingForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (dedicatedNonmember && !gymWalkIn) {
+      setError("Halaman ini hanya untuk akses harian Gym nonmember.");
+      return;
+    }
+    if (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim())) {
+      setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
+      return;
+    }
+    if (dedicatedNonmember && !proofFile) {
+      setError("Unggah foto bukti pembayaran sebelum mengirim untuk verifikasi.");
+      return;
+    }
     if (gymWalkIn && !x904IdentityValue.trim()) {
       setError("Masukkan PIN X904 atau pilih kartu VIS001–VIS006.");
       return;
