@@ -11,6 +11,9 @@ export const paymentProviderEnum = scSchema.enum("payment_provider", ["mandiri_d
 export const paymentsTable = scSchema.table("sport_payments", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }),
+  // Canonical source membership payment for the Gym membership mirror.
+  // Used to deduplicate one logical payment across membership and booking ledgers.
+  sourceMembershipPaymentId: integer("source_membership_payment_id"),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   proofUrl: text("proof_url"),
   paymentMethod: text("payment_method").default("Transfer Bank"),
