@@ -1,4 +1,5 @@
 import {chooseX904AutomaticCommand,x904MachineCommandResult,x904AutomaticCommandKey} from "./x904AutomationDecision";
+import { isX904AutoSuspendExempt } from "./x904NonmemberAccessPolicy";
 import {db} from "@workspace/db";
 import {sql} from "drizzle-orm";
 import {resolvePaidX904Automation} from "./gymMembershipEntitlement";
@@ -139,6 +140,12 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
       if(entries.length!==1||entries[0].enabled!==true)return;
       const group=Number(entries[0].group);
       const command=chooseX904AutomaticCommand(entitlement,group);
+      if(command === 'SUSPEND_USER' && isX904AutoSuspendExempt(pin,Number(m.device_role))) {
+        await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+          SET state='review_required',result='{"status":"automatic_suspend_exempt_manual_action_required"}'::jsonb
+          WHERE event_id=${Number(ev.event_id)}`);
+        return;
+      }
       if(!command){
         if((entitlement==="active"&&group===1)||(entitlement==="suspended"&&group===2)){
           await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events

@@ -58,6 +58,7 @@ import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProvide
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
 import { uploadProofWithFallback } from "./storage";
+import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
 import {
   generateAiReply,
   logAiMessageReceived,
@@ -836,9 +837,10 @@ async function sendWAReply(phone: string, message: string): Promise<void> {
 // POST /api/wa/booking — create booking from mini form
 router.post("/wa/booking", async (req, res) => {
   try {
-    const { customerName, customerPhone, facilityId, bookingDate, startTime, durationHours, notes } = req.body;
+    const { customerName, customerPhone, facilityId, bookingDate, startTime, durationHours, notes, x904IdentityType, x904IdentityValue } = req.body;
+    let bookingCustomerName = String(customerName ?? "").trim();
 
-    if (!customerName || !customerPhone || !facilityId || !bookingDate || !startTime || !durationHours) {
+    if ((!bookingCustomerName && !(x904IdentityType && x904IdentityValue)) || !customerPhone || !facilityId || !bookingDate || !startTime || !durationHours) {
       res.status(400).json({ error: "Semua field wajib diisi" });
       return;
     }
@@ -849,6 +851,51 @@ router.post("/wa/booking", async (req, res) => {
     if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
 
     const gymWalkIn = isGymWalkInFacility(facility);
+    if (gymWalkIn && (!x904IdentityType || !String(x904IdentityValue ?? "").trim())) {
+      res.status(400).json({ error: "Masukkan PIN X904 atau pilih kartu VIS001–VIS006 untuk akses Gym harian." });
+      return;
+    }
+    let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
+    if (x904IdentityType != null || x904IdentityValue != null) {
+      if (!gymWalkIn || !["pin", "card"].includes(String(x904IdentityType))) {
+        res.status(400).json({ error: "Identitas X904 hanya berlaku untuk booking Gym." });
+        return;
+      }
+      const identityType = x904IdentityType as "pin" | "card";
+      const identityValue = String(x904IdentityValue ?? "").trim().toUpperCase();
+      const card = identityType === "card" ? resolveX904NonmemberCard(identityValue) : null;
+      if (identityType === "card" && !card) {
+        res.status(400).json({ error: "Kartu harus terdaftar sebagai VIS001 sampai VIS006." });
+        return;
+      }
+      if (identityType === "pin" && !/^[0-9]{1,8}$/.test(identityValue)) {
+        res.status(400).json({ error: "PIN X904 harus berisi 1–8 angka." });
+        return;
+      }
+      const userPin = identityType === "card" ? card!.userPin : identityValue;
+      const inventory = await db.execute(sql`SELECT user_pin, device_uid, display_name, device_role
+        FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin=${userPin}`);
+      if (inventory.rows.length !== 1) {
+        res.status(409).json({ error: "Identitas tidak ditemukan atau tidak unik pada mesin X904." });
+        return;
+      }
+      const row = inventory.rows[0] as any;
+      const normalizedName = String(row.display_name ?? "").replace(/\s+/g, "").toUpperCase();
+      if (Number(row.device_role) !== 0 || !Number.isSafeInteger(Number(row.device_uid)) || Number(row.device_uid) <= 0 ||
+        (card && (Number(row.device_uid) !== card.deviceUid || normalizedName !== card.displayName.replace(/\s+/g, "").toUpperCase()))) {
+        res.status(409).json({ error: "Data kartu/PIN tidak cocok dengan identitas terverifikasi X904." });
+        return;
+      }
+      bookingCustomerName = String(row.display_name).trim();
+      verifiedX904Identity = {
+        identityType,
+        identityLabel: identityType === "card" ? identityValue : "PIN:" + identityValue,
+        userPin: String(row.user_pin),
+        deviceUid: Number(row.device_uid),
+        displayName: bookingCustomerName,
+      };
+    }
     const effectiveDurationHours = gymWalkIn ? 1 : Number(durationHours);
     const endTime = addHours(startTime, effectiveDurationHours);
 
@@ -873,7 +920,7 @@ router.post("/wa/booking", async (req, res) => {
     }
 
     const totalPrice = Number(facility.pricePerHour) * effectiveDurationHours;
-    const customer = await ensureCustomer(customerPhone, customerName);
+    const customer = await ensureCustomer(customerPhone, bookingCustomerName);
     const taxCalc = await resolveCustomerTax(totalPrice, {
       customerId: customer.id,
       bookingDate,
@@ -881,9 +928,10 @@ router.post("/wa/booking", async (req, res) => {
     const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-    const [booking] = await db.insert(bookingsTable).values({
+    const booking = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(bookingsTable).values({
       orderNumber,
-      customerName,
+      customerName: bookingCustomerName,
       customerEmail: customer.email,
       customerPhone,
       customerId: customer.id,
@@ -906,15 +954,21 @@ router.post("/wa/booking", async (req, res) => {
       grandTotal: String(taxCalc.grandTotal),
       ppnTreatment: taxCalc.ppnTreatment,
       ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
-    }).returning();
-
-    // History
-    await db.insert(bookingHistoryTable).values({
-      bookingId: booking.id,
-      fromStatus: null,
-      toStatus: "pending_payment",
-      changedByName: customerName,
-      note: "Booking dibuat via WhatsApp",
+      }).returning();
+      if (!created) throw new Error("WA_BOOKING_CREATE_FAILED");
+      // Store the verified PIN/card relationship atomically with the booking.
+      if (verifiedX904Identity) {
+        await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
+          (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+          VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
+            ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
+            ${created.id},'verified','pending')`);
+      }
+      await tx.insert(bookingHistoryTable).values({
+        bookingId: created.id, fromStatus: null, toStatus: "pending_payment",
+        changedByName: bookingCustomerName, note: "Booking dibuat via WhatsApp",
+      });
+      return created;
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
@@ -939,7 +993,7 @@ router.post("/wa/booking", async (req, res) => {
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingCreated({
-      customerName,
+      customerName: bookingCustomerName,
       customerPhone,
       orderNumber,
       facilityName: facility.name,
@@ -969,6 +1023,12 @@ router.post("/wa/booking", async (req, res) => {
       facilityName: facility.name,
       statusUrl,
       uploadProofUrl,
+      x904Identity: verifiedX904Identity ? {
+        type: verifiedX904Identity.identityType,
+        label: verifiedX904Identity.identityLabel,
+        displayName: verifiedX904Identity.displayName,
+        deviceUid: verifiedX904Identity.deviceUid,
+      } : null,
     });
   } catch (err) {
     console.error("[wa/booking] error:", err);
@@ -1592,7 +1652,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       booking.membershipPaymentId == null &&
       booking.groupRef == null &&
       Number(booking.downPayment ?? 0) === 0 &&
-      booking.isDpPaid !== true;
+      booking.isDpPaid !== true &&
+      !isGymWalkInFacility(facility);
 
     if (autoConfirmEligible) {
       proofUrl = await uploadProofWithFallback(
