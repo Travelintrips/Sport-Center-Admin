@@ -3683,7 +3683,7 @@ export default function AdminBookings() {
           setSelectedBooking(null);
           toast({
             title: "Pembatalan berhasil",
-            description: data?.groupRef
+            description: (data as any)?.groupRef
               ? "Seluruh sesi dalam grup telah dibatalkan dan alasannya dicatat."
               : "Booking dibatalkan dan alasannya dicatat.",
           });
