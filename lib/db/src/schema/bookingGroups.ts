@@ -4,6 +4,7 @@ import { scSchema } from "./_schema";
 export const bookingGroupStatusEnum = scSchema.enum("booking_group_status", [
   "pending",
   "paid",
+  "cancelled",
 ]);
 
 export const bookingGroupsTable = scSchema.table("booking_groups", {

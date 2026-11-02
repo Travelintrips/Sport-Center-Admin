@@ -1386,6 +1386,8 @@ function BookingDetailDrawer({
     editablePayment?.submittedAt ??
     booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
+  const [cancellationNoteError, setCancellationNoteError] = useState("");
+  const [cancellationReason, setCancellationReason] = useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
@@ -1512,11 +1514,20 @@ function BookingDetailDrawer({
 
   const handleAction = (action: string) => {
     if (confirmAction === action) {
-      if (action === "completed" || action === "cancelled" || action === "refunded") {
-        onUpdateStatus(action, adminNotes);
+      if (action === "cancelled" && !cancellationReason.trim()) {
+        setCancellationNoteError("Alasan pembatalan wajib diisi sebelum menyimpan.");
+        return;
       }
+      if (action === "completed" || action === "refunded") {
+        onUpdateStatus(action, adminNotes);
+      } else if (action === "cancelled") {
+        onUpdateStatus(action, cancellationReason.trim());
+      }
+      setCancellationNoteError("");
       setConfirmAction(null);
     } else {
+      setCancellationNoteError("");
+      if (action === "cancelled") setCancellationReason("");
       setConfirmAction(action);
     }
   };
@@ -2491,13 +2502,33 @@ function BookingDetailDrawer({
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-2 mt-2"
+                    className="flex flex-col gap-2 mt-2"
                   >
+                    {confirmAction === "cancelled" && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-red-600">Note / Alasan Pembatalan (wajib)</label>
+                        <Textarea
+                          value={cancellationReason}
+                          onChange={(event) => {
+                            setCancellationReason(event.target.value);
+                            if (event.target.value.trim()) setCancellationNoteError("");
+                          }}
+                          placeholder={isMultiSessionGroup
+                            ? "Alasan ini akan dicatat pada semua sesi dalam grup..."
+                            : "Tuliskan alasan pembatalan booking..."}
+                          rows={3}
+                          maxLength={2000}
+                        />
+                        <p className={cancellationNoteError ? "text-xs text-red-600" : "text-xs text-muted-foreground"}>
+                          {cancellationNoteError || (isMultiSessionGroup
+                            ? `Wajib diisi. Catatan akan dicatat ke ${groupBookings.length} sesi dan histori masing-masing.`
+                            : "Wajib diisi. Catatan akan dicatat pada booking dan booking_history.")}
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
                     <button
-                      onClick={() => {
-                        onUpdateStatus(confirmAction, adminNotes);
-                        setConfirmAction(null);
-                      }}
+                      onClick={() => handleAction(confirmAction)}
                       disabled={isUpdating}
                       className="flex-1 h-8 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
                     >
@@ -2509,6 +2540,7 @@ function BookingDetailDrawer({
                     >
                       Batal
                     </button>
+                    </div>
                   </motion.div>
                 )}
               </div>
@@ -2521,8 +2553,8 @@ function BookingDetailDrawer({
                 {booking.status !== "cancelled" && booking.status !== "refunded" && (
                   <ActionButton
                     action="cancelled"
-                    label="Batalkan Booking"
-                    description="Ubah status → Dibatalkan"
+                    label={isMultiSessionGroup ? `Batalkan Seluruh Grup (${groupBookings.length} sesi)` : "Batalkan Booking"}
+                    description={isMultiSessionGroup ? "Batalkan seluruh sesi dalam satu transaksi; alasan wajib." : "Ubah status menjadi Dibatalkan; alasan wajib."}
                     icon={XCircle}
                     confirmAction={confirmAction}
                     onClick={() => handleAction("cancelled")}
@@ -3644,12 +3676,29 @@ export default function AdminBookings() {
 
   const updateBookingMutation = useUpdateBooking({
     mutation: {
-      onSuccess: (data) => {
-        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      onSuccess: async (data, variables) => {
+        await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        const refreshed = await refetchBookings();
+        if (variables?.data?.status === "cancelled") {
+          setSelectedBooking(null);
+          toast({
+            title: "Pembatalan berhasil",
+            description: (data as any)?.groupRef
+              ? "Seluruh sesi dalam grup telah dibatalkan dan alasannya dicatat."
+              : "Booking dibatalkan dan alasannya dicatat.",
+          });
+          return;
+        }
         toast({ title: "Status booking diperbarui" });
-        setSelectedBooking(data);
+        setSelectedBooking(
+          (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === data?.id) ?? data,
+        );
       },
-      onError: () => toast({ title: "Gagal memperbarui booking", variant: "destructive" }),
+      onError: (error: any) => toast({
+        title: "Gagal memperbarui booking",
+        description: error?.message?.replace(/^HTTP \\d+ [^:]+:\\s*/, "") || "Periksa pembayaran, invoice, dan alasan pembatalan.",
+        variant: "destructive",
+      }),
     },
   });
 
@@ -4062,6 +4111,10 @@ export default function AdminBookings() {
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
+    if (status === "cancelled" && !String(adminNotes ?? "").trim()) {
+      toast({ title: "Alasan pembatalan wajib diisi", variant: "destructive" });
+      return;
+    }
     updateBookingMutation.mutate({
       id: selectedBooking.id,
       data: { status: status as any, adminNotes },

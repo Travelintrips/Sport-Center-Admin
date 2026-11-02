@@ -29,6 +29,7 @@ import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/addit
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { syncBookingGroupTotal } from "../lib/groupTotals";
+import { evaluateBookingCancellation } from "../lib/bookingCancellationPolicy";
 import {
   FINAL_BANK_MATCH_STATUSES,
   getReconciledPaymentIds,
@@ -2820,6 +2821,228 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!beforeUpdate) {
       res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    // Universal cancellation path: one booking when groupRef is absent,
+    // every active session when groupRef is present. A reason is mandatory.
+    if (status === "cancelled") {
+      const cancellationReason = typeof adminNotes === "string" ? adminNotes.trim() : "";
+      if (!cancellationReason) {
+        res.status(400).json({
+          code: "BOOKING_CANCELLATION_REASON_REQUIRED",
+          error: "Note/alasan pembatalan wajib diisi.",
+        });
+        return;
+      }
+      if (cancellationReason.length > 2000) {
+        res.status(400).json({ error: "Note pembatalan maksimal 2.000 karakter." });
+        return;
+      }
+
+      const actor = getUserFromReq(req);
+      const cancelledAt = new Date();
+      const today = todayWIB();
+      const cancellation = await db.transaction(async (tx) => {
+        const lockedRows = await tx
+          .select()
+          .from(bookingsTable)
+          .where(beforeUpdate.groupRef
+            ? eq(bookingsTable.groupRef, beforeUpdate.groupRef)
+            : eq(bookingsTable.id, id))
+          .for("update");
+
+        if (lockedRows.length === 0) return { kind: "not_found" as const };
+        const activeRows = lockedRows.filter((row) => row.status !== "cancelled");
+        if (activeRows.length === 0) return { kind: "already_cancelled" as const };
+
+
+        const bookingIds = activeRows.map((row) => row.id);
+        const paymentRows = await tx
+          .select({ id: paymentsTable.id, bookingId: paymentsTable.bookingId, status: paymentsTable.status })
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, bookingIds));
+
+        const membershipPaymentIds = [...new Set(
+          activeRows.map((row) => row.membershipPaymentId).filter((value): value is number => value != null),
+        )];
+        const membershipPayments = membershipPaymentIds.length > 0
+          ? await tx
+              .select({ id: membershipPaymentsTable.id, status: membershipPaymentsTable.status })
+              .from(membershipPaymentsTable)
+              .where(inArray(membershipPaymentsTable.id, membershipPaymentIds))
+          : [];
+
+        const invoiceBookingLinks = await tx
+          .select({ bookingId: companyInvoiceItemsTable.bookingId, invoiceId: companyInvoiceItemsTable.invoiceId })
+          .from(companyInvoiceItemsTable)
+          .where(inArray(companyInvoiceItemsTable.bookingId, bookingIds));
+        const directInvoiceIds = activeRows
+          .map((row) => row.companyInvoiceId)
+          .filter((value): value is number => value != null);
+        const linkedInvoiceIds = [...new Set([
+          ...directInvoiceIds,
+          ...invoiceBookingLinks.map((item) => item.invoiceId),
+        ])];
+        const linkedInvoices = linkedInvoiceIds.length > 0
+          ? await tx
+              .select({ id: companyInvoicesTable.id, invoiceNumber: companyInvoicesTable.invoiceNumber, status: companyInvoicesTable.status })
+              .from(companyInvoicesTable)
+              .where(inArray(companyInvoicesTable.id, linkedInvoiceIds))
+          : [];
+        const [groupRecord] = beforeUpdate.groupRef
+          ? await tx.select({ status: bookingGroupsTable.status })
+              .from(bookingGroupsTable)
+              .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef))
+              .limit(1)
+          : [];
+        const decision = evaluateBookingCancellation({
+          bookingStatuses: activeRows.map((row) => String(row.status)),
+          paymentStatuses: paymentRows.map((payment) => String(payment.status)),
+          membershipPaymentStatuses: membershipPayments.map((payment) => String(payment.status)),
+          invoiceNumbers: linkedInvoices.map((invoice) => invoice.invoiceNumber),
+          groupStatus: groupRecord?.status ? String(groupRecord.status) : null,
+        });
+        if (!decision.allowed) {
+          if (decision.kind === "terminal_status") {
+            return {
+              kind: "terminal_status" as const,
+              orders: activeRows.filter((row) =>
+                ["completed", "refunded", "expired", "rejected", "paid", "confirmed", "waiting_confirmation"].includes(row.status),
+              ).map((row) => row.orderNumber),
+            };
+          }
+          if (decision.kind === "payment_confirmed") return { kind: "payment_confirmed" as const };
+          if (decision.kind === "payment_pending") return { kind: "payment_pending" as const, paymentCount: paymentRows.length };
+          if (decision.kind === "membership_payment") return { kind: "membership_payment_exists" as const, paymentCount: membershipPayments.length };
+          return { kind: "company_invoice_exists" as const, invoiceNumbers: linkedInvoices.map((invoice) => invoice.invoiceNumber) };
+        }
+
+        const historyRows = activeRows.map((row) => ({
+          bookingId: row.id,
+          fromStatus: row.status,
+          toStatus: "cancelled",
+          changedBy: actor.userId ?? null,
+          changedByName: actor.userName ?? "Admin",
+          note: cancellationReason,
+        }));
+        for (const row of activeRows) {
+          const previousNotes = String(row.adminNotes ?? "").trim();
+          const noteEntry = `[PEMBATALAN ${cancelledAt.toISOString()}] ${cancellationReason}`;
+          await tx.update(bookingsTable)
+            .set({
+              status: "cancelled",
+              adminNotes: previousNotes ? `${previousNotes}\n${noteEntry}` : noteEntry,
+              updatedAt: cancelledAt,
+            })
+            .where(eq(bookingsTable.id, row.id));
+        }
+        await tx.insert(bookingHistoryTable).values(historyRows);
+
+        if (beforeUpdate.groupRef) {
+          const [group] = await tx.select().from(bookingGroupsTable)
+            .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef))
+            .limit(1);
+          if (group) {
+            const previousGroupNotes = String(group.notes ?? "").trim();
+            const groupNote = `[PEMBATALAN ${cancelledAt.toISOString()}] ${cancellationReason}`;
+            await tx.update(bookingGroupsTable)
+              .set({
+                status: "cancelled" as any,
+                notes: previousGroupNotes ? `${previousGroupNotes}\n${groupNote}` : groupNote,
+                updatedAt: cancelledAt,
+              })
+              .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef));
+          }
+        }
+        return { kind: "cancelled" as const, rows: activeRows };
+      });
+
+      if (cancellation.kind === "not_found") {
+        res.status(404).json({ error: "Booking tidak ditemukan." });
+        return;
+      }
+      if (cancellation.kind === "already_cancelled") {
+        res.status(409).json({ error: "Booking/grup sudah dibatalkan sebelumnya." });
+        return;
+      }
+      if (cancellation.kind === "terminal_status") {
+        res.status(409).json({
+          code: "BOOKING_CANCELLATION_REQUIRES_REFUND_OR_REVIEW",
+          error: `Pembatalan langsung ditolak karena ada booking berstatus selesai/refund/kedaluwarsa: ${cancellation.orders.join(", ")}. Periksa prosedur refund atau audit terlebih dahulu.`,
+        });
+        return;
+      }
+      if (cancellation.kind === "payment_confirmed") {
+        res.status(409).json({
+          code: "BOOKING_CANCELLATION_REQUIRES_REFUND",
+          error: "Ada pembayaran atau grup berstatus paid. Gunakan proses Kembalikan Dana; pembatalan langsung tidak akan menghapus transaksi.",
+        });
+        return;
+      }
+      if (cancellation.kind === "payment_pending") {
+        res.status(409).json({
+          code: "BOOKING_PAYMENT_PENDING",
+          error: "Ada pembayaran/bukti yang masih menunggu verifikasi. Selesaikan verifikasi atau penolakan pembayaran terlebih dahulu.",
+          paymentCount: cancellation.paymentCount,
+        });
+        return;
+      }
+      if (cancellation.kind === "membership_payment_exists") {
+        res.status(409).json({
+          code: "BOOKING_MEMBERSHIP_PAYMENT_EXISTS",
+          error: "Booking terhubung dengan pembayaran membership yang belum dibatalkan. Selesaikan alur membership terlebih dahulu.",
+          paymentCount: cancellation.paymentCount,
+        });
+        return;
+      }
+      if (cancellation.kind === "company_invoice_exists") {
+        res.status(409).json({
+          code: "BOOKING_COMPANY_INVOICE_EXISTS",
+          error: `Booking terhubung ke invoice perusahaan (${cancellation.invoiceNumbers.join(", ")}). Batalkan/selesaikan invoice melalui alur invoice terlebih dahulu.`,
+          invoiceNumbers: cancellation.invoiceNumbers,
+        });
+        return;
+      }
+
+      for (const row of cancellation.rows) {
+        syncStatusToBizportal(row.orderNumber, "cancelled", undefined, null, row, undefined, { preservePaymentStatus: true })
+          .catch((err) => logger.error({ err, orderNumber: row.orderNumber }, "Sync cancellation to BizPortal failed"));
+        const [facility] = await db.select({ name: facilitiesTable.name })
+          .from(facilitiesTable).where(eq(facilitiesTable.id, row.facilityId)).limit(1);
+        notifyBookingCancelled({
+          customerName: row.customerName,
+          customerPhone: row.customerPhone,
+          orderNumber: row.orderNumber,
+          facilityName: facility?.name ?? "",
+          bookingDate: row.bookingDate,
+          startTime: row.startTime,
+          endTime: row.endTime,
+          totalPrice: Number(row.totalPrice).toLocaleString("id-ID"),
+          reason: cancellationReason,
+        }).catch((err) => logger.error({ err, orderNumber: row.orderNumber }, "Booking cancellation notification failed"));
+        reverseTaxTransaction(row.id, row.orderNumber, today)
+          .catch((err) => logger.error({ err, orderNumber: row.orderNumber }, "Tax reversal after cancellation failed"));
+        reverseJournalEntry(row.id, row.orderNumber, `Booking ${row.orderNumber} — dibatalkan: ${cancellationReason}`, today)
+          .catch((err) => logger.error({ err, orderNumber: row.orderNumber }, "Journal reversal after cancellation failed"));
+        reversePublicAccountingEntry(row.orderNumber, `Booking ${row.orderNumber} — dibatalkan: ${cancellationReason}`, today)
+          .catch((err) => logger.error({ err, orderNumber: row.orderNumber }, "Public accounting reversal after cancellation failed"));
+        triggerRekapIfToday(row.bookingDate);
+      }
+
+      await logAudit({
+        userId: actor.userId,
+        userName: actor.userName,
+        userRole: actor.userRole,
+        action: "BOOKING_CANCELLED",
+        entity: beforeUpdate.groupRef ? "booking_group" : "booking",
+        entityId: beforeUpdate.id,
+        before: { groupRef: beforeUpdate.groupRef, bookingIds: cancellation.rows.map((row) => row.id) },
+        after: { status: "cancelled", reason: cancellationReason, cancelledCount: cancellation.rows.length },
+        ...getClientInfo(req),
+      });
+      const result = await getBookingWithPayment(id);
+      res.json(result);
       return;
     }
 
