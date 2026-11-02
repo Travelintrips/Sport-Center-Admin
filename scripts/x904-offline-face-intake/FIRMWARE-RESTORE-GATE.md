@@ -36,3 +36,19 @@ Device context from the existing project handover: serial TDBD234200545, firmwar
 - Do not install/upgrade firmware or test photo/template writes on production.
 - Do not run the blocked scripts; they are intentionally fail-closed.
 - Existing membership, check-in, access and suspend workers are not changed by this gate.
+## Additional vendor-manual evidence (general WDMS 8.0.5, not firmware-specific)
+The official ZKTeco Europe-hosted ZKBio WDMS User Manual (December 2021, software 8.0.5) documents:
+- Bio-Photo registration via device QR/mobile capture and approval; after approval it can be used for visible-light face verification (manual section 5.7.1, printed page 57–58).
+- Bio-Photo import using batch photos; filename must be employee ID and max photo size 25 KB (section 5.7.2, printed page 59).
+- USB-format employee export/import; export can be imported back into a device/system and includes a selectable Face Version for the face template (sections 4.5.2–4.5.3, printed pages 30–31).
+- WDMS PostgreSQL backup supports selecting photos, explicitly including bio-photos; manual restore has a “Restore photos” option (section 7.2.1, printed pages 77–78).
+
+Source: https://zkteco.eu/sites/default/files/content/downloads/zkbio-wdms_user-manual.pdf
+
+This is useful recovery guidance at the WDMS software level, but it does **not** establish:
+- that X904 model serial TDBD234200545 with firmware ZMM510-NF24VB-Ver1.4.15 is supported as a visible-light device by this WDMS build;
+- that the WDMS photo workflow writes a biometric template to this X904 (the manual distinguishes Bio-Photo from Bio-Template);
+- the required Face Version, algorithm compatibility, or exact X904 transfer method;
+- that a WDMS/PostgreSQL backup currently exists for this deployment, or that restore on the same device model/firmware is successful.
+
+Therefore the manual documents plausible vendor tooling for backup/restore, but NO-GO remains until ZKTeco confirms this exact model/firmware and a spare same-version device proves the complete backup → restore → face readback. Never experiment on the sole production door controller.
