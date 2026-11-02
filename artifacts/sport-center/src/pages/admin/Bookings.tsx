@@ -5259,6 +5259,7 @@ export default function AdminBookings() {
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="space-y-0.5">
