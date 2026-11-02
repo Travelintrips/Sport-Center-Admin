@@ -398,6 +398,8 @@ export interface BookingNotifData {
   uploadProofUrl?: string;
   statusUrl?: string;
   groupRef?: string | null;
+  /** Suppress the generic admin booking message when a dedicated admin report is emitted. */
+  adminReport?: boolean;
 }
 
 // Jika booking ini bagian dari keranjang multi-lapangan (groupRef), rangkum semua sesi
@@ -488,21 +490,27 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
     await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   }
 
-  const adminTpl = await getTemplate("admin_new_booking");
-  if (adminTpl) {
-    await sendWAToAdmins(interpolate(adminTpl, vars as unknown as Record<string, string>));
-  } else {
-    // Fallback: notifikasi admin hardcoded
-    const adminMsg =
-      `🏅 *BOOKING BARU — ${data.orderNumber}*\n\n` +
-      `Customer: *${data.customerName}*\n` +
-      `WA: *${data.customerPhone}*\n` +
-      `Fasilitas: *${data.facilityName}*\n` +
-      `Tanggal: *${data.bookingDate}*\n` +
-      `Jam: *${data.startTime} – ${data.endTime}*\n` +
-      `Total: *Rp ${data.totalPrice}*\n` +
-      (data.paymentDeadline ? `Batas bayar: ${data.paymentDeadline}` : "");
-    await sendWAToAdmins(adminMsg);
+  if (data.adminReport !== false) {
+    const adminTpl = await getTemplate("admin_new_booking");
+    if (adminTpl) {
+      await sendWAToAdmins(interpolate(adminTpl, vars as unknown as Record<string, string>));
+    } else {
+      // Fallback: notifikasi admin hardcoded
+      const adminMsg =
+        `🏅 *BOOKING BARU — ${data.orderNumber}*\n\n` +
+        `Customer: *${data.customerName}*\n` +
+        `WA: *${data.customerPhone}*\n` +
+        `Fasilitas: *${data.facilityName}*\n` +
+        `Tanggal: *${data.bookingDate}*\n` +
+        `Jam: *${data.startTime} – ${data.endTime}*\n` +
+        `Total: *Rp ${data.totalPrice}*\n` +
+        (data.paymentDeadline ? `Batas bayar: ${data.paymentDeadline}` : "");
+      await sendWAToAdmins(adminMsg, {
+        bookingId: data.bookingId,
+        orderNumber: data.orderNumber,
+        event: "admin_booking_created",
+      });
+    }
   }
 }
 
@@ -622,15 +630,115 @@ export async function notifyBookingExpired(data: BookingNotifData): Promise<void
   if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, data as unknown as Record<string, string>));
 }
 
+
+export async function notifyAdminBookingReport(data: {
+  bookingId: number;
+  paymentStatus: "paid" | "unpaid";
+  paymentMethod?: string | null;
+  paymentDate?: Date | string | null;
+  proofUrl?: string | null;
+}): Promise<void> {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.id, data.bookingId)).limit(1);
+  if (!booking) throw new Error(`Booking ${data.bookingId} tidak ditemukan untuk report WA admin.`);
+
+  const rows = booking.groupRef
+    ? await db.select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        customerName: bookingsTable.customerName,
+        customerPhone: bookingsTable.customerPhone,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        totalPrice: bookingsTable.totalPrice,
+        grandTotal: bookingsTable.grandTotal,
+        facilityName: facilitiesTable.name,
+      }).from(bookingsTable)
+        .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
+        .where(eq(bookingsTable.groupRef, booking.groupRef))
+    : await db.select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        customerName: bookingsTable.customerName,
+        customerPhone: bookingsTable.customerPhone,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        totalPrice: bookingsTable.totalPrice,
+        grandTotal: bookingsTable.grandTotal,
+        facilityName: facilitiesTable.name,
+      }).from(bookingsTable)
+        .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
+        .where(eq(bookingsTable.id, booking.id));
+  rows.sort((a, b) => String(a.bookingDate).localeCompare(String(b.bookingDate)) ||
+    String(a.startTime).localeCompare(String(b.startTime)) ||
+    String(a.orderNumber).localeCompare(String(b.orderNumber)));
+
+  const [group] = booking.groupRef
+    ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1)
+    : [null];
+  const grandTotal = group?.totalPayment != null
+    ? Number(group.totalPayment)
+    : rows.reduce((sum, row) => sum + Number(row.grandTotal ?? row.totalPrice ?? 0), 0);
+  const first = rows[0] ?? booking;
+  const customerName = String(first.customerName ?? booking.customerName);
+  const facilityNames = [...new Set(rows.map((row) => String(row.facilityName ?? "-")))];
+  const isGroup = Boolean(booking.groupRef && rows.length > 1);
+  const formatDate = (value: string | Date) => {
+    const date = new Date(`${String(value).slice(0, 10)}T12:00:00+07:00`);
+    return date.toLocaleDateString("id-ID", {
+      weekday: "long", day: "numeric", month: "long", year: "numeric",
+      timeZone: "Asia/Jakarta",
+    });
+  };
+  const sessionLines = rows.map((row, index) =>
+    `${index + 1}. *${row.orderNumber}*\n   ${formatDate(row.bookingDate)}\n   ${String(row.startTime).slice(0, 5)}–${String(row.endTime).slice(0, 5)} | Rp ${Number(row.grandTotal ?? row.totalPrice ?? 0).toLocaleString("id-ID")}`
+  ).join("\n\n");
+  const paid = data.paymentStatus === "paid";
+  const message =
+    `📋 *BOOKING BARU*\n\n` +
+    (booking.groupRef ? `🆔 Group ID: *${booking.groupRef}*\n\n` : "") +
+    `👤 Customer: *${customerName}*\n` +
+    `🏟️ Fasilitas: *${(facilityNames.length === 1 ? facilityNames[0] : facilityNames.join(", "))}*\n` +
+    `📅 Jenis: *${isGroup ? "Booking Berulang / Grup" : "Booking Tunggal"}*\n` +
+    `📌 Jumlah sesi: *${rows.length} sesi*\n\n` +
+    `*DETAIL JADWAL BOOKING*\n\n${sessionLines}\n\n` +
+    `━━━━━━━━━━━━━━━━\n\n` +
+    `💰 *RINGKASAN PEMBAYARAN*\n\n` +
+    `Total booking: *Rp ${grandTotal.toLocaleString("id-ID")}*\n` +
+    (paid
+      ? `Metode: *${data.paymentMethod ?? "-"}*\nTanggal pembayaran: *${data.paymentDate ? formatDate(data.paymentDate) : "-"}*\nStatus pembayaran: ✅ *LUNAS*\n\n📎 Bukti pembayaran: ${data.proofUrl ? data.proofUrl : "Tersimpan"}`
+      : `Status pembayaran: ⏳ *BELUM DIBAYAR*`);
+  await sendWAToAdmins(message, {
+    bookingId: booking.id,
+    orderNumber: booking.orderNumber,
+    event: paid ? "admin_booking_paid_report" : "admin_booking_unpaid_report",
+  });
+}
+
 export async function notifyPaymentProofUploaded(data: BookingNotifData & { reviewUrl?: string }): Promise<void> {
   if (data.reviewUrl) {
+    const groupSummary = await buildGroupSummary(data.groupRef, data.orderNumber);
+    let totalLabel = `Rp ${data.totalPrice}`;
+    if (data.groupRef) {
+      const [group] = await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, data.groupRef))
+        .limit(1);
+      if (group) totalLabel = `Rp ${Number(group.totalPayment).toLocaleString("id-ID")}`;
+    }
     const msg =
       `🔔 *Bukti Pembayaran Masuk*\n\n` +
+      (data.groupRef ? `🆔 Group ID: *${data.groupRef}*\n` : "") +
       `Booking: *${data.orderNumber}*\n` +
       `Customer: *${data.customerName}*\n` +
-      `Fasilitas: *${data.facilityName}*\n` +
-      `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
-      `Total: *Rp ${data.totalPrice}*\n\n` +
+      (data.groupRef ? `Fasilitas: *${data.facilityName}*\n` : `Fasilitas: *${data.facilityName}*\n`) +
+      (data.groupRef ? "" : `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n`) +
+      (data.groupRef ? `Total pembayaran grup: *${totalLabel}*\n` : `Total: *${totalLabel}*\n`) +
+      (groupSummary ? `${groupSummary}\n\n` : "\n") +
+      `Status: ⏳ *MENUNGGU VERIFIKASI*\n\n` +
       `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
     await sendWAToAdmins(msg, {
       bookingId: data.bookingId,
