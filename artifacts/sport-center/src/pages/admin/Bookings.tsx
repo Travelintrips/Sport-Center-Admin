@@ -1518,10 +1518,15 @@ function BookingDetailDrawer({
         setCancellationNoteError("Alasan pembatalan wajib diisi sebelum menyimpan.");
         return;
       }
+      if (action === "cancelled") {
+        // Keep the reason and confirmation visible while the request is pending.
+        // On success the mutation closes the drawer; on error the admin can retry.
+        onUpdateStatus(action, cancellationReason.trim());
+        setCancellationNoteError("");
+        return;
+      }
       if (action === "completed" || action === "refunded") {
         onUpdateStatus(action, adminNotes);
-      } else if (action === "cancelled") {
-        onUpdateStatus(action, cancellationReason.trim());
       }
       setCancellationNoteError("");
       setConfirmAction(null);
@@ -2529,10 +2534,10 @@ function BookingDetailDrawer({
                     <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAction(confirmAction)}
-                      disabled={isUpdating}
+                      disabled={isUpdating || (confirmAction === "cancelled" && !cancellationReason.trim())}
                       className="flex-1 h-8 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
                     >
-                      {isUpdating ? "Menyimpan..." : `Simpan → ${STATUS_CONFIG[confirmAction as BookingStatus]?.label ?? confirmAction}`}
+                      {isUpdating ? "Memproses pembatalan..." : confirmAction === "cancelled" ? "Konfirmasi Pembatalan" : `Simpan → ${STATUS_CONFIG[confirmAction as BookingStatus]?.label ?? confirmAction}`}
                     </button>
                     <button
                       onClick={() => setConfirmAction(null)}
@@ -2546,23 +2551,6 @@ function BookingDetailDrawer({
               </div>
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">
-                <p className="text-xs text-slate-400">
-                  Atau gunakan tombol cepat (klik dua kali untuk konfirmasi):
-                </p>
-
-                {booking.status !== "cancelled" && booking.status !== "refunded" && (
-                  <ActionButton
-                    action="cancelled"
-                    label={isMultiSessionGroup ? `Batalkan Seluruh Grup (${groupBookings.length} sesi)` : "Batalkan Booking"}
-                    description={isMultiSessionGroup ? "Batalkan seluruh sesi dalam satu transaksi; alasan wajib." : "Ubah status menjadi Dibatalkan; alasan wajib."}
-                    icon={XCircle}
-                    confirmAction={confirmAction}
-                    onClick={() => handleAction("cancelled")}
-                    isUpdating={isUpdating}
-                    variant="danger"
-                  />
-                )}
-
                 {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
                   <ActionButton
                     action="refunded"
@@ -3258,6 +3246,12 @@ export default function AdminBookings() {
   const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100 | 200 | 300>(25);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedGroupRef, setSelectedGroupRef] = useState<string | null>(null);
+  const [tableCancellation, setTableCancellation] = useState<{
+    bookingId: number;
+    groupCount: number;
+    isGroup: boolean;
+  } | null>(null);
+  const [tableCancellationReason, setTableCancellationReason] = useState("");
   // Paginated group rows are summaries. Always load the authoritative booking
   // detail, including payment rows linked to *any* member of the group.
   useEffect(() => {
@@ -3681,6 +3675,8 @@ export default function AdminBookings() {
         const refreshed = await refetchBookings();
         if (variables?.data?.status === "cancelled") {
           setSelectedBooking(null);
+          setTableCancellation(null);
+          setTableCancellationReason("");
           toast({
             title: "Pembatalan berhasil",
             description: (data as any)?.groupRef
@@ -4108,6 +4104,20 @@ export default function AdminBookings() {
     }
     return m;
   }, [filtered]);
+
+  const openTableCancellation = (bookingId: number, groupCount = 1, isGroup = false) => {
+    setTableCancellation({ bookingId, groupCount, isGroup });
+    setTableCancellationReason("");
+  };
+
+  const confirmTableCancellation = () => {
+    const reason = tableCancellationReason.trim();
+    if (!tableCancellation || !reason || updateBookingMutation.isPending) return;
+    updateBookingMutation.mutate({
+      id: tableCancellation.bookingId,
+      data: { status: "cancelled" as any, adminNotes: reason },
+    });
+  };
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
@@ -5425,6 +5435,12 @@ export default function AdminBookings() {
                                   bookingId={(groupVerificationRow ?? b).id}
                                   status={groupStatus}
                                   onUpdate={(_id, status) => {
+                                    if (status === "cancelled") {
+                                      // The API detects groupRef and cancels every sibling
+                                      // atomically; do not issue one request per session.
+                                      openTableCancellation((groupVerificationRow ?? b).id, groupRows.length, true);
+                                      return;
+                                    }
                                     groupRows.forEach((row: any) => {
                                       if (row.status !== status) {
                                         updateBookingMutation.mutate({ id: row.id, data: { status: status as any } });
@@ -5440,9 +5456,13 @@ export default function AdminBookings() {
                               <InlineStatusSelect
                                 bookingId={b.id}
                                 status={b.status}
-                                onUpdate={(id, status) =>
-                                  updateBookingMutation.mutate({ id, data: { status: status as any } })
-                                }
+                                onUpdate={(id, status) => {
+                                  if (status === "cancelled") {
+                                    openTableCancellation(id, 1, false);
+                                    return;
+                                  }
+                                  updateBookingMutation.mutate({ id, data: { status: status as any } });
+                                }}
                                 isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                               />
                             )}
@@ -5821,6 +5841,70 @@ export default function AdminBookings() {
            onUpdateAdditionalCharges={handleAdditionalChargesUpdate}
         />
       )}
+
+      <Dialog
+        open={Boolean(tableCancellation)}
+        onOpenChange={(open) => {
+          if (!open && !updateBookingMutation.isPending) {
+            setTableCancellation(null);
+            setTableCancellationReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <XCircle size={18} />
+              Konfirmasi Pembatalan {tableCancellation?.isGroup ? "Grup" : "Booking"}
+            </DialogTitle>
+          </DialogHeader>
+          {tableCancellation && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {tableCancellation.isGroup
+                  ? `Seluruh ${tableCancellation.groupCount} sesi dalam grup akan dibatalkan dalam satu transaksi.`
+                  : "Booking ini akan dibatalkan."}
+                {" "}Server tetap memeriksa pembayaran, invoice, dan status final sebelum memproses pembatalan.
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-red-600">Note / Alasan Pembatalan (wajib)</label>
+                <Textarea
+                  value={tableCancellationReason}
+                  onChange={(event) => setTableCancellationReason(event.target.value)}
+                  placeholder="Tuliskan alasan pembatalan..."
+                  rows={4}
+                  maxLength={2000}
+                  disabled={updateBookingMutation.isPending}
+                />
+                <p className="text-xs text-slate-500">
+                  Wajib diisi, maksimal 2.000 karakter. Catatan disimpan pada booking dan riwayat pembatalan.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={updateBookingMutation.isPending}
+                  onClick={() => {
+                    setTableCancellation(null);
+                    setTableCancellationReason("");
+                  }}
+                >
+                  Kembali
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={!tableCancellationReason.trim() || updateBookingMutation.isPending}
+                  onClick={confirmTableCancellation}
+                >
+                  {updateBookingMutation.isPending ? "Memproses..." : "Konfirmasi Pembatalan"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <VerifyIdDialog booking={verifyBooking} onClose={() => setVerifyBooking(null)} />
 
