@@ -826,7 +826,7 @@ router.post("/payments", async (req, res) => {
     if (!adminSelfServicePayment) {
       const APP_URL = await getBaseUrl();
       const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
-      await notifyPaymentProofUploaded({
+      notifyPaymentProofUploaded({
         bookingId: booking.id,
         groupRef: booking.groupRef,
         customerName: booking.customerName,
@@ -838,7 +838,10 @@ router.post("/payments", async (req, res) => {
         endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
         reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
-      });
+      }).catch((err) => logger.error(
+        { err, bookingId: booking.id, paymentId: payment.id },
+        "[WA] Payment proof verification alert failed",
+      ));
     }
     syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
 
