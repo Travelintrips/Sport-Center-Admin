@@ -29,6 +29,7 @@ import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/addit
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { syncBookingGroupTotal } from "../lib/groupTotals";
+import { evaluateBookingCancellation } from "../lib/bookingCancellationPolicy";
 import {
   FINAL_BANK_MATCH_STATUSES,
   getReconciledPaymentIds,
@@ -2855,15 +2856,6 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         const activeRows = lockedRows.filter((row) => row.status !== "cancelled");
         if (activeRows.length === 0) return { kind: "already_cancelled" as const };
 
-        const protectedRows = activeRows.filter((row) =>
-          ["completed", "refunded", "expired"].includes(row.status),
-        );
-        if (protectedRows.length > 0) {
-          return {
-            kind: "terminal_status" as const,
-            orders: protectedRows.map((row) => row.orderNumber),
-          };
-        }
 
         const bookingIds = activeRows.map((row) => row.id);
         const paymentRows = await tx
@@ -2885,21 +2877,12 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         const membershipPaymentIds = [...new Set(
           activeRows.map((row) => row.membershipPaymentId).filter((value): value is number => value != null),
         )];
-        if (membershipPaymentIds.length > 0) {
-          const membershipPayments = await tx
-            .select({ id: membershipPaymentsTable.id, status: membershipPaymentsTable.status })
-            .from(membershipPaymentsTable)
-            .where(inArray(membershipPaymentsTable.id, membershipPaymentIds));
-          const activeMembershipPayments = membershipPayments.filter((payment) =>
-            payment.status !== "cancelled",
-          );
-          if (activeMembershipPayments.length > 0) {
-            return {
-              kind: "membership_payment_exists" as const,
-              paymentCount: activeMembershipPayments.length,
-            };
-          }
-        }
+        const membershipPayments = membershipPaymentIds.length > 0
+          ? await tx
+              .select({ id: membershipPaymentsTable.id, status: membershipPaymentsTable.status })
+              .from(membershipPaymentsTable)
+              .where(inArray(membershipPaymentsTable.id, membershipPaymentIds))
+          : [];
 
         const invoiceBookingLinks = await tx
           .select({ bookingId: companyInvoiceItemsTable.bookingId, invoiceId: companyInvoiceItemsTable.invoiceId })
@@ -2912,17 +2895,38 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           ...directInvoiceIds,
           ...invoiceBookingLinks.map((item) => item.invoiceId),
         ])];
-        if (linkedInvoiceIds.length > 0) {
-          const linkedInvoices = await tx
-            .select({ id: companyInvoicesTable.id, invoiceNumber: companyInvoicesTable.invoiceNumber, status: companyInvoicesTable.status })
-            .from(companyInvoicesTable)
-            .where(inArray(companyInvoicesTable.id, linkedInvoiceIds));
-          if (linkedInvoices.length > 0) {
+        const linkedInvoices = linkedInvoiceIds.length > 0
+          ? await tx
+              .select({ id: companyInvoicesTable.id, invoiceNumber: companyInvoicesTable.invoiceNumber, status: companyInvoicesTable.status })
+              .from(companyInvoicesTable)
+              .where(inArray(companyInvoicesTable.id, linkedInvoiceIds))
+          : [];
+        const [groupRecord] = beforeUpdate.groupRef
+          ? await tx.select({ status: bookingGroupsTable.status })
+              .from(bookingGroupsTable)
+              .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef))
+              .limit(1)
+          : [];
+        const decision = evaluateBookingCancellation({
+          bookingStatuses: activeRows.map((row) => String(row.status)),
+          paymentStatuses: paymentRows.map((payment) => String(payment.status)),
+          membershipPaymentStatuses: membershipPayments.map((payment) => String(payment.status)),
+          invoiceNumbers: linkedInvoices.map((invoice) => invoice.invoiceNumber),
+          groupStatus: groupRecord?.status ? String(groupRecord.status) : null,
+        });
+        if (!decision.allowed) {
+          if (decision.kind === "terminal_status") {
             return {
-              kind: "company_invoice_exists" as const,
-              invoiceNumbers: linkedInvoices.map((invoice) => invoice.invoiceNumber),
+              kind: "terminal_status" as const,
+              orders: activeRows.filter((row) =>
+                ["completed", "refunded", "expired", "rejected", "paid", "confirmed", "waiting_confirmation"].includes(row.status),
+              ).map((row) => row.orderNumber),
             };
           }
+          if (decision.kind === "payment_confirmed") return { kind: "payment_confirmed" as const };
+          if (decision.kind === "payment_pending") return { kind: "payment_pending" as const, paymentCount: paymentRows.length };
+          if (decision.kind === "membership_payment") return { kind: "membership_payment_exists" as const, paymentCount: membershipPayments.length };
+          return { kind: "company_invoice_exists" as const, invoiceNumbers: linkedInvoices.map((invoice) => invoice.invoiceNumber) };
         }
 
         const historyRows = activeRows.map((row) => ({
@@ -2939,7 +2943,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           await tx.update(bookingsTable)
             .set({
               status: "cancelled",
-              adminNotes: previousNotes ? `${previousNotes}\\n${noteEntry}` : noteEntry,
+              adminNotes: previousNotes ? `${previousNotes}\n${noteEntry}` : noteEntry,
               updatedAt: cancelledAt,
             })
             .where(eq(bookingsTable.id, row.id));
@@ -2956,7 +2960,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
             await tx.update(bookingGroupsTable)
               .set({
                 status: "cancelled" as any,
-                notes: previousGroupNotes ? `${previousGroupNotes}\\n${groupNote}` : groupNote,
+                notes: previousGroupNotes ? `${previousGroupNotes}\n${groupNote}` : groupNote,
                 updatedAt: cancelledAt,
               })
               .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef));
@@ -2980,12 +2984,17 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         });
         return;
       }
-      if (cancellation.kind === "payment_exists") {
+      if (cancellation.kind === "payment_confirmed") {
         res.status(409).json({
-          code: cancellation.hasConfirmed ? "BOOKING_CANCELLATION_REQUIRES_REFUND" : "BOOKING_PAYMENT_PENDING",
-          error: cancellation.hasConfirmed
-            ? "Ada pembayaran terkonfirmasi. Gunakan proses Kembalikan Dana; pembatalan langsung tidak akan menghapus transaksi."
-            : "Ada pembayaran/bukti yang masih menunggu verifikasi. Selesaikan verifikasi atau penolakan pembayaran terlebih dahulu.",
+          code: "BOOKING_CANCELLATION_REQUIRES_REFUND",
+          error: "Ada pembayaran atau grup berstatus paid. Gunakan proses Kembalikan Dana; pembatalan langsung tidak akan menghapus transaksi.",
+        });
+        return;
+      }
+      if (cancellation.kind === "payment_pending") {
+        res.status(409).json({
+          code: "BOOKING_PAYMENT_PENDING",
+          error: "Ada pembayaran/bukti yang masih menunggu verifikasi. Selesaikan verifikasi atau penolakan pembayaran terlebih dahulu.",
           paymentCount: cancellation.paymentCount,
         });
         return;
