@@ -159,6 +159,7 @@ export default function WaBookingForm() {
         const data = await response.json();
         if (!response.ok || !data.valid || !data.displayName) throw new Error(data.error || "Identitas tidak valid.");
         setX904VerifiedName(data.displayName);
+        setForm(previous => ({ ...previous, customerName: data.displayName }));
       } catch (err) {
         if (!controller.signal.aborted) setX904VerificationError(err instanceof Error ? err.message : "Gagal memverifikasi identitas.");
       } finally {
@@ -1007,6 +1008,26 @@ export default function WaBookingForm() {
               )}
             </CardContent>
           </Card>
+
+          {(() => {
+            const missing: string[] = [];
+            if (dedicatedNonmember && !x904VerifiedName) missing.push(x904Verifying ? "Verifikasi PIN/kartu sedang berlangsung" : "PIN/kartu X904 belum terverifikasi");
+            if (!form.customerName) missing.push("Nama pemesan belum tersedia");
+            if (!form.customerPhone.trim() || (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim()))) missing.push("Isi nomor WhatsApp valid (628...)");
+            if (!form.bookingDate) missing.push("Pilih tanggal kunjungan");
+            if (!form.startTime) missing.push("Pilih jam kunjungan");
+            if (!gymWalkIn && (availabilityLoading || !availabilitySlots || !timeSlots.includes(form.startTime))) missing.push("Pilih slot yang tersedia");
+            if (!form.paymentMethod) missing.push("Pilih QRIS atau transfer bank");
+            if (!proofFile) missing.push("Unggah bukti pembayaran");
+            else if (proofScanning) missing.push("Menunggu pemeriksaan bukti");
+            else if (!proofOcrPreview?.amountMatch) missing.push("Nominal bukti belum cocok dengan tagihan");
+            if (missing.length === 0 || submitting || uploadingProof) return null;
+            return <div role="status" aria-live="polite" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <p className="font-semibold">Booking belum dapat dikirim:</p>
+              <ul className="list-disc pl-5">{missing.map(reason => <li key={reason}>{reason}</li>)}</ul>
+              {dedicatedNonmember && <p className="mt-2">Untuk simulasi tanpa pembayaran, gunakan lingkungan uji. Bukti pembayaran tetap wajib untuk transaksi nyata.</p>}
+            </div>;
+          })()}
 
           <Button
             type="submit"
