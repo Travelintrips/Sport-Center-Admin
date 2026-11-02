@@ -52,6 +52,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     WHERE a.verification_state='verified'
       AND a.payment_id IS NOT NULL AND a.confirmed_at IS NOT NULL AND a.expires_at IS NOT NULL
       AND (a.access_state IN ('pending','active','expired') OR p.status::text IN ('cancelled','rejected','refunded'))
+      AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
     ORDER BY a.confirmed_at LIMIT 25`);
 
   for (const row of due.rows as any[]) {
