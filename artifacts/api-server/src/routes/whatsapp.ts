@@ -834,6 +834,40 @@ async function sendWAReply(phone: string, message: string): Promise<void> {
   await sendWAMsg(phone, message, true);
 }
 
+// Public read-only identity lookup. Never creates bookings, payments or X904 commands.
+router.get("/wa/x904-identity", async (req, res) => {
+  try {
+    const type = String(req.query.type ?? "");
+    const value = String(req.query.value ?? "").trim().toUpperCase();
+    if (!["pin", "card"].includes(type) || !value) {
+      res.status(400).json({ error: "Pilih jenis identitas dan masukkan PIN/kartu." }); return;
+    }
+    const card = type === "card" ? resolveX904NonmemberCard(value) : null;
+    if ((type === "card" && !card) || (type === "pin" && !/^[0-9]{1,8}$/.test(value))) {
+      res.status(400).json({ error: "Format PIN atau kartu tidak valid." }); return;
+    }
+    const pin = card ? card.userPin : value;
+    const inventory = await db.execute(sql`SELECT user_pin, device_uid, display_name, device_role
+      FROM sport_center.gym_x904_lan_users
+      WHERE device_serial='TDBD234200545' AND user_pin=${pin}`);
+    if (inventory.rows.length !== 1) {
+      res.status(404).json({ error: "PIN/kartu tidak ditemukan atau tidak unik di inventaris X904." }); return;
+    }
+    const row = inventory.rows[0] as any;
+    const name = String(row.display_name ?? "").trim();
+    if (!name || Number(row.device_role) !== 0 || !Number.isSafeInteger(Number(row.device_uid)) ||
+        Number(row.device_uid) <= 0 ||
+        (card && (Number(row.device_uid) !== card.deviceUid ||
+          name.replace(/\s+/g, "").toUpperCase() !== card.displayName.replace(/\s+/g, "").toUpperCase()))) {
+      res.status(409).json({ error: "Identitas X904 tidak cocok dengan inventaris terverifikasi." }); return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ valid: true, displayName: name, identityType: type, identityValue: value });
+  } catch {
+    res.status(503).json({ error: "Verifikasi X904 sedang tidak tersedia." });
+  }
+});
+
 // POST /api/wa/booking — create booking from mini form
 router.post("/wa/booking", async (req, res) => {
   try {

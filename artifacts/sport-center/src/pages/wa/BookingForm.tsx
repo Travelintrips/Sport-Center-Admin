@@ -121,6 +121,9 @@ export default function WaBookingForm() {
   const [proofOcrPreview, setProofOcrPreview] = useState<BookingProofOcrPreview | null>(null);
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("pin");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
+  const [x904VerifiedName, setX904VerifiedName] = useState("");
+  const [x904VerificationError, setX904VerificationError] = useState("");
+  const [x904Verifying, setX904Verifying] = useState(false);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -142,6 +145,28 @@ export default function WaBookingForm() {
       .catch(() => setError("Gagal memuat data fasilitas"))
       .finally(() => setLoading(false));
   }, [params.facilityId]);
+
+  useEffect(() => {
+    setX904VerifiedName("");
+    setX904VerificationError("");
+    if (!dedicatedNonmember || !x904IdentityValue.trim()) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setX904Verifying(true);
+      try {
+        const query = new URLSearchParams({ type: x904IdentityType, value: x904IdentityValue.trim() });
+        const response = await fetch("/api/wa/x904-identity?" + query, { signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok || !data.valid || !data.displayName) throw new Error(data.error || "Identitas tidak valid.");
+        setX904VerifiedName(data.displayName);
+      } catch (err) {
+        if (!controller.signal.aborted) setX904VerificationError(err instanceof Error ? err.message : "Gagal memverifikasi identitas.");
+      } finally {
+        if (!controller.signal.aborted) setX904Verifying(false);
+      }
+    }, 400);
+    return () => { window.clearTimeout(timeout); controller.abort(); setX904Verifying(false); };
+  }, [dedicatedNonmember, x904IdentityType, x904IdentityValue]);
 
   // Manual payment options are read from the public production settings.
   // This flow does not use the Paylabs/sandbox configuration.
@@ -407,6 +432,14 @@ export default function WaBookingForm() {
       setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
       return;
     }
+    if (dedicatedNonmember && (!x904VerifiedName || x904Verifying)) {
+      setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
+      return;
+    }
+    if (dedicatedNonmember && (!form.paymentMethod || paymentOptions.length === 0)) {
+      setError("Pilih QRIS atau transfer bank yang tersedia sebelum mengunggah bukti.");
+      return;
+    }
     if (dedicatedNonmember && !proofFile) {
       setError("Unggah foto bukti pembayaran sebelum mengirim untuk verifikasi.");
       return;
@@ -644,6 +677,7 @@ export default function WaBookingForm() {
                       </Select>
                     </div>
                   )}
+                  {dedicatedNonmember && x904IdentityValue && <p role="status" className={`text-xs ${x904VerifiedName ? "text-green-700" : "text-red-700"}`}>{x904Verifying ? "Memeriksa identitas X904..." : x904VerifiedName ? `Terverifikasi: ${x904VerifiedName}` : x904VerificationError || "Menunggu verifikasi..."}</p>}
                 </div>
               )}
             </CardContent>
@@ -768,7 +802,7 @@ export default function WaBookingForm() {
           </Card>
 
           {/* Price summary */}
-          {form.startTime && (
+          {(form.startTime || dedicatedNonmember) && (
             <Card className="border-orange-200 bg-orange-50">
               <CardContent className="pt-4 pb-3 space-y-1.5">
                 {paymentOptions.length > 0 && (
