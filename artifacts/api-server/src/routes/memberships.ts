@@ -137,6 +137,7 @@ async function applyMembershipPaymentProof(
   paymentProofUrl: string,
   paymentDateInput?: unknown,
   reqLog?: { error: (obj: unknown, msg?: string) => void },
+  notifyAdminGroup = true,
 ) {
   if (!["qris", "transfer"].includes(paymentMethod)) {
     throw new MembershipProofError(400, "Metode pembayaran tidak valid");
@@ -203,17 +204,19 @@ async function applyMembershipPaymentProof(
   );
   await syncToPublic(membership);
 
-  const appUrl = await getBaseUrl();
-  notifyMembershipPaymentProofUploaded({
-    membershipId: membership.id,
-    customerName: membership.name,
-    startDate: membership.startDate,
-    endDate: membership.endDate,
-    totalPrice: Number(membership.totalPrice).toLocaleString("id-ID"),
-    reviewUrl: appUrl ? `${appUrl}/admin/memberships` : undefined,
-  }).catch((err) =>
-    reqLog?.error({ err }, "[WA] notifyMembershipPaymentProofUploaded error"),
-  );
+  if (notifyAdminGroup) {
+    const appUrl = await getBaseUrl();
+    notifyMembershipPaymentProofUploaded({
+      membershipId: membership.id,
+      customerName: membership.name,
+      startDate: membership.startDate,
+      endDate: membership.endDate,
+      totalPrice: Number(membership.totalPrice).toLocaleString("id-ID"),
+      reviewUrl: appUrl ? `${appUrl}/admin/memberships` : undefined,
+    }).catch((err) =>
+      reqLog?.error({ err }, "[WA] notifyMembershipPaymentProofUploaded error"),
+    );
+  }
 
   return membership;
 }
@@ -1110,7 +1113,17 @@ router.post("/memberships/:id/admin-payment-proof-upload", adminMiddleware, memb
     const safeExt: Record<string,string> = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp","image/heic":".heic","image/heif":".heif"};
     const objectName = `membership-${id}-payment-${pending.id}-${randomUUID()}${safeExt[req.file.mimetype.toLowerCase()]}`;
     const proofUrl = await uploadFile(BUCKETS.proof,objectName,req.file.buffer,req.file.mimetype);
-    const membership = await applyMembershipPaymentProof(id,pending.id,String(req.body?.paymentMethod ?? ""),proofUrl,req.body?.paymentDate,req.log);
+    const actorRole = String((req as any).user?.role ?? "");
+    const hasSelfConfirmationAuthority = ["owner", "admin", "super_admin", "finance", "admin_booking"].includes(actorRole);
+    const membership = await applyMembershipPaymentProof(
+      id,
+      pending.id,
+      String(req.body?.paymentMethod ?? ""),
+      proofUrl,
+      req.body?.paymentDate,
+      req.log,
+      !hasSelfConfirmationAuthority,
+    );
     res.json({...membership,totalPrice:Number(membership.totalPrice)});
   } catch(err) {
     if(err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
