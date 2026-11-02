@@ -1022,21 +1022,84 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       }
     }
 
-    const isBookingFullyPaid = (booking:any) => {
-      if (booking.payerType === "company") {
-        const invoice=booking.companyInvoiceId != null ? companyInvoiceById.get(booking.companyInvoiceId) : undefined;
-        return invoice?.status === "paid" && Boolean(invoice.paidAt) &&
-          Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)>0;
+    const getCanonicalBookingPayments = (booking: any) => {
+      const candidates = [
+        ...(Array.isArray(booking.groupPayments) ? booking.groupPayments : []),
+        ...(Array.isArray(booking.payments) ? booking.payments : []),
+        booking.payment,
+        booking.membershipPayment,
+      ].filter((payment: any) => payment?.id != null);
+      const canonical = new Map<string, any>();
+      for (const payment of candidates) {
+        const sourceMembershipPaymentId =
+          payment.sourceMembershipPaymentId ?? payment.source_membership_payment_id;
+        const key = sourceMembershipPaymentId != null
+          ? `membership:${sourceMembershipPaymentId}`
+          : payment === booking.membershipPayment
+            ? `membership:${payment.id}`
+            : `sport:${payment.id}`;
+        const existing = canonical.get(key);
+        // Keep sport_payments mirror where available: it carries settlement/reconciliation metadata.
+        if (!existing || (sourceMembershipPaymentId != null && payment !== booking.membershipPayment)) {
+          canonical.set(key, payment);
+        }
       }
-      const payments = [...new Map(
-        [booking.payment,...(Array.isArray(booking.payments)?booking.payments:[])]
-          .filter((p:any)=>p?.id != null && p.status==="confirmed")
-          .map((p:any)=>[p.id,p])
-      ).values()];
-      const due=Number(booking.grandTotal ?? booking.totalPrice ?? 0);
-      const confirmedDirect=payments.reduce((sum:number,p:any)=>sum+Number(p.amount??0),0);
-      const allocations=validGroupAllocationByBooking.get(Number(booking.id))??0;
-      return due>0 && confirmedDirect+allocations>=due-0.005;
+      return [...canonical.values()];
+    };
+
+    const getBookingPaymentMetrics = (booking: any) => {
+      if (booking.payerType === "company") {
+        const invoice = booking.companyInvoiceId != null
+          ? companyInvoiceById.get(booking.companyInvoiceId)
+          : undefined;
+        const due = Number(invoice?.grandTotal ?? invoice?.totalAmount ??
+          booking.companyInvoiceTotal ?? booking.grandTotal ?? booking.totalPrice ?? 0);
+        const paidAmount = invoice?.status === "paid" && Boolean(invoice.paidAt) ? due : 0;
+        return { due, paidAmount, rows: [], isCompanyInvoice: true };
+      }
+      const due = Number(
+        booking.groupRef && Number(booking.groupTotalPayment ?? 0) > 0
+          ? booking.groupTotalPayment
+          : booking.grandTotal ?? booking.totalPrice ?? 0,
+      );
+      const rows = getCanonicalBookingPayments(booking);
+      const confirmedAmount = rows
+        .filter((payment: any) => payment.status === "confirmed")
+        .reduce((sum: number, payment: any) => sum + Math.max(0, Number(payment.amount ?? 0)), 0);
+      // Group-level payment rows represent the whole group and must not be
+      // added to per-session allocations a second time.
+      const hasGroupPaymentSet = Boolean(
+        booking.groupRef && Array.isArray(booking.groupPayments) && booking.groupPayments.length > 0,
+      );
+      const allocations = hasGroupPaymentSet
+        ? 0
+        : (validGroupAllocationByBooking.get(Number(booking.id)) ?? 0);
+      return { due, paidAmount: confirmedAmount + allocations, rows, isCompanyInvoice: false };
+    };
+
+    const isBookingFullyPaid = (booking: any) => {
+      const metrics = getBookingPaymentMetrics(booking);
+      return metrics.due > 0 && metrics.paidAmount >= metrics.due - 0.005;
+    };
+
+    const getBookingPaymentFilterState = (booking: any) => {
+      const metrics = getBookingPaymentMetrics(booking);
+      const { due, paidAmount, rows } = metrics;
+      const hasRejected = rows.some((payment: any) => payment.status === "rejected");
+      const hasWaitingVerification = rows.some((payment: any) =>
+        payment.status === "waiting_confirmation",
+      );
+      if (booking.status === "refunded") return "refunded";
+      if (booking.status === "rejected" || hasRejected) return "rejected";
+      if (due > 0 && paidAmount > due + 0.005) return "needs_review";
+      if (due > 0 && paidAmount >= due - 0.005) return "confirmed";
+      if (booking.status === "paid" && paidAmount < due - 0.005) return "needs_review";
+      if (
+        booking.status === "waiting_confirmation" ||
+        hasWaitingVerification
+      ) return "waiting_verification";
+      if (paidAmount > 0) return "partial";
+      return "unpaid";
     };
 
     let responseRows = result;
@@ -1087,7 +1150,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           (booking.membershipId != null && booking.membershipPaymentId == null);
         if (isMembershipCheckIn) return false;
         // Apply before grouping and pagination, so counts and pages stay accurate.
-        if (normalizedPayment === "confirmed" && !isBookingFullyPaid(booking)) return false;
+        if (normalizedPayment !== "all" && getBookingPaymentFilterState(booking) !== normalizedPayment) return false;
         if (normalizedGroup === "group" && !booking.groupRef) return false;
         if (normalizedGroup === "individual" && !!booking.groupRef) return false;
         // Invoice billing status is corporate-specific; personal null status
@@ -1095,17 +1158,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         if (["unbilled", "billed", "paid"].includes(normalizedBilling) &&
             (booking.payerType !== "company" || booking.billingStatus !== normalizedBilling)) return false;
 
-        if (normalizedStatus !== "all") {
-          const statusMatches =
-            normalizedStatus === "completed"
-              ? booking.status === "completed" || booking.status === "confirmed"
-              : normalizedStatus === "waiting_confirmation"
-                ? booking.status === "waiting_confirmation" || booking.status === "paid"
-                : normalizedStatus === "cancelled"
-                  ? booking.status === "cancelled" || booking.status === "refunded"
-                  : booking.status === normalizedStatus;
-          if (!statusMatches) return false;
-        }
+        if (normalizedStatus !== "all" && booking.status !== normalizedStatus) return false;
 
         const paymentRows = [
           booking.payment,
