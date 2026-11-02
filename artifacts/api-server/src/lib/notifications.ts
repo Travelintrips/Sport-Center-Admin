@@ -422,16 +422,12 @@ async function buildGroupSummary(groupRef: string | null | undefined, currentOrd
 
     if (rows.length <= 1) return "";
 
-    const [group] = await db.select().from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1);
-
     const lines = rows
       .map((r) => {
         const marker = r.orderNumber === currentOrderNumber ? "👉" : "•";
         return `${marker} *${r.orderNumber}* — ${r.facilityName ?? "-"} | ${r.bookingDate} ${r.startTime}–${r.endTime} | Rp ${Number(r.totalPrice).toLocaleString("id-ID")}`;
       })
       .join("\n");
-
-    const totalStr = group ? `Rp ${Number(group.totalPayment).toLocaleString("id-ID")}` : "";
 
     return `\n\n📋 *DETAIL SELURUH SESI (${rows.length}):*\n${lines}`;
   } catch (err) {
@@ -684,7 +680,8 @@ export async function notifyAdminBookingReport(data: {
   const facilityNames = [...new Set(rows.map((row) => String(row.facilityName ?? "-")))];
   const isGroup = Boolean(booking.groupRef && rows.length > 1);
   const formatDate = (value: string | Date) => {
-    const date = new Date(`${String(value).slice(0, 10)}T12:00:00+07:00`);
+    const dateOnly = value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+    const date = new Date(`${dateOnly}T12:00:00+07:00`);
     return date.toLocaleDateString("id-ID", {
       weekday: "long", day: "numeric", month: "long", year: "numeric",
       timeZone: "Asia/Jakarta",
@@ -731,7 +728,7 @@ export async function notifyPaymentProofUploaded(data: BookingNotifData & { revi
       (data.groupRef ? `🆔 Group ID: *${data.groupRef}*\n` : "") +
       `Booking: *${data.orderNumber}*\n` +
       `Customer: *${data.customerName}*\n` +
-      (data.groupRef ? `Fasilitas: *${data.facilityName}*\n` : `Fasilitas: *${data.facilityName}*\n`) +
+      `Fasilitas: *${data.facilityName}*\n` +
       (data.groupRef ? "" : `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n`) +
       (data.groupRef ? `Total pembayaran grup: *${totalLabel}*\n` : `Total: *${totalLabel}*\n`) +
       (groupSummary ? `${groupSummary}\n\n` : "\n") +
