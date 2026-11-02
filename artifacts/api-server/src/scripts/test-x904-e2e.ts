@@ -1,10 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 if(process.env.NODE_ENV!=="development") throw Error("DEV_ONLY");
-const url=process.env.SUPABASE_DATABASE_URL_DEV;
-if(!url) throw Error("DEV_URL_MISSING");
+const url=process.env.X904_E2E_LOCAL_DATABASE_URL;
+if(process.env.X904_E2E_LOCAL!=="true") throw Error("ISOLATED_E2E_FLAG_REQUIRED");
+if(!url) throw Error("ISOLATED_E2E_URL_MISSING");
 const u=new URL(url);
-if(!u.username.endsWith(".xssrfshdrtdfupgqwfdw")) throw Error("WRONG_PROJECT");
+if(!["127.0.0.1","localhost"].includes(u.hostname)||u.pathname!=="/x904_e2e"||decodeURIComponent(u.username)!=="postgres") throw Error("NON_LOCAL_E2E_DATABASE_REFUSED");
+if(process.env.SUPABASE_DATABASE_URL && process.env.SUPABASE_DATABASE_URL===url) throw Error("PROD_DATABASE_URL_REFUSED");
 const {db,pool}=await import("@workspace/db");
 const {sql}=await import("drizzle-orm");
 const {processX904Event}=await import("../services/processX904Event");
