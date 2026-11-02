@@ -511,6 +511,14 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           groupRef: string | null;
           additionalCharges: typeof bookingsTable.$inferSelect.additionalCharges;
         }>);
+    // Fetch every booking in each referenced group, not only rows surviving
+    // the date/facility filter. Group payment obligations span all sessions.
+    const fullGroupBookingsPromise = groupRefs.length > 0
+      ? db
+          .select()
+          .from(bookingsTable)
+          .where(inArray(bookingsTable.groupRef, groupRefs))
+      : Promise.resolve([] as (typeof bookingsTable.$inferSelect)[]);
     const groupsPromise = groupRefs.length > 0
       ? db
           .select()
@@ -521,18 +529,21 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             return [];
           })
       : Promise.resolve([] as (typeof bookingGroupsTable.$inferSelect)[]);
-    const allPaymentsPromise = bookingIds.length > 0
-      ? db
-          .select()
-          .from(paymentsTable)
-          .where(inArray(paymentsTable.bookingId, bookingIds))
-      : Promise.resolve([] as (typeof paymentsTable.$inferSelect)[]);
-
-    const [groupChargeRows, groups, allPayments] = await Promise.all([
+    const [groupChargeRows, groups, fullGroupBookings] = await Promise.all([
       groupChargeRowsPromise,
       groupsPromise,
-      allPaymentsPromise,
+      fullGroupBookingsPromise,
     ]);
+    const paymentLookupBookingIds = [...new Set([
+      ...bookingIds,
+      ...fullGroupBookings.map((booking) => booking.id),
+    ])];
+    const allPayments = paymentLookupBookingIds.length > 0
+      ? await db
+          .select()
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, paymentLookupBookingIds))
+      : [];
     const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
     for (const row of groupChargeRows) {
       if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
@@ -548,8 +559,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       groupNetTotalPayment: number;
     }>();
     if (groupRefs.length > 0) {
-      const bookingsByGroupRef = new Map<string, typeof bookings>();
-      for (const booking of bookings) {
+      const bookingsByGroupRef = new Map<string, typeof fullGroupBookings>();
+      for (const booking of fullGroupBookings) {
         if (!booking.groupRef) continue;
         const current = bookingsByGroupRef.get(booking.groupRef) ?? [];
         current.push(booking);
@@ -631,13 +642,13 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .where(and(
             or(
               inArray(bankMutationsTable.matchedPaymentId, paymentIds),
-              inArray(bankMutationsTable.matchedOrderId, bookingIds),
+              inArray(bankMutationsTable.matchedOrderId, paymentLookupBookingIds),
             ),
             inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
           ));
         reconciledPaymentIds = getReconciledPaymentIds(
           allPayments,
-          bookings,
+          [...bookings, ...fullGroupBookings],
           reconciledMutations,
         );
       } catch (err) {
