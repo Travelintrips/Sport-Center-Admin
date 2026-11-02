@@ -41,7 +41,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   if (identity.rows.length !== 1) return;
 
   const due = await store.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
-      a.payment_id,a.confirmed_at,a.expires_at,a.access_state,a.verification_state,
+      a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
       p.status::text AS payment_status
     FROM sport_center.x904_nonmember_daily_access a
     JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
@@ -54,7 +54,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
-          a.payment_id,a.confirmed_at,a.expires_at,a.access_state,a.verification_state,
+          a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
           p.status::text AS payment_status
         FROM sport_center.x904_nonmember_daily_access a
         JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
@@ -69,7 +69,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const pin = String(a.user_pin);
       const shouldBeActive = a.payment_status === "confirmed" &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
-        now.getTime() < new Date(String(a.expires_at)).getTime();
+        (a.activated_at == null || now.getTime() < new Date(String(a.expires_at)).getTime());
       const targetGroup = shouldBeActive ? 1 : 2;
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
       if (targetGroup === 2 && isX904AutoSuspendExempt(pin, 0)) {
@@ -124,9 +124,28 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true) {
           if (!last.completed_at || observedAt.getTime() <= new Date(String(last.completed_at)).getTime()) return;
           if (currentGroup === targetGroup) {
-            await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-              SET access_state=${shouldBeActive ? "active" : "expired"}
-              WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+            if (shouldBeActive) {
+              const ackGroup = Number((last.result as any)?.afterGroup);
+              const ackUid = Number((last.result as any)?.deviceUid);
+              const ackTime = new Date(String(last.completed_at));
+              if (ackGroup !== 1 || ackUid !== Number(a.device_uid) ||
+                  !Number.isFinite(ackTime.getTime()) ||
+                  ackTime.getTime() < new Date(String(a.confirmed_at)).getTime()) {
+                await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                  SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
+                return;
+              }
+              await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                SET activated_at=COALESCE(activated_at,${ackTime}),
+                    expires_at=COALESCE(activated_at,${ackTime}) + interval '12 hours',
+                    access_state='active'
+                WHERE access_id=${Number(a.access_id)} AND verification_state='verified'
+                  AND payment_id=${Number(a.payment_id)}`);
+            } else {
+              await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                SET access_state='expired'
+                WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+            }
             return;
           }
           // A newer authenticated snapshot proves the previous command's
@@ -149,9 +168,15 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       }
 
       if (currentGroup === targetGroup) {
-        // A fresh authenticated snapshot already matches the required group.
+        // Never attribute an existing Group 1 to this payment.
+        if (shouldBeActive) {
+          await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+            SET access_state='review_required'
+            WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+          return;
+        }
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-          SET access_state=${shouldBeActive ? "active" : "expired"}
+          SET access_state='expired'
           WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
         return;
       }
