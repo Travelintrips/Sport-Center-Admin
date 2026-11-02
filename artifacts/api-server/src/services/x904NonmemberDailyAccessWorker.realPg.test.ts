@@ -211,3 +211,16 @@ test("cancelled payment cannot suspend pre-existing Group 1 without verified act
   expect(state.access_state).toBe('review_required');
   expect(state.activated_at).toBeNull();
 });
+
+test("VIS006 existing Group 1 must not receive automatic suspend before paid activation", async () => {
+  await run("INSERT INTO sport_center.sport_bookings VALUES(9008)");
+  await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9008)");
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9108,9008,'pending')");
+  await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=now() WHERE id=9108");
+  await run("UPDATE sport_center.sport_payments SET status='cancelled' WHERE id=9108");
+  const start=new Date((await run("SELECT confirmed_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008")).rows[0].confirmed_at);
+  await addSnapshot(new Date(start.getTime()-1000),'15','VIS 006',1);
+  await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+100));
+  expect(await commandFor('SUSPEND_USER',8)).toBeUndefined();
+  expect((await run("SELECT activated_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008")).rows[0].activated_at).toBeNull();
+});
