@@ -2176,6 +2176,7 @@ router.post("/bookings/recurring", async (req, res) => {
       customPrice: rawCustomPrice,
       // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
       groupRef: externalGroupRefRaw,
+      source: rawSource,
     } = req.body;
     const externalGroupRef: string | null = externalGroupRefRaw
       ? String(externalGroupRefRaw).trim().slice(0, 64) || null
@@ -2217,7 +2218,13 @@ router.post("/bookings/recurring", async (req, res) => {
     const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
 
     // customerId hanya boleh dipercaya dari body ketika request datang dari admin/operator.
-    const effectiveCustomerId = (isAdminRequest && bodyCustomerId) ? Number(bodyCustomerId) : loggedInUserId;
+    const recurringSource = String(rawSource ?? "").trim().slice(0, 32);
+    // Match the single-booking admin flow: a guest booking must remain
+    // unlinked instead of accidentally inheriting the operator's user ID.
+    const isAdminGuestBooking = isAdminRequest && recurringSource === "admin" && bodyCustomerId == null;
+    const effectiveCustomerId = isAdminGuestBooking
+      ? null
+      : (isAdminRequest && bodyCustomerId) ? Number(bodyCustomerId) : loggedInUserId;
 
     // ── Verifikasi company billing (mirror logika di POST /bookings) ──
     const explicitCompanyId = companyCustomerId ? Number(companyCustomerId) : null;
@@ -2402,6 +2409,7 @@ router.post("/bookings/recurring", async (req, res) => {
         customerName,
         customerEmail: customerEmail || "",
         customerPhone,
+        source: recurringSource || "web",
         facilityId: Number(facilityId),
         bookingDate,
         startTime,
