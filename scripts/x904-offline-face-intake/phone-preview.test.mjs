@@ -9,7 +9,11 @@ test('browser preview declares no network and no form destination', () => {
 });
 test('mobile preview rejects non-test PIN, caps source images, and compresses locally', () => {
  assert.match(html,/pin\.value!=='500'/);
- assert.match(html,/file\.size<100\|\|file\.size>50000/);
+ assert.match(html,/file\.size<100\|\|file\.size>20000000/);
+ assert.match(html,/canvas\.toBlob/);
+ assert.match(html,/blob\.size<=50000/);
+ assert.match(html,/Ukuran asli/);
+ assert.match(html,/Ukuran hasil/);
  assert.match(html,/STAGED_OFFLINE_ONLY/);
  assert.match(html,/createImageBitmap/);
 });
