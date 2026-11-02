@@ -928,7 +928,8 @@ router.post("/wa/booking", async (req, res) => {
     const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-    const [booking] = await db.insert(bookingsTable).values({
+    const booking = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(bookingsTable).values({
       orderNumber,
       customerName: bookingCustomerName,
       customerEmail: customer.email,
@@ -953,26 +954,21 @@ router.post("/wa/booking", async (req, res) => {
       grandTotal: String(taxCalc.grandTotal),
       ppnTreatment: taxCalc.ppnTreatment,
       ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
-    }).returning();
-
-    // Persist only the verified X904 identity reference. This does NOT activate
-    // the device; payment confirmation and the dedicated access worker are separate.
-    if (verifiedX904Identity) {
-      await db.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
-        (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
-        VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
-          ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
-          ${booking.id},'verified','pending')
-        ON CONFLICT (booking_id) DO NOTHING`);
-    }
-
-    // History
-    await db.insert(bookingHistoryTable).values({
-      bookingId: booking.id,
-      fromStatus: null,
-      toStatus: "pending_payment",
-      changedByName: bookingCustomerName,
-      note: "Booking dibuat via WhatsApp",
+      }).returning();
+      if (!created) throw new Error("WA_BOOKING_CREATE_FAILED");
+      // Store the verified PIN/card relationship atomically with the booking.
+      if (verifiedX904Identity) {
+        await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
+          (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+          VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
+            ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
+            ${created.id},'verified','pending')`);
+      }
+      await tx.insert(bookingHistoryTable).values({
+        bookingId: created.id, fromStatus: null, toStatus: "pending_payment",
+        changedByName: bookingCustomerName, note: "Booking dibuat via WhatsApp",
+      });
+      return created;
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
