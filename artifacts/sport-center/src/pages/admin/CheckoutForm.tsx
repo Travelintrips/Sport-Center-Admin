@@ -552,7 +552,11 @@ export default function AdminCheckoutForm() {
               {createdRecurringOrders.map((order) => <div key={order} className="flex items-center justify-between rounded-md border px-3 py-2"><span className="font-mono font-semibold">{order}</span><span className="text-xs text-green-700">Dibuat</span></div>)}
             </div>
             {createdRecurringSkipped.length > 0 && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold flex items-center gap-2"><XCircle size={15} /> Sebagian tanggal tidak dibuat</p><p className="mt-1">Periksa tanggal berikut: {createdRecurringSkipped.join(", ")}</p></div>}
-            <p className="text-xs text-muted-foreground">Pembayaran belum otomatis lunas. Buka menu Pemesanan untuk memeriksa tagihan grup dan mencatat satu pembayaran beserta bukti transfer/QRIS.</p>
+            <p className="text-xs text-muted-foreground">
+              {createdRecurringGroupRef
+                ? "Pembayaran belum otomatis lunas. Buka grup di menu Pemesanan untuk memeriksa tagihan dan mencatat satu pembayaran grup beserta bukti transfer/QRIS."
+                : "Tidak terbentuk grup karena hanya satu sesi yang berhasil dibuat. Buka booking tersebut di menu Pemesanan untuk memeriksa dan mencatat pembayarannya."}
+            </p>
           </CardContent>
           <CardFooter><Button type="button" onClick={() => setLocation("/admin/bookings")}>Buka Pemesanan</Button></CardFooter>
         </Card>
