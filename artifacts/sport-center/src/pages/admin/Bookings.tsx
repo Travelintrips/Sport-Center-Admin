@@ -1386,6 +1386,7 @@ function BookingDetailDrawer({
     editablePayment?.submittedAt ??
     booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
+  const [cancellationNoteError, setCancellationNoteError] = useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
@@ -1512,11 +1513,17 @@ function BookingDetailDrawer({
 
   const handleAction = (action: string) => {
     if (confirmAction === action) {
-      if (action === "completed" || action === "cancelled" || action === "refunded") {
-        onUpdateStatus(action, adminNotes);
+      if (action === "cancelled" && !adminNotes.trim()) {
+        setCancellationNoteError("Alasan pembatalan wajib diisi sebelum menyimpan.");
+        return;
       }
+      if (action === "completed" || action === "cancelled" || action === "refunded") {
+        onUpdateStatus(action, adminNotes.trim());
+      }
+      setCancellationNoteError("");
       setConfirmAction(null);
     } else {
+      setCancellationNoteError("");
       setConfirmAction(action);
     }
   };
@@ -2436,15 +2443,25 @@ function BookingDetailDrawer({
           {/* Admin Notes */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-              Catatan Admin (internal)
+              {confirmAction === "cancelled" ? "Alasan Pembatalan (wajib)" : "Catatan Admin (internal)"}
             </label>
             <Textarea
               value={adminNotes}
-              onChange={(e) => setAdminNotes(e.target.value)}
-              placeholder="Catatan internal admin..."
+              onChange={(e) => {
+                setAdminNotes(e.target.value);
+                if (e.target.value.trim()) setCancellationNoteError("");
+              }}
+              placeholder={confirmAction === "cancelled" ? "Tuliskan alasan pembatalan yang akan tercatat di semua sesi..." : "Catatan internal admin..."}
               rows={2}
               className="text-sm rounded-xl border-slate-200 dark:border-slate-700 resize-none"
             />
+            {confirmAction === "cancelled" && (
+              <p className={cancellationNoteError ? "text-xs text-red-600" : "text-xs text-amber-700"}>
+                {cancellationNoteError || (booking.groupRef && groupBookings.length > 1
+                  ? `Alasan ini akan dicatat pada seluruh ${groupBookings.length} sesi grup.`
+                  : "Alasan ini akan dicatat pada histori booking dan catatan admin.")}
+              </p>
+            )}
             <button
               onClick={() => onUpdateStatus(booking.status, adminNotes)}
               disabled={isUpdating}
@@ -2494,10 +2511,7 @@ function BookingDetailDrawer({
                     className="flex items-center gap-2 mt-2"
                   >
                     <button
-                      onClick={() => {
-                        onUpdateStatus(confirmAction, adminNotes);
-                        setConfirmAction(null);
-                      }}
+                      onClick={() => handleAction(confirmAction)}
                       disabled={isUpdating}
                       className="flex-1 h-8 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
                     >
@@ -2521,8 +2535,8 @@ function BookingDetailDrawer({
                 {booking.status !== "cancelled" && booking.status !== "refunded" && (
                   <ActionButton
                     action="cancelled"
-                    label="Batalkan Booking"
-                    description="Ubah status → Dibatalkan"
+                    label={isMultiSessionGroup ? `Batalkan Seluruh Grup (${groupBookings.length} sesi)` : "Batalkan Booking"}
+                    description={isMultiSessionGroup ? "Batalkan seluruh sesi dalam satu transaksi; alasan wajib." : "Ubah status menjadi Dibatalkan; alasan wajib."}
                     icon={XCircle}
                     confirmAction={confirmAction}
                     onClick={() => handleAction("cancelled")}
@@ -3644,12 +3658,29 @@ export default function AdminBookings() {
 
   const updateBookingMutation = useUpdateBooking({
     mutation: {
-      onSuccess: (data) => {
-        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      onSuccess: async (data, variables) => {
+        await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        const refreshed = await refetchBookings();
+        if (variables?.data?.status === "cancelled") {
+          setSelectedBooking(null);
+          toast({
+            title: "Pembatalan berhasil",
+            description: data?.groupRef
+              ? "Seluruh sesi dalam grup telah dibatalkan dan alasannya dicatat."
+              : "Booking dibatalkan dan alasannya dicatat.",
+          });
+          return;
+        }
         toast({ title: "Status booking diperbarui" });
-        setSelectedBooking(data);
+        setSelectedBooking(
+          (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === data?.id) ?? data,
+        );
       },
-      onError: () => toast({ title: "Gagal memperbarui booking", variant: "destructive" }),
+      onError: (error: any) => toast({
+        title: "Gagal memperbarui booking",
+        description: error?.message?.replace(/^HTTP \\d+ [^:]+:\\s*/, "") || "Periksa pembayaran, invoice, dan alasan pembatalan.",
+        variant: "destructive",
+      }),
     },
   });
 
@@ -4062,6 +4093,10 @@ export default function AdminBookings() {
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
+    if (status === "cancelled" && !String(adminNotes ?? "").trim()) {
+      toast({ title: "Alasan pembatalan wajib diisi", variant: "destructive" });
+      return;
+    }
     updateBookingMutation.mutate({
       id: selectedBooking.id,
       data: { status: status as any, adminNotes },
