@@ -815,7 +815,7 @@ export default function AdminCheckoutForm() {
       <form onSubmit={handleSubmit}>
         <Card>
           <CardHeader>
-            <CardTitle>Detail Booking</CardTitle>
+            <CardTitle>{isMembership && memberAction === "new" ? "Pendaftaran Member Gym Baru" : "Detail Booking"}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
 
@@ -834,7 +834,7 @@ export default function AdminCheckoutForm() {
                   {customers.length === 0 && (
                     <SelectItem value="__empty__" disabled>Tidak ada customer terdaftar</SelectItem>
                   )}
-                  <SelectItem value="__guest__">+ Pemesan belum terdaftar (Tamu)</SelectItem>
+                  <SelectItem value="__guest__">{isMembership ? "+ Customer Baru (Daftar Membership)" : "+ Pemesan belum terdaftar (Tamu)"}</SelectItem>
                   {filteredCustomers.length === 0 && customers.length > 0 && (
                     <SelectItem value="__no_matches__" disabled>Tidak ada pemesan yang cocok</SelectItem>
                   )}

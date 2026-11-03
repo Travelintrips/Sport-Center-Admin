@@ -936,7 +936,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       if (existingPhoneUsers.some(user => String(user.email ?? "").toLowerCase() !== email)) {
         throw new MembershipProofError(409, "Nomor WhatsApp sudah digunakan customer lain; verifikasi identitas dahulu");
       }
-      const existingUsers = await tx.select().from(usersTable).where(eq(usersTable.email,email)).limit(1);
+      const existingUsers = await tx.select().from(usersTable).where(ilike(usersTable.email,email)).limit(1);
       let customer = existingUsers[0];
       if (customer) {
         const userPhone = String(customer.phone ?? "").replace(/\D/g, "").replace(/^0/, "62");
