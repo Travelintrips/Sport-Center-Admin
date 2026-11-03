@@ -1071,7 +1071,7 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (!inv) { res.status(404).json({ error: "Not found" }); return; }
 
     const { status, notes } = req.body;
-    if (status === "paid" && inv.status !== "paid" && inv.invoiceStatus === "paid") {
+    if (status === "paid" && inv.status === "paid" && inv.legacyStatus !== "paid") {
       res.status(409).json({ error: "Invoice memiliki status lunas lama tanpa pembayaran tervalidasi. Rekonsiliasi mutasi bank dan data invoice dahulu; tidak boleh membuat jurnal pembayaran ulang." });
       return;
     }
@@ -1092,7 +1092,7 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
         return;
       }
       updates.paidAt = paidAt;
-      updates.invoiceStatus = "paid";
+      updates.legacyStatus = "paid";
       updates.paidAmount = String(Number(inv.netAmount ?? inv.grandTotal ?? inv.totalAmount ?? 0));
       updates.remainingAmount = "0";
     }
@@ -1210,7 +1210,7 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
     const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
     if (!inv) { res.status(404).json({ error: "Invoice tidak ditemukan" }); return; }
-    if (markPaid && inv.status !== "paid" && inv.invoiceStatus === "paid") {
+    if (markPaid && inv.status === "paid" && inv.legacyStatus !== "paid") {
       res.status(409).json({ error: "Invoice memiliki penanda lunas lama yang belum direkonsiliasi. Bukti transfer tidak boleh menghasilkan mutasi atau jurnal pembayaran kedua." });
       return;
     }
@@ -1241,7 +1241,7 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
     if (markPaid && inv.status !== "paid") {
       updates.status = "paid";
-      updates.invoiceStatus = "paid";
+      updates.legacyStatus = "paid";
       updates.paidAmount = String(Number(inv.netAmount ?? inv.grandTotal ?? inv.totalAmount ?? 0));
       updates.remainingAmount = "0";
       updates.paidAt = parseCompanyPaymentDate(paymentDateRaw)!;
