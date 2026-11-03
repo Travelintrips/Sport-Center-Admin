@@ -962,6 +962,9 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
         paymentDate,submittedAt:today,
       }).returning();
       if (!pending) throw new Error("PAYMENT_INSERT_FAILED");
+      // The canonical payment mirror trigger checks for EXACTLY ONE booking
+      // before it permits a confirmed payment. Create it while still pending.
+      const pendingBooking = await ensureMembershipPaymentBooking(membership,pending,tx,orderNumber);
       const [payment] = await tx.update(membershipPaymentsTable).set({
         status:"confirmed",confirmedAt:today,settlementProviderCode:"mandiri_direct",
         mutationKey:`SC-MBP-${pending.id}`,accountingRef:`MB-${membership.id}-P${pending.id}`,
@@ -969,6 +972,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       }).where(eq(membershipPaymentsTable.id,pending.id)).returning();
       if (!payment) throw new Error("PAYMENT_CONFIRM_FAILED");
       const booking = await ensureMembershipPaymentBooking(membership,payment,tx,orderNumber);
+      if (booking.id !== pendingBooking.id) throw new Error("MEMBERSHIP_BOOKING_DUPLICATE");
       const [linkedBooking] = await tx.update(bookingsTable).set({customerId:customer.id})
         .where(eq(bookingsTable.id,booking.id)).returning();
       if (!linkedBooking) throw new Error("CUSTOMER_BOOKING_LINK_FAILED");

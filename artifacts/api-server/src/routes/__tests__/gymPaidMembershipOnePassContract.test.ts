@@ -34,7 +34,11 @@ describe("paid Gym membership one-pass registration contract", () => {
   });
 
   it("uses the existing membership payment booking, financial idempotency and X904 receipt", () => {
+    expect(section).toContain("ensureMembershipPaymentBooking(membership,pending,tx,orderNumber)");
     expect(section).toContain("ensureMembershipPaymentBooking(membership,payment,tx,orderNumber)");
+    expect(section.indexOf("ensureMembershipPaymentBooking(membership,pending,tx,orderNumber)"))
+      .toBeLessThan(section.indexOf("tx.update(membershipPaymentsTable)"));
+    expect(section).toContain("if (booking.id !== pendingBooking.id)");
     expect(section).toContain("mutationKey:");
     expect(section).toContain("accountingRef:");
     expect(section).toContain("x904_automatic_entitlement_events");
