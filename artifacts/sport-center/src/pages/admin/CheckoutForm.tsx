@@ -123,6 +123,9 @@ export default function AdminCheckoutForm() {
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = bookingDay;
   const isGymNonmember = bookingKind === "personal" && /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? ""));
+  // Backdated admin bookings are accounting/history only, never a fresh door entitlement.
+  const isHistoricalGymNonmember = isGymNonmember && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate) &&
+    selectedDate < jakartaDateOnly();
   useEffect(() => {
     setX904VerifiedName("");
     setX904VerificationError("");
@@ -197,7 +200,8 @@ export default function AdminCheckoutForm() {
     !isSubmitting &&
     paymentChoice !== null &&
     formPaymentValid &&
-    (!isGymNonmember || (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
+    (!isGymNonmember || (isHistoricalGymNonmember && !x904IdentityValue.trim()) ||
+      (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
     (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && selectedCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
@@ -617,7 +621,8 @@ export default function AdminCheckoutForm() {
         payerType: corporate ? "company" : "personal",
         ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
         source: "admin",
-        ...(isGymNonmember ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
+        ...(isGymNonmember && (!isHistoricalGymNonmember || x904IdentityValue.trim())
+          ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         adminPaymentChoice: paymentChoice,
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
         notes: notes || undefined,
@@ -986,7 +991,9 @@ export default function AdminCheckoutForm() {
             </div>}
 
             {isGymNonmember && <div className="space-y-3 rounded-lg border p-3">
-              <Label>Identitas akses X904 (nonmember) *</Label>
+              <Label>{isHistoricalGymNonmember
+                ? "Referensi identitas X904 historis (opsional)"
+                : "Identitas akses X904 (nonmember) *"}</Label>
               <Select value={x904IdentityType} onValueChange={(value) => { setX904IdentityType(value as "pin" | "card"); setX904IdentityValue(""); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="card">Kartu pengunjung</SelectItem><SelectItem value="pin">PIN mesin X904</SelectItem></SelectContent>
@@ -998,7 +1005,11 @@ export default function AdminCheckoutForm() {
               {x904Verifying && <p className="text-xs">Memverifikasi identitas mesin...</p>}
               {x904VerifiedName && <p className="text-xs text-emerald-700">Terverifikasi: {x904VerifiedName}</p>}
               {x904VerificationError && <p className="text-xs text-destructive">{x904VerificationError}</p>}
-              <p className="text-xs text-muted-foreground">Akses baru aktif setelah pembayaran dikonfirmasi dan mesin memberikan ACK.</p>
+              {isHistoricalGymNonmember ? (
+                <p className="text-xs text-amber-700">Booking tanggal lampau hanya untuk pencatatan. VIS001–VIS006 boleh dipilih kembali sebagai referensi historis, tanpa aktivasi, suspend, atau perpanjangan akses X904. Identitas boleh dikosongkan.</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">Akses baru aktif setelah pembayaran dikonfirmasi dan mesin memberikan ACK.</p>
+              )}
             </div>}
             {/* Booking date and duration: Gym is per visit, not hourly. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

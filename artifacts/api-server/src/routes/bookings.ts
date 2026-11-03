@@ -1577,6 +1577,12 @@ router.post("/bookings", async (req, res) => {
     // Legacy Gym records may still have booking_mode = time_slot. Gym access
     // is per visit, so identify it by name/category as a safe fallback.
     const isWalkIn = isGymFacility(facility);
+    // Historical admin Gym bookings can reuse a VIS identity as a reference,
+    // without creating a new access grant that might affect the physical door.
+    const isHistoricalGymNonmember = isWalkIn &&
+      /gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")) &&
+      isAdminRequest && bookingSource === "admin" && isOperationalBookingRole(loggedInRole) &&
+      normalizedBookingDate < getTodayWIB();
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
     const hasX904Identity = req.body.x904IdentityType != null || req.body.x904IdentityValue != null;
     if (hasX904Identity) {
@@ -1825,7 +1831,11 @@ router.post("/bookings", async (req, res) => {
       basePrice: String(basePrice),
       activityType,
       numberOfPeople,
-      notes,
+      notes: isHistoricalGymNonmember && verifiedX904Identity
+        ? [String(notes ?? "").trim(),
+            `X904 historis (referensi saja, tanpa akses): ${verifiedX904Identity.identityLabel} / ${verifiedX904Identity.displayName}`]
+            .filter(Boolean).join(" | ")
+        : notes,
       groupRef: incomingGroupRef,
       // Company billing: auto-confirm KECUALI company punya requirePerBookingApproval = true
       // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
@@ -1853,7 +1863,7 @@ router.post("/bookings", async (req, res) => {
     }).returning();
       const created = createdRows[0];
       if (!created) throw new Error("ADMIN_BOOKING_CREATE_FAILED");
-      if (verifiedX904Identity) {
+      if (verifiedX904Identity && !isHistoricalGymNonmember) {
         await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
           (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
           VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
