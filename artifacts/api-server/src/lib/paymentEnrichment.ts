@@ -23,6 +23,10 @@ export type { PaymentCompanyEvidence, PaymentCompanyResolution } from "./payment
 export type PaymentEnrichment = {
   companyId: number | null;
   settlementRuleVersion: string | null;
+  settlementSource: string | null;
+  settlementCalculationMethod: string | null;
+  fixedProviderFee: number;
+  feeTaxRate: number;
   mdrRate: number;
   mdrAmount: number;
   netAmount: number | null;
@@ -445,6 +449,10 @@ export async function enrichPayment(
   );
 
   let settlementRuleVersion: string | null = null;
+  let settlementSource: string | null = null;
+  let settlementCalculationMethod: string | null = null;
+  let fixedProviderFee = 0;
+  let feeTaxRate = 0;
   let mdrRate = 0;
   let mdrAmount = 0;
   let netAmount: number | null = null;
@@ -481,9 +489,13 @@ export async function enrichPayment(
     } : null;
     if (rule) {
       settlementRuleVersion = rule.ruleVersion ?? null;
+      settlementSource = rule.source ?? null;
+      settlementCalculationMethod = rule.calculationMethod ?? null;
       const configuredRate = Number(rule.mdrRate ?? 0);
       const fixedFee = Number(rule.fixedProviderFee ?? 0);
-      const feeTaxRate = Number(rule.feeTaxRate ?? 0);
+      const configuredFeeTaxRate = Number(rule.feeTaxRate ?? 0);
+      fixedProviderFee = fixedFee;
+      feeTaxRate = configuredFeeTaxRate;
 
       if (
         provider === "mandiri_direct" &&
@@ -492,7 +504,7 @@ export async function enrichPayment(
         String(rule.calculationMethod ?? "") === "percentage_of_gross" &&
         Math.abs(configuredRate - 0.007) < 0.0000001 &&
         fixedFee === 0 &&
-        feeTaxRate === 0
+        configuredFeeTaxRate === 0
       ) {
         // BI expanded zero-MDR threshold for this approved Sport Center QRIS rule.
         // The amount-specific snapshot is filled by the caller because enrichment
@@ -507,6 +519,10 @@ export async function enrichPayment(
   return {
     companyId: company.companyId,
     settlementRuleVersion,
+    settlementSource,
+    settlementCalculationMethod,
+    fixedProviderFee,
+    feeTaxRate,
     mdrRate,
     mdrAmount,
     netAmount,
