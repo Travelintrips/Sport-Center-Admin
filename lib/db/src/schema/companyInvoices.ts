@@ -23,7 +23,10 @@ export const companyInvoicesTable = scSchema.table("company_invoices", {
   netAmount: numeric("net_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   remainingAmount: numeric("remaining_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  // Legacy financial status is a separate persisted column from invoice_status.
+  // Both must agree before an invoice is treated as paid in booking reports.
   status: invoiceStatusEnum("invoice_status").notNull().default("unpaid"),
+  legacyStatus: text("status"),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   paymentMethod: text("payment_method"),
   paymentProofUrl: text("payment_proof_url"),
