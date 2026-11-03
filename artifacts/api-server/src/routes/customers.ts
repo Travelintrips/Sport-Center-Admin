@@ -414,7 +414,8 @@ router.get("/customers/:id", adminMiddleware, async (req, res) => {
     const userBookings = await db.select().from(bookingsTable).where(
       or(eq(bookingsTable.customerId, id), eq(bookingsTable.companyCustomerId, id))
     );
-    res.json(mapUser(user, userBookings));
+    const [enrichedCustomer] = await enrichWithApMember([mapUser(user, userBookings)]);
+    res.json(enrichedCustomer);
   } catch (err) {
     req.log.error({ err }, "Get customer error");
     res.status(500).json({ error: "Internal server error" });
