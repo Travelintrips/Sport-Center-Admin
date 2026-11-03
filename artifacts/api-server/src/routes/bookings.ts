@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
 import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
@@ -1576,6 +1577,32 @@ router.post("/bookings", async (req, res) => {
     // Legacy Gym records may still have booking_mode = time_slot. Gym access
     // is per visit, so identify it by name/category as a safe fallback.
     const isWalkIn = isGymFacility(facility);
+    let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
+    const hasX904Identity = req.body.x904IdentityType != null || req.body.x904IdentityValue != null;
+    if (hasX904Identity) {
+      if (!isWalkIn || !isAdminRequest || bookingSource !== "admin" ||
+          !["pin", "card"].includes(String(req.body.x904IdentityType))) {
+        res.status(400).json({ error: "Identitas X904 hanya untuk booking Gym nonmember oleh admin." }); return;
+      }
+      const identityType = req.body.x904IdentityType as "pin" | "card";
+      const identityValue = String(req.body.x904IdentityValue ?? "").trim().toUpperCase();
+      const card = identityType === "card" ? resolveX904NonmemberCard(identityValue) : null;
+      if ((identityType === "card" && !card) || (identityType === "pin" && !/^[0-9]{1,8}$/.test(identityValue))) {
+        res.status(400).json({ error: "Kartu/PIN X904 tidak valid." }); return;
+      }
+      const userPin = card ? card.userPin : identityValue;
+      const inventory = await db.execute(sql`SELECT user_pin,device_uid,display_name,device_role FROM sport_center.gym_x904_lan_users WHERE device_serial='TDBD234200545' AND user_pin=${userPin}`);
+      if (inventory.rows.length !== 1) { res.status(409).json({ error: "Identitas X904 tidak ditemukan atau tidak unik." }); return; }
+      const row = inventory.rows[0] as any;
+      if (Number(row.device_role) !== 0 || !Number.isSafeInteger(Number(row.device_uid)) || Number(row.device_uid) <= 0 ||
+          (card && (Number(row.device_uid) !== card.deviceUid || String(row.display_name ?? "").replace(/\s+/g, "").toUpperCase() !== card.displayName.replace(/\s+/g, "").toUpperCase()))) {
+        res.status(409).json({ error: "Identitas X904 tidak cocok dengan inventaris mesin." }); return;
+      }
+      verifiedX904Identity = { identityType, identityLabel: card ? identityValue : `PIN:${identityValue}`, userPin: String(row.user_pin), deviceUid: Number(row.device_uid), displayName: String(row.display_name).trim() };
+    }
+    if (isWalkIn && isAdminRequest && bookingSource === "admin" && !verifiedX904Identity && !isCompanyBilling) {
+      res.status(400).json({ error: "Booking Gym harian admin memerlukan identitas kartu/PIN X904 terverifikasi." }); return;
+    }
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
@@ -1772,7 +1799,8 @@ router.post("/bookings", async (req, res) => {
       }
     }
 
-    const [booking] = await db.insert(bookingsTable).values({
+    const [booking] = await db.transaction(async (tx) => {
+      const createdRows = await tx.insert(bookingsTable).values({
       orderNumber,
       customerId: effectiveCustomerId,
       bookedByUserId: loggedInUserId,
@@ -1823,6 +1851,17 @@ router.post("/bookings", async (req, res) => {
       additionalCharges,
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
+      const created = createdRows[0];
+      if (!created) throw new Error("ADMIN_BOOKING_CREATE_FAILED");
+      if (verifiedX904Identity) {
+        await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
+          (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+          VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
+            ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
+            ${created.id},'verified','pending')`);
+      }
+      return createdRows;
+    });
 
     if (incomingGroupRef) {
       await syncBookingGroupTotal(incomingGroupRef);

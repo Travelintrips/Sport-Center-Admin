@@ -40,6 +40,11 @@ export default function AdminCheckoutForm() {
   const [slotOptions, setSlotOptions] = useState<Array<{time: string; available: boolean; reason: string | null}>>([]);
   const [slotState, setSlotState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
+  const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
+  const [x904IdentityValue, setX904IdentityValue] = useState("");
+  const [x904VerifiedName, setX904VerifiedName] = useState("");
+  const [x904VerificationError, setX904VerificationError] = useState("");
+  const [x904Verifying, setX904Verifying] = useState(false);
   const [startTime, setStartTime] = useState("");
   const [bookingDay, setBookingDay] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -114,6 +119,26 @@ export default function AdminCheckoutForm() {
   const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = bookingDay;
+  const isGymNonmember = isWalkIn && bookingKind !== "membership";
+  useEffect(() => {
+    setX904VerifiedName("");
+    setX904VerificationError("");
+    if (!isGymNonmember || !x904IdentityValue.trim()) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setX904Verifying(true);
+      try {
+        const query = new URLSearchParams({ type: x904IdentityType, value: x904IdentityValue.trim() });
+        const response = await fetch("/api/wa/x904-identity?" + query, { signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok || data.valid !== true || !data.displayName) throw new Error(data.error || "Identitas X904 tidak ditemukan");
+        if (!controller.signal.aborted) setX904VerifiedName(data.displayName);
+      } catch (error) {
+        if (!controller.signal.aborted) setX904VerificationError(error instanceof Error ? error.message : "Verifikasi X904 gagal");
+      } finally { if (!controller.signal.aborted) setX904Verifying(false); }
+    }, 350);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [isGymNonmember, x904IdentityType, x904IdentityValue]);
   const isMembership = bookingKind === "membership";
   const hideRegularBookingFields = isMembership && memberAction !== "new";
   const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
@@ -169,6 +194,7 @@ export default function AdminCheckoutForm() {
     !isSubmitting &&
     paymentChoice !== null &&
     formPaymentValid &&
+    (!isGymNonmember || (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
     (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && selectedCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
@@ -588,6 +614,7 @@ export default function AdminCheckoutForm() {
         payerType: corporate ? "company" : "personal",
         ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
         source: "admin",
+        ...(isGymNonmember ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         adminPaymentChoice: paymentChoice,
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
         notes: notes || undefined,
@@ -912,6 +939,21 @@ export default function AdminCheckoutForm() {
               </Select>
             </div>}
 
+            {isGymNonmember && <div className="space-y-3 rounded-lg border p-3">
+              <Label>Identitas akses X904 (nonmember) *</Label>
+              <Select value={x904IdentityType} onValueChange={(value) => { setX904IdentityType(value as "pin" | "card"); setX904IdentityValue(""); }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="card">Kartu pengunjung</SelectItem><SelectItem value="pin">PIN mesin X904</SelectItem></SelectContent>
+              </Select>
+              {x904IdentityType === "card" ? <Select value={x904IdentityValue} onValueChange={setX904IdentityValue}>
+                <SelectTrigger><SelectValue placeholder="Pilih kartu VIS001–VIS006" /></SelectTrigger>
+                <SelectContent>{Array.from({length: 6}, (_, i) => `VIS${String(i + 1).padStart(3, "0")}`).map((card) => <SelectItem key={card} value={card}>{card}</SelectItem>)}</SelectContent>
+              </Select> : <Input aria-label="PIN mesin X904" inputMode="numeric" value={x904IdentityValue} onChange={(event) => setX904IdentityValue(event.target.value)} placeholder="Masukkan PIN mesin" />}
+              {x904Verifying && <p className="text-xs">Memverifikasi identitas mesin...</p>}
+              {x904VerifiedName && <p className="text-xs text-emerald-700">Terverifikasi: {x904VerifiedName}</p>}
+              {x904VerificationError && <p className="text-xs text-destructive">{x904VerificationError}</p>}
+              <p className="text-xs text-muted-foreground">Akses baru aktif setelah pembayaran dikonfirmasi dan mesin memberikan ACK.</p>
+            </div>}
             {/* Booking date and duration: Gym is per visit, not hourly. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
