@@ -37,3 +37,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-11-03 rebuild Hostinger Node backend from merged Gym one-pass PR #471 (9d5e1327); verify /api/healthz git_commit and POST /api/memberships/admin-register-paid requires auth; do not enable X904 automatic commands or replay old events.
 
 2026-11-03 deploy PR #472 canonical QRIS MDR snapshot fix.
+
+2026-11-03 request clean Hostinger rebuild for merged Gym historical nonmember VIS references PR #479 (4c613a91); verify /api/healthz git_commit and CheckoutForm historical label. Do NOT enable X904 flags, send device commands, or replay historical payment events.
