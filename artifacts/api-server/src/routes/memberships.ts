@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   db,
+  usersTable,
   gymMembershipsTable,
   membershipPaymentsTable,
   publicMembershipsTable,
@@ -867,6 +868,141 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Get membership error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Admin-only, single-request registration for an already-paid Gym member.
+// All customer, membership, payment, booking and X904 entitlement writes are
+// transactional. An uploaded proof is never treated as payment verification.
+router.post("/memberships/admin-register-paid", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
+  try {
+    const role = String((req as any).user?.role ?? "");
+    if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
+      res.status(403).json({ error: "Konfirmasi pembayaran memerlukan admin/finance berwenang" });
+      return;
+    }
+    const name = String(req.body?.name ?? "").trim();
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const phone = String(req.body?.phone ?? "").trim();
+    const phoneKey = phone.replace(/\D/g, "").replace(/^0/, "62");
+    const months = Number(req.body?.months);
+    const startDate = String(req.body?.startDate ?? "").trim();
+    const paymentMethod = String(req.body?.paymentMethod ?? "").trim();
+    const paymentDate = normalizePaymentDate(req.body?.paymentDate);
+    const notes = String(req.body?.notes ?? "").trim();
+    const proof = req.file;
+    if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phoneKey.length < 10 || phoneKey.length > 15) {
+      res.status(400).json({ error: "Nama, email, dan nomor WhatsApp yang valid wajib diisi" }); return;
+    }
+    if (!Number.isInteger(months) || ![1,2,3,6,12].includes(months)) {
+      res.status(400).json({ error: "Paket membership tidak valid" }); return;
+    }
+    const parsedStartDate = new Date(startDate + "T00:00:00Z");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || Number.isNaN(parsedStartDate.getTime()) || parsedStartDate.toISOString().slice(0,10) !== startDate) {
+      res.status(400).json({ error: "Tanggal mulai membership tidak valid" }); return;
+    }
+    if (!["qris", "transfer"].includes(paymentMethod)) {
+      res.status(400).json({ error: "Pilih QRIS atau Transfer Bank" }); return;
+    }
+    const mime = proof?.mimetype.toLowerCase();
+    const extensions: Record<string,string> = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp","image/heic":".heic","image/heif":".heif"};
+    if (!proof || !mime || !extensions[mime]) {
+      res.status(400).json({ error: "Unggah bukti pembayaran berupa gambar" }); return;
+    }
+
+    // Do not create a customer/login with a predictable default password.
+    // A customer record without credentials is safe to invite later.
+    const objectName = `membership-paid-intake-${randomUUID()}${extensions[mime]}`;
+    const proofUrl = await uploadFile(BUCKETS.proof, objectName, proof.buffer, mime);
+    const orderNumber = await generateBookingOrderNumber();
+    const today = new Date();
+    const end = new Date(startDate + "T00:00:00Z");
+    end.setUTCMonth(end.getUTCMonth() + months);
+    const endDate = end.toISOString().slice(0,10);
+    const amount = String(months * PRICE_PER_MONTH);
+    const result = await db.transaction(async tx => {
+      // Serialize attempts for the same phone, including simultaneous double-clicks.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${phoneKey}))`);
+      const conflicts = await tx.select({ id:gymMembershipsTable.id }).from(gymMembershipsTable)
+        .where(sql`regexp_replace(${gymMembershipsTable.phone}, '[^0-9]', '', 'g') IN (${phoneKey}, ${phone.replace(/\D/g, "")}) AND ${gymMembershipsTable.status} IN ('active','pending_payment','waiting_confirmation')`)
+        .limit(1);
+      if (conflicts.length) throw new MembershipProofError(409, "Nomor ini sudah memiliki membership aktif atau tagihan yang belum selesai; periksa riwayat member");
+      // Reuse by verified email, but never silently create a second customer
+      // against an existing WhatsApp identity.
+      const existingPhoneUsers = await tx.select().from(usersTable)
+        .where(sql`regexp_replace(${usersTable.phone}, '[^0-9]', '', 'g') IN (${phoneKey}, ${phone.replace(/\D/g, "")})`)
+        .limit(2);
+      if (existingPhoneUsers.some(user => String(user.email ?? "").toLowerCase() !== email)) {
+        throw new MembershipProofError(409, "Nomor WhatsApp sudah digunakan customer lain; verifikasi identitas dahulu");
+      }
+      const existingUsers = await tx.select().from(usersTable).where(ilike(usersTable.email,email)).limit(1);
+      let customer = existingUsers[0];
+      if (customer) {
+        const userPhone = String(customer.phone ?? "").replace(/\D/g, "").replace(/^0/, "62");
+        if (customer.role !== "customer" || (userPhone && userPhone !== phoneKey)) {
+          throw new MembershipProofError(409, "Email sudah digunakan akun lain; verifikasi identitas customer");
+        }
+      } else {
+        const [createdCustomer] = await tx.insert(usersTable).values({
+          name, email, phone, role:"customer", accountType:"personal",
+          registrationSource:"admin_gym_membership", passwordHash:null,
+        }).returning();
+        if (!createdCustomer) throw new Error("CUSTOMER_INSERT_FAILED");
+        customer = createdCustomer;
+      }
+      const [membership] = await tx.insert(gymMembershipsTable).values({
+        name,email,phone,startDate,endDate,months,totalPrice:amount,
+        notes:notes||null,status:"pending_payment",
+      }).returning();
+      if (!membership) throw new Error("MEMBERSHIP_INSERT_FAILED");
+      const [pending] = await tx.insert(membershipPaymentsTable).values({
+        membershipId:membership.id,periodStart:startDate,periodEnd:endDate,
+        months,amount,status:"waiting_confirmation",paymentMethod,paymentProofUrl:proofUrl,
+        paymentDate,submittedAt:today,
+      }).returning();
+      if (!pending) throw new Error("PAYMENT_INSERT_FAILED");
+      // The canonical payment mirror trigger checks for EXACTLY ONE booking
+      // before it permits a confirmed payment. Create it while still pending.
+      const pendingBooking = await ensureMembershipPaymentBooking(membership,pending,tx,orderNumber);
+      const [payment] = await tx.update(membershipPaymentsTable).set({
+        status:"confirmed",confirmedAt:today,settlementProviderCode:"mandiri_direct",
+        mutationKey:`SC-MBP-${pending.id}`,accountingRef:`MB-${membership.id}-P${pending.id}`,
+        updatedAt:today,
+      }).where(eq(membershipPaymentsTable.id,pending.id)).returning();
+      if (!payment) throw new Error("PAYMENT_CONFIRM_FAILED");
+      const booking = await ensureMembershipPaymentBooking(membership,payment,tx,orderNumber);
+      if (booking.id !== pendingBooking.id) throw new Error("MEMBERSHIP_BOOKING_DUPLICATE");
+      const [linkedBooking] = await tx.update(bookingsTable).set({customerId:customer.id})
+        .where(eq(bookingsTable.id,booking.id)).returning();
+      if (!linkedBooking) throw new Error("CUSTOMER_BOOKING_LINK_FAILED");
+      const [active] = await tx.update(gymMembershipsTable).set({
+        status:"active",paymentMethod,paymentProofUrl:proofUrl,updatedAt:today,
+      }).where(eq(gymMembershipsTable.id,membership.id)).returning();
+      if (!active) throw new Error("MEMBERSHIP_ACTIVATION_FAILED");
+      await tx.execute(sql`
+        INSERT INTO sport_center.x904_automatic_entitlement_events
+          (membership_id,payment_id,reason,event_key)
+        VALUES (${active.id},${payment.id},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(payment.id)})
+        ON CONFLICT (event_key) DO NOTHING
+      `);
+      return {customerId:customer.id,membership:active,payment,booking:linkedBooking};
+    });
+    syncMembershipToBizportal(result.membership).catch(err => req.log.error({err},"Paid membership sync failed"));
+    syncBookingRecordToBizportal(result.booking).catch(err => req.log.error({err},"Paid membership booking sync failed"));
+    pushMembershipPaymentAsBankMutation(result.membership,result.payment,today,result.booking)
+      .catch(err => req.log.error({err},"Paid membership mutation sync failed"));
+    await syncToPublic(result.membership);
+    res.status(201).json({
+      customerId:result.customerId, membershipId:result.membership.id,
+      paymentId:result.payment.id, bookingId:result.booking.id,
+      status:"active", paymentStatus:"confirmed", amount:Number(result.payment.amount),
+      x904Status:"pending_device_ack",
+    });
+  } catch (err) {
+    if (err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
+    req.log.error({err},"Register paid Gym membership failed");
+    res.status(500).json({error:"Pendaftaran atau konfirmasi pembayaran gagal. Periksa riwayat sebelum mencoba lagi."});
   }
 });
 
