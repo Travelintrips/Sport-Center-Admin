@@ -239,6 +239,8 @@ test("VIS006 rollout guard rejects invalid PIN and excludes all other PINs", asy
 test('VIS006 unpaid booking automatically suspends and remains pending until verified payment', async () => {
   process.env.GYM_X904_NONMEMBER_ONLY_PIN = '15';
   try {
+    // Prior negative test owns the same PIN; remove only that isolated fixture.
+    await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008");
     await run("INSERT INTO sport_center.sport_bookings VALUES(9099)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9099)");
     const access = (await run('SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9099')).rows[0].access_id;
