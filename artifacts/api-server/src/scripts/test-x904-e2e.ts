@@ -71,9 +71,11 @@ try{
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
  const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
- const report = {message:redact(e.message), stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
+ const cause = (e as Error & {cause?: unknown}).cause;
+ const dbCause = cause && typeof cause === "object" ? cause as {code?: string;message?: string;detail?: string;hint?: string} : null;
+ const report = {message:redact(e.message), dbCause:dbCause ? {code:dbCause.code ?? null,message:redact(dbCause.message ?? ""),detail:redact(dbCause.detail ?? ""),hint:redact(dbCause.hint ?? "")} : null, stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
  writeFileSync("x904_runtime_error_log.json",JSON.stringify(report,null,2),{mode:0o600});
- console.error("DETAILE_ERROR_E2E:",report.message,report.stack);
+ console.error("DETAILE_ERROR_E2E:",report.message,JSON.stringify(report.dbCause),report.stack);
  process.exitCode=1;
  throw new Error("X904_E2E_FAILED_CHECK_REPORT");
 } finally {
