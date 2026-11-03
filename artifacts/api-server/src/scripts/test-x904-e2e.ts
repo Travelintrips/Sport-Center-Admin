@@ -18,6 +18,8 @@ const marker="X904 event "+eventId;
 const originalTrustedCodes=process.env.GYM_X904_TRUSTED_VERIFICATION_CODES;
 process.env.GYM_X904_TRUSTED_VERIFICATION_CODES="1";
 try{
+ const identity=await db.execute(sql`SELECT current_user AS role_name, session_user AS login_name, has_schema_privilege(current_user, 'sport_center', 'USAGE') AS schema_usage`);
+ console.log("X904_DEV_DB_IDENTITY",JSON.stringify(identity.rows[0]));
  // DEV-only synthetic membership and mapping; never touch an existing member.
  const member=await db.execute(sql`INSERT INTO sport_center.sport_memberships
   (name,email,phone,start_date,end_date,months,total_price,status,notes)
