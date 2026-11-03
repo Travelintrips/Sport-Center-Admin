@@ -89,6 +89,26 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
+      // The pilot PIN filter remains enabled until rollout is explicitly approved.
+      // All other PINs must pass these shared ownership checks first.
+      const owners = await tx.execute(sql`SELECT membership_id,status
+        FROM sport_center.gym_x904_member_mapping
+        WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
+      if (owners.rows.length > 0) {
+        await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+          SET access_state='review_required'
+          WHERE access_id=${Number(a.access_id)} AND access_state IN ('pending','active')`);
+        return;
+      }
+      // Never suspend an exempt PIN, even if it is presently recorded as a
+      // nonmember paid access. The exemption applies to both transitions to
+      // prevent the 12-hour worker taking ownership of special access.
+      if (isX904AutoSuspendExempt(pin, 0)) {
+        await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+          SET access_state='review_required'
+          WHERE access_id=${Number(a.access_id)} AND access_state IN ('pending','active')`);
+        return;
+      }
       const unpaidVis006 = a.payment_id == null && ["pending", "review_required"].includes(a.access_state) &&
         a.user_pin === "15" && testPin === "15";
       const shouldBeActive = a.payment_status === "confirmed" &&
@@ -119,6 +139,21 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             AND other.access_id<>${Number(a.access_id)} AND pay.status::text='confirmed'
             AND other.expires_at>${now} LIMIT 1`);
         if (paid.rows.length) return;
+      }
+
+      // A later/parallel confirmed grant for the same PIN must take priority
+      // over an older grant's expiry. Do not suspend the shared machine user.
+      if (targetGroup === 2) {
+        const overlapping = await tx.execute(sql`SELECT 1
+          FROM sport_center.x904_nonmember_daily_access other
+          JOIN sport_center.sport_payments pay
+            ON pay.id=other.payment_id AND pay.booking_id=other.booking_id
+          WHERE other.device_serial=${DEVICE} AND other.user_pin=${pin}
+            AND other.access_id<>${Number(a.access_id)}
+            AND pay.status::text='confirmed'
+            AND other.confirmed_at<=${now} AND other.expires_at>${now}
+          LIMIT 1`);
+        if (overlapping.rows.length) return;
       }
 
       const machine = await tx.execute(sql`SELECT observed_at,user_count,users
