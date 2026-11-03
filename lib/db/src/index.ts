@@ -9,7 +9,9 @@ const isProd            = NODE_ENV === "production";
 
 const SUPABASE_PROD_URL   = process.env.SUPABASE_DATABASE_URL;
 const SUPABASE_DEV_URL    = process.env.SUPABASE_DATABASE_URL_DEV;
-const ALLOW_DEV_ON_PROD   = process.env.ALLOW_DEV_ON_PROD_DB === "true";
+const X904_E2E_LOCAL_URL = process.env.X904_E2E_LOCAL_DATABASE_URL;
+const X904_E2E_LOCAL = process.env.X904_E2E_LOCAL === "true";
+const ALLOW_DEV_ON_PROD = process.env.ALLOW_DEV_ON_PROD_DB === "true";
 
 let connectionString: string | undefined;
 let dbSource: string;
@@ -22,7 +24,26 @@ if (ALLOW_DEV_ON_PROD) {
   );
 }
 
-if (isProd) {
+if (X904_E2E_LOCAL) {
+  if (isProd || NODE_ENV !== "development") {
+    throw new Error("[DB] Isolated X904 E2E database is allowed only with NODE_ENV=development.");
+  }
+  if (!X904_E2E_LOCAL_URL) {
+    throw new Error("[DB] X904_E2E_LOCAL_DATABASE_URL is required when X904_E2E_LOCAL=true.");
+  }
+  let localUrl: URL;
+  try { localUrl = new URL(X904_E2E_LOCAL_URL); } catch {
+    throw new Error("[DB] Invalid isolated X904 E2E database URL.");
+  }
+  const localHost = ["127.0.0.1", "localhost"].includes(localUrl.hostname);
+  const localDb = localUrl.pathname === "/x904_e2e";
+  const localUser = decodeURIComponent(localUrl.username) === "postgres";
+  if (!localHost || !localDb || !localUser || !localUrl.password || SUPABASE_PROD_URL === X904_E2E_LOCAL_URL) {
+    throw new Error("[DB] X904 E2E URL must target only localhost/x904_e2e as postgres.");
+  }
+  connectionString = X904_E2E_LOCAL_URL;
+  dbSource = "X904 isolated ephemeral PostgreSQL (localhost only)";
+} else if (isProd) {
   if (!SUPABASE_PROD_URL) {
     throw new Error(
       "[DB] Production database is not configured. " +
