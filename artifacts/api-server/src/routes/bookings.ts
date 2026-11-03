@@ -237,7 +237,7 @@ async function getBookingWithPayment(id: number) {
     ? {
         id: -companyInvoice.id,
         bookingId: booking.id,
-        amount: Number(companyInvoiceItem?.totalAmount ?? companyInvoice.grandTotal ?? companyInvoice.totalAmount ?? booking.totalPrice),
+        amount: Number(companyInvoice.netAmount ?? companyInvoice.grandTotal ?? companyInvoice.totalAmount ?? booking.totalPrice),
         proofUrl: companyInvoice.paymentProofUrl,
         paymentMethod: companyInvoice.paymentMethod,
         paymentProvider: "unknown",
@@ -852,7 +852,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             bookingId: b.id,
             // The invoice is the only payment at this level. Never expose the
             // individual invoice item/session amount as the paid payment.
-            amount: Number(invoice.grandTotal ?? invoice.totalAmount ?? 0),
+            amount: Number(invoice.netAmount ?? invoice.grandTotal ?? invoice.totalAmount ?? 0),
             proofUrl: invoice.paymentProofUrl,
             paymentMethod: invoice.paymentMethod,
             paymentProvider: "company_invoice",
