@@ -1385,6 +1385,23 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       updatedAt: Date;
     } = { updatedAt: new Date() };
 
+    // Protect every new membership and renewal from bypassing payment verification.
+    // A direct status change must never activate a pending, unconfirmed payment.
+    // Likewise, a submitted proof must not be silently cancelled via generic edit.
+    if (status === "active" && existing.status === "cancelled") {
+      res.status(409).json({ error: "Membership dibatalkan. Verifikasi riwayat pembayaran dan lakukan pemulihan melalui alur khusus; jangan aktifkan manual." });
+      return;
+    }
+    if (status === "cancelled") {
+      const [unresolvedProof] = await db.select().from(membershipPaymentsTable)
+        .where(and(eq(membershipPaymentsTable.membershipId, id),
+          eq(membershipPaymentsTable.status, "waiting_confirmation")))
+        .limit(1);
+      if (unresolvedProof) {
+        res.status(409).json({ error: "Ada bukti pembayaran menunggu konfirmasi. Pembatalan memerlukan alasan, identitas petugas, dan pemeriksaan penerimaan dana melalui alur pembatalan resmi." });
+        return;
+      }
+    }
     let paymentToConfirm: typeof membershipPaymentsTable.$inferSelect | undefined;
     if (status === "active") {
       [paymentToConfirm] = await db.select().from(membershipPaymentsTable)
@@ -1413,6 +1430,16 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         data.status = "active";
         data.startDate = paymentToConfirm.periodStart;
         data.endDate = paymentToConfirm.periodEnd;
+      }
+    }
+    if (status === "active" && !paymentToConfirm && existing.status !== "active") {
+      const [unconfirmed] = await db.select().from(membershipPaymentsTable)
+        .where(and(eq(membershipPaymentsTable.membershipId, id),
+          inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"])))
+        .limit(1);
+      if (unconfirmed) {
+        res.status(409).json({ error: "Membership tidak boleh diaktifkan sebelum pembayaran dikonfirmasi. Gunakan bukti pembayaran yang sudah ada." });
+        return;
       }
     }
     if (status !== undefined && !paymentToConfirm) data.status = status;
