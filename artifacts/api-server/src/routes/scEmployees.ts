@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { asc, eq } from "drizzle-orm";
 import { db, scEmployeesTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
@@ -21,7 +21,7 @@ function validateEmployee(input: any) {
   const whatsappNumber = normalizeEmployeePhone(input?.whatsappNumber);
   const notes = typeof input?.notes === "string" ? input.notes.trim() : "";
   const isActive = input?.isActive === undefined ? true : input.isActive;
-  if (!employeeIdPattern.test(employeeId)) return { error: "ID Karyawan harus 2-32 karakter (huruf, angka, - atau _)" };
+  if (employeeId && ! employeeIdPattern.test(employeeId)) return { error: "ID Karyawan tidak valid" };
   if (fullName.length < 2 || fullName.length > 150) return { error: "Nama lengkap wajib diisi (2-150 karakter)" };
   if (!whatsappNumber) return { error: "Nomor WhatsApp tidak valid. Gunakan nomor Indonesia, misalnya 081234567890" };
   if (typeof isActive !== "boolean") return { error: "Status harus Aktif atau Nonaktif" };
@@ -39,10 +39,12 @@ router.get("/admin/sc-employees", adminMiddleware, async (_req, res) => {
 });
 
 router.post("/admin/sc-employees", adminMiddleware, async (req, res) => {
+  if (req.body?.employeeId !== undefined) { res.status(400).json({ error: "ID Karyawan dibuat otomatis oleh sistem" }); return; }
   const validation = validateEmployee(req.body);
   if (!validation.data) { res.status(400).json({ error: validation.error }); return; }
   try {
-    const [row] = await db.insert(scEmployeesTable).values(validation.data).returning();
+    const { employeeId: _generated, ...data } = validation.data;
+    const [row] = await db.insert(scEmployeesTable).values(data).returning();
     const actor = getUserFromReq(req);
     await logAudit({ ...actor, action: "SC_EMPLOYEE_CREATED", entity: "sc_employee",  after: row, ...getClientInfo(req) });
     res.status(201).json(row);
