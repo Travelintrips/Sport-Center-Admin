@@ -16,8 +16,9 @@ function normalizeTriggerMessage(message: string): string {
 /** Recognize the greetings that should start or restart Mina's greeting flow. */
 export function isMinaGreeting(message: string): boolean {
   const normalized = normalizeTriggerMessage(message);
-  return /^(?:halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?$/.test(normalized) ||
-    /^selamat\s+(?:pagi|siang|sore|malam)$/.test(normalized);
+  return /^(?:halo|hallo|hi|hai)(?:\s+(?:mina|kak|ka))?(?:\s*,?\s*mau\s+tanya)?$/.test(normalized) ||
+    /^(?:selamat\s+)?(?:pagi|siang|sore|malam)$/.test(normalized) ||
+    /^(?:assalamualaikum|assalamu\s*alaikum|assalamu'alaikum|asalamualaikum|assalamualaikum\s+wr\s*wb)$/.test(normalized);
 }
 
 /** Recognize general questions that should leave a stale booking flow and return to Mina's normal assistant. */

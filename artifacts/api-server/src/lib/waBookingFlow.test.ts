@@ -37,11 +37,19 @@ describe("WhatsApp Mina booking flow regressions", () => {
       "selamat sore",
       "Selamat malam",
       "selamat malam",
+      "pagi",
+      "Pagi!",
+      "assalamualaikum",
+      "Assalamu alaikum",
+      "halo mina, mau tanya",
+      "Halo Mina, mau tanya.",
     ]) {
       expect(isMinaGreeting(message)).toBe(true);
     }
     expect(isMinaGreeting("halo,")).toBe(true);
-    expect(isMinaGreeting("pagi")).toBe(false);
+    expect(isMinaGreeting("pagi")).toBe(true);
+    expect(isMinaGreeting("halo mina mau booking")).toBe(false);
+    expect(isMinaGreeting("mau kasbon")).toBe(false);
   });
 
   it("recognizes general questions that should leave a stale booking flow", () => {

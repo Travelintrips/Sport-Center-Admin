@@ -18,7 +18,7 @@ export function isBotEcho(msg: string): boolean {
  * customer input for the active booking session.
  */
 export function isMinaGreetingEcho(msg: string): boolean {
-  return /^Halo! Aku Mina asisten Sport Center\b/i.test(msg.trimStart());
+  return /^Halo!\s*(?:👋\s*)?Aku Mina,?\s+asisten Sport Center(?:\.|\b)/iu.test(msg.trimStart());
 }
 
 /**
