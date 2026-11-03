@@ -1331,47 +1331,7 @@ export function normalizePhone(raw: string): string {
   return p;
 }
 
-// Admin-only lookup used by checkout and customer detail badges.
-// Match one active AP card to the selected customer's normalized phone.
-router.get("/bookings/ap-member-lookup", adminMiddleware, async (req, res) => {
-  try {
-    const phone = normalizePhone(String(req.query.phone ?? ""));
-    if (!phone) {
-      res.status(400).json({ error: "Nomor telepon customer diperlukan" });
-      return;
-    }
-    const [members, settings] = await Promise.all([
-      db.select({
-        name: apMembersTable.name,
-        phone: apMembersTable.phone,
-        idCardNumber: apMembersTable.idCardNumber,
-      }).from(apMembersTable).where(eq(apMembersTable.isActive, true)),
-      db.select({
-        discountPercentage: discountSettingsTable.discountPercentage,
-        discountAmount: discountSettingsTable.discountAmount,
-        isActive: discountSettingsTable.isActive,
-      }).from(discountSettingsTable)
-        .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1),
-    ]);
-    const matches = members.filter((member) => normalizePhone(member.phone) === phone);
-    if (matches.length !== 1) {
-      res.json({ eligible: false, ambiguous: matches.length > 1 });
-      return;
-    }
-    const setting = settings[0] ?? null;
-    res.json({
-      eligible: true,
-      name: matches[0].name,
-      idCardNumber: matches[0].idCardNumber,
-      discountActive: Boolean(setting?.isActive && (Number(setting.discountAmount ?? 0) > 0 || Number(setting.discountPercentage ?? 0) > 0)),
-      discountPercentage: Number(setting?.discountPercentage ?? 0),
-      discountAmount: setting?.discountAmount == null ? 0 : Number(setting.discountAmount),
-    });
-  } catch (err) {
-    req.log.error({ err }, "AP member checkout lookup failed");
-    res.status(500).json({ error: "Tidak dapat memeriksa status Member AP" });
-  }
-});
+
 
 async function generateCustomerCode(): Promise<string> {
   await db.execute(sql`SELECT pg_advisory_lock(42002)`);
