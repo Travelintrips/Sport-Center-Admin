@@ -77,7 +77,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     const daily = await tx.execute(sql`
       SELECT l.event_id,l.device_serial,l.user_pin,l.device_time,
         COALESCE(NULLIF(trim(u.display_name),''),'Pengguna X904') AS display_name,
-        membership.status AS membership_status
+        membership.status AS membership_status,
+        visitor.is_verified_visitor AS is_verified_visitor
       FROM sport_center.gym_x904_lan_logs l
       LEFT JOIN sport_center.gym_x904_lan_state state
         ON state.device_serial=l.device_serial
@@ -98,17 +99,29 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
                  AND lower(btrim(other.display_name))=lower(btrim(u.display_name)))=1
         LIMIT 1
       ) membership ON true
+      LEFT JOIN LATERAL (
+        SELECT true AS is_verified_visitor
+        FROM sport_center.x904_nonmember_daily_access access
+        WHERE u.device_role=0
+          AND access.device_serial=u.device_serial
+          AND access.user_pin=u.user_pin
+          AND access.device_uid=u.device_uid
+          AND access.verification_state='verified'
+          AND lower(btrim(access.verified_name))=lower(btrim(u.display_name))
+          AND access.identity_type='card'
+        LIMIT 1
+      ) visitor ON true
       WHERE l.device_serial=${serial}
         AND l.device_time >= ${day + " 00:00:00"}
         AND l.device_time <= ${latest}
       ORDER BY l.device_time,l.event_id LIMIT 10000`);
     const dailyRows = daily.rows;
     if (!dailyRows.length) throw new Error("X904_DAILY_RECAP_EMPTY");
-    const people = new Map<string,{name:string;times:string[];membershipStatus:string|null}>();
+    const people = new Map<string,{name:string;times:string[];membershipStatus:string|null;isVerifiedVisitor:boolean}>();
     for (const r of dailyRows) {
       const pin = String(r.user_pin);
       const key = String(r.device_serial) + ":" + pin;
-      const entry = people.get(key) ?? {name:String(r.display_name).slice(0,80),times:[],membershipStatus:r.membership_status == null ? null : String(r.membership_status)};
+      const entry = people.get(key) ?? {name:String(r.display_name).slice(0,80),times:[],membershipStatus:r.membership_status == null ? null : String(r.membership_status),isVerifiedVisitor:r.is_verified_visitor === true};
       entry.times.push(String(r.device_time));
       people.set(key,entry);
     }
@@ -124,7 +137,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       // Status is derived from the unique current machine account + unique member name.
       // Ambiguous/unmapped identities (e.g. several POLRES users) receive no marker.
       const marker = person.membershipStatus === "active" ? " (M)"
-        : person.membershipStatus === "expired" ? " (ME)" : "";
+        : person.membershipStatus === "expired" ? " (ME)"
+        : person.isVerifiedVisitor ? " (V)" : "";
       return `${i+1}. *${person.name}${marker}* — ${scanTimes} WIB`;
     });
     const body = [
