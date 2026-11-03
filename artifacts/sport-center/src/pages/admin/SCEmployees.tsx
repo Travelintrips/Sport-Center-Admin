@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,10 @@ export default function SCEmployees() {
       ? request("/admin/sc-employees/" + encodeURIComponent(editing), "PATCH", {
         fullName: value.fullName, whatsappNumber: value.whatsappNumber, isActive: value.isActive, notes: value.notes,
       })
-      : request("/admin/sc-employees", "POST", value),
+      : request("/admin/sc-employees", "POST", {
+        fullName: value.fullName, whatsappNumber: value.whatsappNumber,
+        isActive: value.isActive, notes: value.notes,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-sc-employees"] });
       setOpen(false); setEditing(null); setForm(emptyForm);
@@ -67,7 +70,7 @@ export default function SCEmployees() {
   };
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!form.employeeId.trim() || !form.fullName.trim() || !form.whatsappNumber.trim()) return;
+    if (!form.fullName.trim() || !form.whatsappNumber.trim()) return;
     save.mutate(form);
   };
   return (
@@ -97,12 +100,12 @@ export default function SCEmployees() {
       <Dialog open={open} onOpenChange={(value) => { if (!save.isPending) setOpen(value); }}>
         <DialogContent className="max-w-lg"><DialogHeader><DialogTitle>{editing ? "Edit Karyawan SC" : "Tambah Karyawan SC"}</DialogTitle></DialogHeader>
           <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-1"><Label htmlFor="sc-id">ID Karyawan</Label><Input id="sc-id" required maxLength={32} disabled={!!editing} value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value.toUpperCase() })} placeholder="SC001"/></div>
+            <div className="space-y-1"><Label htmlFor="sc-id">ID Karyawan</Label><Input id="sc-id" readOnly tabIndex={-1} value={editing ? form.employeeId : "Otomatis setelah disimpan"} className="bg-muted" /><p className="text-xs text-muted-foreground">Sistem membuat ID unik berurutan (SC001, SC002, ...).</p></div>
             <div className="space-y-1"><Label htmlFor="sc-name">Nama Lengkap</Label><Input id="sc-name" required maxLength={150} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })}/></div>
             <div className="space-y-1"><Label htmlFor="sc-phone">Nomor WhatsApp</Label><Input id="sc-phone" required type="tel" value={form.whatsappNumber} onChange={(e) => setForm({ ...form, whatsappNumber: e.target.value })} placeholder="081234567890"/></div>
             <div className="space-y-1"><Label htmlFor="sc-status">Status</Label><select id="sc-status" className="block w-full rounded-md border bg-background p-2" value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></div>
             <div className="space-y-1"><Label htmlFor="sc-notes">Keterangan</Label><Textarea id="sc-notes" maxLength={2000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}/></div>
-            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpen(false)}>Batal</Button><Button type="submit" disabled={save.isPending || !form.employeeId.trim() || !form.fullName.trim() || !form.whatsappNumber.trim()}>{save.isPending ? "Menyimpan..." : "Simpan"}</Button></div>
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpen(false)}>Batal</Button><Button type="submit" disabled={save.isPending || !form.fullName.trim() || !form.whatsappNumber.trim()}>{save.isPending ? "Menyimpan..." : "Simpan"}</Button></div>
           </form>
         </DialogContent>
       </Dialog>
