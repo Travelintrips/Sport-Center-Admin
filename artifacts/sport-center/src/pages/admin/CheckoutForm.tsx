@@ -46,6 +46,7 @@ export default function AdminCheckoutForm() {
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
   const [membershipX904Pin, setMembershipX904Pin] = useState("");
+  const [membershipX904IdentityConfirmed, setMembershipX904IdentityConfirmed] = useState(false);
   const [membershipX904Name, setMembershipX904Name] = useState("");
   const [membershipX904Error, setMembershipX904Error] = useState("");
   const [membershipX904Checking, setMembershipX904Checking] = useState(false);
@@ -289,6 +290,7 @@ export default function AdminCheckoutForm() {
   }, [isMembership]);
   useEffect(() => {
     setMembershipX904Name("");
+    setMembershipX904IdentityConfirmed(false);
     setMembershipX904Error("");
     if (!isMembership || memberAction !== "new" || !membershipX904Pin.trim()) return;
     const controller = new AbortController();
@@ -312,7 +314,7 @@ export default function AdminCheckoutForm() {
   const membershipReady = memberAction === "new"
     ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
-      && membershipX904Name && !membershipX904Checking && !membershipX904Error)
+      && membershipX904Name && membershipX904IdentityConfirmed && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
@@ -333,6 +335,8 @@ export default function AdminCheckoutForm() {
         form.append("startDate",selectedDate);
         form.append("notes",notes);
         form.append("x904Pin",membershipX904Pin.trim());
+        form.append("x904VerifiedName",membershipX904Name);
+        form.append("x904IdentityConfirmed",String(membershipX904IdentityConfirmed));
         form.append("paymentMethod",membershipPaymentMethod);
         form.append("paymentDate",membershipPaymentDate);
         form.append("proof",membershipPaymentFile);
@@ -1285,6 +1289,13 @@ export default function AdminCheckoutForm() {
                   {membershipX904Checking && <p className="text-xs">Memverifikasi PIN mesin...</p>}
                   {membershipX904Name && <p className="text-xs text-emerald-700">Nama di mesin: {membershipX904Name} · PIN {membershipX904Pin}</p>}
                   {membershipX904Error && <p className="text-xs text-destructive">{membershipX904Error}</p>}
+                  {membershipX904Name && !membershipX904Checking && !membershipX904Error && (
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={membershipX904IdentityConfirmed}
+                        onChange={e=>setMembershipX904IdentityConfirmed(e.target.checked)} />
+                      <span>Saya telah mencocokkan pemilik PIN dengan identitas pendaftar dan nama di mesin.</span>
+                    </label>
+                  )}
                   <p className="text-xs text-muted-foreground">PIN harus terdaftar pada X904 dan belum dipetakan ke membership lain. Pembayaran tidak otomatis membuktikan pintu sudah terbuka; tunggu ACK mesin.</p>
                 </div>
                 <Label>Paket membership</Label>
