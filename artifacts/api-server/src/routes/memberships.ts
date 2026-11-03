@@ -979,7 +979,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
         notes:notes||null,status:"pending_payment",
       }).returning();
       if (!membership) throw new Error("MEMBERSHIP_INSERT_FAILED");
-      await tx.execute(sql`
+      const mapped = await tx.execute(sql`
         INSERT INTO sport_center.gym_x904_member_mapping
           (device_serial,user_pin,membership_id,status,verified_at,verified_by,review_reason,updated_at)
         VALUES ('TDBD234200545',${x904Pin},${membership.id},'verified',now(),
@@ -989,7 +989,14 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
           verified_at=EXCLUDED.verified_at,verified_by=EXCLUDED.verified_by,
           review_reason=EXCLUDED.review_reason,updated_at=now()
         WHERE sport_center.gym_x904_member_mapping.membership_id IS NULL
+        RETURNING membership_id,user_pin,status
       `);
+      if (mapped.rows.length !== 1 ||
+          String(mapped.rows[0].membership_id) !== String(membership.id) ||
+          String(mapped.rows[0].user_pin) !== x904Pin ||
+          String(mapped.rows[0].status) !== "verified") {
+        throw new MembershipProofError(409,"Pemetaan PIN X904 gagal atau berubah bersamaan. Pendaftaran dibatalkan.");
+      }
       const [pending] = await tx.insert(membershipPaymentsTable).values({
         membershipId:membership.id,periodStart:startDate,periodEnd:endDate,
         months,amount,status:"waiting_confirmation",paymentMethod,paymentProofUrl:proofUrl,
