@@ -59,6 +59,10 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(section).toContain('gym_x904_member_mapping');
     expect(section).toContain('mappings.rows[0].membership_id != null');
     expect(section).toContain('membership_id=EXCLUDED.membership_id');
+    expect(section).toContain('RETURNING membership_id,user_pin,status');
+    expect(section).toContain('mapped.rows.length !== 1');
+    expect(section).toContain('String(mapped.rows[0].membership_id) !== String(membership.id)');
+    expect(section).toContain('Pemetaan PIN X904 gagal atau berubah bersamaan');
     expect(ui).toContain('form.append("x904Pin",membershipX904Pin.trim())');
     expect(ui).toContain('Nama di mesin:');
     expect(ui).toContain('membershipX904Name && !membershipX904Checking && !membershipX904Error');
