@@ -136,10 +136,10 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       const scanTimes = person.times.map(t => t.slice(11,16)).join(", ");
       // Status is derived from the unique current machine account + unique member name.
       // Ambiguous/unmapped identities (e.g. several POLRES users) receive no marker.
-      const marker = person.membershipStatus === "active" ? " (M)"
-        : person.membershipStatus === "expired" ? " (ME)"
-        : person.isVerifiedVisitor ? " (V)" : "";
-      return `${i+1}. *${person.name}${marker}* — ${scanTimes} WIB`;
+      const marker = person.membershipStatus === "active" ? " 🟢 M"
+        : person.membershipStatus === "expired" ? " 🔴 ME"
+        : person.isVerifiedVisitor ? " 🔵 V" : "";
+      return `${i+1}. *${person.name}*${marker} — ${scanTimes} WIB`;
     });
     const body = [
       "✅ *REKAP ABSENSI GYM*",
@@ -150,6 +150,8 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       ...lines,
       "",
       "👥 *" + people.size + " orang* | 📋 *" + dailyRows.length + " scan*",
+      "",
+      "🟢 M = Member aktif   🔴 ME = Expired   🔵 V = Visitor",
     ].join("\n");
     const batchId = "x904-lan-digest-" + String(eligible[0].event_id);
     await tx.execute(sql`INSERT INTO sport_center.gym_x904_lan_wa_batches
