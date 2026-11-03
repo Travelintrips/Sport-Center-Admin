@@ -388,6 +388,9 @@ async function getBookingWithPayment(id: number) {
       return Math.max(0, total - (confirmedDp > 0 ? confirmedDp : dpAmt));
     })(),
     groupInfo,
+    companyInvoiceStatus: companyInvoice?.status ?? null,
+    companyInvoicePaymentProofUrl: companyInvoice?.paymentProofUrl ?? null,
+    companyInvoicePaymentConfirmed: isCompanyInvoicePaymentConfirmed(companyInvoice),
   };
 }
 
