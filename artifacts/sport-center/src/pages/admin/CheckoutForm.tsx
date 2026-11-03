@@ -118,8 +118,27 @@ export default function AdminCheckoutForm() {
   const hideRegularBookingFields = isMembership && memberAction !== "new";
   const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
   const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
+  const apMember = selectedCustomer?.apMember ?? null;
+  const isActiveApMember = Boolean(apMember?.isActive && apMember?.idCardNumber);
+  const apDiscountEnabled = Boolean(isActiveApMember && apMember?.discountActive);
+  const isApMultiguna = /multiguna/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? ""));
+  const apDiscountForPrice = (basePrice: number) => {
+    if (!apDiscountEnabled || basePrice <= 0) return 0;
+    if (isApMultiguna) return Math.max(0, basePrice - Math.min(basePrice, 300000 * (isWalkIn ? 1 : Number(duration))));
+    const fixed = Number(apMember?.discountAmount ?? 0);
+    const percentage = Number(apMember?.discountPercentage ?? 0);
+    return fixed > 0
+      ? Math.min(Math.round(fixed), basePrice)
+      : Math.min(Math.round(basePrice * percentage / 100), basePrice);
+  };
   const estimatedEventDiscount = bookingKind === "event" ? Math.round(estimatedBase * 0.214) : 0;
-  const estimatedBeforeTax = Math.max(0, estimatedBase - estimatedEventDiscount);
+  const estimatedApDiscount = isActiveApMember ? apDiscountForPrice(estimatedBase) : 0;
+  const estimatedDiscount = isActiveApMember ? estimatedApDiscount : estimatedEventDiscount;
+  const estimatedBeforeTax = Math.max(0, estimatedBase - estimatedDiscount);
+  const repeatApDiscount = repeatPreview ? apDiscountForPrice(Number(repeatPreview.pricePerSession)) : 0;
+  const repeatBaseTotal = repeatPreview ? Number(repeatPreview.pricePerSession) * repeatCount : 0;
+  const repeatAdditionalCharges = repeatPreview ? Math.max(0, Number(repeatPreview.totalPrice) - Number(repeatPreview.pricePerSession) * Number(repeatPreview.validCount)) : 0;
+  const repeatApTotal = Math.max(0, repeatBaseTotal - repeatApDiscount * repeatCount + repeatAdditionalCharges);
   const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const slotValid = isMembership || (isWalkIn ? Boolean(selectedDate) : slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16)));
   const repeatCurrentKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
@@ -521,6 +540,7 @@ export default function AdminCheckoutForm() {
         ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
         source: "admin",
         adminPaymentChoice: paymentChoice,
+        ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
         notes: notes || undefined,
       };
       const res = repeatEnabled
@@ -790,6 +810,18 @@ export default function AdminCheckoutForm() {
             {!isGuest && selectedCustomer && <div className="space-y-2">
               <Label>Nomor Telepon / WhatsApp</Label>
               <Input value={selectedCustomer.phone ?? ""} readOnly />
+              {isActiveApMember && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex rounded-full border border-sky-200 bg-white px-2 py-0.5 text-xs font-semibold text-sky-800">Member Angkasa Pura</span>
+                    {apDiscountEnabled
+                      ? <span className="inline-flex rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700">{isApMultiguna ? "Harga khusus AP Multiguna" : `Diskon ${Number(apMember.discountPercentage ?? 0)}%`}</span>
+                      : <span className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold text-slate-600">Diskon tidak aktif</span>}
+                  </div>
+                  <p className="text-xs text-slate-700">ID Card: <strong>{apMember.idCardNumber}</strong></p>
+                  <p className="text-xs text-slate-600">Identitas cocok dengan nomor WhatsApp Member AP aktif. Harga akhir divalidasi ulang oleh server.</p>
+                </div>
+              )}
             </div>}
             {/* Facility */}
             <div className="space-y-2">
@@ -957,13 +989,16 @@ export default function AdminCheckoutForm() {
                         </div>
                       ))}
                     </div>
-                    <div className="flex justify-between gap-3 border-t pt-2"><span>{repeatAllAvailable ? "Subtotal seluruh sesi" : "Subtotal jika semua sesi tersedia"}</span><strong>{formatRupiah(repeatPreview.pricePerSession * repeatCount)}</strong></div>
-                    {bookingKind === "event" && (
+                    <div className="flex justify-between gap-3 border-t pt-2"><span>{repeatAllAvailable ? "Subtotal seluruh sesi" : "Subtotal jika semua sesi tersedia"}</span><strong>{formatRupiah(repeatBaseTotal + repeatAdditionalCharges)}</strong></div>
+                    {isActiveApMember && (
+                      <div className="flex justify-between gap-3 text-green-700"><span>{isApMultiguna ? "Potongan harga khusus AP Multiguna" : `Diskon Member AP (${Number(apMember.discountPercentage ?? 0)}%)`}</span><span>− {formatRupiah(repeatApDiscount * repeatCount)}</span></div>
+                    )}
+                    {!isActiveApMember && bookingKind === "event" && (
                       <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(Math.round(repeatPreview.pricePerSession * 0.214) * repeatCount)}</span></div>
                     )}
                     <div className="flex justify-between gap-3 font-semibold text-base">
                       <span>{isCompanyPayer ? "Estimasi sebelum pajak perusahaan" : repeatAllAvailable ? "Estimasi Total Pembayaran" : "Estimasi total jika semua sesi tersedia"}</span>
-                      <strong>{formatRupiah(Math.max(0, repeatPreview.pricePerSession * repeatCount - (bookingKind === "event" ? Math.round(repeatPreview.pricePerSession * 0.214) * repeatCount : 0)))}</strong>
+                      <strong>{formatRupiah(isActiveApMember ? repeatApTotal : Math.max(0, repeatBaseTotal - (bookingKind === "event" ? Math.round(repeatPreview.pricePerSession * 0.214) * repeatCount : 0) + repeatAdditionalCharges))}</strong>
                     </div>
                     {!repeatAllAvailable && (
                       <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
@@ -982,7 +1017,10 @@ export default function AdminCheckoutForm() {
                     <div className="flex justify-between gap-3"><span>{isWalkIn ? "Tarif per kunjungan" : "Tarif per jam"}</span><strong>{formatRupiah(Number(facility?.pricePerHour ?? 0))}</strong></div>
                     {!isWalkIn && <div className="flex justify-between gap-3"><span>Durasi</span><span>{duration} jam</span></div>}
                     <div className="flex justify-between gap-3"><span>Subtotal</span><strong>{formatRupiah(estimatedBase)}</strong></div>
-                    {bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
+                    {isActiveApMember && (
+                      <div className="flex justify-between gap-3 text-green-700"><span>{isApMultiguna ? "Harga khusus AP Multiguna" : `Diskon Member AP (${Number(apMember.discountPercentage ?? 0)}%)`}</span><span>− {formatRupiah(estimatedApDiscount)}</span></div>
+                    )}
+                    {!isActiveApMember && bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
                     <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Total Pembayaran"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
                     {isCompanyPayer ? <>
                       <p className="text-muted-foreground">DPP, PPN, dan PPh mengikuti konfigurasi perusahaan serta kalkulasi backend; jumlah ini bukan angka invoice final.</p>
