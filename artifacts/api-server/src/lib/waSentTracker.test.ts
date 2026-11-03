@@ -10,6 +10,12 @@ describe("Mina WhatsApp echo guard", () => {
     ).toBe(true);
   });
 
+  it("ignores the new greeting with an appended provider footer", () => {
+    expect(isMinaGreetingEcho(
+      "Halo! 👋 Aku Mina, asisten Sport Center.\nAda yang bisa Mina bantu hari ini? 😊\nSilakan sampaikan keperluannya, ya.\n\n> Sent via fonnte.com",
+    )).toBe(true);
+  });
+
   it("does not classify a customer's ordinary greeting as Mina output", () => {
     expect(isMinaGreetingEcho("halo ka")).toBe(false);
   });
