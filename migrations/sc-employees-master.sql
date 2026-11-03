@@ -8,3 +8,7 @@ CREATE TABLE IF NOT EXISTS sport_center.sc_employees (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE sport_center.sc_employees ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON sport_center.sc_employees FROM anon, authenticated;
+
