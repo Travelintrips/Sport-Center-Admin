@@ -1600,10 +1600,9 @@ router.post("/bookings", async (req, res) => {
       }
       verifiedX904Identity = { identityType, identityLabel: card ? identityValue : `PIN:${identityValue}`, userPin: String(row.user_pin), deviceUid: Number(row.device_uid), displayName: String(row.display_name).trim() };
     }
-    if (isWalkIn && isAdminRequest && bookingSource === "admin" && !verifiedX904Identity && !isCompanyBilling) {
-      res.status(400).json({ error: "Booking Gym harian admin memerlukan identitas kartu/PIN X904 terverifikasi." }); return;
-    }
-
+    // Keep existing Gym booking clients compatible. The new admin form requires
+    // verified X904 identity for nonmember access, but older callers without
+    // identity must remain ordinary bookings without automatic door access.
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
       if (numberOfPeople == null) numberOfPeople = 1;
