@@ -17,3 +17,15 @@ test('mobile preview rejects non-test PIN, caps source images, and compresses lo
  assert.match(html,/STAGED_OFFLINE_ONLY/);
  assert.match(html,/createImageBitmap/);
 });
+
+test('manual attendance handoff stays local, PIN 500 synthetic only, and invalidates stale results',()=>{
+ assert.match(html,/id="download" type="button" disabled/);
+ assert.match(html,/a\.download='verify_biophoto_9_500\.jpg'/);
+ assert.match(html,/URL\.createObjectURL\(stagedJPEG\)/);
+ assert.match(html,/URL\.revokeObjectURL\(url\)/);
+ assert.match(html,/if\(pin\.value!=='500'\|\|!stagedJPEG\|\|download\.disabled\)return/);
+ assert.match(html,/generation!==currentGeneration/);
+ assert.match(html,/photo\.addEventListener\('change',clearStaging\)/);
+ assert.match(html,/pin\.addEventListener\('input',clearStaging\)/);
+ assert.doesNotMatch(html,/<form\b|fetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource|<iframe\b|SendUserFacePhoto|UploadUserPhoto|x904_user_commands/i);
+});
