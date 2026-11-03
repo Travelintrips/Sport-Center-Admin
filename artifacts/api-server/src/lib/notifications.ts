@@ -691,6 +691,17 @@ export async function notifyAdminBookingReport(data: {
     `${index + 1}. *${row.orderNumber}*\n   ${formatDate(row.bookingDate)}\n   ${String(row.startTime).slice(0, 5)}–${String(row.endTime).slice(0, 5)} | Rp ${Number(row.grandTotal ?? row.totalPrice ?? 0).toLocaleString("id-ID")}`
   ).join("\n\n");
   const paid = data.paymentStatus === "paid";
+  // Reuse the existing branded /proof/{code} resolver used by other WA reports.
+  // Never leak a raw Supabase Storage URL in this report if short-link
+  // persistence is temporarily unavailable; keep the paid report deliverable.
+  const shortenedProofUrl = paid && data.proofUrl
+    ? await getOrCreatePaymentProofShortUrl(data.proofUrl)
+    : null;
+  const brandedProofText = shortenedProofUrl && shortenedProofUrl !== data.proofUrl
+    ? shortenedProofUrl
+    : data.proofUrl
+      ? "Tersimpan (tautan pendek belum tersedia)"
+      : "Tersimpan";
   const message =
     `📋 *BOOKING BARU*\n\n` +
     (booking.groupRef ? `🆔 Group ID: *${booking.groupRef}*\n\n` : "") +
@@ -703,7 +714,7 @@ export async function notifyAdminBookingReport(data: {
     `💰 *RINGKASAN PEMBAYARAN*\n\n` +
     `Total booking: *Rp ${grandTotal.toLocaleString("id-ID")}*\n` +
     (paid
-      ? `Metode: *${data.paymentMethod ?? "-"}*\nTanggal pembayaran: *${data.paymentDate ? formatDate(data.paymentDate) : "-"}*\nStatus pembayaran: ✅ *LUNAS*\n\n📎 Bukti pembayaran: ${data.proofUrl ? data.proofUrl : "Tersimpan"}`
+      ? `Metode: *${data.paymentMethod ?? "-"}*\nTanggal pembayaran: *${data.paymentDate ? formatDate(data.paymentDate) : "-"}*\nStatus pembayaran: ✅ *LUNAS*\n\n📎 Bukti pembayaran: ${brandedProofText}`
       : `Status pembayaran: ⏳ *BELUM DIBAYAR*`);
   await sendWAToAdmins(message, {
     bookingId: booking.id,
