@@ -8,11 +8,19 @@
 <label for="pin">PIN uji</label><input id="pin" value="500" inputmode="numeric" maxlength="8" autocomplete="off">
 <label for="photo">Pilih JPEG dari HP</label><input id="photo" type="file" accept="image/jpeg,.jpg" capture="user">
 <p>JPEG dari HP akan otomatis dikecilkan di browser hingga maksimal 50.000 byte. Nama file bebas. Gunakan hanya gambar sintetis, bukan foto orang. Foto tidak disimpan dan tidak keluar dari browser.</p>
-<button id="validate" type="button">Validasi lokal</button><div id="result" role="status" aria-live="polite">Belum divalidasi.</div>
+<button id="validate" type="button">Validasi lokal</button>
+<button id="download" type="button" disabled>Unduh JPEG untuk impor manual</button>
+<div id="result" role="status" aria-live="polite">Belum divalidasi.</div>
+<p class="note">Unduhan hanya untuk berkas JPEG sintetis PIN 500. Format nama file vendor: <code>verify_biophoto_9_500.jpg</code>. Petugas dapat meninjau file di PC Attendance Management; halaman ini tidak memanggil software tersebut dan tidak mengirim apa pun ke mesin. Pembentukan template wajah belum terverifikasi.</p>
 </main><script>
 'use strict';
 const pin=document.getElementById('pin'),photo=document.getElementById('photo'),out=document.getElementById('result');
-const reject=(reason)=>{out.textContent='DITOLAK: '+reason;};
+const download=document.getElementById('download');
+let stagedJPEG=null;
+const clearStaging=()=>{stagedJPEG=null;download.disabled=true;};
+const reject=(reason)=>{clearStaging();out.textContent='DITOLAK: '+reason;};
+pin.addEventListener('input',clearStaging);
+photo.addEventListener('change',clearStaging);
 const toBlob=(canvas,quality)=>new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));
 async function compressJPEG(file){
  if(file.size<100||file.size>20000000)throw Error('INPUT_SIZE_INVALID');
@@ -47,12 +55,21 @@ document.getElementById('validate').addEventListener('click',async()=>{
  if(pin.value!=='500')return reject('TEST_PIN_ONLY');
  if(!file)return reject('FILE_MISSING');
  if(!/\.jpe?g$/i.test(file.name))return reject('EXTENSION_INVALID');
- out.textContent='Memproses foto secara lokal...';
+ clearStaging();out.textContent='Memproses foto secara lokal...';
  try{
   const {data,width,height}=await compressJPEG(file);
   const digest=await crypto.subtle.digest('SHA-256',data);
   const sha=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  stagedJPEG=new Blob([data],{type:'image/jpeg'});download.disabled=false;
   out.textContent='STAGED_OFFLINE_ONLY\nPIN: 500\nUkuran asli: '+file.size+' byte\nUkuran hasil: '+data.length+' byte\nDimensi hasil: '+width+' × '+height+'\nSHA-256 hasil: '+sha+'\nPengiriman X904: NONAKTIF\nPenyimpanan server: TIDAK ADA';
  }catch(e){reject(e instanceof Error?e.message:'DECODE_OR_COMPRESS_FAILED');}
+});
+download.addEventListener('click',()=>{
+ if(pin.value!=='500'||!stagedJPEG||download.disabled)return;
+ const url=URL.createObjectURL(stagedJPEG);
+ const a=document.createElement('a');
+ a.href=url;a.download='verify_biophoto_9_500.jpg';
+ document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),30000);
 });
 </script></body></html>
