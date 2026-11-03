@@ -52,6 +52,18 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(section).not.toContain("ACTIVATE_USER");
   });
 
+  it("validates and atomically maps a selected X904 PIN without bypassing ACK", () => {
+    expect(section).toContain('req.body?.x904Pin');
+    expect(section).toContain('gym_x904_lan_users');
+    expect(section).toContain('device_role');
+    expect(section).toContain('gym_x904_member_mapping');
+    expect(section).toContain('mappings.rows[0].membership_id != null');
+    expect(section).toContain('membership_id=EXCLUDED.membership_id');
+    expect(ui).toContain('form.append("x904Pin",membershipX904Pin.trim())');
+    expect(ui).toContain('Nama di mesin:');
+    expect(ui).toContain('membershipX904Name && !membershipX904Checking && !membershipX904Error');
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');

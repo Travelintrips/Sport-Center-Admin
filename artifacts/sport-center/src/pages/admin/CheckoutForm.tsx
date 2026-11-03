@@ -45,6 +45,10 @@ export default function AdminCheckoutForm() {
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
+  const [membershipX904Pin, setMembershipX904Pin] = useState("");
+  const [membershipX904Name, setMembershipX904Name] = useState("");
+  const [membershipX904Error, setMembershipX904Error] = useState("");
+  const [membershipX904Checking, setMembershipX904Checking] = useState(false);
   const [x904VerifiedName, setX904VerifiedName] = useState("");
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
@@ -283,10 +287,32 @@ export default function AdminCheckoutForm() {
       .catch(e => {if(active) setMemberLoadError(String(e.message || e));});
     return () => {active = false;};
   }, [isMembership]);
+  useEffect(() => {
+    setMembershipX904Name("");
+    setMembershipX904Error("");
+    if (!isMembership || memberAction !== "new" || !membershipX904Pin.trim()) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setMembershipX904Checking(true);
+      try {
+        const query = new URLSearchParams({type:"pin",value:membershipX904Pin.trim()});
+        const response = await fetch("/api/wa/x904-identity?" + query,{signal:controller.signal});
+        const result = await response.json();
+        if (!response.ok || result.valid !== true) throw new Error(result.error || "PIN tidak ditemukan");
+        if (!controller.signal.aborted) setMembershipX904Name(String(result.displayName));
+      } catch (error) {
+        if (!controller.signal.aborted) setMembershipX904Error(error instanceof Error ? error.message : "Verifikasi gagal");
+      } finally {
+        if (!controller.signal.aborted) setMembershipX904Checking(false);
+      }
+    },350);
+    return () => {window.clearTimeout(timer);controller.abort();};
+  },[isMembership,memberAction,membershipX904Pin]);
   const matchedMember = members.find(m => String(m.id) === memberId);
   const membershipReady = memberAction === "new"
     ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
-      && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId)
+      && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
+      && membershipX904Name && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
@@ -306,6 +332,7 @@ export default function AdminCheckoutForm() {
         form.append("months",memberMonths);
         form.append("startDate",selectedDate);
         form.append("notes",notes);
+        form.append("x904Pin",membershipX904Pin.trim());
         form.append("paymentMethod",membershipPaymentMethod);
         form.append("paymentDate",membershipPaymentDate);
         form.append("proof",membershipPaymentFile);
@@ -1250,6 +1277,16 @@ export default function AdminCheckoutForm() {
               </Select>
               {memberAction === "new" ? <>
                 <p className="text-xs text-muted-foreground">Isi nama, WhatsApp dan email di atas. Fasilitas Gym otomatis; tidak ada tarif kunjungan Rp30.000.</p>
+                <div className="rounded-lg border p-3 space-y-2">
+                  <Label htmlFor="membership-x904-pin">PIN mesin X904 *</Label>
+                  <Input id="membership-x904-pin" inputMode="numeric" pattern="[0-9]*"
+                    placeholder="Masukkan PIN X904 member baru" value={membershipX904Pin}
+                    onChange={e=>setMembershipX904Pin(e.target.value.replace(/[^0-9]/g,"").slice(0,8))} />
+                  {membershipX904Checking && <p className="text-xs">Memverifikasi PIN mesin...</p>}
+                  {membershipX904Name && <p className="text-xs text-emerald-700">Nama di mesin: {membershipX904Name} · PIN {membershipX904Pin}</p>}
+                  {membershipX904Error && <p className="text-xs text-destructive">{membershipX904Error}</p>}
+                  <p className="text-xs text-muted-foreground">PIN harus terdaftar pada X904 dan belum dipetakan ke membership lain. Pembayaran tidak otomatis membuktikan pintu sudah terbuka; tunggu ACK mesin.</p>
+                </div>
                 <Label>Paket membership</Label>
                 <Select value={memberMonths} onValueChange={setMemberMonths}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
