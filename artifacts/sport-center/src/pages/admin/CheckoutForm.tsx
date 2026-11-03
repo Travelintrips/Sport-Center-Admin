@@ -117,6 +117,7 @@ export default function AdminCheckoutForm() {
   const isMembership = bookingKind === "membership";
   const hideRegularBookingFields = isMembership && memberAction !== "new";
   const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
+  const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
   const apMember = selectedCustomer?.apMember ?? null;
   const isActiveApMember = Boolean(apMember?.isActive && apMember?.idCardNumber);
@@ -144,7 +145,6 @@ export default function AdminCheckoutForm() {
   const repeatBaseTotal = repeatPreview ? Number(repeatPreview.pricePerSession) * repeatCount : 0;
   const repeatAdditionalCharges = repeatPreview ? Math.max(0, Number(repeatPreview.totalPrice) - Number(repeatPreview.pricePerSession) * Number(repeatPreview.validCount)) : 0;
   const repeatApTotal = Math.max(0, repeatBaseTotal - repeatApDiscount * repeatCount + repeatAdditionalCharges);
-  const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const slotValid = isMembership || (isWalkIn ? Boolean(selectedDate) : slotState === "ready" && slotOptions.some((x) => x.available && x.time.slice(0, 5) === startTime.slice(11, 16)));
   const repeatCurrentKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
   const repeatAllAvailable = Boolean(repeatPreview && repeatPreview.dates.length === repeatCount && repeatPreview.dates.every((row) => row.available));
