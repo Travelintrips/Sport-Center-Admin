@@ -22,7 +22,7 @@ function normalizePhoneKey(raw: string | null | undefined): string {
   return digits;
 }
 
-async function enrichWithApMember<T extends { phone?: string | null }>(rows: T[]) {
+async function enrichWithApMember<T extends { phone?: string | null }>(rows: T[], includeIdCardNumber = true) {
   const [activeMembers, settings] = await Promise.all([
     db.select({
       name: apMembersTable.name,
@@ -45,7 +45,7 @@ async function enrichWithApMember<T extends { phone?: string | null }>(rows: T[]
       ...row,
       apMember: member ? {
         name: member.name,
-        idCardNumber: member.idCardNumber,
+        idCardNumber: includeIdCardNumber ? member.idCardNumber : null,
         isActive: true,
         discountActive: Boolean(setting?.isActive && (Number(setting.discountAmount ?? 0) > 0 || Number(setting.discountPercentage ?? 0) > 0)),
         discountPercentage: Number(setting?.discountPercentage ?? 0),
@@ -117,7 +117,9 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
         accountType: "personal" as const,
       }));
 
-    const enriched = await enrichWithApMember([...registeredUsers, ...pastCustomers]);
+    const role = String((req as any).user?.role ?? "");
+    const includeIdCardNumber = ["owner", "super_admin", "admin", "admin_booking", "finance", "staff"].includes(role);
+    const enriched = await enrichWithApMember([...registeredUsers, ...pastCustomers], includeIdCardNumber);
     res.json(enriched);
   } catch (err) {
     req.log.error({ err }, "List customers simple error");
