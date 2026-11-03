@@ -134,11 +134,7 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     ? await db.select({ companyName: usersTable.companyName, picEmail: usersTable.picEmail })
         .from(usersTable).where(eq(usersTable.id, booking.companyCustomerId)).limit(1)
     : [];
-    const [company] = firstBooking.companyCustomerId != null
-    ? await db.select({ companyName: usersTable.companyName, picEmail: usersTable.picEmail })
-        .from(usersTable).where(eq(usersTable.id, firstBooking.companyCustomerId)).limit(1)
-    : [];
-    const [settings] = await db.select().from(settingsTable).limit(1);
+  const [settings] = await db.select().from(settingsTable).limit(1);
   const { invoiceDoc, generalDoc } = await loadDocSettings();
 
   const ppnRate = booking.ppnRate == null ? await resolvePpnRate(booking.ppnRate) : Number(booking.ppnRate);
@@ -238,6 +234,10 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
 
   groupBookings.sort((a, b) => a.bookingDate.localeCompare(b.bookingDate));
   const firstBooking = groupBookings[0]!;
+  const [company] = firstBooking.companyCustomerId != null
+    ? await db.select({ companyName: usersTable.companyName, picEmail: usersTable.picEmail })
+        .from(usersTable).where(eq(usersTable.id, firstBooking.companyCustomerId)).limit(1)
+    : [];
 
   const [facility] = await db
     .select()
