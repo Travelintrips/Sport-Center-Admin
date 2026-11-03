@@ -5130,26 +5130,34 @@ export default function AdminBookings() {
                     const uniquePaymentRowsForTruth = [...uniquePaymentRepresentations.values()];
                     const uniqueConfirmedPayments = uniquePaymentRowsForTruth
                       .filter((payment: any) => payment.status === "confirmed");
-                    const paymentRecordedAmount = uniqueConfirmedPayments.reduce(
-                      (sum: number, payment: any) => sum + Math.max(0, Number(payment.amount ?? 0)),
-                      0,
-                    );
-                    const paymentDueAmount = isCompanyInvoiceAggregate && companyInvoiceNetTotal > 0
+                    // Corporate bookings are settled once at invoice level.
+                    // Never derive paid cash for the collapsed invoice row by summing
+                    // per-booking synthetic payment mirrors, which may be missing
+                    // from an older API response or duplicated across five sessions.
+                    const hasCompanyInvoice = b.payerType === "company" && b.companyInvoiceId != null;
+                    const verifiedCompanyInvoice = hasCompanyInvoice && b.companyInvoicePaymentConfirmed === true;
+                    const paymentRecordedAmount = hasCompanyInvoice
+                      ? (verifiedCompanyInvoice ? Math.max(0, Number(b.companyInvoicePaidAmount ?? 0)) : 0)
+                      : uniqueConfirmedPayments.reduce(
+                          (sum: number, payment: any) => sum + Math.max(0, Number(payment.amount ?? 0)),
+                          0,
+                        );
+                    const paymentDueAmount = hasCompanyInvoice && companyInvoiceNetTotal > 0
                       ? companyInvoiceNetTotal
-                      : b.payerType === "company" && Number(b.companyInvoiceTotal ?? 0) > 0
-                        ? Number(b.companyInvoiceTotal)
-                        : b.groupRef && Number(b.groupTotalPayment ?? 0) > 0
-                          ? Number(b.groupTotalPayment)
-                          : isMultiSessionGroup
-                            ? Number(groupTaxSummary?.grandTotal ??
-                                groupRows.reduce((sum: number, row: any) =>
-                                  sum + Number(row.grandTotal ?? row.totalPrice ?? 0), 0))
-                            : Number(b.grandTotal ?? b.totalPrice ?? 0);
+                      : b.groupRef && Number(b.groupTotalPayment ?? 0) > 0
+                        ? Number(b.groupTotalPayment)
+                        : isMultiSessionGroup
+                          ? Number(groupTaxSummary?.grandTotal ??
+                              groupRows.reduce((sum: number, row: any) =>
+                                sum + Number(row.grandTotal ?? row.totalPrice ?? 0), 0))
+                          : Number(b.grandTotal ?? b.totalPrice ?? 0);
                     const paymentRemainingAmount = Math.max(0, paymentDueAmount - paymentRecordedAmount);
                     const paymentIsFullyCovered = paymentDueAmount > 0 &&
                       paymentRecordedAmount >= paymentDueAmount - 0.005;
-                    const paymentSettlementLabel = uniqueConfirmedPayments.length === 0
-                      ? null
+                    const paymentSettlementLabel = hasCompanyInvoice
+                      ? null // Invoice cash is linked to the bank reconciliation independently.
+                      : uniqueConfirmedPayments.length === 0
+                        ? null
                       : uniqueConfirmedPayments.every((payment: any) => payment.isBankReconciled)
                         ? "Rekonsiliasi bank cocok"
                         : uniqueConfirmedPayments.every((payment: any) => payment.isSettledOutsideBankReconciliation)
@@ -5394,7 +5402,7 @@ export default function AdminBookings() {
                             <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
                               <AlertCircle size={11} /> Dibayar sebagian
                             </span>
-                          ) : uniquePaymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
+                          ) : !hasCompanyInvoice && uniquePaymentRowsForTruth.some((payment: any) => payment?.status === "pending") ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
                               <Clock size={11} /> Menunggu verifikasi
                             </span>
