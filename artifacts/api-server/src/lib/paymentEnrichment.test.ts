@@ -3,6 +3,7 @@ import {
   resolveEffectiveFacilityCompanyMapping,
   resolvePaymentCompanyEvidence,
 } from "./paymentCompanyResolution.js";
+import { computeCanonicalMdrSnapshot } from "./paymentEnrichment.js";
 
 describe("deterministic payment company evidence", () => {
   it("resolves one company from validated evidence", () => {
@@ -99,5 +100,46 @@ describe("deterministic payment company evidence", () => {
     expect(resolveEffectiveFacilityCompanyMapping([
       { id: 1, facilityId: 1, companyId: 24, effectiveFrom: "2026-01-01", effectiveUntil: null, isActive: false },
     ], "2026-08-09")).toBeNull();
+  });
+});
+
+describe("canonical QRIS MDR snapshot", () => {
+  it("applies zero MDR for approved Mandiri QRIS payments up to Rp100.000 from 1 Oct 2026", () => {
+    expect(computeCanonicalMdrSnapshot({
+      provider: "mandiri_direct",
+      effectiveDate: "2026-10-30",
+      configuredRate: 0.007,
+      amount: 30000,
+      source: "OWNER_APPROVED",
+      calculationMethod: "percentage_of_gross",
+      fixedProviderFee: 0,
+      feeTaxRate: 0,
+    })).toEqual({ mdrRate: 0, mdrAmount: 0, netAmount: 30000 });
+  });
+
+  it("applies 0.7% MDR above Rp100.000", () => {
+    expect(computeCanonicalMdrSnapshot({
+      provider: "mandiri_direct",
+      effectiveDate: "2026-10-30",
+      configuredRate: 0.007,
+      amount: 320000,
+      source: "OWNER_APPROVED",
+      calculationMethod: "percentage_of_gross",
+      fixedProviderFee: 0,
+      feeTaxRate: 0,
+    })).toEqual({ mdrRate: 0.007, mdrAmount: 2240, netAmount: 317760 });
+  });
+
+  it("does not apply the threshold to a non-approved rule", () => {
+    expect(computeCanonicalMdrSnapshot({
+      provider: "mandiri_direct",
+      effectiveDate: "2026-10-30",
+      configuredRate: 0.007,
+      amount: 30000,
+      source: "BANK_OBSERVED_EXCEPTION",
+      calculationMethod: "percentage_of_gross",
+      fixedProviderFee: 0,
+      feeTaxRate: 0,
+    })).toEqual({ mdrRate: 0.007, mdrAmount: 210, netAmount: 29790 });
   });
 });

@@ -22,6 +22,14 @@ export type { PaymentCompanyEvidence, PaymentCompanyResolution } from "./payment
 
 export type PaymentEnrichment = {
   companyId: number | null;
+  settlementRuleVersion: string | null;
+  settlementSource: string | null;
+  settlementCalculationMethod: string | null;
+  fixedProviderFee: number;
+  feeTaxRate: number;
+  mdrRate: number;
+  mdrAmount: number;
+  netAmount: number | null;
   companyEvidenceSource: PaymentCompanyResolution["evidenceSource"];
   companyEvidenceReference: string | null;
   companyDeterministic: boolean;
@@ -56,6 +64,40 @@ export type PaymentEnrichmentOptions = {
     settlementDelayBusinessDays: number;
   } | null;
 };
+
+export function computeCanonicalMdrSnapshot(input: {
+  provider: SettlementProvider;
+  effectiveDate: string | null;
+  configuredRate: number;
+  amount: number;
+  source?: string | null;
+  calculationMethod?: string | null;
+  fixedProviderFee?: number;
+  feeTaxRate?: number;
+}): { mdrRate: number; mdrAmount: number; netAmount: number } {
+  const configuredRate = Number(input.configuredRate ?? 0);
+  const fixedProviderFee = Number(input.fixedProviderFee ?? 0);
+  const feeTaxRate = Number(input.feeTaxRate ?? 0);
+  const isExpandedZeroMdrMandiriQris =
+    input.provider === "mandiri_direct" &&
+    input.effectiveDate != null &&
+    input.effectiveDate >= "2026-10-01" &&
+    input.source === "OWNER_APPROVED" &&
+    input.calculationMethod === "percentage_of_gross" &&
+    Math.abs(configuredRate - 0.007) < 0.0000001 &&
+    fixedProviderFee === 0 &&
+    feeTaxRate === 0;
+
+  const mdrRate = isExpandedZeroMdrMandiriQris && input.amount <= 100000
+    ? 0
+    : configuredRate;
+  const mdrAmount = Math.round(input.amount * mdrRate * 100) / 100;
+  return {
+    mdrRate,
+    mdrAmount,
+    netAmount: Math.max(0, Math.round((input.amount - mdrAmount) * 100) / 100),
+  };
+}
 
 export function paymentEffectiveDate(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -405,8 +447,85 @@ export async function enrichPayment(
     account.bankAccountId,
     options,
   );
+
+  let settlementRuleVersion: string | null = null;
+  let settlementSource: string | null = null;
+  let settlementCalculationMethod: string | null = null;
+  let fixedProviderFee = 0;
+  let feeTaxRate = 0;
+  let mdrRate = 0;
+  let mdrAmount = 0;
+  let netAmount: number | null = null;
+  const effectiveDate = options?.effectiveDate ?? (paidAt ? paymentEffectiveDate(paidAt) : null);
+
+  if (company.companyId != null && account.bankAccountId && effectiveDate) {
+    const result = await db.execute(sql`
+      SELECT
+        mdr_rate,
+        fixed_provider_fee,
+        fee_tax_rate,
+        source,
+        rule_version,
+        calculation_method
+      FROM sport_center.payment_settlement_configs
+      WHERE company_id = ${company.companyId}
+        AND provider_code = ${provider}
+        AND bank_account_id = ${account.bankAccountId}
+        AND is_active = true
+        AND effective_from <= ${effectiveDate}::date
+        AND (effective_until IS NULL OR effective_until >= ${effectiveDate}::date)
+      ORDER BY effective_from DESC, id DESC
+      LIMIT 1
+    `).catch(() => ({ rows: [] }));
+
+    const rawRule = (result as any).rows?.[0] ?? null;
+    const rule = rawRule ? {
+      mdrRate: rawRule.mdr_rate,
+      fixedProviderFee: rawRule.fixed_provider_fee,
+      feeTaxRate: rawRule.fee_tax_rate,
+      source: rawRule.source,
+      ruleVersion: rawRule.rule_version,
+      calculationMethod: rawRule.calculation_method,
+    } : null;
+    if (rule) {
+      settlementRuleVersion = rule.ruleVersion ?? null;
+      settlementSource = rule.source ?? null;
+      settlementCalculationMethod = rule.calculationMethod ?? null;
+      const configuredRate = Number(rule.mdrRate ?? 0);
+      const fixedFee = Number(rule.fixedProviderFee ?? 0);
+      const configuredFeeTaxRate = Number(rule.feeTaxRate ?? 0);
+      fixedProviderFee = fixedFee;
+      feeTaxRate = configuredFeeTaxRate;
+
+      if (
+        provider === "mandiri_direct" &&
+        effectiveDate >= "2026-10-01" &&
+        String(rule.source ?? "") === "OWNER_APPROVED" &&
+        String(rule.calculationMethod ?? "") === "percentage_of_gross" &&
+        Math.abs(configuredRate - 0.007) < 0.0000001 &&
+        fixedFee === 0 &&
+        configuredFeeTaxRate === 0
+      ) {
+        // BI expanded zero-MDR threshold for this approved Sport Center QRIS rule.
+        // The amount-specific snapshot is filled by the caller because enrichment
+        // intentionally does not know the payment amount.
+        mdrRate = configuredRate;
+      } else {
+        mdrRate = configuredRate;
+      }
+    }
+  }
+
   return {
     companyId: company.companyId,
+    settlementRuleVersion,
+    settlementSource,
+    settlementCalculationMethod,
+    fixedProviderFee,
+    feeTaxRate,
+    mdrRate,
+    mdrAmount,
+    netAmount,
     companyEvidenceSource: company.evidenceSource,
     companyEvidenceReference: company.evidenceReference,
     companyDeterministic: company.deterministic,

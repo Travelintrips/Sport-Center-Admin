@@ -40,6 +40,7 @@ import { calculateBookingWithholdingTax } from "../lib/tax";
 import {
   ensurePaymentBankAccount,
   resolveRequiredPaymentEnrichment,
+  computeCanonicalMdrSnapshot,
   paymentEffectiveDate,
   type SettlementProvider,
 } from "../lib/paymentEnrichment";
@@ -723,6 +724,24 @@ router.post("/payments", async (req, res) => {
       req.body.providerOrderId ?? req.body.merchantTradeNo ?? req.body.providerReference ?? req.body.providerTradeNo,
     );
 
+    const effectivePaymentDate = manualPaidAt ? paymentEffectiveDate(manualPaidAt) : null;
+    const mdrSnapshot = paymentMethod === "QRIS"
+      ? computeCanonicalMdrSnapshot({
+          provider: paymentProvider ?? "unknown",
+          effectiveDate: effectivePaymentDate,
+          configuredRate: Number(paymentEnrichment.mdrRate ?? 0),
+          amount: amountNum,
+          source: paymentEnrichment.settlementSource,
+          calculationMethod: paymentEnrichment.settlementCalculationMethod,
+          fixedProviderFee: paymentEnrichment.fixedProviderFee,
+          feeTaxRate: paymentEnrichment.feeTaxRate,
+        })
+      : { mdrRate: 0, mdrAmount: 0, netAmount: amountNum };
+
+    const paymentMdrRate = mdrSnapshot.mdrRate;
+    const paymentMdrAmount = mdrSnapshot.mdrAmount;
+    const paymentNetAmount = mdrSnapshot.netAmount;
+
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
       .values({
@@ -737,6 +756,10 @@ router.post("/payments", async (req, res) => {
         companyId: paymentEnrichment.companyId ?? null,
         bankAccountId: paymentEnrichment.bankAccountId,
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
+        settlementRuleVersion: paymentEnrichment.settlementRuleVersion ?? null,
+        mdrRate: String(paymentMdrRate),
+        mdrAmount: String(paymentMdrAmount),
+        netAmount: String(paymentNetAmount),
         paidAt: paymentEnrichment.paidAt ?? null,
         notes,
         ocrName: proofOcr?.name ?? null,
