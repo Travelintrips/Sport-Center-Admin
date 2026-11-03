@@ -23,3 +23,14 @@ test('existing X904 executor command sets have no face dispatch',async()=>{
  const routes=await Promise.all(['gymX904Integration','gymX904Events','gymX904Lan','gymX904Attested'].map(n=>load('artifacts/api-server/src/routes/'+n+'.ts')));
  for(const route of routes) assert.doesNotMatch(route,/SendUserFacePhoto|SEND_FACE_PHOTO|SEND_USER_FACE/);
 });
+
+test('admin manual export is local only, synthetic PIN 500, with stale validation guard', async()=>{
+ const ui=await load('artifacts/sport-center/src/pages/admin/GymX904FaceOffline.tsx');
+ assert.match(ui,/a\.download = "verify_biophoto_9_500\.jpg"/);
+ assert.match(ui,/URL\.createObjectURL\(/);
+ assert.match(ui,/URL\.revokeObjectURL\(/);
+ assert.match(ui,/pin !== "500"/);
+ assert.match(ui,/generation\.current!==currentGeneration/);
+ assert.match(ui,/Unduh JPEG untuk impor manual/);
+ assert.doesNotMatch(ui,/\bfetch\s*\(|axios|XMLHttpRequest|WebSocket|EventSource|sendBeacon|x904_user_commands|UploadUserPhoto|SendUserFacePhoto/);
+});
