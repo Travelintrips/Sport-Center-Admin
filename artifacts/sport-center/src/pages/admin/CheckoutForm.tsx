@@ -119,7 +119,7 @@ export default function AdminCheckoutForm() {
   const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = bookingDay;
-  const isGymNonmember = isWalkIn && bookingKind !== "membership";
+  const isGymNonmember = bookingKind === "personal" && /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? ""));
   useEffect(() => {
     setX904VerifiedName("");
     setX904VerificationError("");

@@ -1580,7 +1580,8 @@ router.post("/bookings", async (req, res) => {
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
     const hasX904Identity = req.body.x904IdentityType != null || req.body.x904IdentityValue != null;
     if (hasX904Identity) {
-      if (!isWalkIn || !isAdminRequest || bookingSource !== "admin" ||
+      if (!isWalkIn || !/gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")) ||
+          !isAdminRequest || bookingSource !== "admin" || isCompanyBilling || isEvent ||
           !["pin", "card"].includes(String(req.body.x904IdentityType))) {
         res.status(400).json({ error: "Identitas X904 hanya untuk booking Gym nonmember oleh admin." }); return;
       }
