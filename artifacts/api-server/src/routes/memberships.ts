@@ -1365,6 +1365,8 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
 });
 
 router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
+  let confirmationStage = "load_membership";
+  let confirmingPaymentId: number | null = null;
   try {
     const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
@@ -1455,6 +1457,8 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       confirmedAt: Date;
     } | null = null;
     if (paymentToConfirm) {
+      confirmingPaymentId = paymentToConfirm.id;
+      confirmationStage = "atomic_payment_confirmation";
       // Trigger-driven payment mirroring, canonical payment, booking and entitlement
       // must commit together. A failed provider/booking trigger rolls back ALL changes.
       const result = await db.transaction(async (tx) => {
@@ -1495,6 +1499,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
       });
       membership = result.membership;
       confirmedBundle = result;
+      confirmationStage = "post_commit_projection";
     } else {
       await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
       const [updatedMembership] = await db.select().from(gymMembershipsTable)
@@ -1541,12 +1546,32 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     // Also repair/sync payment bookings when an admin changes the membership
     // dates or cancels it. This keeps the order mirror consistent with the
     // immutable membership payment events.
-    await syncMembershipPaymentBookings(membership);
+    // After a successful atomic commit, best-effort projections must not
+    // report payment confirmation as failed. The canonical payment and X904
+    // entitlement event have already been durably committed.
+    try {
+      await syncMembershipPaymentBookings(membership);
+    } catch (projectionError) {
+      req.log.error({ err: projectionError, membershipId: membership.id, paymentId: confirmingPaymentId },
+        "Membership payment booking post-commit projection failed");
+    }
     await syncToPublic(membership);
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
-    req.log.error({ err }, "Update membership error");
-    res.status(500).json({ error: "Internal server error" });
+    const dbError = err as { code?: string; constraint?: string; message?: string; cause?: { code?: string; constraint?: string; message?: string } };
+    const sqlState = dbError.cause?.code ?? dbError.code ?? null;
+    const constraint = dbError.cause?.constraint ?? dbError.constraint ?? null;
+    req.log.error({ err, confirmationStage, membershipId: req.params.id, paymentId: confirmingPaymentId, sqlState, constraint },
+      "Update membership error");
+    // Do not expose raw SQL, schema, credentials or user data to the client.
+    // A stable stage/code helps support diagnose failed confirmations even
+    // when the hosting provider's runtime log viewer is unavailable.
+    res.status(500).json({
+      error: "Konfirmasi pembayaran gagal. Transaksi belum berhasil disimpan; jangan unggah bukti atau membuat tagihan ulang.",
+      code: "MEMBERSHIP_CONFIRMATION_FAILED",
+      stage: confirmationStage,
+      ...(sqlState ? { sqlState } : {}),
+    });
   }
 });
 
