@@ -45,6 +45,7 @@ const AP_MULTIGUNA_HOURLY_PRICE = 300000;
 // Company invoices have one canonical receipt at invoice level, not one payment per booking.
 function isCompanyInvoicePaymentConfirmed(invoice: {
   status?: string | null;
+  legacyStatus?: string | null;
   paidAt?: Date | string | null;
   netAmount?: string | number | null;
   grandTotal?: string | number | null;
@@ -52,7 +53,7 @@ function isCompanyInvoicePaymentConfirmed(invoice: {
   paidAmount?: string | number | null;
   remainingAmount?: string | number | null;
 } | null | undefined): boolean {
-  if (!invoice || invoice.status !== "paid" || !invoice.paidAt) return false;
+  if (!invoice || invoice.status !== "paid" || invoice.legacyStatus !== "paid" || !invoice.paidAt) return false;
   const due = Number(invoice.netAmount ?? invoice.grandTotal ?? invoice.totalAmount ?? 0);
   const paid = Number(invoice.paidAmount ?? 0);
   const remaining = Number(invoice.remainingAmount ?? due - paid);
@@ -221,6 +222,7 @@ async function getBookingWithPayment(id: number) {
     ? await db.select({
         id: companyInvoicesTable.id,
         status: companyInvoicesTable.status,
+        legacyStatus: companyInvoicesTable.legacyStatus,
         grandTotal: companyInvoicesTable.grandTotal,
         totalAmount: companyInvoicesTable.totalAmount,
         netAmount: companyInvoicesTable.netAmount,
@@ -498,6 +500,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           id: companyInvoicesTable.id,
           invoiceNumber: companyInvoicesTable.invoiceNumber,
           status: companyInvoicesTable.status,
+          legacyStatus: companyInvoicesTable.legacyStatus,
           grandTotal: companyInvoicesTable.grandTotal,
           totalAmount: companyInvoicesTable.totalAmount,
           pphAmount: companyInvoicesTable.pphAmount,
