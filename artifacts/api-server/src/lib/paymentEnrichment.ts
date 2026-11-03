@@ -61,6 +61,40 @@ export type PaymentEnrichmentOptions = {
   } | null;
 };
 
+export function computeCanonicalMdrSnapshot(input: {
+  provider: SettlementProvider;
+  effectiveDate: string | null;
+  configuredRate: number;
+  amount: number;
+  source?: string | null;
+  calculationMethod?: string | null;
+  fixedProviderFee?: number;
+  feeTaxRate?: number;
+}): { mdrRate: number; mdrAmount: number; netAmount: number } {
+  const configuredRate = Number(input.configuredRate ?? 0);
+  const fixedProviderFee = Number(input.fixedProviderFee ?? 0);
+  const feeTaxRate = Number(input.feeTaxRate ?? 0);
+  const isExpandedZeroMdrMandiriQris =
+    input.provider === "mandiri_direct" &&
+    input.effectiveDate != null &&
+    input.effectiveDate >= "2026-10-01" &&
+    input.source === "OWNER_APPROVED" &&
+    input.calculationMethod === "percentage_of_gross" &&
+    Math.abs(configuredRate - 0.007) < 0.0000001 &&
+    fixedProviderFee === 0 &&
+    feeTaxRate === 0;
+
+  const mdrRate = isExpandedZeroMdrMandiriQris && input.amount <= 100000
+    ? 0
+    : configuredRate;
+  const mdrAmount = Math.round(input.amount * mdrRate * 100) / 100;
+  return {
+    mdrRate,
+    mdrAmount,
+    netAmount: Math.max(0, Math.round((input.amount - mdrAmount) * 100) / 100),
+  };
+}
+
 export function paymentEffectiveDate(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",
