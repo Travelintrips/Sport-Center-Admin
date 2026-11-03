@@ -135,9 +135,35 @@ describe("Mina WhatsApp duration runtime regression", () => {
       (entry) =>
         entry.role === "bot" &&
         entry.text ===
-          "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
-          "Mau booking fasilitas, cukup ketik Booking.",
+          "Halo! 👋 Aku Mina, asisten Sport Center.\n" +
+          "Ada yang bisa Mina bantu hari ini? 😊\n" +
+          "Silakan sampaikan keperluannya, ya.",
     )).toBe(true);
+
+    // A follow-up greeting must retain the booking session and send one reply.
+    const preservedSessionId = greetingSession?.id;
+    const preservedGreetingRequest = {
+      sender: phone,
+      message: "Halo Mina, mau tanya",
+      name: "Mina regression",
+      inboxid: "8998",
+      id: "mina-greeting-preserved-" + phone,
+    };
+    const greetingOutboundBefore = fonnteSendCalls(fetchMock).length;
+    const preservedReply = await request
+      .post("/api/wa/fonnte/webhook")
+      .send(preservedGreetingRequest);
+    expect(preservedReply.status).toBe(200);
+    expect((await getActiveSession(phone))?.id).toBe(preservedSessionId);
+    expect(fonnteSendCalls(fetchMock).length).toBe(greetingOutboundBefore + 1);
+
+    // Provider retry with the same message ID cannot generate another reply.
+    const retriedGreeting = await request
+      .post("/api/wa/fonnte/webhook")
+      .send(preservedGreetingRequest);
+    expect(retriedGreeting.status).toBe(200);
+    expect((await getActiveSession(phone))?.id).toBe(preservedSessionId);
+    expect(fonnteSendCalls(fetchMock).length).toBe(greetingOutboundBefore + 1);
 
     const bookingResponse = await request
       .post("/api/wa/fonnte/webhook")

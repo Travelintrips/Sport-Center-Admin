@@ -3766,6 +3766,11 @@ async function beginAvailabilityInquiry(
   }).catch(() => {});
 }
 
+const MINA_GREETING_MESSAGE =
+  "Halo! 👋 Aku Mina, asisten Sport Center.\n" +
+  "Ada yang bisa Mina bantu hari ini? 😊\n" +
+  "Silakan sampaikan keperluannya, ya.";
+
 async function startGreetingSession(
   phone: string,
   msg: string,
@@ -3773,9 +3778,7 @@ async function startGreetingSession(
   useCustomerToken = false,
 ): Promise<void> {
   const customer = await getRegisteredCustomer(phone);
-  const greeting =
-    "Halo! Aku Mina asisten Sport Center Ada yang bisa Mina bantu hari ini? " +
-    "Mau booking fasilitas, cukup ketik Booking.";
+  const greeting = MINA_GREETING_MESSAGE;
   const greetingSession = await createSession({
     phone,
     customerId: customer?.id ?? null,
@@ -5882,6 +5885,19 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
     // 3. Active session — continue conversation (always takes priority)
     const session = activeSession;
     if (session) {
+      // Greeting-only messages must never expire a booking draft.
+      if (isMinaGreeting(msg)) {
+        await appendMessage(session.id, "customer", msg);
+        await appendMessage(session.id, "bot", MINA_GREETING_MESSAGE);
+        await sendWAMsg(phone, MINA_GREETING_MESSAGE, true);
+        await logAudit({
+          action: "mina_greeting_session_preserved",
+          entity: "wa_booking_session",
+          entityId: session.id,
+          after: { message: msg, currentStep: session.currentStep },
+        }).catch(() => {});
+        return;
+      }
       const leaveBookingForGeneralConversation = isGeneralConversationInquiry(msg);
       if (leaveBookingForGeneralConversation) {
         await updateSession(session.id, { status: "expired" });
@@ -5906,21 +5922,6 @@ const handleFonnteWebhook = async (req: Request, res: Response) => {
           return;
         }
         clearHistory(phone);
-      }
-
-      // A greeting after a pause means the customer is starting over, not
-      // answering the previous booking field. Close the stale flow and create
-      // a fresh one so Mina does not send a confusing validation error.
-      if (isMinaGreeting(msg)) {
-        await updateSession(session.id, { status: "expired" });
-        await logAudit({
-          action: "booking_session_restarted",
-          entity: "wa_booking_session",
-          entityId: session.id,
-          after: { reason: "new_greeting", message: msg },
-        });
-        await startGreetingSession(phone, msg, String(name), true);
-        return;
       }
 
       // A time input at the time step must go through continueSession so the
