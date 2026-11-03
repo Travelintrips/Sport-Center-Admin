@@ -1071,6 +1071,10 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (!inv) { res.status(404).json({ error: "Not found" }); return; }
 
     const { status, notes } = req.body;
+    if (status === "paid" && inv.status !== "paid" && inv.invoiceStatus === "paid") {
+      res.status(409).json({ error: "Invoice memiliki status lunas lama tanpa pembayaran tervalidasi. Rekonsiliasi mutasi bank dan data invoice dahulu; tidak boleh membuat jurnal pembayaran ulang." });
+      return;
+    }
     const paymentMethod = normalizeCompanyPaymentMethod(req.body?.paymentMethod);
     const paymentDateRaw = String(req.body?.paymentDate ?? "").trim();
     const updates: Partial<typeof companyInvoicesTable.$inferInsert> = {};
@@ -1088,6 +1092,9 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
         return;
       }
       updates.paidAt = paidAt;
+      updates.invoiceStatus = "paid";
+      updates.paidAmount = String(Number(inv.netAmount ?? inv.grandTotal ?? inv.totalAmount ?? 0));
+      updates.remainingAmount = "0";
     }
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
@@ -1203,6 +1210,10 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
     const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
     if (!inv) { res.status(404).json({ error: "Invoice tidak ditemukan" }); return; }
+    if (markPaid && inv.status !== "paid" && inv.invoiceStatus === "paid") {
+      res.status(409).json({ error: "Invoice memiliki penanda lunas lama yang belum direkonsiliasi. Bukti transfer tidak boleh menghasilkan mutasi atau jurnal pembayaran kedua." });
+      return;
+    }
     if (markPaid && (!paymentMethod || !parseCompanyPaymentDate(paymentDateRaw))) {
       res.status(400).json({ error: "Metode dan tanggal pembayaran wajib diisi saat invoice dilunasi" });
       return;
@@ -1230,6 +1241,9 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
     if (markPaid && inv.status !== "paid") {
       updates.status = "paid";
+      updates.invoiceStatus = "paid";
+      updates.paidAmount = String(Number(inv.netAmount ?? inv.grandTotal ?? inv.totalAmount ?? 0));
+      updates.remainingAmount = "0";
       updates.paidAt = parseCompanyPaymentDate(paymentDateRaw)!;
     }
 
