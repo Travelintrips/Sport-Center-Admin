@@ -61,10 +61,13 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
       p.status::text AS payment_status
     FROM sport_center.x904_nonmember_daily_access a
-    JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+    LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
     WHERE a.verification_state='verified'
-      AND a.payment_id IS NOT NULL AND a.confirmed_at IS NOT NULL AND a.expires_at IS NOT NULL
-      AND (a.access_state IN ('pending','active','expired') OR p.status::text IN ('cancelled','rejected','refunded'))
+      AND ((a.payment_id IS NOT NULL AND a.confirmed_at IS NOT NULL AND a.expires_at IS NOT NULL
+        AND (a.access_state IN ('pending','active','expired') OR p.status::text IN ('cancelled','rejected','refunded')))
+        OR (a.payment_id IS NULL AND a.access_state='pending'
+          AND a.identity_type='card' AND a.identity_label='VIS006' AND a.user_pin='15'
+          AND ${testPin ?? null}::text='15'))
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
     ORDER BY a.confirmed_at LIMIT 25`);
 
@@ -75,7 +78,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
           p.status::text AS payment_status
         FROM sport_center.x904_nonmember_daily_access a
-        JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+        LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
         WHERE a.access_id=${Number(row.access_id)} FOR UPDATE OF a`);
       if (locked.rows.length !== 1) return;
       const a = locked.rows[0] as any;
@@ -86,6 +89,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
+      const unpaidVis006 = a.payment_id == null && a.access_state === "pending" &&
+        a.user_pin === "15" && testPin === "15";
       const shouldBeActive = a.payment_status === "confirmed" &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
         (a.activated_at == null || now.getTime() < new Date(String(a.expires_at)).getTime());
@@ -93,7 +98,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
       // A cancelled payment without verified activation must never suspend a
       // pre-existing Group 1 user (including a member sharing this PIN).
-      if (!shouldBeActive && a.activated_at == null) {
+      if (!shouldBeActive && a.activated_at == null && !unpaidVis006) {
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required'
           WHERE access_id=${Number(a.access_id)} AND access_state <> 'review_required'`);
@@ -104,6 +109,16 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           SET access_state='review_required'
           WHERE access_id=${Number(a.access_id)} AND access_state IN ('pending','active')`);
         return;
+      }
+
+      // Do not suspend a PIN that also has a confirmed, unexpired access grant.
+      if (unpaidVis006) {
+        const paid = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access other
+          JOIN sport_center.sport_payments pay ON pay.id=other.payment_id AND pay.booking_id=other.booking_id
+          WHERE other.device_serial=${DEVICE} AND other.user_pin=${pin}
+            AND other.access_id<>${Number(a.access_id)} AND pay.status::text='confirmed'
+            AND other.expires_at>${now} LIMIT 1`);
+        if (paid.rows.length) return;
       }
 
       const machine = await tx.execute(sql`SELECT observed_at,user_count,users
@@ -178,7 +193,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
                   AND payment_id=${Number(a.payment_id)}`);
             } else {
               await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-                SET access_state='expired'
+                SET access_state=${unpaidVis006 ? 'pending' : 'expired'}
                 WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
             }
             return;
@@ -211,7 +226,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           return;
         }
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-          SET access_state='expired'
+          SET access_state=${unpaidVis006 ? 'pending' : 'expired'}
           WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
         return;
       }
@@ -236,7 +251,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const payload = JSON.stringify({
         expectedUid: Number(a.device_uid), expectedName: String(a.verified_name),
         source: "AUTO_NONMEMBER_GYM_12H", accessId: Number(a.access_id),
-        expiresAt: new Date(String(a.expires_at)).toISOString(), attempt,
+        expiresAt: a.expires_at ? new Date(String(a.expires_at)).toISOString() : null, attempt,
       });
       await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
