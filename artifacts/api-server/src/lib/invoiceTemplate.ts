@@ -593,7 +593,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
           <td>${data.customerPhone}</td>
         </tr>
         ${data.companyName ? `<tr><td>Perusahaan</td><td>:</td><td>${data.companyName}</td></tr>` : ""}
-        ${data.customerEmail && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(data.customerEmail)
+        ${data.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.customerEmail)
           ? `<tr><td>Email</td><td>:</td><td>${data.customerEmail}</td></tr>`
           : ""}
         <tr>
