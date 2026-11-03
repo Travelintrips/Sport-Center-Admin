@@ -93,6 +93,27 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
       // A cancelled payment without verified activation must never suspend a
       // pre-existing Group 1 user (including a member sharing this PIN).
+      if (!shouldBeActive) {
+        // Revoke queued activations before the no-verified-activation early return.
+        // A claimed command is not safe to cancel without executor ACK.
+        const stale = await tx.execute(sql`SELECT command_id,state FROM sport_center.x904_user_commands
+          WHERE device_serial=${DEVICE} AND command_type='ACTIVATE_USER'
+            AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
+            AND payload->>'accessId'=${String(a.access_id)}
+            AND state IN ('queued','claimed') FOR UPDATE`);
+        for (const cmd of stale.rows as any[]) {
+          if (cmd.state === 'queued') {
+            await tx.execute(sql`UPDATE sport_center.x904_user_commands
+              SET state='failed',completed_at=${now},
+                  result=jsonb_build_object('readBackConfirmed',false,'errorCode','PAYMENT_REVOKED_BEFORE_CLAIM')
+              WHERE command_id=${String(cmd.command_id)}::uuid AND state='queued'`);
+          } else {
+            await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+              SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
+            return;
+          }
+        }
+      }
       if (!shouldBeActive && a.activated_at == null) {
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required'
@@ -147,6 +168,26 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         ORDER BY created_at DESC LIMIT 1`);
       if (prior.rows.length) {
         const last = prior.rows[0] as any;
+        if (last.command_type === "ACTIVATE_USER" && !shouldBeActive &&
+            (last.state === "queued" || last.state === "claimed")) {
+          if (last.state === "queued") {
+            // Queued jobs can be cancelled atomically before the VMSC claim.
+            // The claim function must only select state='queued'.
+            const cancelled = await tx.execute(sql`UPDATE sport_center.x904_user_commands
+              SET state='failed', completed_at=${now},
+                  result=jsonb_build_object('readBackConfirmed',false,
+                    'errorCode','PAYMENT_REVOKED_BEFORE_CLAIM')
+              WHERE command_id=${String(last.command_id)}::uuid AND state='queued'
+              RETURNING command_id`);
+            if (cancelled.rows.length === 1) return;
+          }
+          // A claimed job may already be at the door. Do not mark it failed or
+          // enqueue a conflicting suspend until the executor reports ACK.
+          await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+            SET access_state='review_required'
+            WHERE access_id=${Number(a.access_id)}`);
+          return;
+        }
         if (last.state === "queued" || last.state === "claimed") return;
         if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true) {
           if (last.command_type !== commandType) {
