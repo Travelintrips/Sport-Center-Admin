@@ -257,6 +257,43 @@ export default function AdminCheckoutForm() {
     : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
+    // Authorized admin registration: one request, one DB transaction, one payment.
+    if (memberAction === "new" && getCurrentRole() !== "staff") {
+      if (!membershipPaymentFile || !membershipPaymentDate || membershipPaymentDate > jakartaDateOnly()) {
+        toast({title:"Bukti pembayaran wajib",description:"Unggah bukti dan isi tanggal pembayaran yang benar.",variant:"destructive"});
+        return;
+      }
+      setIsSubmitting(true);
+      setMembershipResult("");
+      try {
+        const form = new FormData();
+        form.append("name",isGuest ? guestName.trim() : String(selectedCustomer?.name ?? ""));
+        form.append("phone",isGuest ? guestPhone.trim() : String(selectedCustomer?.phone ?? ""));
+        form.append("email",isGuest ? guestEmail.trim() : String(selectedCustomer?.email ?? ""));
+        form.append("months",memberMonths);
+        form.append("startDate",selectedDate);
+        form.append("notes",notes);
+        form.append("paymentMethod",membershipPaymentMethod);
+        form.append("paymentDate",membershipPaymentDate);
+        form.append("proof",membershipPaymentFile);
+        const response = await fetch("/api/memberships/admin-register-paid",{
+          method:"POST",
+          headers:{Authorization:"Bearer " + (getToken() ?? "")},
+          body:form,
+        });
+        const result = await response.json();
+        if(!response.ok) throw Error(result.error || "Pendaftaran dan pembayaran gagal");
+        setMembershipPaymentDone(true);
+        setMembershipPaymentFile(null);
+        setMembershipResult(`Customer #${result.customerId} · Membership #${result.membershipId} · Pembayaran #${result.paymentId} terkonfirmasi. Akses X904 menunggu ACK perangkat.`);
+        toast({title:"Pendaftaran & pembayaran berhasil",description:"Customer, membership dan pembayaran telah tersimpan satu kali."});
+      } catch(e) {
+        toast({title:"Pendaftaran belum berhasil",description:e instanceof Error ? e.message : "Periksa riwayat sebelum mengulangi.",variant:"destructive"});
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
     setIsSubmitting(true);
     setMembershipResult("");
     try {
@@ -815,9 +852,9 @@ export default function AdminCheckoutForm() {
               <Input id="guestName" value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
               <Label htmlFor="guestPhone">Nomor WhatsApp *</Label>
               <Input id="guestPhone" type="tel" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} required />
-              <Label htmlFor="guestEmail">Email (opsional)</Label>
+              <Label htmlFor="guestEmail">{isMembership ? "Email *" : "Email (opsional)"}</Label>
               <Input id="guestEmail" type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
-              <p className="text-xs text-muted-foreground">Pemesan tamu disimpan di booking; akun tidak otomatis dibuat.</p>
+              <p className="text-xs text-muted-foreground">{isMembership ? "Customer akan dibuat tanpa kata sandi login, sekaligus dengan membership dan pembayaran." : "Pemesan tamu disimpan di booking; akun tidak otomatis dibuat."}</p>
             </div>}
             {!isGuest && selectedCustomer && <div className="space-y-2">
               <Label>Nomor Telepon / WhatsApp</Label>
@@ -836,7 +873,7 @@ export default function AdminCheckoutForm() {
               )}
             </div>}
             {/* Facility */}
-            <div className="space-y-2">
+            {!isMembership && <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
               <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setStartTime(""); }}>
                 <SelectTrigger id="facility">
@@ -850,16 +887,16 @@ export default function AdminCheckoutForm() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </div>}
 
             {/* Booking date and duration: Gym is per visit, not hourly. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="bookingDate">Tanggal Booking *</Label>
+                <Label htmlFor="bookingDate">{isMembership ? "Tanggal Mulai Membership *" : "Tanggal Booking *"}</Label>
                 <Input id="bookingDate" type="date" value={bookingDay}
                   onChange={(e) => { setBookingDay(e.target.value); setStartTime(""); }} required={bookingKind !== "membership"} />
               </div>
-              {!isWalkIn && <div className="space-y-2">
+              {!isMembership && !isWalkIn && <div className="space-y-2">
                 <Label htmlFor="duration">Durasi (jam) *</Label>
                 <Select value={duration} onValueChange={(v) => { setDuration(v); setStartTime(""); }}>
                   <SelectTrigger id="duration"><SelectValue /></SelectTrigger>
@@ -868,7 +905,7 @@ export default function AdminCheckoutForm() {
                 </Select>
               </div>}
             </div>
-            {isWalkIn && <p className="text-sm text-muted-foreground rounded-lg border p-3">
+            {!isMembership && isWalkIn && <p className="text-sm text-muted-foreground rounded-lg border p-3">
               Gym reguler menggunakan tarif per kunjungan, tanpa durasi atau pilihan slot jam.
               Member Gym menggunakan alur Membership terpisah agar kunjungan tidak ditagih ulang.
             </p>}
@@ -1111,13 +1148,32 @@ export default function AdminCheckoutForm() {
                 </SelectContent>
               </Select>
               {memberAction === "new" ? <>
-                <p className="text-xs text-muted-foreground">Gunakan Nama Pemesan dan nomor WhatsApp di atas. Email wajib diisi untuk pendaftaran. Pendaftaran tidak otomatis lunas.</p>
+                <p className="text-xs text-muted-foreground">Isi nama, WhatsApp dan email di atas. Fasilitas Gym otomatis; tidak ada tarif kunjungan Rp30.000.</p>
                 <Label>Paket membership</Label>
                 <Select value={memberMonths} onValueChange={setMemberMonths}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{[1,2,3,6,12].map(n => <SelectItem key={n} value={String(n)}>{n} bulan</SelectItem>)}</SelectContent>
                 </Select>
-                <p className="text-sm">Tagihan membership: <strong>{formatRupiah(Number(memberMonths) * 300000)}</strong>. Pembayaran dapat diselesaikan langsung setelah pendaftaran.</p>
+                <p className="text-sm">Total membership: <strong>{formatRupiah(Number(memberMonths) * 300000)}</strong>.</p>
+                {getCurrentRole() !== "staff" && !membershipPaymentDone && <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                  <p className="font-semibold text-sm">Sudah Bayar — Pendaftaran dan Pembayaran Sekaligus</p>
+                  <Label>Metode pembayaran *</Label>
+                  <Select value={membershipPaymentMethod} onValueChange={setMembershipPaymentMethod}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="qris">QRIS Mandiri</SelectItem>
+                      <SelectItem value="transfer">Transfer Bank</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Label htmlFor="paid-gym-date">Tanggal Pembayaran *</Label>
+                  <Input id="paid-gym-date" type="date" value={membershipPaymentDate}
+                    max={jakartaDateOnly()} onChange={e=>setMembershipPaymentDate(e.target.value)} />
+                  <Label htmlFor="paid-gym-proof">Bukti Pembayaran *</Label>
+                  <Input id="paid-gym-proof" type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    onChange={e=>setMembershipPaymentFile(e.target.files?.[0] ?? null)} />
+                  <p className="text-xs text-muted-foreground">Pastikan dana sudah masuk dan cocok dengan bukti. Satu klik akan membuat customer, membership dan pembayaran lunas. X904 menunggu ACK perangkat.</p>
+                </div>}
               </> : <>
                 <Label>Cari Member Gym</Label>
                 <Select value={memberId} onValueChange={setMemberId}>
@@ -1239,8 +1295,10 @@ export default function AdminCheckoutForm() {
                 </div>
               )}
 
-              {!membershipPaymentTarget && <Button type="button" disabled={!membershipReady || isSubmitting} className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
-                {isSubmitting ? "Memproses..." : memberAction === "new" ? "Lanjutkan Pendaftaran" : memberAction === "renew" ? "Lanjutkan Perpanjangan" : "Catat Kunjungan (Rp0)"}
+              {!membershipPaymentTarget && !membershipPaymentDone && <Button type="button"
+                disabled={!membershipReady || isSubmitting || (memberAction === "new" && getCurrentRole() !== "staff" && (!membershipPaymentFile || !membershipPaymentDate || membershipPaymentDate > jakartaDateOnly()))}
+                className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
+                {isSubmitting ? "Memproses..." : memberAction === "new" && getCurrentRole() !== "staff" ? "Daftarkan Member & Konfirmasi Pembayaran" : memberAction === "new" ? "Lanjutkan Pendaftaran" : memberAction === "renew" ? "Lanjutkan Perpanjangan" : "Catat Kunjungan (Rp0)"}
               </Button>}
               {(!membershipPaymentTarget || membershipPaymentDone) && <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>}
             </div>}
@@ -1276,7 +1334,7 @@ export default function AdminCheckoutForm() {
                     <p>Setelah dikonfirmasi, sistem membuat perpanjangan dan langsung menampilkan pembayaran pada halaman ini.</p>
                   </>
                 ) : (
-                  <p>{memberAction === "new" ? "Member baru akan dibuat dan pembayaran dapat langsung diselesaikan pada halaman ini." : "Proses ini akan dicatat di sistem. Pastikan data yang dipilih sudah benar."}</p>
+                  <p>{memberAction === "new" && getCurrentRole() !== "staff" ? "Konfirmasi dana sudah masuk. Satu transaksi akan membuat customer, membership dan pembayaran lunas tanpa booking kunjungan tambahan." : memberAction === "new" ? "Member baru akan dibuat dan bukti pembayaran diverifikasi terpisah oleh admin." : "Proses ini akan dicatat di sistem. Pastikan data yang dipilih sudah benar."}</p>
                 )}
               </div>
             </AlertDialogDescription>
@@ -1291,7 +1349,7 @@ export default function AdminCheckoutForm() {
                 void submitMembership();
               }}
             >
-              {isSubmitting ? "Memproses..." : memberAction === "renew" ? "Ya, Perpanjang Membership" : memberAction === "new" ? "Ya, Daftarkan Member" : "Ya, Catat Kunjungan"}
+              {isSubmitting ? "Memproses..." : memberAction === "renew" ? "Ya, Perpanjang Membership" : memberAction === "new" && getCurrentRole() !== "staff" ? "Ya, Daftarkan & Konfirmasi" : memberAction === "new" ? "Ya, Daftarkan Member" : "Ya, Catat Kunjungan"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
