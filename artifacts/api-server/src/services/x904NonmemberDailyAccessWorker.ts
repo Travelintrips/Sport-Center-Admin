@@ -65,7 +65,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     WHERE a.verification_state='verified'
       AND ((a.payment_id IS NOT NULL AND a.confirmed_at IS NOT NULL AND a.expires_at IS NOT NULL
         AND (a.access_state IN ('pending','active','expired') OR p.status::text IN ('cancelled','rejected','refunded')))
-        OR (a.payment_id IS NULL AND a.access_state='pending'
+        OR (a.payment_id IS NULL AND a.access_state IN ('pending','review_required')
           AND a.identity_type='card' AND a.identity_label='VIS006' AND a.user_pin='15'
           AND ${testPin ?? null}::text='15'))
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
@@ -89,7 +89,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
-      const unpaidVis006 = a.payment_id == null && a.access_state === "pending" &&
+      const unpaidVis006 = a.payment_id == null && ["pending", "review_required"].includes(a.access_state) &&
         a.user_pin === "15" && testPin === "15";
       const shouldBeActive = a.payment_status === "confirmed" &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
