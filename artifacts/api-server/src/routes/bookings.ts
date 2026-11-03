@@ -1652,7 +1652,7 @@ router.post("/bookings", async (req, res) => {
       const [apMember] = await db.select().from(apMembersTable)
         .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
         .limit(1);
-      if (!apMember || normalizePhone(apMember.phone) !== customerPhone) {
+      if (!apMember || normalizePhone(apMember.phone ?? "") !== customerPhone) {
         res.status(400).json({ error: "ID Card AP tidak aktif atau nomor WhatsApp tidak cocok dengan data Member AP." });
         return;
       }
@@ -2321,7 +2321,7 @@ router.post("/bookings/recurring", async (req, res) => {
       const [apMemberR] = await db.select().from(apMembersTable)
         .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
         .limit(1);
-      if (!apMemberR || normalizePhone(apMemberR.phone) !== customerPhone) {
+      if (!apMemberR || normalizePhone(apMemberR.phone ?? "") !== customerPhone) {
         res.status(400).json({ error: "ID Card AP tidak aktif atau nomor WhatsApp tidak cocok dengan data Member AP." });
         return;
       }
