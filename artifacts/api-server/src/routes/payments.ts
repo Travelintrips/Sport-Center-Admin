@@ -723,6 +723,24 @@ router.post("/payments", async (req, res) => {
       req.body.providerOrderId ?? req.body.merchantTradeNo ?? req.body.providerReference ?? req.body.providerTradeNo,
     );
 
+    const effectivePaymentDate = manualPaidAt ? paymentEffectiveDate(manualPaidAt) : null;
+    const isExpandedZeroMdrMandiriQris =
+      paymentMethod === "QRIS" &&
+      (paymentProvider ?? "unknown") === "mandiri_direct" &&
+      effectivePaymentDate != null &&
+      effectivePaymentDate >= "2026-10-01" &&
+      Math.abs(Number(paymentEnrichment.mdrRate ?? 0) - 0.007) < 0.0000001;
+
+    const paymentMdrRate =
+      isExpandedZeroMdrMandiriQris && amountNum <= 100000
+        ? 0
+        : Number(paymentEnrichment.mdrRate ?? 0);
+    const paymentMdrAmount =
+      paymentMethod === "QRIS"
+        ? Math.round(amountNum * paymentMdrRate * 100) / 100
+        : 0;
+    const paymentNetAmount = Math.max(0, Math.round((amountNum - paymentMdrAmount) * 100) / 100);
+
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
       .values({
@@ -737,6 +755,10 @@ router.post("/payments", async (req, res) => {
         companyId: paymentEnrichment.companyId ?? null,
         bankAccountId: paymentEnrichment.bankAccountId,
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
+        settlementRuleVersion: paymentEnrichment.settlementRuleVersion ?? null,
+        mdrRate: String(paymentMdrRate),
+        mdrAmount: String(paymentMdrAmount),
+        netAmount: String(paymentNetAmount),
         paidAt: paymentEnrichment.paidAt ?? null,
         notes,
         ocrName: proofOcr?.name ?? null,
