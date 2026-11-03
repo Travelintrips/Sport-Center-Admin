@@ -982,8 +982,8 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       if (!active) throw new Error("MEMBERSHIP_ACTIVATION_FAILED");
       await tx.execute(sql`
         INSERT INTO sport_center.x904_automatic_entitlement_events
-          (event_id,membership_id,payment_id,reason,event_key)
-        VALUES (nextval('sport_center.x904_automatic_entitlement_events_event_id_seq'::regclass),${active.id},${payment.id},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(payment.id)})
+          (membership_id,payment_id,reason,event_key)
+        VALUES (${active.id},${payment.id},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(payment.id)})
         ON CONFLICT (event_key) DO NOTHING
       `);
       return {customerId:customer.id,membership:active,payment,booking:linkedBooking};
@@ -1486,8 +1486,8 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         // Do not enqueue physical commands or touch other mapped users here.
         await tx.execute(sql`
           INSERT INTO sport_center.x904_automatic_entitlement_events
-            (event_id,membership_id,payment_id,reason,event_key)
-          VALUES (nextval('sport_center.x904_automatic_entitlement_events_event_id_seq'::regclass),${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
+            (membership_id,payment_id,reason,event_key)
+          VALUES (${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
             ${x904PaymentConfirmedEventKey(updatedPayment.id)})
           ON CONFLICT (event_key) DO NOTHING
         `);
