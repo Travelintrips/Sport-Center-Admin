@@ -819,6 +819,29 @@ export default function AdminCheckoutForm() {
           </CardHeader>
           <CardContent className="space-y-5">
 
+            <div className="space-y-2">
+              <Label>Jenis pemesanan</Label>
+              <Select value={bookingKind} onValueChange={setBookingKind}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal / Umum</SelectItem>
+                  <SelectItem value="corporate">Perusahaan / Corporate</SelectItem>
+                  <SelectItem value="membership">Membership Gym</SelectItem>
+                  <SelectItem value="event">Event / Kegiatan Khusus</SelectItem>
+                </SelectContent>
+              </Select>
+              {bookingKind === "event" && <Select value={eventPayer} onValueChange={setEventPayer}>
+                <SelectTrigger><SelectValue placeholder="Pihak pembayar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Dibayar personal</SelectItem>
+                  <SelectItem value="corporate">Dibayar perusahaan</SelectItem>
+                </SelectContent>
+              </Select>}
+              {!isMembership && <p className="text-xs text-muted-foreground">{isCompanyPayer ? "Penagihan mengikuti status approval dan konfigurasi invoice perusahaan; bukan otomatis menunggu pembayaran." : "Booking belum dianggap lunas. Bukti pembayaran perlu diverifikasi sebelum konfirmasi."}</p>}
+              {bookingKind === "event" && <p className="text-xs text-amber-700">Alur ini untuk satu sesi event. Booking grup multi-sesi harus menggunakan alur grup khusus.</p>}
+              {isMembership && <p className="text-xs text-muted-foreground">Kelola pendaftaran, perpanjangan, pembayaran, atau kunjungan member langsung dari halaman ini.</p>}
+            </div>
+
             {!hideRegularBookingFields && <>
             {/* Customer */}
             <div className="space-y-2">
@@ -995,28 +1018,7 @@ export default function AdminCheckoutForm() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label>Jenis pemesanan</Label>
-              <Select value={bookingKind} onValueChange={setBookingKind}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="personal">Personal / Umum</SelectItem>
-                  <SelectItem value="corporate">Perusahaan / Corporate</SelectItem>
-                  <SelectItem value="membership">Membership Gym</SelectItem>
-                  <SelectItem value="event">Event / Kegiatan Khusus</SelectItem>
-                </SelectContent>
-              </Select>
-              {bookingKind === "event" && <Select value={eventPayer} onValueChange={setEventPayer}>
-                <SelectTrigger><SelectValue placeholder="Pihak pembayar" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="personal">Dibayar personal</SelectItem>
-                  <SelectItem value="corporate">Dibayar perusahaan</SelectItem>
-                </SelectContent>
-              </Select>}
-              {!isMembership && <p className="text-xs text-muted-foreground">{isCompanyPayer ? "Penagihan mengikuti status approval dan konfigurasi invoice perusahaan; bukan otomatis menunggu pembayaran." : "Booking belum dianggap lunas. Bukti pembayaran perlu diverifikasi sebelum konfirmasi."}</p>}
-              {bookingKind === "event" && <p className="text-xs text-amber-700">Alur ini untuk satu sesi event. Booking grup multi-sesi harus menggunakan alur grup khusus.</p>}
-              {isMembership && <p className="text-xs text-muted-foreground">Kelola pendaftaran, perpanjangan, pembayaran, atau kunjungan member langsung dari halaman ini.</p>}
-            </div>
+
 
             {!isMembership && selectedFacilityId && selectedDate &&
               (repeatEnabled ? (repeatPreviewCurrent && Boolean(repeatPreview)) : (isWalkIn || slotValid)) && (
