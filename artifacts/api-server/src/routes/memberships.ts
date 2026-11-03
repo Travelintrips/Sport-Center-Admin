@@ -892,6 +892,8 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     const paymentDate = normalizePaymentDate(req.body?.paymentDate);
     const notes = String(req.body?.notes ?? "").trim();
     const x904Pin = String(req.body?.x904Pin ?? "").trim();
+    const x904VerifiedName = String(req.body?.x904VerifiedName ?? "").trim();
+    const x904IdentityConfirmed = req.body?.x904IdentityConfirmed === "true";
     if (!/^[0-9]{1,8}$/.test(x904Pin)) {
       res.status(400).json({ error: "Pilih PIN X904 yang valid sebelum mendaftarkan member baru." }); return;
     }
@@ -937,6 +939,12 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       if (machineUsers.rows.length !== 1 || Number(machineUsers.rows[0].device_role) !== 0 ||
           !String(machineUsers.rows[0].display_name ?? "").trim()) {
         throw new MembershipProofError(409,"PIN X904 tidak valid atau bukan pengguna biasa.");
+      }
+      // Admin must confirm the device identity shown in the form; the server
+      // compares it against its own inventory lookup, not browser lookup alone.
+      if (!x904IdentityConfirmed || !x904VerifiedName ||
+          x904VerifiedName !== String(machineUsers.rows[0].display_name).trim()) {
+        throw new MembershipProofError(409,"Konfirmasi identitas PIN X904 tidak cocok. Verifikasi ulang nama di mesin.");
       }
       const mappings = await tx.execute(sql`
         SELECT membership_id,status FROM sport_center.gym_x904_member_mapping
