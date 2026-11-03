@@ -5,6 +5,8 @@ import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import {
@@ -16,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft, RefreshCw, CalendarDays, XCircle } from "lucide-react";
+import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft, RefreshCw, CalendarDays, XCircle, ChevronsUpDown, Check } from "lucide-react";
 import { getToken, getCurrentRole } from "@/lib/auth";
 
 function jakartaDateOnly(): string {
@@ -34,6 +36,7 @@ export default function AdminCheckoutForm() {
 
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
@@ -873,28 +876,71 @@ export default function AdminCheckoutForm() {
             {/* Customer */}
             <div className="space-y-2">
               <Label htmlFor="customer">Nama Pemesan <span className="text-destructive">*</span></Label>
-              <Select value={selectedCustomerId} onValueChange={(value) => { setSelectedCustomerId(value); setCustomerSearch(""); }}>
-                <SelectTrigger id="customer">
-                  <SelectValue placeholder="Pilih customer..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <div className="sticky top-0 z-10 bg-popover px-2 pb-2 pt-2" onKeyDown={(e) => e.stopPropagation()}>
-                    <Input autoFocus aria-label="Cari nama atau nomor telepon pemesan" placeholder="Cari nama / nomor telepon..." value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} />
-                  </div>
-                  {customers.length === 0 && (
-                    <SelectItem value="__empty__" disabled>Tidak ada customer terdaftar</SelectItem>
-                  )}
-                  <SelectItem value="__guest__">{isMembership ? "+ Customer Baru (Daftar Membership)" : "+ Pemesan belum terdaftar (Tamu)"}</SelectItem>
-                  {filteredCustomers.length === 0 && customers.length > 0 && (
-                    <SelectItem value="__no_matches__" disabled>Tidak ada pemesan yang cocok</SelectItem>
-                  )}
-                  {filteredCustomers.map((c: any) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name}{c.phone ? ` (${c.phone})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={customerPickerOpen} onOpenChange={(open) => {
+                setCustomerPickerOpen(open);
+                if (!open) setCustomerSearch("");
+              }}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    id="customer"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={customerPickerOpen}
+                    aria-label="Nama Pemesan"
+                    className="w-full min-w-0 justify-between gap-2 font-normal"
+                  >
+                    <span className="min-w-0 truncate text-left">
+                      {isGuest
+                        ? (isMembership ? "+ Customer Baru (Daftar Membership)" : "+ Pemesan belum terdaftar (Tamu)")
+                        : selectedCustomer
+                          ? `${selectedCustomer.name}${selectedCustomer.phone ? ` (${selectedCustomer.phone})` : ""}`
+                          : "Pilih customer..."}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={4}
+                  collisionPadding={12}
+                  className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden p-0"
+                >
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      autoFocus
+                      aria-label="Cari nama atau nomor telepon pemesan"
+                      placeholder="Cari nama / nomor telepon..."
+                      value={customerSearch}
+                      onValueChange={setCustomerSearch}
+                    />
+                    <CommandList className="max-h-[min(300px,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain">
+                      <CommandItem value="__guest__" onSelect={() => {
+                        setSelectedCustomerId("__guest__");
+                        setCustomerPickerOpen(false);
+                        setCustomerSearch("");
+                      }} className="gap-2 py-2">
+                        <Check className={`h-4 w-4 shrink-0 ${isGuest ? "opacity-100" : "opacity-0"}`} />
+                        {isMembership ? "+ Customer Baru (Daftar Membership)" : "+ Pemesan belum terdaftar (Tamu)"}
+                      </CommandItem>
+                      {filteredCustomers.map((c: any) => (
+                        <CommandItem key={c.id} value={String(c.id)} onSelect={() => {
+                          setSelectedCustomerId(String(c.id));
+                          setCustomerPickerOpen(false);
+                          setCustomerSearch("");
+                        }} className="min-w-0 gap-2 py-2">
+                          <Check className={`h-4 w-4 shrink-0 ${selectedCustomerId === String(c.id) ? "opacity-100" : "opacity-0"}`} />
+                          <span className="min-w-0 truncate">{c.name}{c.phone ? ` (${c.phone})` : ""}</span>
+                        </CommandItem>
+                      ))}
+                      {filteredCustomers.length === 0 && (
+                        <CommandEmpty>{customers.length === 0 ? "Tidak ada customer terdaftar" : "Tidak ada pemesan yang cocok"}</CommandEmpty>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             {isGuest && <div className="space-y-3 rounded-lg border p-3">
