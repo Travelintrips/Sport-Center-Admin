@@ -1331,6 +1331,8 @@ export function normalizePhone(raw: string): string {
   return p;
 }
 
+
+
 async function generateCustomerCode(): Promise<string> {
   await db.execute(sql`SELECT pg_advisory_lock(42002)`);
   try {
@@ -1650,6 +1652,10 @@ router.post("/bookings", async (req, res) => {
       const [apMember] = await db.select().from(apMembersTable)
         .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
         .limit(1);
+      if (!apMember || normalizePhone(apMember.phone ?? "") !== customerPhone) {
+        res.status(400).json({ error: "ID Card AP tidak aktif atau nomor WhatsApp tidak cocok dengan data Member AP." });
+        return;
+      }
       if (apMember) {
         const [apSetting] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
@@ -2315,6 +2321,10 @@ router.post("/bookings/recurring", async (req, res) => {
       const [apMemberR] = await db.select().from(apMembersTable)
         .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
         .limit(1);
+      if (!apMemberR || normalizePhone(apMemberR.phone ?? "") !== customerPhone) {
+        res.status(400).json({ error: "ID Card AP tidak aktif atau nomor WhatsApp tidak cocok dengan data Member AP." });
+        return;
+      }
       if (apMemberR) {
         const [apSettingR] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
