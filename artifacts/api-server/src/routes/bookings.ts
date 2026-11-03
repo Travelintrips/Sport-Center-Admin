@@ -41,6 +41,24 @@ import {
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
 
+// An uploaded proof or a legacy paid badge is not a verified settlement.
+// Company invoices have one canonical receipt at invoice level, not one payment per booking.
+function isCompanyInvoicePaymentConfirmed(invoice: {
+  status?: string | null;
+  paidAt?: Date | string | null;
+  netAmount?: string | number | null;
+  grandTotal?: string | number | null;
+  totalAmount?: string | number | null;
+  paidAmount?: string | number | null;
+  remainingAmount?: string | number | null;
+} | null | undefined): boolean {
+  if (!invoice || invoice.status !== "paid" || !invoice.paidAt) return false;
+  const due = Number(invoice.netAmount ?? invoice.grandTotal ?? invoice.totalAmount ?? 0);
+  const paid = Number(invoice.paidAmount ?? 0);
+  const remaining = Number(invoice.remainingAmount ?? due - paid);
+  return Number.isFinite(due) && due > 0 && paid >= due - 0.005 && remaining <= 0.005;
+}
+
 function taxSnapshotFields(taxCalc: Awaited<ReturnType<typeof resolveCustomerTax>>) {
   return {
     ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -205,6 +223,9 @@ async function getBookingWithPayment(id: number) {
         status: companyInvoicesTable.status,
         grandTotal: companyInvoicesTable.grandTotal,
         totalAmount: companyInvoicesTable.totalAmount,
+        netAmount: companyInvoicesTable.netAmount,
+        paidAmount: companyInvoicesTable.paidAmount,
+        remainingAmount: companyInvoicesTable.remainingAmount,
         paymentMethod: companyInvoicesTable.paymentMethod,
         paymentProofUrl: companyInvoicesTable.paymentProofUrl,
         paidAt: companyInvoicesTable.paidAt,
@@ -212,8 +233,7 @@ async function getBookingWithPayment(id: number) {
         .where(eq(companyInvoicesTable.id, companyInvoiceId))
         .limit(1)
     : [];
-  const companyInvoicePayment = companyInvoice?.status === "paid" &&
-    (companyInvoice.paymentMethod || companyInvoice.paidAt)
+  const companyInvoicePayment = isCompanyInvoicePaymentConfirmed(companyInvoice)
     ? {
         id: -companyInvoice.id,
         bookingId: booking.id,
@@ -479,6 +499,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           totalAmount: companyInvoicesTable.totalAmount,
           pphAmount: companyInvoicesTable.pphAmount,
           netAmount: companyInvoicesTable.netAmount,
+          paidAmount: companyInvoicesTable.paidAmount,
+          remainingAmount: companyInvoicesTable.remainingAmount,
           paymentMethod: companyInvoicesTable.paymentMethod,
           paymentProofUrl: companyInvoicesTable.paymentProofUrl,
           paidAt: companyInvoicesTable.paidAt,
@@ -821,8 +843,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       // Company invoice settlement is one canonical payment at invoice level.
       // Expose a read-only synthetic representation per booking for display,
       // without inserting duplicate booking-level payment rows.
-      const companyInvoicePayment = invoice?.status === "paid" &&
-        (invoice.paymentMethod || invoice.paidAt)
+      const companyInvoicePayment = isCompanyInvoicePaymentConfirmed(invoice)
         ? {
             id: -invoice.id,
             bookingId: b.id,
@@ -917,7 +938,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const bookingWithholding = calculateBookingWithholdingTax(b);
       const groupTax = b.groupRef ? groupTaxByRef.get(b.groupRef) : undefined;
       const companyInvoiceTotal =
-        invoice?.status === "paid"
+        isCompanyInvoicePaymentConfirmed(invoice)
           ? Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)
           : null;
       return {
@@ -930,6 +951,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         companyInvoicePaymentMethod: invoice?.paymentMethod ?? null,
         companyInvoicePaymentProofUrl: invoice?.paymentProofUrl ?? null,
         companyInvoiceStatus: invoice?.status ?? null,
+        companyInvoicePaidAmount: invoice?.paidAmount == null ? null : Number(invoice.paidAmount),
+        companyInvoiceRemainingAmount: invoice?.remainingAmount == null ? null : Number(invoice.remainingAmount),
+        companyInvoicePaymentConfirmed: isCompanyInvoicePaymentConfirmed(invoice),
         paidAt: b.paidAt ?? invoice?.paidAt ?? null,
         companyName: b.companyCustomerId ? (companyNameById[b.companyCustomerId] ?? "") : null,
         totalPrice: Number(b.totalPrice),
@@ -1056,7 +1080,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           : undefined;
         const due = Number(invoice?.grandTotal ?? invoice?.totalAmount ??
           booking.companyInvoiceTotal ?? booking.grandTotal ?? booking.totalPrice ?? 0);
-        const paidAmount = invoice?.status === "paid" && Boolean(invoice.paidAt) ? due : 0;
+        const paidAmount = isCompanyInvoicePaymentConfirmed(invoice) ? due : 0;
         return { due, paidAmount, rows: [], isCompanyInvoice: true };
       }
       const due = Number(
