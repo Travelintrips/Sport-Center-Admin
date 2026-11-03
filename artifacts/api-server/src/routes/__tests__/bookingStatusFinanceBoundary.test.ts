@@ -23,4 +23,16 @@ describe("booking status update financial boundary", () => {
   it("does not forge a paidAt timestamp on booking confirmation", () => {
     expect(statusRoute).not.toContain('status === "confirmed" ? new Date() : null');
   });
+
+  it("requires the canonical invoice settlement fields before treating a company booking as paid", () => {
+    expect(route).toContain("function isCompanyInvoicePaymentConfirmed(");
+    expect(route).toContain('invoice.status !== "paid"');
+    expect(route).toContain("paid >= due - 0.005 && remaining <= 0.005");
+    expect(route).toContain("companyInvoicePaymentConfirmed: isCompanyInvoicePaymentConfirmed(invoice)");
+  });
+
+  it("does not count an unverified legacy company invoice as paid revenue", () => {
+    expect(route).toContain("const paidAmount = isCompanyInvoicePaymentConfirmed(invoice) ? due : 0;");
+    expect(route).toContain("!isBookingFullyPaid(booking)");
+  });
 });
