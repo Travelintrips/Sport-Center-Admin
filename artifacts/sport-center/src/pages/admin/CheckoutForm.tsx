@@ -181,7 +181,7 @@ export default function AdminCheckoutForm() {
   const repeatAllAvailable = Boolean(repeatPreview && repeatPreview.dates.length === repeatCount && repeatPreview.dates.every((row) => row.available));
   const repeatPreviewCurrent = repeatPreviewKey === repeatCurrentKey && repeatCheckState === "ready";
   const customerFormValid = isGuest
-    ? Boolean(guestName.trim() && /^\\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\\s()-]/g, "")))
+    ? Boolean(guestName.trim() && /^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))
     : Boolean(selectedCustomer?.name && selectedCustomer?.phone);
   const formPaymentValid = paymentChoice === "unpaid" ||
     (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
