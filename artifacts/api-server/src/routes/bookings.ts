@@ -1238,7 +1238,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const revenueCompanyOutstanding = filteredResult.filter((booking: any) =>
         booking.payerType === "company" &&
         (booking.status === "confirmed" || booking.status === "completed") &&
-        booking.billingStatus !== "paid"
+        !isBookingFullyPaid(booking)
       );
       const revenueWaiting = filteredResult.filter((booking: any) =>
         booking.status === "waiting_confirmation" || booking.status === "paid"
