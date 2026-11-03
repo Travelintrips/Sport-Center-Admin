@@ -417,32 +417,34 @@ export async function enrichPayment(
   const effectiveDate = options?.effectiveDate ?? (paidAt ? paymentEffectiveDate(paidAt) : null);
 
   if (company.companyId != null && account.bankAccountId && effectiveDate) {
-    const rows = await db
-      .select({
-        mdrRate: paymentSettlementConfigsTable.mdrRate,
-        fixedProviderFee: paymentSettlementConfigsTable.fixedProviderFee,
-        feeTaxRate: paymentSettlementConfigsTable.feeTaxRate,
-        source: paymentSettlementConfigsTable.source,
-        ruleVersion: paymentSettlementConfigsTable.ruleVersion,
-        calculationMethod: paymentSettlementConfigsTable.calculationMethod,
-      })
-      .from(paymentSettlementConfigsTable)
-      .where(and(
-        eq(paymentSettlementConfigsTable.companyId, company.companyId),
-        eq(paymentSettlementConfigsTable.providerCode, provider),
-        eq(paymentSettlementConfigsTable.bankAccountId, account.bankAccountId),
-        eq(paymentSettlementConfigsTable.isActive, true),
-        lte(paymentSettlementConfigsTable.effectiveFrom, effectiveDate),
-        or(
-          isNull(paymentSettlementConfigsTable.effectiveUntil),
-          gte(paymentSettlementConfigsTable.effectiveUntil, effectiveDate),
-        ),
-      ))
-      .orderBy(desc(paymentSettlementConfigsTable.effectiveFrom))
-      .limit(1)
-      .catch(() => []);
+    const result = await db.execute(sql`
+      SELECT
+        mdr_rate,
+        fixed_provider_fee,
+        fee_tax_rate,
+        source,
+        rule_version,
+        calculation_method
+      FROM sport_center.payment_settlement_configs
+      WHERE company_id = ${company.companyId}
+        AND provider_code = ${provider}
+        AND bank_account_id = ${account.bankAccountId}
+        AND is_active = true
+        AND effective_from <= ${effectiveDate}::date
+        AND (effective_until IS NULL OR effective_until >= ${effectiveDate}::date)
+      ORDER BY effective_from DESC, id DESC
+      LIMIT 1
+    `).catch(() => ({ rows: [] }));
 
-    const rule = rows[0];
+    const rawRule = (result as any).rows?.[0] ?? null;
+    const rule = rawRule ? {
+      mdrRate: rawRule.mdr_rate,
+      fixedProviderFee: rawRule.fixed_provider_fee,
+      feeTaxRate: rawRule.fee_tax_rate,
+      source: rawRule.source,
+      ruleVersion: rawRule.rule_version,
+      calculationMethod: rawRule.calculation_method,
+    } : null;
     if (rule) {
       settlementRuleVersion = rule.ruleVersion ?? null;
       const configuredRate = Number(rule.mdrRate ?? 0);
