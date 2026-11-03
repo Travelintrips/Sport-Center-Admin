@@ -54,6 +54,10 @@ describe("paid Gym membership one-pass registration contract", () => {
 
   it("validates and atomically maps a selected X904 PIN without bypassing ACK", () => {
     expect(section).toContain('req.body?.x904Pin');
+    expect(section).toContain('req.body?.x904IdentityConfirmed === "true"');
+    expect(section).toContain('x904VerifiedName !== String(machineUsers.rows[0].display_name).trim()');
+    expect(ui).toContain('form.append("x904IdentityConfirmed",String(membershipX904IdentityConfirmed))');
+    expect(ui).toContain('membershipX904Name && membershipX904IdentityConfirmed');
     expect(section).toContain('gym_x904_lan_users');
     expect(section).toContain('device_role');
     expect(section).toContain('gym_x904_member_mapping');
