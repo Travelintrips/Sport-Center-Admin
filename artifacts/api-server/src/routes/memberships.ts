@@ -1029,12 +1029,18 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
         status:"active",paymentMethod,paymentProofUrl:proofUrl,updatedAt:today,
       }).where(eq(gymMembershipsTable.id,membership.id)).returning();
       if (!active) throw new Error("MEMBERSHIP_ACTIVATION_FAILED");
-      await tx.execute(sql`
+      const entitlementEvent = await tx.execute(sql`
         INSERT INTO sport_center.x904_automatic_entitlement_events
           (membership_id,payment_id,reason,event_key)
         VALUES (${active.id},${payment.id},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(payment.id)})
         ON CONFLICT (event_key) DO NOTHING
+        RETURNING event_id,membership_id,payment_id
       `);
+      if (entitlementEvent.rows.length !== 1 ||
+          String(entitlementEvent.rows[0].membership_id) !== String(active.id) ||
+          String(entitlementEvent.rows[0].payment_id) !== String(payment.id)) {
+        throw new Error("X904_PAYMENT_ENTITLEMENT_EVENT_NOT_PERSISTED");
+      }
       return {customerId:customer.id,membership:active,payment,booking:linkedBooking};
     });
     syncMembershipToBizportal(result.membership).catch(err => req.log.error({err},"Paid membership sync failed"));
