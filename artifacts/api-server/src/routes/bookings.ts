@@ -235,7 +235,7 @@ async function getBookingWithPayment(id: number) {
         .where(eq(companyInvoicesTable.id, companyInvoiceId))
         .limit(1)
     : [];
-  const companyInvoicePayment = isCompanyInvoicePaymentConfirmed(companyInvoice)
+  const companyInvoicePayment = companyInvoice && isCompanyInvoicePaymentConfirmed(companyInvoice)
     ? {
         id: -companyInvoice.id,
         bookingId: booking.id,
@@ -849,7 +849,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       // Company invoice settlement is one canonical payment at invoice level.
       // Expose a read-only synthetic representation per booking for display,
       // without inserting duplicate booking-level payment rows.
-      const companyInvoicePayment = isCompanyInvoicePaymentConfirmed(invoice)
+      const companyInvoicePayment = invoice && isCompanyInvoicePaymentConfirmed(invoice)
         ? {
             id: -invoice.id,
             bookingId: b.id,
@@ -944,7 +944,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const bookingWithholding = calculateBookingWithholdingTax(b);
       const groupTax = b.groupRef ? groupTaxByRef.get(b.groupRef) : undefined;
       const companyInvoiceTotal =
-        isCompanyInvoicePaymentConfirmed(invoice)
+        invoice && isCompanyInvoicePaymentConfirmed(invoice)
           ? Number(invoice.grandTotal ?? invoice.totalAmount ?? 0)
           : null;
       return {
