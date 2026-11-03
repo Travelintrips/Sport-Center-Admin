@@ -17,7 +17,8 @@
 const pin=document.getElementById('pin'),photo=document.getElementById('photo'),out=document.getElementById('result');
 const download=document.getElementById('download');
 let stagedJPEG=null;
-const clearStaging=()=>{stagedJPEG=null;download.disabled=true;};
+let generation=0;
+const clearStaging=()=>{generation++;stagedJPEG=null;download.disabled=true;};
 const reject=(reason)=>{clearStaging();out.textContent='DITOLAK: '+reason;};
 pin.addEventListener('input',clearStaging);
 photo.addEventListener('change',clearStaging);
@@ -55,14 +56,15 @@ document.getElementById('validate').addEventListener('click',async()=>{
  if(pin.value!=='500')return reject('TEST_PIN_ONLY');
  if(!file)return reject('FILE_MISSING');
  if(!/\.jpe?g$/i.test(file.name))return reject('EXTENSION_INVALID');
- clearStaging();out.textContent='Memproses foto secara lokal...';
+ clearStaging();const currentGeneration=generation;out.textContent='Memproses foto secara lokal...';
  try{
   const {data,width,height}=await compressJPEG(file);
   const digest=await crypto.subtle.digest('SHA-256',data);
   const sha=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  if(generation!==currentGeneration)return;
   stagedJPEG=new Blob([data],{type:'image/jpeg'});download.disabled=false;
   out.textContent='STAGED_OFFLINE_ONLY\nPIN: 500\nUkuran asli: '+file.size+' byte\nUkuran hasil: '+data.length+' byte\nDimensi hasil: '+width+' × '+height+'\nSHA-256 hasil: '+sha+'\nPengiriman X904: NONAKTIF\nPenyimpanan server: TIDAK ADA';
- }catch(e){reject(e instanceof Error?e.message:'DECODE_OR_COMPRESS_FAILED');}
+ }catch(e){if(generation===currentGeneration)reject(e instanceof Error?e.message:'DECODE_OR_COMPRESS_FAILED');}
 });
 download.addEventListener('click',()=>{
  if(pin.value!=='500'||!stagedJPEG||download.disabled)return;
