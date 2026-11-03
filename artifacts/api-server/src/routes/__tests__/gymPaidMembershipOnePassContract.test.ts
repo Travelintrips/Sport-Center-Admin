@@ -43,6 +43,9 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(section).toContain("accountingRef:");
     expect(section).toContain("x904_automatic_entitlement_events");
     expect(section).toContain("ON CONFLICT (event_key) DO NOTHING");
+    expect(section).toContain("RETURNING event_id,membership_id,payment_id");
+    expect(section).toContain("entitlementEvent.rows.length !== 1");
+    expect(section).toContain("X904_PAYMENT_ENTITLEMENT_EVENT_NOT_PERSISTED");
     expect(section).not.toContain("gymCheckinsTable");
   });
 
