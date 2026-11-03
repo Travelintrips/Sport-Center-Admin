@@ -40,6 +40,7 @@ import { calculateBookingWithholdingTax } from "../lib/tax";
 import {
   ensurePaymentBankAccount,
   resolveRequiredPaymentEnrichment,
+  computeCanonicalMdrSnapshot,
   paymentEffectiveDate,
   type SettlementProvider,
 } from "../lib/paymentEnrichment";
@@ -724,22 +725,22 @@ router.post("/payments", async (req, res) => {
     );
 
     const effectivePaymentDate = manualPaidAt ? paymentEffectiveDate(manualPaidAt) : null;
-    const isExpandedZeroMdrMandiriQris =
-      paymentMethod === "QRIS" &&
-      (paymentProvider ?? "unknown") === "mandiri_direct" &&
-      effectivePaymentDate != null &&
-      effectivePaymentDate >= "2026-10-01" &&
-      Math.abs(Number(paymentEnrichment.mdrRate ?? 0) - 0.007) < 0.0000001;
+    const mdrSnapshot = paymentMethod === "QRIS"
+      ? computeCanonicalMdrSnapshot({
+          provider: paymentProvider ?? "unknown",
+          effectiveDate: effectivePaymentDate,
+          configuredRate: Number(paymentEnrichment.mdrRate ?? 0),
+          amount: amountNum,
+          source: paymentEnrichment.settlementSource,
+          calculationMethod: paymentEnrichment.settlementCalculationMethod,
+          fixedProviderFee: paymentEnrichment.fixedProviderFee,
+          feeTaxRate: paymentEnrichment.feeTaxRate,
+        })
+      : { mdrRate: 0, mdrAmount: 0, netAmount: amountNum };
 
-    const paymentMdrRate =
-      isExpandedZeroMdrMandiriQris && amountNum <= 100000
-        ? 0
-        : Number(paymentEnrichment.mdrRate ?? 0);
-    const paymentMdrAmount =
-      paymentMethod === "QRIS"
-        ? Math.round(amountNum * paymentMdrRate * 100) / 100
-        : 0;
-    const paymentNetAmount = Math.max(0, Math.round((amountNum - paymentMdrAmount) * 100) / 100);
+    const paymentMdrRate = mdrSnapshot.mdrRate;
+    const paymentMdrAmount = mdrSnapshot.mdrAmount;
+    const paymentNetAmount = mdrSnapshot.netAmount;
 
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
