@@ -226,6 +226,8 @@ function CustomerDetail({ customerId, onClose }: { customerId: number; onClose: 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-lg">{customer.name}</h3>
+                {customer.apMember?.isActive && <Badge className="bg-sky-100 text-sky-800 border-sky-200 text-xs">Member AP</Badge>}
+                {customer.apMember?.discountActive && <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Diskon {customer.apMember.discountPercentage}%</Badge>}
                 {customer.accountType === "company"
                   ? <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs gap-1"><Building2 size={10} /> Perusahaan</Badge>
                   : <SourceBadge source={customer.registrationSource ?? undefined} />}
@@ -1106,6 +1108,8 @@ export default function AdminCustomers() {
                             <div>
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="font-medium">{c.name}</span>
+                                {c.apMember?.isActive && <Badge className="bg-sky-100 text-sky-800 border-sky-200 text-xs py-0 h-4">Member AP</Badge>}
+                                {c.apMember?.discountActive && <Badge className="bg-green-100 text-green-700 border-green-200 text-xs py-0 h-4">Diskon {c.apMember.discountPercentage}%</Badge>}
                                 {isGuest && <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 text-xs py-0 h-4">Guest</Badge>}
                               </div>
                               <div className="text-xs text-muted-foreground">{c.email ?? "–"}</div>
