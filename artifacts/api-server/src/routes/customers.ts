@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, usersTable, bookingsTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, apMembersTable, discountSettingsTable } from "@workspace/db";
 import { eq, and, or, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { createHmac } from "crypto";
@@ -13,6 +13,46 @@ async function generateCustomerCode(): Promise<string> {
     .where(isNotNull(usersTable.customerCode)).orderBy(desc(usersTable.customerCode)).limit(1);
   const lastNum = last?.code ? parseInt(last.code.replace("C", "")) || 0 : 0;
   return "C" + String(lastNum + 1).padStart(4, "0");
+}
+
+function normalizePhoneKey(raw: string | null | undefined): string {
+  let digits = String(raw ?? "").replace(/\D/g, "");
+  if (digits.startsWith("0")) digits = "62" + digits.slice(1);
+  else if (digits && !digits.startsWith("62")) digits = "62" + digits;
+  return digits;
+}
+
+async function enrichWithApMember<T extends { phone?: string | null }>(rows: T[]) {
+  const [activeMembers, settings] = await Promise.all([
+    db.select({
+      name: apMembersTable.name,
+      phone: apMembersTable.phone,
+      idCardNumber: apMembersTable.idCardNumber,
+    }).from(apMembersTable).where(eq(apMembersTable.isActive, true)),
+    db.select({
+      discountPercentage: discountSettingsTable.discountPercentage,
+      discountAmount: discountSettingsTable.discountAmount,
+      isActive: discountSettingsTable.isActive,
+    }).from(discountSettingsTable)
+      .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1),
+  ]);
+  const setting = settings[0] ?? null;
+  return rows.map((row) => {
+    const phoneKey = normalizePhoneKey(row.phone);
+    const matches = phoneKey ? activeMembers.filter((member) => normalizePhoneKey(member.phone) === phoneKey) : [];
+    const member = matches.length === 1 ? matches[0] : null;
+    return {
+      ...row,
+      apMember: member ? {
+        name: member.name,
+        idCardNumber: member.idCardNumber,
+        isActive: true,
+        discountActive: Boolean(setting?.isActive && (Number(setting.discountAmount ?? 0) > 0 || Number(setting.discountPercentage ?? 0) > 0)),
+        discountPercentage: Number(setting?.discountPercentage ?? 0),
+        discountAmount: setting?.discountAmount == null ? 0 : Number(setting.discountAmount),
+      } : null,
+    };
+  });
 }
 
 function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookingsTable.$inferSelect)[]) {
@@ -77,7 +117,8 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
         accountType: "personal" as const,
       }));
 
-    res.json([...registeredUsers, ...pastCustomers]);
+    const enriched = await enrichWithApMember([...registeredUsers, ...pastCustomers]);
+    res.json(enriched);
   } catch (err) {
     req.log.error({ err }, "List customers simple error");
     res.status(500).json({ error: "Internal server error" });
@@ -153,7 +194,8 @@ router.get("/customers", adminMiddleware, async (req, res) => {
       );
     }
 
-    res.json(result);
+    const enrichedResult = await enrichWithApMember(result);
+    res.json(enrichedResult);
   } catch (err) {
     req.log.error({ err }, "List customers error");
     res.status(500).json({ error: "Internal server error" });
