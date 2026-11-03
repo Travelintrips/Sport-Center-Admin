@@ -28,6 +28,7 @@ export interface InvoiceData {
   customerName: string;
   customerPhone: string;
   customerEmail: string;
+  companyName?: string | null;
 
   facilityName: string;
   bookingDate: string;
@@ -591,11 +592,10 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
           <td>:</td>
           <td>${data.customerPhone}</td>
         </tr>
-        <tr>
-          <td>Email</td>
-          <td>:</td>
-          <td>${data.customerEmail}</td>
-        </tr>
+        ${data.companyName ? `<tr><td>Perusahaan</td><td>:</td><td>${data.companyName}</td></tr>` : ""}
+        ${data.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.customerEmail)
+          ? `<tr><td>Email</td><td>:</td><td>${data.customerEmail}</td></tr>`
+          : ""}
         <tr>
           <td>Status</td>
           <td>:</td>

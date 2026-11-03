@@ -537,7 +537,14 @@ export default function AdminCheckoutForm() {
         customerId: guestBooking ? null : Number(selectedCustomerId),
         customerName: isGuest ? guestName.trim() : selectedCustomer.name,
         customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
-        customerEmail: isGuest ? guestEmail.trim() : (selectedCustomer.email ?? ""),
+        // Company name is not an email address. Prefer a valid PIC email for corporate bookings.
+        customerEmail: isGuest ? guestEmail.trim() : (
+          corporate
+            ? [selectedCustomer.picEmail, selectedCustomer.email]
+                .map((value: unknown) => String(value ?? "").trim())
+                .find((value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) ?? ""
+            : (selectedCustomer.email ?? "")
+        ),
         facilityId: Number(selectedFacilityId),
         ...(!isWalkIn ? { startTime: startTime.slice(11, 16), durationHours: Number(duration) } : { numberOfPeople: 1 }),
         bookingType: bookingKind === "event" ? "event" : "regular",

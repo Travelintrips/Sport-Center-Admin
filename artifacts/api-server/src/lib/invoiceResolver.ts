@@ -7,6 +7,7 @@
 import {
   db,
   bookingsTable,
+  usersTable,
   bookingGroupsTable,
   facilitiesTable,
   settingsTable,
@@ -19,6 +20,14 @@ import type { InvoiceSession, InvoiceData } from "./invoiceTemplate";
 import { calculateBookingWithholdingTax, calculateInclusiveInvoiceTax } from "./tax";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Email for a corporate document must be a real address, not the company label
+// stored in some legacy users.email / bookings.customer_email fields.
+const invoiceContactEmail = (bookingEmail: string | null | undefined, picEmail?: string | null) =>
+  [bookingEmail, picEmail].map((value) => String(value ?? "").trim())
+    .find((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) ?? "";
+
+
 
 export function formatInvoiceNumber(orderNumber: string, bookingDate: string): string {
   const datePart = bookingDate.replace(/-/g, "").substring(0, 8);
@@ -121,6 +130,10 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     .where(eq(facilitiesTable.id, booking.facilityId))
     .limit(1);
 
+  const [company] = booking.companyCustomerId != null
+    ? await db.select({ companyName: usersTable.companyName, picEmail: usersTable.picEmail })
+        .from(usersTable).where(eq(usersTable.id, booking.companyCustomerId)).limit(1)
+    : [];
   const [settings] = await db.select().from(settingsTable).limit(1);
   const { invoiceDoc, generalDoc } = await loadDocSettings();
 
@@ -148,7 +161,8 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
 
     customerName: booking.customerName,
     customerPhone: booking.customerPhone,
-    customerEmail: booking.customerEmail,
+    customerEmail: invoiceContactEmail(booking.customerEmail, company?.picEmail),
+    companyName: company?.companyName ?? null,
 
     facilityName: facility?.name ?? "—",
     bookingDate: booking.bookingDate,
@@ -220,6 +234,10 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
 
   groupBookings.sort((a, b) => a.bookingDate.localeCompare(b.bookingDate));
   const firstBooking = groupBookings[0]!;
+  const [company] = firstBooking.companyCustomerId != null
+    ? await db.select({ companyName: usersTable.companyName, picEmail: usersTable.picEmail })
+        .from(usersTable).where(eq(usersTable.id, firstBooking.companyCustomerId)).limit(1)
+    : [];
 
   const [facility] = await db
     .select()
@@ -321,7 +339,9 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
 
     customerName: firstBooking.customerName,
     customerPhone: firstBooking.customerPhone,
-    customerEmail: firstBooking.customerEmail ?? "",
+    customerEmail: invoiceContactEmail(firstBooking.customerEmail, company?.picEmail),
+    companyName: company?.companyName ?? null,
+    isCompanyBooking: firstBooking.companyCustomerId != null,
 
     facilityName: facility?.name ?? "—",
     bookingDate: firstBooking.bookingDate,
