@@ -22,7 +22,8 @@ try{
  console.log("X904_DEV_DB_IDENTITY",JSON.stringify(identity.rows[0]));
  // Verify actual application-role RLS within a rolled-back transaction.
  // This must fail closed if the runner cannot assume the application role.
- await db.transaction(async tx => {
+ let appRoleRollback=false;
+ try { await db.transaction(async tx => {
    await tx.execute(sql`SET LOCAL ROLE sport_center_app`);
    const role=await tx.execute(sql`SELECT current_user AS role_name, has_schema_privilege(current_user,'sport_center','USAGE') AS schema_usage`);
    if(role.rows[0]?.role_name!=="sport_center_app" || role.rows[0]?.schema_usage!==true)
@@ -30,7 +31,27 @@ try{
    const denied=await tx.execute(sql`SELECT count(*)::int AS visible FROM sport_center.x904_automatic_entitlement_events WHERE membership_id=-2147483647`);
    if(Number(denied.rows[0]?.visible)!==0) throw Error("X904_APP_ROLE_UNEXPECTED_VISIBILITY");
    console.log("X904_APP_ROLE_RLS_READ_PASS",JSON.stringify(role.rows[0]));
- });
+   // INSERT and UPDATE are performed as the real application role, then rolled back.
+   const testKey="x904-rls-ci-"+eventId;
+   const testEventId=-(BigInt("0x"+eventId.slice(0,12)) + 1n);
+   const inserted=await tx.execute(sql`INSERT INTO sport_center.x904_automatic_entitlement_events
+     (event_id,membership_id,reason,event_key,state)
+     VALUES (${testEventId.toString()}::bigint,-2147483647,'PAYMENT_RECOVERY',${testKey},'pending')
+     RETURNING event_id`);
+   if(inserted.rows.length!==1) throw Error("X904_APP_ROLE_RLS_INSERT_FAILED");
+   const updated=await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+     SET state='review_required' WHERE event_key=${testKey} RETURNING event_id,state`);
+   if(updated.rows.length!==1 || updated.rows[0]?.state!=="review_required")
+     throw Error("X904_APP_ROLE_RLS_UPDATE_FAILED");
+   console.log("X904_APP_ROLE_RLS_WRITE_PASS");
+   // Throw sentinel so this transaction cannot persist any synthetic event.
+   throw Error("X904_APP_ROLE_TEST_ROLLBACK");
+
+ }); } catch(e) { appRoleRollback=e instanceof Error && e.message==="X904_APP_ROLE_TEST_ROLLBACK"; if(!appRoleRollback) throw e; }
+ if(!appRoleRollback) throw Error("X904_APP_ROLE_ROLLBACK_FAILED");
+ const leftover=await db.execute(sql`SELECT count(*)::int AS n FROM sport_center.x904_automatic_entitlement_events WHERE event_key=${"x904-rls-ci-"+eventId}`);
+ if(Number(leftover.rows[0]?.n)!==0) throw Error("X904_APP_ROLE_ROLLBACK_LEFT_WRITES");
+ console.log("X904_APP_ROLE_RLS_ROLLBACK_PASS");
 
  // DEV-only synthetic membership and mapping; never touch an existing member.
  const member=await db.execute(sql`INSERT INTO sport_center.sport_memberships
