@@ -959,7 +959,7 @@ export default function AdminCheckoutForm() {
                   <SelectItem value="personal">Personal / Umum</SelectItem>
                   <SelectItem value="corporate">Perusahaan / Corporate</SelectItem>
                   <SelectItem value="membership">Membership Gym</SelectItem>
-                  <SelectItem value="event">Event / Grup</SelectItem>
+                  <SelectItem value="event">Event / Kegiatan Khusus</SelectItem>
                 </SelectContent>
               </Select>
               {bookingKind === "event" && <Select value={eventPayer} onValueChange={setEventPayer}>
