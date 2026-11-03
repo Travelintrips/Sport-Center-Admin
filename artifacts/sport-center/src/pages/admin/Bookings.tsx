@@ -4347,7 +4347,7 @@ export default function AdminBookings() {
     const companyBelumInvoiceBookings = filtered.filter((b: any) =>
       b.payerType === "company" &&
       (b.status === "confirmed" || b.status === "completed") &&
-      b.billingStatus !== "paid"
+      b.companyInvoicePaymentConfirmed !== true
     );
     const menungguBookings = filtered.filter((b: any) =>
       b.status === "waiting_confirmation" || b.status === "paid"
