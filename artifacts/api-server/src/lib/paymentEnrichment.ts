@@ -22,6 +22,10 @@ export type { PaymentCompanyEvidence, PaymentCompanyResolution } from "./payment
 
 export type PaymentEnrichment = {
   companyId: number | null;
+  settlementRuleVersion: string | null;
+  mdrRate: number;
+  mdrAmount: number;
+  netAmount: number | null;
   companyEvidenceSource: PaymentCompanyResolution["evidenceSource"];
   companyEvidenceReference: string | null;
   companyDeterministic: boolean;
@@ -405,8 +409,71 @@ export async function enrichPayment(
     account.bankAccountId,
     options,
   );
+
+  let settlementRuleVersion: string | null = null;
+  let mdrRate = 0;
+  let mdrAmount = 0;
+  let netAmount: number | null = null;
+  const effectiveDate = options?.effectiveDate ?? (paidAt ? paymentEffectiveDate(paidAt) : null);
+
+  if (company.companyId != null && account.bankAccountId && effectiveDate) {
+    const rows = await db
+      .select({
+        mdrRate: paymentSettlementConfigsTable.mdrRate,
+        fixedProviderFee: paymentSettlementConfigsTable.fixedProviderFee,
+        feeTaxRate: paymentSettlementConfigsTable.feeTaxRate,
+        source: paymentSettlementConfigsTable.source,
+        ruleVersion: paymentSettlementConfigsTable.ruleVersion,
+        calculationMethod: paymentSettlementConfigsTable.calculationMethod,
+      })
+      .from(paymentSettlementConfigsTable)
+      .where(and(
+        eq(paymentSettlementConfigsTable.companyId, company.companyId),
+        eq(paymentSettlementConfigsTable.providerCode, provider),
+        eq(paymentSettlementConfigsTable.bankAccountId, account.bankAccountId),
+        eq(paymentSettlementConfigsTable.isActive, true),
+        lte(paymentSettlementConfigsTable.effectiveFrom, effectiveDate),
+        or(
+          isNull(paymentSettlementConfigsTable.effectiveUntil),
+          gte(paymentSettlementConfigsTable.effectiveUntil, effectiveDate),
+        ),
+      ))
+      .orderBy(desc(paymentSettlementConfigsTable.effectiveFrom))
+      .limit(1)
+      .catch(() => []);
+
+    const rule = rows[0];
+    if (rule) {
+      settlementRuleVersion = rule.ruleVersion ?? null;
+      const configuredRate = Number(rule.mdrRate ?? 0);
+      const fixedFee = Number(rule.fixedProviderFee ?? 0);
+      const feeTaxRate = Number(rule.feeTaxRate ?? 0);
+
+      if (
+        provider === "mandiri_direct" &&
+        effectiveDate >= "2026-10-01" &&
+        String(rule.source ?? "") === "OWNER_APPROVED" &&
+        String(rule.calculationMethod ?? "") === "percentage_of_gross" &&
+        Math.abs(configuredRate - 0.007) < 0.0000001 &&
+        fixedFee === 0 &&
+        feeTaxRate === 0
+      ) {
+        // BI expanded zero-MDR threshold for this approved Sport Center QRIS rule.
+        // The amount-specific snapshot is filled by the caller because enrichment
+        // intentionally does not know the payment amount.
+        mdrRate = configuredRate;
+      } else {
+        mdrRate = configuredRate;
+      }
+    }
+  }
+
   return {
     companyId: company.companyId,
+    settlementRuleVersion,
+    mdrRate,
+    mdrAmount,
+    netAmount,
     companyEvidenceSource: company.evidenceSource,
     companyEvidenceReference: company.evidenceReference,
     companyDeterministic: company.deterministic,
