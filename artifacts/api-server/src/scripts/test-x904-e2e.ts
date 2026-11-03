@@ -33,10 +33,9 @@ try{
    console.log("X904_APP_ROLE_RLS_READ_PASS",JSON.stringify(role.rows[0]));
    // INSERT and UPDATE are performed as the real application role, then rolled back.
    const testKey="x904-rls-ci-"+eventId;
-   const testEventId=-(BigInt("0x"+eventId.slice(0,12)) + 1n);
    const inserted=await tx.execute(sql`INSERT INTO sport_center.x904_automatic_entitlement_events
-     (event_id,membership_id,reason,event_key,state)
-     VALUES (${testEventId.toString()}::bigint,-2147483647,'PAYMENT_RECOVERY',${testKey},'pending')
+     (membership_id,reason,event_key,state)
+     VALUES (-2147483647,'PAYMENT_RECOVERY',${testKey},'pending')
      RETURNING event_id`);
    if(inserted.rows.length!==1) throw Error("X904_APP_ROLE_RLS_INSERT_FAILED");
    const updated=await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
