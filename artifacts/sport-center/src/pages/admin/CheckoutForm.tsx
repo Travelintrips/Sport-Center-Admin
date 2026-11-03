@@ -134,6 +134,11 @@ export default function AdminCheckoutForm() {
   const estimatedEventDiscount = bookingKind === "event" ? Math.round(estimatedBase * 0.214) : 0;
   const estimatedApDiscount = isActiveApMember ? apDiscountForPrice(estimatedBase) : 0;
   const estimatedDiscount = isActiveApMember ? estimatedApDiscount : estimatedEventDiscount;
+  const apDiscountLabel = isApMultiguna
+    ? "Harga khusus AP Multiguna"
+    : Number(apMember?.discountAmount ?? 0) > 0
+      ? `Potongan tetap ${formatRupiah(Number(apMember.discountAmount))}`
+      : `Diskon Member AP (${Number(apMember?.discountPercentage ?? 0)}%)`;
   const estimatedBeforeTax = Math.max(0, estimatedBase - estimatedDiscount);
   const repeatApDiscount = repeatPreview ? apDiscountForPrice(Number(repeatPreview.pricePerSession)) : 0;
   const repeatBaseTotal = repeatPreview ? Number(repeatPreview.pricePerSession) * repeatCount : 0;
@@ -815,7 +820,7 @@ export default function AdminCheckoutForm() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex rounded-full border border-sky-200 bg-white px-2 py-0.5 text-xs font-semibold text-sky-800">Member Angkasa Pura</span>
                     {apDiscountEnabled
-                      ? <span className="inline-flex rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700">{isApMultiguna ? "Harga khusus AP Multiguna" : `Diskon ${Number(apMember.discountPercentage ?? 0)}%`}</span>
+                      ? <span className="inline-flex rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700">{apDiscountLabel}</span>
                       : <span className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold text-slate-600">Diskon tidak aktif</span>}
                   </div>
                   <p className="text-xs text-slate-700">ID Card: <strong>{apMember.idCardNumber}</strong></p>
@@ -1018,7 +1023,7 @@ export default function AdminCheckoutForm() {
                     {!isWalkIn && <div className="flex justify-between gap-3"><span>Durasi</span><span>{duration} jam</span></div>}
                     <div className="flex justify-between gap-3"><span>Subtotal</span><strong>{formatRupiah(estimatedBase)}</strong></div>
                     {isActiveApMember && (
-                      <div className="flex justify-between gap-3 text-green-700"><span>{isApMultiguna ? "Harga khusus AP Multiguna" : `Diskon Member AP (${Number(apMember.discountPercentage ?? 0)}%)`}</span><span>− {formatRupiah(estimatedApDiscount)}</span></div>
+                      <div className="flex justify-between gap-3 text-green-700"><span>{apDiscountLabel}</span><span>− {formatRupiah(estimatedApDiscount)}</span></div>
                     )}
                     {!isActiveApMember && bookingKind === "event" && <div className="flex justify-between gap-3"><span>Estimasi diskon event (21,4%)</span><span>− {formatRupiah(estimatedEventDiscount)}</span></div>}
                     <div className="flex justify-between gap-3"><span>{isCompanyPayer ? "Harga sebelum perincian pajak" : "Total Pembayaran"}</span><strong>{formatRupiah(estimatedBeforeTax)}</strong></div>
