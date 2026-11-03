@@ -88,6 +88,7 @@ const AdminCalendar = lazy(() => import("@/pages/admin/Calendar"));
 const AdminCompanyBilling = lazy(() => import("@/pages/admin/CompanyBilling"));
 const AdminNotifications = lazy(() => import("@/pages/admin/Notifications"));
 const AdminCompanyVerifications = lazy(() => import("@/pages/admin/CompanyVerifications"));
+const AdminSCEmployees = lazy(() => import("@/pages/admin/SCEmployees"));
 const AdminTaxReport = lazy(() => import("@/pages/admin/TaxReport"));
 const AdminCheckoutForm = lazy(() => import("@/pages/admin/CheckoutForm"));
 const AdminOperatorAccounts = lazy(() => import("@/pages/admin/OperatorAccounts"));
@@ -171,6 +172,7 @@ function AdminRouter() {
     if (location === "/admin/company-billing") return <AdminCompanyBilling />;
     if (location === "/admin/notifications") return <AdminNotifications />;
     if (location === "/admin/company-verifications") return <AdminCompanyVerifications />;
+    if (location === "/admin/sc-employees") return <AdminSCEmployees />;
     if (location === "/admin/tax-report") return <AdminTaxReport />;
     if (location === "/admin/checkout") return <AdminCheckoutForm />;
     if (location === "/admin/operator-accounts") return <AdminOperatorAccounts />;
@@ -228,6 +230,7 @@ function Router() {
       <Route path="/admin/company-billing" component={AdminRouter} />
       <Route path="/admin/notifications" component={AdminRouter} />
       <Route path="/admin/company-verifications" component={AdminRouter} />
+      <Route path="/admin/sc-employees" component={AdminRouter} />
       <Route path="/admin/tax-report" component={AdminRouter} />
       <Route path="/admin/checkout" component={AdminRouter} />
       <Route path="/admin/operator-accounts" component={AdminRouter} />
