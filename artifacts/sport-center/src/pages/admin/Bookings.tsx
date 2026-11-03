@@ -1763,7 +1763,9 @@ function BookingDetailDrawer({
                   Status tagihan: {" "}
                   {booking.billingStatus === "unbilled" && <span className="font-semibold">Belum Ditagih</span>}
                   {booking.billingStatus === "billed" && <span className="font-semibold text-blue-600">Sudah Ditagih</span>}
-                  {booking.billingStatus === "paid" && <span className="font-semibold text-emerald-600">✓ Lunas</span>}
+                  {booking.billingStatus === "paid" && (booking.companyInvoicePaymentConfirmed
+                    ? <span className="font-semibold text-emerald-600">✓ Lunas</span>
+                    : <span className="font-semibold text-amber-700">Perlu verifikasi invoice</span>)}
                   {!booking.billingStatus && "—"}
                 </div>
               </div>
@@ -4339,7 +4341,7 @@ export default function AdminBookings() {
       b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
     const lunasBookings = filtered.filter((b: any) =>
       b.payerType === "company"
-        ? b.billingStatus === "paid"
+        ? b.companyInvoicePaymentConfirmed === true
         : b.status === "confirmed" || b.status === "completed"
     );
     const companyBelumInvoiceBookings = filtered.filter((b: any) =>
@@ -5075,6 +5077,7 @@ export default function AdminBookings() {
                       const isPaidCompanyInvoice =
                         b.payerType === "company" &&
                         b.billingStatus === "paid" &&
+                        b.companyInvoicePaymentConfirmed === true &&
                         Number(b.companyInvoiceTotal ?? 0) > 0;
                       const companyInvoiceNetTotal = Number(
                         b.companyInvoiceNetAmount ?? b.companyInvoiceTotal ?? 0,
@@ -5267,7 +5270,9 @@ export default function AdminBookings() {
                                 </Badge>
                                 {b.billingStatus === "unbilled" && <span className="text-[9px] text-amber-600 font-semibold">Belum Ditagih</span>}
                                 {b.billingStatus === "billed" && <span className="text-[9px] text-blue-600 font-semibold">Sudah Ditagih</span>}
-                                {b.billingStatus === "paid" && <span className="text-[9px] text-green-600 font-semibold">✓ Lunas</span>}
+                                {b.billingStatus === "paid" && (b.companyInvoicePaymentConfirmed
+                                  ? <span className="text-[9px] text-green-600 font-semibold">✓ Lunas</span>
+                                  : <span className="text-[9px] text-amber-700 font-semibold">Perlu verifikasi invoice</span>)}
                               </div>
                             )}
                           </div>
@@ -5395,7 +5400,9 @@ export default function AdminBookings() {
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                              <AlertCircle size={11} /> Belum ada pembayaran sah
+                              <AlertCircle size={11} /> {b.payerType === "company" && b.companyInvoicePaymentProofUrl
+                                ? "Bukti transfer ada · belum terverifikasi"
+                                : "Belum ada pembayaran sah"}
                             </span>
                           )}
                           <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
