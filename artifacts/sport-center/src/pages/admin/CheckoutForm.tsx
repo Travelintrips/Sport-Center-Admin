@@ -542,7 +542,7 @@ export default function AdminCheckoutForm() {
           corporate
             ? [selectedCustomer.picEmail, selectedCustomer.email]
                 .map((value: unknown) => String(value ?? "").trim())
-                .find((value: string) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value)) ?? ""
+                .find((value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) ?? ""
             : (selectedCustomer.email ?? "")
         ),
         facilityId: Number(selectedFacilityId),
