@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "wouter";
 
 type Result = { status: string; detail: string };
@@ -6,10 +6,12 @@ export default function GymX904FaceOffline() {
   const [pin,setPin]=useState("500");
   const [file,setFile]=useState<File|null>(null);
   const [staged,setStaged]=useState<Uint8Array|null>(null);
-  const resetStaged=()=>setStaged(null);
+  const generation=useRef(0);
+  const resetStaged=()=>{generation.current++;setStaged(null);};
   const [result,setResult]=useState<Result>({status:"BELUM DIPERIKSA",detail:"Foto tetap di perangkat HP Anda."});
   async function validate() {
     resetStaged();
+    const currentGeneration=generation.current;
     const rejected=(reason:string)=>setResult({status:"DITOLAK",detail:reason});
     if(pin!=="500") return rejected("TEST_PIN_ONLY");
     if(!file) return rejected("FILE_MISSING");
@@ -44,9 +46,10 @@ export default function GymX904FaceOffline() {
       new Uint8Array(digestBuffer).set(output);
       const digest=await crypto.subtle.digest("SHA-256",digestBuffer);
       const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
+      if(generation.current!==currentGeneration)return;
       setStaged(output);
       setResult({status:"STAGED_OFFLINE_ONLY",detail:`Ukuran asli: ${file.size} byte\nUkuran hasil: ${output.length} byte\nDimensi hasil: ${width} × ${height}\nSHA-256 hasil: ${hash}\nTidak disimpan ke server, tidak dikirim ke X904.`});
-    } catch { rejected("DECODE_OR_COMPRESS_FAILED"); }
+    } catch {if(generation.current===currentGeneration)rejected("DECODE_OR_COMPRESS_FAILED");}
   }
   function download() {
     if (pin !== "500" || !staged || result.status !== "STAGED_OFFLINE_ONLY") return;
