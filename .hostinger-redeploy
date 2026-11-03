@@ -35,3 +35,5 @@ force hostinger redeploy after Mina webhook signing separation
 2026-10-28 deploy PR #334 actual booking payment date field.
 
 2026-11-03 rebuild Hostinger Node backend from merged Gym one-pass PR #471 (9d5e1327); verify /api/healthz git_commit and POST /api/memberships/admin-register-paid requires auth; do not enable X904 automatic commands or replay old events.
+
+2026-11-03 deploy PR #472 canonical QRIS MDR snapshot fix.
