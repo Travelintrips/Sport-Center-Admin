@@ -891,6 +891,12 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     const paymentMethod = String(req.body?.paymentMethod ?? "").trim();
     const paymentDate = normalizePaymentDate(req.body?.paymentDate);
     const notes = String(req.body?.notes ?? "").trim();
+    const x904Pin = String(req.body?.x904Pin ?? "").trim();
+    const x904VerifiedName = String(req.body?.x904VerifiedName ?? "").trim();
+    const x904IdentityConfirmed = req.body?.x904IdentityConfirmed === "true";
+    if (!/^[0-9]{1,8}$/.test(x904Pin)) {
+      res.status(400).json({ error: "Pilih PIN X904 yang valid sebelum mendaftarkan member baru." }); return;
+    }
     const proof = req.file;
     if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phoneKey.length < 10 || phoneKey.length > 15) {
       res.status(400).json({ error: "Nama, email, dan nomor WhatsApp yang valid wajib diisi" }); return;
@@ -922,6 +928,31 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     const endDate = end.toISOString().slice(0,10);
     const amount = String(months * PRICE_PER_MONTH);
     const result = await db.transaction(async tx => {
+      // Lock the selected device identity in the same atomic registration transaction.
+      // Never trust the browser-only identity lookup for entitlement mapping.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"TDBD234200545:" + x904Pin}))`);
+      const machineUsers = await tx.execute(sql`
+        SELECT user_pin,device_uid,display_name,device_role
+        FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin=${x904Pin}
+      `);
+      if (machineUsers.rows.length !== 1 || Number(machineUsers.rows[0].device_role) !== 0 ||
+          !String(machineUsers.rows[0].display_name ?? "").trim()) {
+        throw new MembershipProofError(409,"PIN X904 tidak valid atau bukan pengguna biasa.");
+      }
+      // Admin must confirm the device identity shown in the form; the server
+      // compares it against its own inventory lookup, not browser lookup alone.
+      if (!x904IdentityConfirmed || !x904VerifiedName ||
+          x904VerifiedName !== String(machineUsers.rows[0].display_name).trim()) {
+        throw new MembershipProofError(409,"Konfirmasi identitas PIN X904 tidak cocok. Verifikasi ulang nama di mesin.");
+      }
+      const mappings = await tx.execute(sql`
+        SELECT membership_id,status FROM sport_center.gym_x904_member_mapping
+        WHERE device_serial='TDBD234200545' AND user_pin=${x904Pin}
+      `);
+      if (mappings.rows.length && mappings.rows[0].membership_id != null) {
+        throw new MembershipProofError(409,"PIN X904 sudah dipetakan ke membership lain. Periksa pemetaan sebelum mendaftar.");
+      }
       // Serialize attempts for the same phone, including simultaneous double-clicks.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${phoneKey}))`);
       const conflicts = await tx.select({ id:gymMembershipsTable.id }).from(gymMembershipsTable)
@@ -956,6 +987,24 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
         notes:notes||null,status:"pending_payment",
       }).returning();
       if (!membership) throw new Error("MEMBERSHIP_INSERT_FAILED");
+      const mapped = await tx.execute(sql`
+        INSERT INTO sport_center.gym_x904_member_mapping
+          (device_serial,user_pin,membership_id,status,verified_at,verified_by,review_reason,updated_at)
+        VALUES ('TDBD234200545',${x904Pin},${membership.id},'verified',now(),
+          'admin_paid_registration','PIN selected and inventory validated during paid registration',now())
+        ON CONFLICT (device_serial,user_pin) DO UPDATE SET
+          membership_id=EXCLUDED.membership_id,status=EXCLUDED.status,
+          verified_at=EXCLUDED.verified_at,verified_by=EXCLUDED.verified_by,
+          review_reason=EXCLUDED.review_reason,updated_at=now()
+        WHERE sport_center.gym_x904_member_mapping.membership_id IS NULL
+        RETURNING membership_id,user_pin,status
+      `);
+      if (mapped.rows.length !== 1 ||
+          String(mapped.rows[0].membership_id) !== String(membership.id) ||
+          String(mapped.rows[0].user_pin) !== x904Pin ||
+          String(mapped.rows[0].status) !== "verified") {
+        throw new MembershipProofError(409,"Pemetaan PIN X904 gagal atau berubah bersamaan. Pendaftaran dibatalkan.");
+      }
       const [pending] = await tx.insert(membershipPaymentsTable).values({
         membershipId:membership.id,periodStart:startDate,periodEnd:endDate,
         months,amount,status:"waiting_confirmation",paymentMethod,paymentProofUrl:proofUrl,
@@ -980,12 +1029,18 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
         status:"active",paymentMethod,paymentProofUrl:proofUrl,updatedAt:today,
       }).where(eq(gymMembershipsTable.id,membership.id)).returning();
       if (!active) throw new Error("MEMBERSHIP_ACTIVATION_FAILED");
-      await tx.execute(sql`
+      const entitlementEvent = await tx.execute(sql`
         INSERT INTO sport_center.x904_automatic_entitlement_events
           (membership_id,payment_id,reason,event_key)
         VALUES (${active.id},${payment.id},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(payment.id)})
         ON CONFLICT (event_key) DO NOTHING
+        RETURNING event_id,membership_id,payment_id
       `);
+      if (entitlementEvent.rows.length !== 1 ||
+          String(entitlementEvent.rows[0].membership_id) !== String(active.id) ||
+          String(entitlementEvent.rows[0].payment_id) !== String(payment.id)) {
+        throw new Error("X904_PAYMENT_ENTITLEMENT_EVENT_NOT_PERSISTED");
+      }
       return {customerId:customer.id,membership:active,payment,booking:linkedBooking};
     });
     syncMembershipToBizportal(result.membership).catch(err => req.log.error({err},"Paid membership sync failed"));

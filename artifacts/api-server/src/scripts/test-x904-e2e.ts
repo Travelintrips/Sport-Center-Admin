@@ -18,6 +18,8 @@ const marker="X904 event "+eventId;
 const originalTrustedCodes=process.env.GYM_X904_TRUSTED_VERIFICATION_CODES;
 process.env.GYM_X904_TRUSTED_VERIFICATION_CODES="1";
 try{
+ const identity=await db.execute(sql`SELECT current_user AS role_name, session_user AS login_name, has_schema_privilege(current_user, 'sport_center', 'USAGE') AS schema_usage`);
+ console.log("X904_DEV_DB_IDENTITY",JSON.stringify(identity.rows[0]));
  // DEV-only synthetic membership and mapping; never touch an existing member.
  const member=await db.execute(sql`INSERT INTO sport_center.sport_memberships
   (name,email,phone,start_date,end_date,months,total_price,status,notes)
@@ -35,6 +37,39 @@ try{
  await db.execute(sql`INSERT INTO sport_center.gym_x904_member_mapping
   (device_serial,user_pin,membership_id,status,verified_at,verified_by)
   VALUES (${serial},${pin},${membershipId},'verified',now(),'x904-ci-test')`);
+ // Verify actual application-role RLS within a rolled-back transaction.
+ // This must fail closed if the runner cannot assume the application role.
+ let appRoleRollback=false;
+ try { await db.transaction(async tx => {
+   await tx.execute(sql`SET LOCAL ROLE sport_center_app`);
+   const role=await tx.execute(sql`SELECT current_user AS role_name, has_schema_privilege(current_user,'sport_center','USAGE') AS schema_usage`);
+   if(role.rows[0]?.role_name!=="sport_center_app" || role.rows[0]?.schema_usage!==true)
+     throw Error("X904_APP_ROLE_NOT_ACTIVE");
+   const denied=await tx.execute(sql`SELECT count(*)::int AS visible FROM sport_center.x904_automatic_entitlement_events WHERE membership_id=${membershipId}`);
+   if(Number(denied.rows[0]?.visible)!==0) throw Error("X904_APP_ROLE_UNEXPECTED_VISIBILITY");
+   console.log("X904_APP_ROLE_RLS_READ_PASS",JSON.stringify(role.rows[0]));
+   // INSERT and UPDATE are performed as the real application role, then rolled back.
+   const testKey="x904-rls-ci-"+eventId;
+   const inserted=await tx.execute(sql`INSERT INTO sport_center.x904_automatic_entitlement_events
+     (membership_id,reason,event_key,state)
+     VALUES (${membershipId},'PAYMENT_RECOVERY',${testKey},'pending')
+     RETURNING event_id`);
+   if(inserted.rows.length!==1) throw Error("X904_APP_ROLE_RLS_INSERT_FAILED");
+   const updated=await tx.execute(sql`UPDATE sport_center.x904_automatic_entitlement_events
+     SET state='review_required' WHERE event_key=${testKey} RETURNING event_id,state`);
+   if(updated.rows.length!==1 || updated.rows[0]?.state!=="review_required")
+     throw Error("X904_APP_ROLE_RLS_UPDATE_FAILED");
+   console.log("X904_APP_ROLE_RLS_WRITE_PASS");
+   // Throw sentinel so this transaction cannot persist any synthetic event.
+   throw Error("X904_APP_ROLE_TEST_ROLLBACK");
+
+ }); } catch(e) { appRoleRollback=e instanceof Error && e.message==="X904_APP_ROLE_TEST_ROLLBACK"; if(!appRoleRollback) throw e; }
+ if(!appRoleRollback) throw Error("X904_APP_ROLE_ROLLBACK_FAILED");
+ const leftover=await db.execute(sql`SELECT count(*)::int AS n FROM sport_center.x904_automatic_entitlement_events WHERE event_key=${"x904-rls-ci-"+eventId}`);
+ if(Number(leftover.rows[0]?.n)!==0) throw Error("X904_APP_ROLE_ROLLBACK_LEFT_WRITES");
+ console.log("X904_APP_ROLE_RLS_ROLLBACK_PASS");
+
+
  await db.execute(sql`INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES(${eventId},${serial},${pin},${day+" 10:00:00"},0,1)`);
  // Rollback must not leave a check-in, booking, or processing ledger.
  let rolledBack=false;
@@ -71,9 +106,11 @@ try{
 } catch (error) {
  const e = error instanceof Error ? error : new Error(String(error));
  const redact = (s: string) => s.replace(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]").replace(/password\s*[=:]\s*[^\s,;]+/gi, "password=[REDACTED]");
- const report = {message:redact(e.message), stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
+ const cause = (e as Error & {cause?: unknown}).cause;
+ const dbCause = cause && typeof cause === "object" ? cause as {code?: string;message?: string;detail?: string;hint?: string} : null;
+ const report = {message:redact(e.message), dbCause:dbCause ? {code:dbCause.code ?? null,message:redact(dbCause.message ?? ""),detail:redact(dbCause.detail ?? ""),hint:redact(dbCause.hint ?? "")} : null, stack:redact(e.stack ?? ""), timestamp:new Date().toISOString()};
  writeFileSync("x904_runtime_error_log.json",JSON.stringify(report,null,2),{mode:0o600});
- console.error("DETAILE_ERROR_E2E:",report.message,report.stack);
+ console.error("DETAILE_ERROR_E2E:",report.message,JSON.stringify(report.dbCause),report.stack);
  process.exitCode=1;
  throw new Error("X904_E2E_FAILED_CHECK_REPORT");
 } finally {
