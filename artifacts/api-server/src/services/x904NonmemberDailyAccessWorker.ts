@@ -264,9 +264,13 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           }));
           return;
         }
+        // Group 2 alone does not prove this worker suspended the paid access.
+        // Preserve the grant for review until a matching SUSPEND ACK and
+        // newer authenticated snapshot are observed above.
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-          SET access_state='expired'
-          WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+          SET access_state='review_required'
+          WHERE access_id=${Number(a.access_id)} AND verification_state='verified'
+            AND access_state <> 'review_required'`);
         return;
       }
       if (commandType === "SUSPEND_USER" && isX904AutoSuspendExempt(pin, Number(entries[0].role))) return;
