@@ -15,6 +15,14 @@ describe('X904 nonmember expired state regression guard', () => {
     expect(worker).toContain("SET access_state='expired'");
     expect(worker).toContain('last.result as any)?.readBackConfirmed === true');
   });
+  test('all nonmember card and PIN grants require matching suspend ACK before expiry', () => {
+    expect(worker).toContain("a.identity_type IN ('card','pin')");
+    expect(worker).toContain("if (currentGroup === targetGroup && last.command_type === commandType)");
+    expect(worker).toContain("SET access_state='review_required'");
+    expect(worker).toContain("Group 2 alone does not prove this worker suspended the paid access");
+    const group2Fallback = worker.slice(worker.indexOf("if (currentGroup === targetGroup) {"));
+    expect(group2Fallback).not.toContain("SET access_state='expired'");
+  });
 });
 
 test("paid expired review_required grants are eligible for safe reconciliation only after verified activation", () => {
