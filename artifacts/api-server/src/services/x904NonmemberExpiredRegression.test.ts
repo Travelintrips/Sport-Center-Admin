@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const worker = readFileSync(join(__dirname, 'x904NonmemberDailyAccessWorker.ts'), 'utf8');
+// Jest runs this workspace with artifacts/api-server as its working directory.
+// __dirname is unavailable in the ESM runner used by GitHub Actions.
+const worker = readFileSync(join(process.cwd(), 'src/services/x904NonmemberDailyAccessWorker.ts'), 'utf8');
 
 describe('X904 nonmember expired state regression guard', () => {
   test('completed expired grants are not selected for reprocessing', () => {
