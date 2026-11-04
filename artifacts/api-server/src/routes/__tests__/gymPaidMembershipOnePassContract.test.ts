@@ -75,6 +75,18 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('membershipX904Name && !membershipX904Checking && !membershipX904Error');
   });
 
+  it("searches X904 inventory as a literal substring without SQL LIKE ESCAPE", () => {
+    const lookup = routeFile.split('router.get("/memberships/admin-x904-candidates"')[1]
+      ?.split('router.post("/memberships/admin-register-paid"')[0] ?? "";
+    expect(lookup).toContain("adminMiddleware");
+    expect(lookup).toContain("strpos(lower(i.display_name), lower(${term})) > 0");
+    expect(lookup).toContain("strpos(i.user_pin, ${term}) > 0");
+    expect(lookup).not.toContain("ESCAPE");
+    expect(lookup).toContain("mappedMembershipId:");
+    expect(lookup).toContain("available: row.mapped_membership_id == null");
+    expect(lookup).toContain("LIMIT 15");
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
