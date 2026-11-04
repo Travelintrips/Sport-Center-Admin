@@ -59,6 +59,13 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
   const totalSpent = userBookings
     .filter((b) => b.status !== "cancelled" && b.status !== "expired" && b.status !== "rejected" && b.status !== "refunded")
     .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
+  const gymVisits = userBookings.filter(b =>
+    b.source === "gym_membership" && b.membershipPaymentId == null);
+  const transactionBookings = userBookings.filter(b =>
+    b.source !== "gym_membership" || b.membershipPaymentId != null);
+  const latestDate = (rows: typeof userBookings) => rows
+    .map(b => String(b.bookingDate ?? ""))
+    .filter(Boolean).sort().at(-1) ?? null;
   return {
     id: u.id,
     name: u.name,
@@ -80,6 +87,10 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
     withholdingTaxRate: u.withholdingTaxRate == null ? 10 : Number(u.withholdingTaxRate),
     accountStatus: u.accountStatus ?? "active",
     totalBookings: userBookings.length,
+    transactionBookings: transactionBookings.length,
+    gymVisits: gymVisits.length,
+    lastTransactionDate: latestDate(transactionBookings),
+    lastGymVisitDate: latestDate(gymVisits),
     totalSpent,
     createdAt: u.createdAt,
   };
@@ -105,17 +116,31 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
       .from(bookingsTable)
       .orderBy(bookingsTable.customerPhone, bookingsTable.createdAt);
 
-    // Gabungkan: registered users mendapat id, past bookers pakai id negatif (agar tidak bentrok)
-    const registeredPhones = new Set(registeredUsers.map((u) => u.phone).filter(Boolean));
-    const pastCustomers = pastBookings
-      .filter((b) => b.customerPhone && !registeredPhones.has(b.customerPhone))
-      .map((b, i) => ({
-        id: -(i + 1),
+    // Reuse the same two-factor identity rule as the main customer list.
+    // A different phone with the same email is NOT automatically the same person.
+    const uniqueRegistered = new Map<string, number[]>();
+    for (const user of registeredUsers) {
+      const key = canonicalIdentityKey(user.email,user.phone);
+      if (key) uniqueRegistered.set(key,[...(uniqueRegistered.get(key) ?? []),user.id]);
+    }
+    const seenGuestKeys = new Set<string>();
+    const pastCustomers: Array<{id:number;name:string;email:string|null;phone:string|null;accountType:"personal"}> = [];
+    for (const b of pastBookings) {
+      const phoneKey = normalizePhoneKey(b.customerPhone);
+      if (!phoneKey) continue;
+      const key = canonicalIdentityKey(b.customerEmail,b.customerPhone);
+      if (key && (uniqueRegistered.get(key)?.length ?? 0) === 1) continue;
+      const guestKey = key ?? "phone:" + phoneKey;
+      if (seenGuestKeys.has(guestKey)) continue;
+      seenGuestKeys.add(guestKey);
+      pastCustomers.push({
+        id: -(pastCustomers.length + 1),
         name: b.customerName,
         email: b.customerEmail,
         phone: b.customerPhone,
-        accountType: "personal" as const,
-      }));
+        accountType: "personal",
+      });
+    }
 
     const role = String((req as any).user?.role ?? "");
     const includeIdCardNumber = ["owner", "super_admin", "admin", "admin_booking", "finance", "staff"].includes(role);
@@ -126,6 +151,43 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
+// A guest booking belongs to a registered customer only if BOTH identifiers
+// agree after phone normalization, and the customer match is unambiguous.
+// Never merge people by name, email-only, or phone-only.
+function canonicalIdentityKey(email: string | null | undefined, phone: string | null | undefined): string | null {
+  const normalizedEmail = String(email ?? "").trim().toLowerCase();
+  const normalizedPhone = normalizePhoneKey(phone);
+  return normalizedEmail && normalizedPhone ? normalizedEmail + "|" + normalizedPhone : null;
+}
+
+function customerBookingOwnership(
+  customers: (typeof usersTable.$inferSelect)[],
+  bookings: (typeof bookingsTable.$inferSelect)[],
+) {
+  const byId = new Map(customers.map(u => [u.id, u]));
+  const byIdentity = new Map<string, number[]>();
+  for (const user of customers) {
+    const key = canonicalIdentityKey(user.email, user.phone);
+    if (!key) continue;
+    byIdentity.set(key, [...(byIdentity.get(key) ?? []), user.id]);
+  }
+  const ownerByBooking = new Map<number, number | null>();
+  for (const booking of bookings) {
+    let owner: number | null = null;
+    if (booking.customerId != null) {
+      // Respect an explicit linked customer; never override it by matching contact.
+      owner = byId.has(booking.customerId) ? booking.customerId : null;
+    } else {
+      const key = canonicalIdentityKey(booking.customerEmail, booking.customerPhone);
+      const matches = key ? byIdentity.get(key) ?? [] : [];
+      if (matches.length === 1) owner = matches[0]!;
+    }
+    ownerByBooking.set(booking.id, owner);
+  }
+  return ownerByBooking;
+}
 
 const INACTIVE = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -142,34 +204,37 @@ router.get("/customers", adminMiddleware, async (req, res) => {
 
     const bookings = await db.select().from(bookingsTable);
 
+    const ownerByBooking = customerBookingOwnership(users, bookings);
     let result: ReturnType<typeof mapUser>[] = users.map((u) => {
-      const userBookings = bookings.filter((b) => b.customerId === u.id || b.customerEmail === u.email || b.companyCustomerId === u.id);
+      const userBookings = bookings.filter(b =>
+        ownerByBooking.get(b.id) === u.id || b.companyCustomerId === u.id);
       return mapUser(u, userBookings);
     });
 
-    // Untuk tab personal: tambahkan guest bookers
-    // Guest = booking tanpa customerId ATAU customerId mengarah ke user bukan role "customer"
+    // Only unmatched histories become guests; normalizing Indonesian numbers
+    // prevents one real customer appearing again as a Guest.
     if (accountType !== "company") {
-      const customerUserIds = new Set(users.map((u) => u.id));
-      const registeredPhones = new Set(users.map((u) => u.phone).filter(Boolean));
-      const seenPhones = new Set<string>();
-      const guestEntries: ReturnType<typeof mapUser>[] = [];
-
-      for (const b of bookings) {
-        const phone = b.customerPhone;
-        // Linked ke real customer → skip
-        const linkedToRealCustomer = b.customerId != null && customerUserIds.has(b.customerId);
-        if (!phone || seenPhones.has(phone) || registeredPhones.has(phone) || linkedToRealCustomer) continue;
-        seenPhones.add(phone);
-        const guestBookings = bookings.filter((bk) => bk.customerPhone === phone);
+      const seen = new Set<string>();
+      const guests: ReturnType<typeof mapUser>[] = [];
+      for (const booking of bookings) {
+        if (ownerByBooking.get(booking.id) != null || booking.customerId != null) continue;
+        const phone = normalizePhoneKey(booking.customerPhone);
+        if (!phone) continue;
+        const key = canonicalIdentityKey(booking.customerEmail, booking.customerPhone)
+          ?? "phone:" + phone;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const guestBookings = bookings.filter(b =>
+          ownerByBooking.get(b.id) == null && b.customerId == null &&
+          (canonicalIdentityKey(b.customerEmail,b.customerPhone) ?? "phone:" + normalizePhoneKey(b.customerPhone)) === key);
         const totalSpent = guestBookings
-          .filter((bk) => !INACTIVE.includes(bk.status))
-          .reduce((sum, bk) => sum + (bk.grandTotal != null ? Number(bk.grandTotal) : Number(bk.totalPrice)), 0);
-        guestEntries.push({
-          id: -(guestEntries.length + 1),
-          name: b.customerName,
-          email: b.customerEmail,
-          phone,
+          .filter(b => !INACTIVE.includes(b.status))
+          .reduce((sum,b) => sum + Number(b.grandTotal ?? b.totalPrice ?? 0), 0);
+        guests.push({
+          id: -(guests.length + 1),
+          name: booking.customerName,
+          email: booking.customerEmail,
+          phone: booking.customerPhone,
           customerCode: null,
           registrationSource: "guest",
           accountType: "personal",
@@ -178,10 +243,10 @@ router.get("/customers", adminMiddleware, async (req, res) => {
           allowMonthlyBilling: false, accountStatus: "active",
           totalBookings: guestBookings.length,
           totalSpent,
-          createdAt: b.createdAt,
+          createdAt: booking.createdAt,
         } as any);
       }
-      result = [...result, ...guestEntries];
+      result = [...result,...guests];
     }
 
     if (search) {
@@ -413,9 +478,13 @@ router.get("/customers/:id", adminMiddleware, async (req, res) => {
     const id = parseInt(String(req.params.id));
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
     if (!user) { res.status(404).json({ error: "Not found" }); return; }
-    const userBookings = await db.select().from(bookingsTable).where(
-      or(eq(bookingsTable.customerId, id), eq(bookingsTable.companyCustomerId, id))
-    );
+    const [allCustomers, allBookings] = await Promise.all([
+      db.select().from(usersTable).where(eq(usersTable.role,"customer")),
+      db.select().from(bookingsTable),
+    ]);
+    const ownership = customerBookingOwnership(allCustomers, allBookings);
+    const userBookings = allBookings.filter(b =>
+      ownership.get(b.id) === id || b.companyCustomerId === id);
     const [enrichedCustomer] = await enrichWithApMember([mapUser(user, userBookings)]);
     res.json(enrichedCustomer);
   } catch (err) {

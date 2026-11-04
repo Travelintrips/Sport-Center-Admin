@@ -282,7 +282,7 @@ function CustomerDetail({ customerId, onClose }: { customerId: number; onClose: 
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <Card><CardContent className="p-4 text-center"><div className="text-2xl font-black">{customer.totalBookings}</div><div className="text-xs text-muted-foreground">Total Bookings</div></CardContent></Card>
+            <Card><CardContent className="p-4 text-center"><div className="text-2xl font-black">{(customer as any).transactionBookings ?? customer.totalBookings}</div><div className="text-xs text-muted-foreground">Booking transaksi</div><div className="text-xs text-muted-foreground mt-1">Kunjungan Gym: {(customer as any).gymVisits ?? 0}</div><div className="text-xs text-muted-foreground">Transaksi terakhir: {(customer as any).lastTransactionDate ?? "–"}</div><div className="text-xs text-muted-foreground">Kunjungan terakhir: {(customer as any).lastGymVisitDate ?? "–"}</div></CardContent></Card>
             <Card><CardContent className="p-4 text-center"><div className="text-lg font-black">{formatCurrency(customer.totalSpent ?? 0)}</div><div className="text-xs text-muted-foreground">Total Spent</div></CardContent></Card>
           </div>
           {bookLoading ? <Skeleton className="h-32" /> : (
@@ -1092,7 +1092,7 @@ export default function AdminCustomers() {
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Kode</th>
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Sumber</th>
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Phone</th>
-                    <th className="pb-3 pr-4 font-semibold text-muted-foreground">Bookings</th>
+                    <th className="pb-3 pr-4 font-semibold text-muted-foreground">Transaksi / Kunjungan</th>
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Total Spent</th>
                     <th className="pb-3 font-semibold text-muted-foreground">Aksi</th>
                   </tr>
@@ -1125,7 +1125,7 @@ export default function AdminCustomers() {
                             : <SourceBadge source={c.registrationSource ?? undefined} />}
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">{c.phone ?? "–"}</td>
-                        <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
+                        <td className="py-3 pr-4 font-semibold"><div>{(c as any).transactionBookings ?? c.totalBookings} transaksi</div><div className="text-xs font-normal text-muted-foreground">{(c as any).gymVisits ?? 0} kunjungan Gym</div></td>
                         <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
                         <td className="py-3">
                           <div className="flex items-center gap-1">

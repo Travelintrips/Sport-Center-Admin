@@ -698,9 +698,10 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
         .values({ membershipId: id, checkinDate, notes })
         .returning();
 
+      const matchedCustomerId = await resolveGymBookingCustomerId(member, tx);
       const [newBooking] = await tx.insert(bookingsTable).values({
         orderNumber,
-        customerId: null,
+        customerId: matchedCustomerId,
         customerName: member.name,
         customerEmail: member.email,
         customerPhone: member.phone,

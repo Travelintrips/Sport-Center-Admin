@@ -218,6 +218,38 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('id="checkout-membership-payment-date"');
   });
 
+  it("keeps a canonical customer history without creating a duplicate guest row", () => {
+    const customers = readFileSync(resolve(process.cwd(), "src/routes/customers.ts"), "utf8");
+    expect(customers).toContain('function canonicalIdentityKey(');
+    expect(customers).toContain('const normalizedEmail = String(email ?? "").trim().toLowerCase()');
+    expect(customers).toContain('const normalizedPhone = normalizePhoneKey(phone)');
+    expect(customers).toContain('matches.length === 1');
+    expect(customers).toContain('const ownerByBooking = customerBookingOwnership(users, bookings)');
+    expect(customers).toContain('ownerByBooking.get(booking.id) != null');
+    expect(customers).toContain('const ownership = customerBookingOwnership(allCustomers, allBookings)');
+    expect(customers).toContain('uniqueRegistered.get(key)?.length ?? 0');
+    const normalize = (raw: string) => {
+      let digits = raw.replace(/\\D/g, "");
+      if (digits.startsWith("0")) digits = "62" + digits.slice(1);
+      else if (digits && !digits.startsWith("62")) digits = "62" + digits;
+      return digits;
+    };
+    const key = (email: string, phone: string) => email.trim().toLowerCase() + "|" + normalize(phone);
+    expect(key("cahyo@gmail.com","0857898761")).toBe(key("CAHYO@gmail.com","62857898761"));
+    expect(key("cahyo@gmail.com","0857898761")).not.toBe(key("cahyo@gmail.com","08123456789"));
+    expect(key("cahyo@gmail.com","0857898761")).not.toBe(key("someone@gmail.com","0857898761"));
+  });
+
+  it("links a future manual Gym check-in booking only after verified customer match", () => {
+    const checkin = routeFile.split('router.post("/memberships/:id/checkin"')[1]
+      ?.split('router.post("/memberships/:id/admin-renew"')[0] ?? "";
+    expect(checkin).toContain('resolveGymBookingCustomerId(member, tx)');
+    expect(checkin).toContain('customerId: matchedCustomerId');
+    expect(checkin).toContain('tx.insert(gymCheckinsTable)');
+    expect(checkin).toContain('tx.insert(bookingsTable)');
+    expect(checkin).toContain('membershipId: member.id');
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
