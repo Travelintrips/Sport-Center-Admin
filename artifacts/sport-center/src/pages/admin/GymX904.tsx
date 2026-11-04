@@ -49,6 +49,8 @@ export default function GymX904() {
   const [search, setSearch] = useState("");
   const [machineUserSearch, setMachineUserSearch] = useState("");
   const [machineRoleFilter, setMachineRoleFilter] = useState("all");
+  const [machineIdentityFilter, setMachineIdentityFilter] = useState("all");
+  const [machineAccessFilter, setMachineAccessFilter] = useState("all");
   const [tab, setTab] = useState<GymTab>("dashboard");
   const [selectedMachineUser,setSelectedMachineUser] = useState<{user:LanUser;action:"UPDATE_USER"|"DELETE_USER";request:number}|null>(null);
   useEffect(()=>{
@@ -400,6 +402,22 @@ export default function GymX904() {
     refetchInterval:30000,
   });
   const mappingRows=mappingData?.rows ?? [];
+  // Unmapped PINs must not be classified as nonmembers.
+  const machineIdentity=(u:LanUser):"member"|"nonmember"|"unknown"=>{
+    const mapped=mappingRows.find(m=>m.user_pin===u.user_pin);
+    if(mapped?.membership_id != null && mapped.status==="verified") return "member";
+    if(mapped?.membership_id != null) return "unknown";
+    if(/^VIS 00[1-6]$/i.test(u.display_name.trim()) && u.device_role===0) return "nonmember";
+    return "unknown";
+  };
+  const machineAccessState=(u:LanUser):"allowed"|"suspended"|"pending"|"unknown"=>{
+    if(pendingLedger?.commands.some(c=>c.user_pin===u.user_pin&&c.blocked)) return "pending";
+    const m=machineFor(u);
+    if(machineAccessError||!machineAccess?.available||!machineSnapshotFresh||!m||!m.identityMatched||m.device_uid!==u.device_uid) return "unknown";
+    if(m.device_group===1&&m.enabled) return "allowed";
+    if(m.device_group===2) return "suspended";
+    return "unknown";
+  };
   const observedRows = Array.isArray(observedPins?.users) ? observedPins.users : [];
   const deviceRows = deviceData?.enabled && Array.isArray(deviceData.events) ? deviceData.events : [];
   const tabs: { id: GymTab; label: string; icon: typeof Activity }[] = [
@@ -636,15 +654,25 @@ export default function GymX904() {
               <option value="all">Semua pengguna</option><option value="regular">Pengguna biasa</option><option value="admin">Administrator mesin</option>
             </select>
           </label>
-          <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>{setMachineUserSearch("");setMachineRoleFilter("all")}}>Reset filter</button>
+          <label className="flex flex-col gap-1 text-sm">Jenis pengguna
+  <select aria-label="Filter jenis pengguna" className="rounded-lg border bg-background px-3 py-2" value={machineIdentityFilter} onChange={e=>setMachineIdentityFilter(e.target.value)}>
+    <option value="all">Semua jenis</option><option value="member">Member terverifikasi</option><option value="nonmember">Nonmember VIS</option><option value="unknown">Belum teridentifikasi</option>
+  </select>
+</label>
+<label className="flex flex-col gap-1 text-sm">Status akses
+  <select aria-label="Filter status akses" className="rounded-lg border bg-background px-3 py-2" value={machineAccessFilter} onChange={e=>setMachineAccessFilter(e.target.value)}>
+    <option value="all">Semua status</option><option value="allowed">Diizinkan</option><option value="suspended">Ditahan / Suspend</option><option value="pending">Menunggu perintah</option><option value="unknown">Belum terverifikasi</option>
+  </select>
+</label>
+<button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>{setMachineUserSearch("");setMachineRoleFilter("all");setMachineIdentityFilter("all");setMachineAccessFilter("all")}}>Reset filter</button>
         </div>
         {lanUsersError ? <p role="alert" className="text-sm">Daftar LAN belum tersedia atau backend belum aktif.</p> :
           lanUsersLoading ? <p className="text-sm">Memuat pengguna dari snapshot LAN...</p> :
           <div className="overflow-x-auto"><table className="w-full text-sm text-left">
-            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
-            <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0))).map((u) => <tr key={u.user_pin} className="border-b">
+            <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Jenis pengguna</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
+            <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0)) && (machineIdentityFilter==="all" || machineIdentity(u)===machineIdentityFilter) && (machineAccessFilter==="all" || machineAccessState(u)===machineAccessFilter)).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
-              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1 · akses diperbolehkan":m.device_group===2?"Grup 2 · akses ditahan":"Grup "+m.device_group+" · akses tidak diketahui")+" · akun "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2">{machineIdentity(u)==="member"?"Member terverifikasi":machineIdentity(u)==="nonmember"?"Nonmember VIS":"Belum teridentifikasi"}</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1 · akses diperbolehkan":m.device_group===2?"Grup 2 · akses ditahan":"Grup "+m.device_group+" · akses tidak diketahui")+" · akun "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
                 {(() => {const m=machineFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const verified=!!m&&m.identityMatched&&m.device_uid===u.device_uid&&m.device_role===0&&u.device_role===0&&/^[A-Za-z0-9 ._-]{1,24}$/.test(u.display_name)&&machineSnapshotFresh;const op=verified&&m.device_group===1&&m.enabled?"SUSPEND_USER":verified&&m.device_group===2?"ACTIVATE_USER":null;const permitted=manualAccessAllEnabled||testUser;const outstanding=lockedMachinePin(u.user_pin);const reason=outstanding?"Perintah "+outstanding.command_type+" ("+outstanding.state+") belum dikonfirmasi snapshot baru. ID "+outstanding.command_id:!machineSnapshotFresh?"Snapshot mesin kedaluwarsa":!m?"PIN tidak ditemukan pada mesin":!m.identityMatched||m.device_uid!==u.device_uid?"Identitas mesin tidak cocok":u.device_role!==0||m.device_role!==0?"Akun administrator perangkat tidak dapat diubah":!/^[A-Za-z0-9 ._-]{2,24}$/.test(u.display_name)?"Nama mesin perlu dilengkapi sebelum mengubah akses":!op?"Status grup dan aktif/nonaktif mesin tidak konsisten":!permitted?"Kontrol manual semua pengguna belum diaktifkan pada server":!userCommandCapabilities.operations?.includes(op)?"Kontrol manual belum tersedia":"Ubah akses mesin";
                   return <button type="button" title={reason}
