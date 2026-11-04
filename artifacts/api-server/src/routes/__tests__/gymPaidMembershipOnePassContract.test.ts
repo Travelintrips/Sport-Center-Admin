@@ -95,6 +95,17 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(lookup).toContain("LIMIT 15");
   });
 
+  it("shows the renewal period and blocks continuation if its preview is invalid", () => {
+    expect(ui).toContain('if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false');
+    expect(ui).not.toContain('if (!/^\\\\d{4}-\\\\d{2}-\\\\d{2}$/.test(value)) return false');
+    expect(ui).toContain('.formatToParts(new Date())');
+    expect(ui).toContain('const renewalPeriodValid = memberAction !== "renew" ||');
+    expect(ui).toContain('&& renewalPeriodValid &&');
+    expect(ui).toContain('Periode perpanjangan belum valid. Tombol perpanjangan dinonaktifkan.');
+    expect(ui).toContain('Periode baru');
+    expect(ui).toContain('Tagihan');
+  });
+
   it("previews lapsed gym renewals from Jakarta today, not the old expiration", () => {
     expect(ui).toContain("function previewGymRenewalPeriod(");
     expect(ui).toContain("jakartaDateOnly(),");

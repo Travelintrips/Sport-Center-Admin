@@ -22,12 +22,15 @@ import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft, RefreshCw, CalendarDays
 import { getToken, getCurrentRole } from "@/lib/auth";
 
 function jakartaDateOnly(): string {
-  return new Intl.DateTimeFormat("en-CA", {
+  // formatToParts keeps YYYY-MM-DD stable across browser/ICU locale variations.
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Jakarta",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).formatToParts(new Date());
+  const value = (type: string) => parts.find(part => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
 /**
@@ -45,7 +48,7 @@ function previewGymRenewalPeriod(
   enabled: boolean,
 ): {start: string; end: string} {
   const validDate = (value: string) => {
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const d = new Date(value + "T00:00:00Z");
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
   };
@@ -362,11 +365,23 @@ export default function AdminCheckoutForm() {
     return () => {window.clearTimeout(timer);controller.abort();};
   },[isMembership,memberAction,membershipX904Search]);
   const matchedMember = members.find(m => String(m.id) === memberId);
+  const renewalPeriodPreview = previewGymRenewalPeriod(
+    matchedMember?.status ?? "",
+    matchedMember?.endDate ?? "",
+    jakartaDateOnly(),
+    Number(memberMonths || 1),
+    memberAction === "renew",
+  );
+  const renewalStartDate = renewalPeriodPreview.start;
+  const renewalEndDate = renewalPeriodPreview.end;
+  const membershipCharge = 300000 * Number(memberMonths || 1);
+  const renewalPeriodValid = memberAction !== "renew" ||
+    Boolean(renewalStartDate && renewalEndDate && renewalStartDate <= renewalEndDate);
   const membershipReady = memberAction === "new"
     ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
       && membershipX904Name && membershipX904IdentityConfirmed && membershipX904Pin && membershipX904SelectedUid !== null && !membershipX904Checking && !membershipX904Error)
-    : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
+    : Boolean(matchedMember && !memberLoadError && renewalPeriodValid && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
     // Authorized admin registration: one request, one DB transaction, one payment.
@@ -883,17 +898,6 @@ export default function AdminCheckoutForm() {
       </div>
     );
   }
-
-  const renewalPeriodPreview = previewGymRenewalPeriod(
-    matchedMember?.status ?? "",
-    matchedMember?.endDate ?? "",
-    jakartaDateOnly(),
-    Number(memberMonths || 1),
-    memberAction === "renew",
-  );
-  const renewalStartDate = renewalPeriodPreview.start;
-  const renewalEndDate = renewalPeriodPreview.end;
-  const membershipCharge = 300000 * Number(memberMonths || 1);
 
   return (
     <div className="max-w-2xl mx-auto py-8 px-4">
@@ -1432,17 +1436,25 @@ export default function AdminCheckoutForm() {
                       <span className="text-muted-foreground">Berlaku hingga</span>
                       <strong>{matchedMember.endDate}</strong>
                     </div>
-                    {memberAction === "renew" && renewalStartDate && renewalEndDate && (
-                      <>
-                        <div className="border-t pt-2 flex justify-between gap-4">
-                          <span className="text-muted-foreground">Periode baru</span>
-                          <strong>{renewalStartDate} – {renewalEndDate}</strong>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <span className="text-muted-foreground">Tagihan</span>
-                          <strong>{formatRupiah(membershipCharge)}</strong>
-                        </div>
-                      </>
+                    {memberAction === "renew" && (
+                      <div className="border-t pt-2 space-y-2">
+                        {renewalPeriodValid && renewalStartDate && renewalEndDate ? (
+                          <>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-muted-foreground">Periode baru</span>
+                              <strong>{renewalStartDate} – {renewalEndDate}</strong>
+                            </div>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-muted-foreground">Tagihan</span>
+                              <strong>{formatRupiah(membershipCharge)}</strong>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-sm text-destructive" role="alert">
+                            Periode perpanjangan belum valid. Tombol perpanjangan dinonaktifkan.
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
