@@ -72,7 +72,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     WHERE a.verification_state='verified'
       AND a.identity_type IN ('card','pin')
       AND ((a.payment_id IS NOT NULL AND a.confirmed_at IS NOT NULL AND a.expires_at IS NOT NULL
-        AND (a.access_state IN ('pending','active') OR (a.access_state='review_required' AND a.activated_at IS NOT NULL AND a.expires_at<=${now}) OR (a.access_state <> 'expired' AND p.status::text IN ('cancelled','rejected','refunded'))))
+        AND (a.access_state IN ('pending','active','review_required') OR (a.access_state <> 'expired' AND p.status::text IN ('cancelled','rejected','refunded'))))
         )
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
       AND (${allowedRaw ?? null}::text IS NULL OR a.user_pin = ANY(string_to_array(${allowed?.join(',') ?? null}::text, ',')))
@@ -97,8 +97,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
       if (allowed && !allowed.includes(pin)) return;
-      // The pilot PIN filter remains enabled until rollout is explicitly approved.
-      // All other PINs must pass these shared ownership checks first.
+      // All allowed card and PIN identities must pass the same ownership checks.
       const owners = await tx.execute(sql`SELECT membership_id,status
         FROM sport_center.gym_x904_member_mapping
         WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
