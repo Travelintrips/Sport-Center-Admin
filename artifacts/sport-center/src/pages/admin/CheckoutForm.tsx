@@ -34,7 +34,7 @@ function gymMemberStatusLabel(status: string): string {
     review_required: "Perlu Verifikasi",
     suspended: "Ditangguhkan",
   };
-  return labels[status] ?? status.replace(/_/g, " ").replace(/\\b\\w/g, c => c.toUpperCase());
+  return labels[status] ?? status.split("_").map(word => word ? word[0].toUpperCase() + word.slice(1) : "").join(" ");
 }
 
 function jakartaDateOnly(): string {
