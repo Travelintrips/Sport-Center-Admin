@@ -889,8 +889,7 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
       res.json({ candidates: [] });
       return;
     }
-    // Literal substring search: escape LIKE wildcard characters, not SQL.
-    const pattern = "%" + term.replace(/[\\%_]/g, (character) => "\\" + character) + "%";
+    // Parameterized literal substring search avoids fragile LIKE ESCAPE syntax.
     const candidates = await db.execute(sql`
       SELECT i.user_pin, i.device_uid, i.display_name,
              m.membership_id AS mapped_membership_id,
@@ -903,8 +902,8 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
       WHERE i.device_serial = 'TDBD234200545'
         AND i.device_role = 0
         AND i.device_uid > 0
-        AND (i.display_name ILIKE ${pattern} ESCAPE '\\'
-             OR i.user_pin ILIKE ${pattern} ESCAPE '\\')
+        AND (strpos(lower(i.display_name), lower(${term})) > 0
+             OR strpos(i.user_pin, ${term}) > 0)
       ORDER BY CASE WHEN i.user_pin = ${term} THEN 0 ELSE 1 END,
                i.display_name, i.user_pin
       LIMIT 15
