@@ -295,6 +295,15 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain("setCompletedGymBooking(completed)");
   });
 
+  it("resolves registered customer codes for membership WhatsApp reports", () => {
+    const reporter = routeFile.split("async function reportGymPayment(")[1]
+      ?.split("async function finalizeAdminGymPayment(")[0] ?? "";
+    expect(reporter).toContain("SELECT customer_code FROM sport_center.users");
+    expect(reporter).toContain("result.rows[0]?.customer_code");
+    expect(reporter).not.toContain("SELECT code FROM sport_center.users");
+    expect(reporter).toContain("notifyGymMembershipWa({");
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
