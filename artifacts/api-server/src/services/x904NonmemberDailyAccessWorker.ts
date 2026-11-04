@@ -26,7 +26,7 @@ export function startX904NonmemberAccessWorker(): void {
     userWriteEnabled: process.env.GYM_X904_USER_WRITE_ENABLED === "true",
     intervalMs: 60000,
   }));
-  if (!enabled || !validPin || !validActor || !validAllowlist || (onlyPin === undefined && allowlist === undefined)) return;
+  if (!enabled || !validPin || !validActor || !validAllowlist || (onlyPin === undefined && allowed === undefined)) return;
   let running = false;
   const tick = async () => {
     if (running) return;
