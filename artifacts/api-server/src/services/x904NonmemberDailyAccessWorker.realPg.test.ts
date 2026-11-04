@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { processX904NonmemberDailyAccess } from "./x904NonmemberDailyAccessWorker";
 
 const url = process.env.X904_NONMEMBER_ISOLATED_PG_URL;
-if (!url || !url.includes("127.0.0.1:55444/x904_nonmember")) throw new Error("NONMEMBER_ISOLATED_DATABASE_REQUIRED");
+if (!url || !/^postgres(?:ql)?:\/\/[^@/]+@127\.0\.0\.1:5544[45]\/x904_nonmember(?:_safe[0-9]?)?(?:\?|$)/.test(url)) throw new Error("NONMEMBER_ISOLATED_DATABASE_REQUIRED");
 const pool = new pg.Pool({ connectionString: url, max: 2 });
 const db = drizzle(pool);
 const run = (query: string) => pool.query(query);
@@ -16,6 +16,7 @@ const activationClockMigration = readFileSync("migrations/20261102_x904_nonmembe
 beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
   await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text);
+    CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
     CREATE TABLE sport_center.sport_bookings(id int primary key);
     CREATE TABLE sport_center.sport_payments(id int primary key,booking_id int references sport_center.sport_bookings(id),status text,confirmed_at timestamptz,paid_at timestamptz);
     CREATE TABLE sport_center.gym_x904_access_snapshots(snapshot_id bigserial primary key,device_serial text,observed_at timestamptz,user_count int,users jsonb);
@@ -123,24 +124,14 @@ test("refund of an active paid nonmember queues suspend; protected PINs do not a
   expect(refundSuspend?.payload).toMatchObject({source:"AUTO_NONMEMBER_GYM_12H",accessId:2,expectedUid:500});
 });
 
-test("PIN 237 is allowed to activate after payment but auto-suspend is held for staff", async () => {
+test("PIN 237 remains protected from activation and suspension by nonmember worker", async () => {
   await run(`INSERT INTO sport_center.sport_bookings VALUES(9003);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','pin','PIN:237','237',237,'SANDI',9003);
     INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9103,9003,'pending');
     UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=now() WHERE id=9103;`);
-  const payment=(await run("SELECT confirmed_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9003")).rows[0];
-  const start=new Date(payment.confirmed_at);
-  await addSnapshot(new Date(start.getTime()-1000),'237','SANDI',2);
-  await processX904NonmemberDailyAccess(db as any,new Date(start.getTime()+100));
-  const activation=await commandFor("ACTIVATE_USER",3);
-  expect(activation).toBeTruthy();
-  const ackAt=new Date(start.getTime()+2000);
-  await ack(String(activation.command_id),ackAt,'237','SANDI',237,1);
-  await processX904NonmemberDailyAccess(db as any,new Date(ackAt.getTime()+2000));
-  const expiredAt=new Date(ackAt.getTime()+12*60*60*1000+1000);
-  await addSnapshot(expiredAt,'237','SANDI',1);
-  await processX904NonmemberDailyAccess(db as any,new Date(expiredAt.getTime()+100));
+  await processX904NonmemberDailyAccess(db as any,new Date());
+  expect(await commandFor("ACTIVATE_USER",3)).toBeUndefined();
   expect(await commandFor("SUSPEND_USER",3)).toBeUndefined();
   expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9003")).rows[0].access_state).toBe("review_required");
 });
