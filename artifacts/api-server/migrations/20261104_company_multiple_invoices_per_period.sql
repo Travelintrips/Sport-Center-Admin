@@ -23,6 +23,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS company_invoice_items_booking_unique
   WHERE booking_id IS NOT NULL;
 
 -- Allow multiple invoices for the same company and period.
+ALTER TABLE sport_center.company_invoices
+  DROP CONSTRAINT IF EXISTS company_invoices_company_period_unique;
 DROP INDEX IF EXISTS sport_center.company_invoices_company_period_unique;
 
 -- Serialize invoice creation per company/month and enforce the limit at the database
