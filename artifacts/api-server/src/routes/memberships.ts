@@ -1365,7 +1365,7 @@ async function reportGymPayment(
       AND status = 'verified' LIMIT 1`);
   pin = mapped.rows[0] ? String(mapped.rows[0].user_pin) : null;
   const baseUrl = await getBaseUrl();
-  const reviewUrl = baseUrl ? baseUrl.replace(/\\/$/,"") + "/admin/memberships?memberId=" + membership.id : null;
+  const reviewUrl = baseUrl ? baseUrl.replace(/\/$/,"") + "/admin/memberships?memberId=" + membership.id : null;
   await notifyGymMembershipWa({
     event, action, bookingId: booking.id, orderNumber: booking.orderNumber,
     membershipId: membership.id, paymentId: payment.id,
