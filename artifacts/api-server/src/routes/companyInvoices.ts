@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
-import { eq, and, gte, lt, inArray, isNull, or, desc } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, isNull, or, desc, sql } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
@@ -375,7 +375,7 @@ function mapInvoice(
   };
 }
 
-async function buildAndInsertItems(invoiceId: number, companyId: number, bookings: any[], facilityMap: Record<number, string>) {
+async function buildAndInsertItems(invoiceId: number, companyId: number, bookings: any[], facilityMap: Record<number, string>, executor: Pick<typeof db, "update" | "insert"> = db) {
   const normalizedBookings = [];
   for (const booking of bookings) {
     const withholding = calculateBookingWithholdingTax(booking);
@@ -398,7 +398,7 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
         Number(booking.netAmount ?? 0) !== normalizedBooking.netAmount
       )
     ) {
-      await db.update(bookingsTable)
+      await executor.update(bookingsTable)
         .set({
           pphRate: normalizedBooking.pphRate == null ? null : String(normalizedBooking.pphRate),
           pphAmount: normalizedBooking.pphAmount == null ? null : String(normalizedBooking.pphAmount),
@@ -434,7 +434,7 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
   if (items.length > 0) {
     // The same invoice-generation request can be retried or race with another
     // request. Keep one line per (invoice, booking) and make retries idempotent.
-    await db.insert(companyInvoiceItemsTable)
+    await executor.insert(companyInvoiceItemsTable)
       .values(items)
       .onConflictDoNothing();
   }
@@ -538,13 +538,15 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
     const withholding = summarizeWithholdingTax(bookingList, tax);
     const { pphRate, pphAmount, netAmount } = withholding;
 
-    // Check if invoice already exists for this company + period
-    const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
+    // Multiple invoices can exist in the same month. Preview must match
+    // the generate endpoint: append to an open invoice, otherwise create a new one.
+    const invoicesForPeriod = await db.select().from(companyInvoicesTable).where(
       and(
         eq(companyInvoicesTable.companyCustomerId, compId),
         eq(companyInvoicesTable.periodMonth, String(periodMonth))
       )
-    ).limit(1);
+    ).orderBy(desc(companyInvoicesTable.createdAt), desc(companyInvoicesTable.id));
+    const existingInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid") ?? invoicesForPeriod[0];
 
     res.json({
       companyName: company.companyName ?? company.name,
@@ -563,6 +565,7 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       netAmount,
       grandTotal,
       bookings: bookingList,
+      invoiceCount: invoicesForPeriod.length,
       existingInvoice: existingInvoice ? {
         id: existingInvoice.id,
         invoiceNumber: existingInvoice.invoiceNumber,
@@ -591,38 +594,41 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     const { startDate, endDate } = periodDateRange(periodMonth);
 
-    const unbilledBookings = await db
+    await db.transaction(async (tx) => {
+      // Serialize all generate requests for the same company and billing period
+      // before reading unbilled bookings or existing invoices.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${String(companyCustomerId)}), hashtext(${String(periodMonth)}))`);
+    const unbilledBookings = await tx
       .select(invoiceBookingSelection)
       .from(bookingsTable)
       .where(invoiceBookingFilter(companyCustomerId, startDate, endDate));
 
-    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilities = await tx.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
 
     // Check for existing invoice
-    const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
+    const invoicesForPeriod = await tx.select().from(companyInvoicesTable).where(
       and(
         eq(companyInvoicesTable.companyCustomerId, companyCustomerId),
         eq(companyInvoicesTable.periodMonth, periodMonth)
       )
-    ).limit(1);
+    ).orderBy(desc(companyInvoicesTable.createdAt), desc(companyInvoicesTable.id));
+    // Prefer an open invoice for aggregation. Paid invoices must never be modified.
+    const openInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid");
+    const existingInvoice = openInvoice ?? invoicesForPeriod[0];
+
+    // Maximum two invoices per company per billing month.
+    // A third invoice must never be created, even via a direct API call.
+    if (invoicesForPeriod.length >= 2 && !openInvoice) {
+      return res.status(409).json({
+        error: "Maksimal 2 invoice per perusahaan per periode. Tidak dapat membuat invoice tambahan.",
+      });
+    }
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
 
-    if (existingInvoice) {
-      if (existingInvoice.status === "paid") {
-        res.status(409).json({
-          error: `Invoice periode ini sudah ada dan sudah lunas: ${existingInvoice.invoiceNumber}`,
-          existingInvoice: {
-            id: existingInvoice.id,
-            invoiceNumber: existingInvoice.invoiceNumber,
-            status: existingInvoice.status,
-          },
-        });
-        return;
-      }
-
+    if (existingInvoice && existingInvoice.status !== "paid") {
       // Invoice exists and unpaid — add new unbilled bookings to it
       if (unbilledBookings.length === 0) {
         res.status(409).json({
@@ -637,10 +643,10 @@ async function handleGenerateInvoice(req: any, res: any) {
       }
 
       // Add new bookings as items and recalculate totals
-      await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap);
+      await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
       // Rebuild invoice totals from the stored booking snapshots on each item.
-      const allItems = await db.select().from(companyInvoiceItemsTable).where(
+      const allItems = await tx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       const newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
@@ -651,7 +657,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         netAmount: newNetAmount,
       } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems), newTax);
 
-      const [updated] = await db.update(companyInvoicesTable)
+      const [updated] = await tx.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
            dppNilaiLain: String(newTax.dppNilaiLain),
@@ -671,10 +677,11 @@ async function handleGenerateInvoice(req: any, res: any) {
 
       // Mark new bookings as billed
       for (const b of unbilledBookings) {
-        await db.update(bookingsTable)
+        await tx.update(bookingsTable)
           .set({ billingStatus: "billed", companyInvoiceId: existingInvoice.id })
           .where(eq(bookingsTable.id, b.id));
       }
+
 
       await logAudit({
         ...userInfo,
@@ -686,7 +693,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         userAgent,
       });
 
-      const updatedItems = await db.select().from(companyInvoiceItemsTable).where(
+      const updatedItems = await tx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       return res.status(200).json({
@@ -695,14 +702,28 @@ async function handleGenerateInvoice(req: any, res: any) {
       });
     }
 
-    // No existing invoice — use each booking's tax snapshot; never re-extract
+    if (invoicesForPeriod.length >= 2) {
+      return res.status(409).json({ error: "Maksimal 2 invoice per perusahaan per periode." });
+    }
+
+    // A paid invoice is immutable. Issue a separate invoice for new bookings.
+    if (unbilledBookings.length === 0) {
+      return res.status(409).json({ error: "Tidak ada booking belum ditagih untuk periode ini." });
+    }
+
+    // New invoice (including additional invoice after a paid one) — use each booking's tax snapshot; never re-extract
     // historical values from the current tax settings.
     const tax = summarizeBookingTax(unbilledBookings);
     const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
     const { pphRate, pphAmount, netAmount } = summarizeWithholdingTax(unbilledBookings, tax);
 
-    const [inv] = await db.insert(companyInvoicesTable).values({
-      invoiceNumber: "TEMP",
+    let inv: typeof companyInvoicesTable.$inferSelect;
+    let updated: typeof companyInvoicesTable.$inferSelect;
+    let invoiceNumber: string;
+    {
+    // The database trigger serializes competing inserts and rejects invoice #3.
+    [inv] = await tx.insert(companyInvoicesTable).values({
+      invoiceNumber: `PENDING-${randomUUID()}`,
       companyCustomerId,
       periodMonth,
       totalAmount: String(totalAmount),
@@ -721,21 +742,24 @@ async function handleGenerateInvoice(req: any, res: any) {
       notes: notes ?? null,
     }).returning();
 
-    const invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
-    const [updated] = await db.update(companyInvoicesTable)
+    invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
+    [updated] = await tx.update(companyInvoicesTable)
       .set({ invoiceNumber })
       .where(eq(companyInvoicesTable.id, inv.id))
       .returning();
 
     // Insert line items
-    await buildAndInsertItems(inv.id, companyCustomerId, unbilledBookings, facilityMap);
+    await buildAndInsertItems(inv.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
     // Mark bookings as billed
     for (const b of unbilledBookings) {
-      await db.update(bookingsTable)
+      await tx.update(bookingsTable)
         .set({ billingStatus: "billed", companyInvoiceId: inv.id })
         .where(eq(bookingsTable.id, b.id));
     }
+
+    }
+
 
     await logAudit({
       ...userInfo,
@@ -756,10 +780,11 @@ async function handleGenerateInvoice(req: any, res: any) {
       userAgent,
     });
 
-    const items = await db.select().from(companyInvoiceItemsTable).where(
+    const items = await tx.select().from(companyInvoiceItemsTable).where(
       eq(companyInvoiceItemsTable.invoiceId, inv.id)
     );
     res.status(201).json(mapInvoice(updated, company.companyName ?? company.name, items, company));
+    });
   } catch (err) {
     req.log.error({ err }, "Generate company invoice error");
     res.status(500).json({ error: "Internal server error" });

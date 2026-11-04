@@ -34,7 +34,7 @@ export const companyInvoicesTable = scSchema.table("company_invoices", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  uniqueCompanyPeriod: uniqueIndex("company_invoices_company_period_unique").on(t.companyCustomerId, t.periodMonth),
+  // Multiple invoices per company and month are permitted; paid invoices remain immutable.
 }));
 
 export const companyInvoiceItemsTable = scSchema.table("company_invoice_items", {
