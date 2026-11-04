@@ -1517,9 +1517,12 @@ async function handleMembershipRenewal(req: Request, res: Response) {
     syncBookingRecordToBizportal(paymentBooking).catch((err) =>
       req.log.error({ err }, "[membership] Gagal sync booking renewal ke Bizportal")
     );
-    reportGymPayment(existing,payment,paymentBooking,"pending",
-      existing.startDate + " – " + existing.endDate).catch(err =>
-      req.log.error({err},"[WA] Gagal mengantre laporan membership pending"));
+    // The public renewal endpoint must never be able to spam the admin WA group.
+    if (authorizedGymPaymentRole(req)) {
+      reportGymPayment(existing,payment,paymentBooking,"pending",
+        existing.startDate + " – " + existing.endDate).catch(err =>
+        req.log.error({err},"[WA] Gagal mengantre laporan membership pending"));
+    }
     res.json({
       ...existing,
       totalPrice: Number(existing.totalPrice),
