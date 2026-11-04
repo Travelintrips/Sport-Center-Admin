@@ -218,6 +218,29 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('id="checkout-membership-payment-date"');
   });
 
+  it("distinguishes paid active, seven-day grace, expired and review status without changing X904", () => {
+    const list = routeFile.split('router.get("/memberships", adminMiddleware')[1]
+      ?.split('router.get("/memberships/export"')[0] ?? "";
+    expect(list).toContain('membershipPaymentsTable.periodEnd');
+    expect(list).toContain('payment.status !== "confirmed"');
+    expect(list).toContain('const covered = confirmed.some(');
+    expect(list).toContain('isWithinGymGracePeriod(m.endDate,today)');
+    expect(list).toContain('lastPaidEnd === m.endDate');
+    expect(list).toContain('"grace_period"');
+    expect(list).toContain('"review_required"');
+    expect(list).toContain('displayPhone: normalizedGymPhone(');
+    expect(list).not.toContain('ACTIVATE_USER');
+    expect(list).not.toContain('UPDATE sport_center.gym_x904_member_mapping');
+    const ui = readFileSync(resolve(process.cwd(), "../sport-center/src/pages/admin/Memberships.tsx"), "utf8");
+    expect(ui).toContain('Masa Tenggang — Belum Diperpanjang');
+    expect(ui).toContain('(m as any).displayPhone || m.phone');
+    expect(ui).toContain('viewMember.displayPhone || viewMember.phone');
+    expect(ui).toContain('displayStatus ?? m.status');
+    expect(ui).toContain('totalGrace');
+    expect(ui).toContain('Dalam Periode Berbayar');
+    expect(ui).toContain('Perlu Verifikasi Pembayaran');
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
