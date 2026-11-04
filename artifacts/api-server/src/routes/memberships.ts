@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "node:path";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -1280,7 +1280,7 @@ router.post("/memberships", async (req, res) => {
 });
 
 // POST /memberships/:id/renew — public, perpanjang membership yang ada (update record, bukan buat baru)
-router.post("/memberships/:id/renew", async (req, res) => {
+async function handleMembershipRenewal(req: Request, res: Response) {
   try {
     const id = parseInt(String(req.params.id));
     const months = Number(req.body?.months ?? 1);
@@ -1368,7 +1368,13 @@ router.post("/memberships/:id/renew", async (req, res) => {
     req.log.error({ err }, "Renew membership error");
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}
+
+// Preserve the original public renewal contract. Custom dates require the
+// authenticated, admin-only endpoint; never trust a claimed role in JSON.
+router.post("/memberships/:id/renew", handleMembershipRenewal);
+router.post("/memberships/:id/admin-renew", adminMiddleware, handleMembershipRenewal);
+
 
 // Admin-only proof submission resolves the current pending payment by membership ID.
 // It never confirms or activates membership; existing verification controls remain authoritative.
