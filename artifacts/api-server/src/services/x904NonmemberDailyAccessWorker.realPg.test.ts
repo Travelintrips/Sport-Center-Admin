@@ -249,3 +249,24 @@ test('VIS006 review_required unpaid booking recovers automatically after fresh s
     expect(state).toMatchObject({access_state:'pending',payment_id:null,activated_at:null});
   } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
 });
+
+test('paid VIS006 review_required becomes expired after verified suspend and newer Group2 snapshot', async () => {
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN='15';
+  try {
+    await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008");
+    await run("INSERT INTO sport_center.sport_bookings VALUES(9100)");
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9100)");
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9200,9100,'pending')");
+    await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=now() WHERE id=9200");
+    const a=(await run('SELECT access_id,confirmed_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9100')).rows[0];
+    const access=Number(a.access_id), start=new Date(a.confirmed_at);
+    const activated=new Date(start.getTime()+3000), expires=new Date(activated.getTime()+12*3600000);
+    await run(`UPDATE sport_center.x904_nonmember_daily_access SET activated_at='${activated.toISOString()}',expires_at='${expires.toISOString()}',access_state='review_required' WHERE access_id=${access}`);
+    const ackAt=new Date(expires.getTime()+3000);
+    await run(`INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,completed_at,result) VALUES('TDBD234200545','SUSPEND_USER','15',jsonb_build_object('source','AUTO_NONMEMBER_GYM_12H','accessId',${access}),301,'review-reconcile-${access}','completed','${ackAt.toISOString()}',jsonb_build_object('readBackConfirmed',true,'deviceUid',15,'afterGroup',2))`);
+    await addSnapshot(new Date(ackAt.getTime()+1000),'15','VIS 006',2);
+    await processX904NonmemberDailyAccess(db as any,new Date(ackAt.getTime()+2000));
+    expect((await run(`SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=${access}`)).rows[0].access_state).toBe('expired');
+    expect((await run(`SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'='${access}'`)).rows[0].n).toBe(1);
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
