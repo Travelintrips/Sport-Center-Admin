@@ -642,7 +642,8 @@ async function handleGenerateInvoice(req: any, res: any) {
         return;
       }
 
-      const { updated, newTax } = 
+      let updated: typeof companyInvoicesTable.$inferSelect;
+      let newTax: ReturnType<typeof summarizeBookingTax>;
       // Add new bookings as items and recalculate totals
       await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
