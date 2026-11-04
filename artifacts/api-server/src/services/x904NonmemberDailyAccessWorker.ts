@@ -129,6 +129,19 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           WHERE access_id=${Number(a.access_id)} AND access_state <> 'review_required'`);
         return;
       }
+      // Never attribute an old Group 1 state to a paid access grant without
+      // a verified ACTIVATE ACK. Historical grants remain review_required;
+      // newly confirmed bookings continue through the shared VIS006 worker.
+      if (a.activated_at == null && a.access_state === "review_required" && shouldBeActive) {
+        const evidence = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+          WHERE device_serial=${DEVICE} AND user_pin=${pin}
+            AND command_type='ACTIVATE_USER' AND state='completed'
+            AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
+            AND payload->>'accessId'=${String(a.access_id)}
+            AND result->>'readBackConfirmed'='true'
+          LIMIT 1`);
+        if (!evidence.rows.length) return;
+      }
       if (targetGroup === 2 && isX904AutoSuspendExempt(pin, 0)) {
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required'
