@@ -75,7 +75,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         AND (a.access_state IN ('pending','active','review_required') OR (a.access_state <> 'expired' AND p.status::text IN ('cancelled','rejected','refunded'))))
         )
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
-      AND (${allowedRaw ?? null}::text IS NULL OR a.user_pin = ANY(string_to_array(${allowed?.join(',') ?? null}::text, ',')))
+      -- Verified paid grants cover both VIS cards and ordinary nonmember PINs.
+      -- The card allowlist must not silently exclude verified PIN bookings.
     ORDER BY a.confirmed_at LIMIT 25`);
 
   for (const row of due.rows as any[]) {
@@ -96,7 +97,9 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
-      if (allowed && !allowed.includes(pin)) return;
+      // Do not apply the VIS card allowlist to verified paid nonmember PIN grants.
+      // Membership ownership, exempt roles/PINs, device identity and payment
+      // verification below remain mandatory for every PIN.
       // All allowed card and PIN identities must pass the same ownership checks.
       const owners = await tx.execute(sql`SELECT membership_id,status
         FROM sport_center.gym_x904_member_mapping
