@@ -743,7 +743,7 @@ async function handleGenerateInvoice(req: any, res: any) {
     }).returning();
 
     invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
-    const [updated] = await tx.update(companyInvoicesTable)
+    [updated] = await tx.update(companyInvoicesTable)
       .set({ invoiceNumber })
       .where(eq(companyInvoicesTable.id, inv.id))
       .returning();
