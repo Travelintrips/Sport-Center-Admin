@@ -610,19 +610,7 @@ async function handleGenerateInvoice(req: any, res: any) {
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
 
-    if (existingInvoice) {
-      if (existingInvoice.status === "paid") {
-        res.status(409).json({
-          error: `Invoice periode ini sudah ada dan sudah lunas: ${existingInvoice.invoiceNumber}`,
-          existingInvoice: {
-            id: existingInvoice.id,
-            invoiceNumber: existingInvoice.invoiceNumber,
-            status: existingInvoice.status,
-          },
-        });
-        return;
-      }
-
+    if (existingInvoice && existingInvoice.status !== "paid") {
       // Invoice exists and unpaid — add new unbilled bookings to it
       if (unbilledBookings.length === 0) {
         res.status(409).json({
@@ -695,7 +683,12 @@ async function handleGenerateInvoice(req: any, res: any) {
       });
     }
 
-    // No existing invoice — use each booking's tax snapshot; never re-extract
+    // A paid invoice is immutable. Issue a separate invoice for new bookings.
+    if (unbilledBookings.length === 0) {
+      return res.status(409).json({ error: "Tidak ada booking belum ditagih untuk periode ini." });
+    }
+
+    // New invoice (including additional invoice after a paid one) — use each booking's tax snapshot; never re-extract
     // historical values from the current tax settings.
     const tax = summarizeBookingTax(unbilledBookings);
     const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
