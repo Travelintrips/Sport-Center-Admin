@@ -2,6 +2,7 @@ import { sendWAToAdmins } from "./notifications";
 
 export interface GymMembershipWaData {
   event: "pending" | "confirmed";
+  action?: "new" | "renew";
   bookingId: number;
   orderNumber: string;
   membershipId: number;
@@ -27,6 +28,7 @@ const day = (value: string) => {
 };
 
 export async function notifyGymMembershipWa(data: GymMembershipWaData): Promise<void> {
+  const bookingKind = data.action === "new" ? "Pendaftaran Member Baru" : "Perpanjangan Membership";
   const common = `👤 *INFORMASI MEMBER*
 Nama: ${data.customerName}
 Customer: ${data.customerCode}
@@ -34,13 +36,13 @@ Membership ID: #${data.membershipId}`;
   const price = "Rp" + data.amount.toLocaleString("id-ID");
   const period = `*${day(data.periodStart)} – ${day(data.periodEnd)}*`;
   const report = data.event === "pending"
-    ? `📋 *BOOKING PERPANJANGAN MEMBERSHIP GYM*
+    ? `📋 *BOOKING ${data.action === "new" ? "PENDAFTARAN" : "PERPANJANGAN"} MEMBERSHIP GYM*
 
 ${common}
 WhatsApp: ${data.whatsapp}
 
 🏋️ *DETAIL MEMBERSHIP*
-Jenis: Perpanjangan Membership
+Jenis: ${bookingKind}
 Paket: ${data.months} Bulan
 ${data.previousPeriod ? "Periode sebelumnya: " + data.previousPeriod + "\n" : ""}Periode baru: ${period}
 
@@ -66,7 +68,7 @@ Nominal: *${price}*
 Metode: ${data.paymentMethod === "transfer" ? "Transfer Bank" : "QRIS Mandiri"}
 Tanggal pembayaran: ${day(data.paymentDate || "")}
 ✅ Status pembayaran: LUNAS
-Bukti pembayaran: ${data.proofUrl || "Tersimpan"}
+Bukti pembayaran (buka detail Sport Center): ${data.proofUrl || "Tersimpan di sistem"}
 
 ⏳ Status akses X904: MENUNGGU ACK/READ-BACK
 Akses mesin X904 akan dinyatakan aktif setelah verifikasi perangkat berhasil.`;
