@@ -565,6 +565,7 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       netAmount,
       grandTotal,
       bookings: bookingList,
+      invoiceCount: invoicesForPeriod.length,
       existingInvoice: existingInvoice ? {
         id: existingInvoice.id,
         invoiceNumber: existingInvoice.invoiceNumber,
