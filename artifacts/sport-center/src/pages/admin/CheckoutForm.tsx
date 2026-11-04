@@ -46,6 +46,9 @@ export default function AdminCheckoutForm() {
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
   const [membershipX904Pin, setMembershipX904Pin] = useState("");
+  const [membershipX904Search, setMembershipX904Search] = useState("");
+  const [membershipX904Candidates, setMembershipX904Candidates] = useState<Array<{pin:string;uid:number;name:string;available:boolean;mappedMembershipId:number|null;membershipStatus:string|null}>>([]);
+  const [membershipX904SelectedUid, setMembershipX904SelectedUid] = useState<number|null>(null);
   const [membershipX904IdentityConfirmed, setMembershipX904IdentityConfirmed] = useState(false);
   const [membershipX904Name, setMembershipX904Name] = useState("");
   const [membershipX904Error, setMembershipX904Error] = useState("");
@@ -289,32 +292,40 @@ export default function AdminCheckoutForm() {
     return () => {active = false;};
   }, [isMembership]);
   useEffect(() => {
-    setMembershipX904Name("");
-    setMembershipX904IdentityConfirmed(false);
-    setMembershipX904Error("");
-    if (!isMembership || memberAction !== "new" || !membershipX904Pin.trim()) return;
+    if (!isMembership || memberAction !== "new" || membershipX904Search.trim().length < 2) {
+      setMembershipX904Candidates([]);
+      setMembershipX904Checking(false);
+      return;
+    }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setMembershipX904Checking(true);
+      setMembershipX904Error("");
       try {
-        const query = new URLSearchParams({type:"pin",value:membershipX904Pin.trim()});
-        const response = await fetch("/api/wa/x904-identity?" + query,{signal:controller.signal});
-        const result = await response.json();
-        if (!response.ok || result.valid !== true) throw new Error(result.error || "PIN tidak ditemukan");
-        if (!controller.signal.aborted) setMembershipX904Name(String(result.displayName));
+        const q = new URLSearchParams({q:membershipX904Search.trim()});
+        const response = await fetch("/api/memberships/admin-x904-candidates?" + q, {
+          headers:{Authorization:"Bearer " + (getToken() ?? "")},
+          signal:controller.signal,
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Pencarian mesin gagal");
+        if (!controller.signal.aborted) setMembershipX904Candidates(Array.isArray(data.candidates) ? data.candidates : []);
       } catch (error) {
-        if (!controller.signal.aborted) setMembershipX904Error(error instanceof Error ? error.message : "Verifikasi gagal");
+        if (!controller.signal.aborted) {
+          setMembershipX904Candidates([]);
+          setMembershipX904Error(error instanceof Error ? error.message : "Pencarian X904 gagal");
+        }
       } finally {
         if (!controller.signal.aborted) setMembershipX904Checking(false);
       }
-    },350);
+    }, 350);
     return () => {window.clearTimeout(timer);controller.abort();};
-  },[isMembership,memberAction,membershipX904Pin]);
+  },[isMembership,memberAction,membershipX904Search]);
   const matchedMember = members.find(m => String(m.id) === memberId);
   const membershipReady = memberAction === "new"
     ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
-      && membershipX904Name && membershipX904IdentityConfirmed && !membershipX904Checking && !membershipX904Error)
+      && membershipX904Pin && membershipX904Name && membershipX904SelectedUid !== null && membershipX904IdentityConfirmed && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
@@ -1282,12 +1293,51 @@ export default function AdminCheckoutForm() {
               {memberAction === "new" ? <>
                 <p className="text-xs text-muted-foreground">Isi nama, WhatsApp dan email di atas. Fasilitas Gym otomatis; tidak ada tarif kunjungan Rp30.000.</p>
                 <div className="rounded-lg border p-3 space-y-2">
-                  <Label htmlFor="membership-x904-pin">PIN mesin X904 *</Label>
-                  <Input id="membership-x904-pin" inputMode="numeric" pattern="[0-9]*"
-                    placeholder="Masukkan PIN X904 member baru" value={membershipX904Pin}
-                    onChange={e=>setMembershipX904Pin(e.target.value.replace(/[^0-9]/g,"").slice(0,8))} />
-                  {membershipX904Checking && <p className="text-xs">Memverifikasi PIN mesin...</p>}
-                  {membershipX904Name && <p className="text-xs text-emerald-700">Nama di mesin: {membershipX904Name} · PIN {membershipX904Pin}</p>}
+                  <Label htmlFor="membership-x904-search">Cari nama / PIN mesin X904 *</Label>
+                  <Input id="membership-x904-search" autoComplete="off"
+                    placeholder="Cari nama mesin atau PIN, mis. BUAN"
+                    value={membershipX904Search}
+                    onChange={e=>{
+                      setMembershipX904Search(e.target.value);
+                      setMembershipX904Pin("");
+                      setMembershipX904Name("");
+                      setMembershipX904SelectedUid(null);
+                      setMembershipX904IdentityConfirmed(false);
+                      setMembershipX904Error("");
+                    }} />
+                  {membershipX904Checking && <p className="text-xs">Mencari pengguna di inventaris X904...</p>}
+                  {!membershipX904Pin && membershipX904Search.trim().length >= 2 && !membershipX904Checking && !membershipX904Error && (
+                    <div className="max-h-52 space-y-1 overflow-y-auto rounded-md border p-1" role="listbox" aria-label="Hasil pencarian pengguna X904">
+                      {membershipX904Candidates.length === 0 && <p className="p-2 text-xs text-muted-foreground">Tidak ada pengguna cocok. Periksa nama atau PIN mesin.</p>}
+                      {membershipX904Candidates.map(item=>(
+                        <button key={item.pin} type="button" role="option" aria-selected={false}
+                          disabled={!item.available || !item.name}
+                          className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={()=>{
+                            setMembershipX904Pin(item.pin);
+                            setMembershipX904Name(item.name);
+                            setMembershipX904SelectedUid(item.uid);
+                            setMembershipX904IdentityConfirmed(false);
+                            setMembershipX904Search(item.name + " · PIN " + item.pin);
+                            setMembershipX904Candidates([]);
+                          }}>
+                          <span className="font-medium">{item.name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">PIN {item.pin} · UID {item.uid}</span>
+                          {!item.available && <span className="block text-xs text-destructive">Sudah dipetakan ke membership #{item.mappedMembershipId}{item.membershipStatus ? " ("+item.membershipStatus+")" : ""}. Periksa riwayat/perpanjangan.</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {membershipX904Pin && membershipX904Name && (
+                    <div className="flex items-center justify-between rounded-md border p-2">
+                      <p className="text-xs text-emerald-700">Terpilih: {membershipX904Name} · PIN {membershipX904Pin} · UID {membershipX904SelectedUid}</p>
+                      <Button type="button" variant="ghost" size="sm" onClick={()=>{
+                        setMembershipX904Pin("");setMembershipX904Name("");
+                        setMembershipX904SelectedUid(null);setMembershipX904IdentityConfirmed(false);
+                        setMembershipX904Search("");
+                      }}>Ganti</Button>
+                    </div>
+                  )}
                   {membershipX904Error && <p className="text-xs text-destructive">{membershipX904Error}</p>}
                   {membershipX904Name && !membershipX904Checking && !membershipX904Error && (
                     <label className="flex items-start gap-2 text-xs">
