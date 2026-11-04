@@ -612,6 +612,14 @@ async function handleGenerateInvoice(req: any, res: any) {
     const openInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid");
     const existingInvoice = openInvoice ?? invoicesForPeriod[0];
 
+    // Maximum two invoices per company per billing month.
+    // A third invoice must never be created, even via a direct API call.
+    if (invoicesForPeriod.length >= 2 && !openInvoice) {
+      return res.status(409).json({
+        error: "Maksimal 2 invoice per perusahaan per periode. Tidak dapat membuat invoice tambahan.",
+      });
+    }
+
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
 
@@ -686,6 +694,10 @@ async function handleGenerateInvoice(req: any, res: any) {
         ...mapInvoice(updated, company.companyName ?? company.name, updatedItems, company),
         message: `${unbilledBookings.length} booking baru ditambahkan ke invoice existing ${existingInvoice.invoiceNumber}`,
       });
+    }
+
+    if (invoicesForPeriod.length >= 2) {
+      return res.status(409).json({ error: "Maksimal 2 invoice per perusahaan per periode." });
     }
 
     // A paid invoice is immutable. Issue a separate invoice for new bookings.
