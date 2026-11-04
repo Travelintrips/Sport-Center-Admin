@@ -2254,7 +2254,7 @@ router.post("/bookings/recurring/check", async (req, res) => {
 router.post("/bookings/recurring", async (req, res) => {
   try {
     const {
-      customerName, customerEmail, facilityId, startDate, startTime, durationHours,
+      customerName, customerEmail, facilityId, startDate, startTime, durationHours, activityType: rawActivityType,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
 
       downPaymentAmount,
@@ -2355,6 +2355,11 @@ router.post("/bookings/recurring", async (req, res) => {
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
 
+    // Retain the same Multiguna sport metadata as single bookings and customer checkout.
+    const activityType = /multiguna/i.test(String(facility.name ?? "") + " " + String(facility.category ?? ""))
+      && ["futsal","basket","voli"].includes(String(rawActivityType ?? ""))
+      ? String(rawActivityType)
+      : null;
     const endTime = addHours(startTime, durationHours);
     const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
       ? specificDates
@@ -2525,6 +2530,7 @@ router.post("/bookings/recurring", async (req, res) => {
         customerType,
         idCardNumber: idCardNumber || null,
         verificationStatus: isAp ? (apAutoVerifiedR ? "verified" : "pending") : "not_required",
+        activityType,
         notes,
          ...taxSnapshotFields(taxCalc),
         pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
