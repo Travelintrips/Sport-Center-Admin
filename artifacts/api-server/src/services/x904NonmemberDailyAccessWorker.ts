@@ -23,7 +23,9 @@ export function startX904NonmemberAccessWorker(): void {
     userWriteEnabled: process.env.GYM_X904_USER_WRITE_ENABLED === "true",
     intervalMs: 60000,
   }));
-  if (!enabled || !validPin || !validActor) return;
+  const allowlist = process.env.GYM_X904_NONMEMBER_ALLOWED_PINS;
+  const validAllowlist = allowlist === undefined || (allowlist.length > 0 && allowlist.split(",").every(pin => /^[0-9]{1,8}$/.test(pin.trim())));
+  if (!enabled || !validPin || !validActor || !validAllowlist || (onlyPin === undefined && allowlist === undefined)) return;
   let running = false;
   const tick = async () => {
     if (running) return;
@@ -48,6 +50,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   // Optional controlled rollout: when configured, no other PIN may be processed.
   const testPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   if (testPin !== undefined && !/^[0-9]{1,8}$/.test(testPin)) return;
+  const allowedRaw = process.env.GYM_X904_NONMEMBER_ALLOWED_PINS;
+  const allowed = allowedRaw?.split(",").map(pin => pin.trim());
+  if (allowed && (allowed.length === 0 || allowed.some(pin => !/^[0-9]{1,8}$/.test(pin)))) return;
+  if (testPin === undefined && !allowed) return;
 
   const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
   if (!Number.isSafeInteger(actor) || actor <= 0) return;
@@ -89,6 +95,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
+      if (allowed && !allowed.includes(pin)) return;
       // The pilot PIN filter remains enabled until rollout is explicitly approved.
       // All other PINs must pass these shared ownership checks first.
       const owners = await tx.execute(sql`SELECT membership_id,status
