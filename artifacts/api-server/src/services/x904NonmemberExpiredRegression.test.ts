@@ -18,7 +18,7 @@ describe('X904 nonmember expired state regression guard', () => {
 });
 
 test("paid expired review_required grants are eligible for safe reconciliation only after verified activation", () => {
-  expect(worker).toContain("a.access_state='review_required' AND a.activated_at IS NOT NULL AND a.expires_at<=\u0024{now}");
+  expect(worker).toContain("a.access_state='review_required' AND a.activated_at IS NOT NULL AND a.expires_at<=${now}");
   expect(worker).toContain("if (owners.rows.length > 0)");
   expect(worker).toContain("if (overlapping.rows.length) return");
   expect(worker).toContain("last.result as any)?.readBackConfirmed === true");
