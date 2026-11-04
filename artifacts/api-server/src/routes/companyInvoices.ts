@@ -598,7 +598,7 @@ async function handleGenerateInvoice(req: any, res: any) {
       // Serialize all generate requests for the same company and billing period
       // before reading unbilled bookings or existing invoices.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${String(companyCustomerId)}), hashtext(${String(periodMonth)}))`);
-    const unbilledBookings = await db
+    const unbilledBookings = await tx
       .select(invoiceBookingSelection)
       .from(bookingsTable)
       .where(invoiceBookingFilter(companyCustomerId, startDate, endDate));
