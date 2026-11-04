@@ -131,6 +131,7 @@ export default function AdminCheckoutForm() {
   const [slotOptions, setSlotOptions] = useState<Array<{time: string; available: boolean; reason: string | null}>>([]);
   const [slotState, setSlotState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
+  const [selectedActivityType, setSelectedActivityType] = useState("");
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
   const [membershipX904Pin, setMembershipX904Pin] = useState("");
@@ -218,6 +219,12 @@ export default function AdminCheckoutForm() {
     [c.name, c.phone, c.email].some((field) => String(field ?? "").toLocaleLowerCase("id-ID").includes(customerSearch.trim().toLocaleLowerCase("id-ID")))
   );
   const facility: any = facilities.find((f: any) => String(f.id) === selectedFacilityId);
+  const isMultigunaFacility = /multiguna/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? ""));
+  const multigunaActivities = [
+    {value:"futsal",label:"Futsal"},
+    {value:"basket",label:"Basket"},
+    {value:"voli",label:"Voli"},
+  ];
   const isWalkIn = /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? "")) || facility?.bookingMode === "walk_in";
   const selectedDate = bookingDay;
   const isGymNonmember = bookingKind === "personal" && /gym|fitness/i.test(String(facility?.name ?? "") + " " + String(facility?.category ?? ""));
@@ -293,6 +300,7 @@ export default function AdminCheckoutForm() {
     customerFormValid &&
     selectedFacilityId &&
     activeFacilities.some((item: any) => String(item.id) === selectedFacilityId) &&
+    (!isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
     selectedDate &&
     slotValid &&
     !isSubmitting &&
@@ -780,6 +788,10 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
       return;
     }
+    if (isMultigunaFacility && !multigunaActivities.some(a => a.value === selectedActivityType)) {
+      toast({ title: "Pilih Jenis Fasilitas / Olahraga", description:"Lapangan Multiguna membutuhkan pilihan Futsal, Basket, atau Voli.", variant:"destructive" });
+      return;
+    }
     if (!activeFacilities.some((f: any) => String(f.id) === selectedFacilityId)) {
       toast({ title: "Fasilitas sedang maintenance atau tidak tersedia untuk booking", variant: "destructive" });
       return;
@@ -847,6 +859,7 @@ export default function AdminCheckoutForm() {
             : (selectedCustomer.email ?? "")
         ),
         facilityId: Number(selectedFacilityId),
+        ...(isMultigunaFacility ? {activityType:selectedActivityType} : {}),
         ...(!isWalkIn ? { startTime: startTime.slice(11, 16), durationHours: Number(duration) } : { numberOfPeople: 1 }),
         bookingType: bookingKind === "event" ? "event" : "regular",
         payerType: corporate ? "company" : "personal",
@@ -1237,7 +1250,7 @@ export default function AdminCheckoutForm() {
             {/* Facility */}
             {!isMembership && <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
-              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setStartTime(""); }}>
+              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setSelectedActivityType(""); setStartTime(""); }}>
                 <SelectTrigger id="facility">
                   <SelectValue placeholder="Pilih fasilitas..." />
                 </SelectTrigger>
@@ -1250,6 +1263,23 @@ export default function AdminCheckoutForm() {
                 </SelectContent>
               </Select>
             </div>}
+
+            {!isMembership && isMultigunaFacility && (
+              <div className="space-y-2">
+                <Label htmlFor="admin-multiguna-activity">Jenis Fasilitas / Olahraga <span className="text-destructive">*</span></Label>
+                <Select value={selectedActivityType} onValueChange={setSelectedActivityType}>
+                  <SelectTrigger id="admin-multiguna-activity">
+                    <SelectValue placeholder="Pilih olahraga untuk Lapangan Multiguna" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {multigunaActivities.map(activity => (
+                      <SelectItem key={activity.value} value={activity.value}>{activity.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Futsal, Basket, dan Voli memakai lapangan dan jadwal yang sama. Harga dan ketersediaan tetap mengikuti Lapangan Multiguna.</p>
+              </div>
+            )}
 
             {isGymNonmember && <div className="space-y-3 rounded-lg border p-3">
               <Label>{isHistoricalGymNonmember
@@ -1384,6 +1414,7 @@ export default function AdminCheckoutForm() {
               (repeatEnabled ? (repeatPreviewCurrent && Boolean(repeatPreview)) : (isWalkIn || slotValid)) && (
               <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
                 <p className="font-semibold">Ringkasan Booking</p>
+                {isMultigunaFacility && selectedActivityType && <p className="text-muted-foreground">Jenis Fasilitas / Olahraga: <strong className="text-foreground">{multigunaActivities.find(a => a.value === selectedActivityType)?.label}</strong></p>}
                 {repeatEnabled && repeatPreview ? (
                   <>
                     <p>{facility?.name} · {startTime.slice(11,16)} – {computedEndTime.slice(11,16)} · {duration} jam per sesi</p>
