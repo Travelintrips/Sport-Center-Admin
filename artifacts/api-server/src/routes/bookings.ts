@@ -2252,6 +2252,7 @@ router.post("/bookings/recurring/check", async (req, res) => {
 
 // POST /bookings/recurring — create all valid (non-conflicting) bookings
 router.post("/bookings/recurring", async (req, res) => {
+  const multiLocks: Array<{ facilityId: number; dateInteger: number }> = [];
   try {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours, activityType: rawActivityType,
@@ -2272,6 +2273,7 @@ router.post("/bookings/recurring", async (req, res) => {
       // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
       groupRef: externalGroupRefRaw,
       source: rawSource,
+      multiSessions: rawMultiSessions,
     } = req.body;
     const externalGroupRef: string | null = externalGroupRefRaw
       ? String(externalGroupRefRaw).trim().slice(0, 64) || null
@@ -2311,6 +2313,15 @@ router.post("/bookings/recurring", async (req, res) => {
       }
     }
     const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
+    const isMultiSession = rawMultiSessions !== undefined;
+    if (isMultiSession && (!isAdminRequest || rawSource !== "admin" ||
+        rawBookingTypeR === "event" || rawCustomerType === "angkasa_pura" ||
+        externalGroupRef || (Array.isArray(rawAdditionalCharges) && rawAdditionalCharges.length > 0) ||
+        downPaymentAmount != null || rawCustomPrice != null ||
+        Number(discountAmountPerSession ?? 0) !== 0)) {
+      res.status(403).json({ error: "Multi-jadwal hanya untuk admin booking reguler tanpa harga khusus/DP" });
+      return;
+    }
 
     // customerId hanya boleh dipercaya dari body ketika request datang dari admin/operator.
     const recurringSource = String(rawSource ?? "").trim().slice(0, 32);
@@ -2361,20 +2372,49 @@ router.post("/bookings/recurring", async (req, res) => {
       ? String(rawActivityType)
       : null;
     const endTime = addHours(startTime, durationHours);
-    const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
-      ? specificDates
-      : generateRecurringDates(startDate, repeatType, repeatCount);
+    const multiSessions = isMultiSession && Array.isArray(rawMultiSessions)
+      ? rawMultiSessions.map((row: any) => ({
+          date: String(row?.date ?? ""),
+          startTime: String(row?.startTime ?? ""),
+          durationHours: Number(row?.durationHours),
+        }))
+      : [];
+    if (isMultiSession && (
+      !Array.isArray(rawMultiSessions) || multiSessions.length < 2 ||
+      multiSessions.length > 52 || facility.bookingMode === "walk_in" ||
+      /gym|fitness/i.test(String(facility.name) + String(facility.category))
+    )) {
+      res.status(400).json({ error: "Multi-jadwal harus terdiri dari 2–52 sesi lapangan dengan slot waktu" });
+      return;
+    }
+    const dates: string[] = isMultiSession
+      ? multiSessions.map((row: { date: string }) => row.date)
+      : Array.isArray(specificDates) && specificDates.length > 0
+        ? specificDates : generateRecurringDates(startDate, repeatType, repeatCount);
     const uniqueDates = [...new Set(dates.map((date) => String(date)))];
-    if (uniqueDates.length !== dates.length) {
+    if (!isMultiSession && uniqueDates.length !== dates.length) {
       res.status(400).json({ error: "Tanggal recurring tidak boleh duplikat" });
       return;
     }
-    const scheduleErrors = uniqueDates
-      .map((date) => recurringScheduleError(
-        facility,
-        date,
-        String(startTime),
-        Number(durationHours),
+    if (isMultiSession) {
+      for (let i = 0; i < multiSessions.length; i++) {
+        for (let j = i + 1; j < multiSessions.length; j++) {
+          if (multiSessions[i].date !== multiSessions[j].date) continue;
+          const aStart = timeToMinutes(multiSessions[i].startTime);
+          const bStart = timeToMinutes(multiSessions[j].startTime);
+          if (aStart < bStart + multiSessions[j].durationHours * 60 &&
+              bStart < aStart + multiSessions[i].durationHours * 60) {
+            res.status(400).json({ error: "Ada sesi saling bertabrakan dalam keranjang" });
+            return;
+          }
+        }
+      }
+    }
+    const scheduleErrors = dates
+      .map((date, i) => recurringScheduleError(
+        facility, date,
+        isMultiSession ? multiSessions[i].startTime : String(startTime),
+        isMultiSession ? multiSessions[i].durationHours : Number(durationHours),
         { allowPastSchedule: isOperationalBookingRole(loggedInRole) },
       ))
       .filter(Boolean);
@@ -2451,13 +2491,16 @@ router.post("/bookings/recurring", async (req, res) => {
     // Rp100.000 tetap valid untuk 4 sesi @ Rp80.000 (total Rp320.000).
     const taxByDate = new Map<string, Awaited<ReturnType<typeof resolveCustomerTax>>>();
     let projectedGrandTotal = additionalChargeAmount;
-    for (const bookingDate of dates) {
-      const taxCalc = await resolveCustomerTax(baseSessionPrice, {
+    for (const [sessionIndex, bookingDate] of dates.entries()) {
+      const projectedPrice = isMultiSession
+        ? Number(facility.pricePerHour) * multiSessions[sessionIndex].durationHours
+        : baseSessionPrice;
+      const taxCalc = await resolveCustomerTax(projectedPrice, {
         customerId: effectiveCustomerId,
         companyCustomerId: verifiedCompanyCustomerId,
         bookingDate,
       });
-      taxByDate.set(bookingDate, taxCalc);
+      taxByDate.set(String(sessionIndex), taxCalc);
       const pphCalc = await resolveWithholdingTax(
         verifiedCompanyCustomerId,
         taxCalc.grandTotal,
@@ -2475,16 +2518,42 @@ router.post("/bookings/recurring", async (req, res) => {
       return;
     }
 
+    if (isMultiSession) {
+      for (const date of [...new Set(dates)].sort()) {
+        const facilityIdNumber = Number(facilityId);
+        const dateInteger = Number(date.replace(/-/g, ""));
+        await db.execute(sql`SELECT pg_advisory_lock(${facilityIdNumber}, ${dateInteger})`);
+        multiLocks.push({ facilityId: facilityIdNumber, dateInteger });
+      }
+      // Fail before first insert if any selected slot is occupied/blocked.
+      for (const item of multiSessions) {
+        if (await checkSlotConflict(Number(facilityId), item.date, item.startTime,
+              addHours(item.startTime, item.durationHours)) ||
+            !await checkSlotAvailable(Number(facilityId), item.date,
+              item.startTime, item.durationHours)) {
+          res.status(409).json({ error: `Slot ${item.date} ${item.startTime} tidak tersedia; tidak ada booking dibuat` });
+          return;
+        }
+      }
+    }
     const created: any[] = [];
     const skipped: string[] = [];
-    for (const bookingDate of dates) {
+    for (const [sessionIndex, bookingDate] of dates.entries()) {
+      const session = isMultiSession ? multiSessions[sessionIndex] : null;
+      const sessionStartTime = session ? session.startTime : String(startTime);
+      const sessionDuration = session ? session.durationHours : Number(durationHours);
+      const sessionEndTime = addHours(sessionStartTime, sessionDuration);
+      const sessionBasePrice = session ? Number(facility.pricePerHour) * sessionDuration : basePrice;
+      const sessionDiscount = session ? 0 : discount;
+      const sessionNetPrice = Math.max(0, sessionBasePrice - sessionDiscount);
       // Advisory lock per (facilityId, date) cegah double booking pada recurring
       const recFId = Number(facilityId);
       const recDInt = parseInt(bookingDate.replace(/-/g, ""), 10);
       await db.execute(sql`SELECT pg_advisory_lock(${recFId}, ${recDInt})`);
-      const conflict = await checkSlotConflict(recFId, bookingDate, startTime, endTime);
+      const conflict = await checkSlotConflict(recFId, bookingDate, sessionStartTime, sessionEndTime);
       if (conflict) {
         await db.execute(sql`SELECT pg_advisory_unlock(${recFId}, ${recDInt})`);
+        if (isMultiSession) throw new Error("MULTI_SLOT_CONFLICT");
         skipped.push(bookingDate);
         continue;
       }
@@ -2493,14 +2562,14 @@ router.post("/bookings/recurring", async (req, res) => {
       // to the first session that is actually created, not every session.
       const isFirstCreatedSession = created.length === 0;
       const sessionAdditionalCharges = isFirstCreatedSession ? additionalCharges : [];
-      const sessionTotalPrice = baseSessionPrice + additionalChargesTotal(sessionAdditionalCharges);
+      const sessionTotalPrice = sessionNetPrice + additionalChargesTotal(sessionAdditionalCharges);
       const taxCalc = isFirstCreatedSession
         ? await resolveCustomerTax(sessionTotalPrice, {
             customerId: effectiveCustomerId,
             companyCustomerId: verifiedCompanyCustomerId,
             bookingDate,
           })
-        : taxByDate.get(bookingDate)!;
+        : taxByDate.get(String(sessionIndex))!;
       const pphCalc = await resolveWithholdingTax(
         companyBillingUser?.id,
         taxCalc.grandTotal,
@@ -2517,16 +2586,16 @@ router.post("/bookings/recurring", async (req, res) => {
         source: recurringSource || "web",
         facilityId: Number(facilityId),
         bookingDate,
-        startTime,
-        endTime,
-        durationHours,
+        startTime: sessionStartTime,
+        endTime: sessionEndTime,
+        durationHours: sessionDuration,
         totalPrice: String(sessionTotalPrice),
         promoCode: isAp || isEventR ? null : (promoCode || null),
-        discountAmount: String(discount),
+        discountAmount: String(sessionDiscount),
         apDiscountAmount: isAp ? String(apAutoDiscountAmountR) : "0",
         bookingType: bookingTypeR,
         eventDiscountAmount: isEventR ? String(eventDiscountAmountCalcR) : null,
-        basePrice: String(basePrice),
+        basePrice: String(sessionBasePrice),
         customerType,
         idCardNumber: idCardNumber || null,
         verificationStatus: isAp ? (apAutoVerifiedR ? "verified" : "pending") : "not_required",
@@ -2701,6 +2770,11 @@ router.post("/bookings/recurring", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");
     res.status(500).json({ error: "Internal server error" });
+  } finally {
+    for (const lock of multiLocks.reverse()) {
+      await db.execute(sql`SELECT pg_advisory_unlock(${lock.facilityId}, ${lock.dateInteger})`)
+        .catch((err) => req.log.error({ err }, "Release multi-session lock failed"));
+    }
   }
 });
 
