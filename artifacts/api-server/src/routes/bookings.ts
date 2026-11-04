@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
-import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -2182,6 +2182,231 @@ function recurringScheduleError(
   return null;
 }
 
+
+// POST /bookings/admin-multi-schedule
+// Separate, atomic admin-only path. Legacy recurring and membership flows are unchanged.
+router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) => {
+  try {
+    const {
+      customerId: bodyCustomerId, customerName: rawName,
+      customerPhone: rawPhone, customerEmail: rawEmail,
+      facilityId: rawFacilityId, activityType: rawActivity,
+      multiSessions: rawSessions, payerType, companyCustomerId,
+      adminPaymentChoice, notes,
+    } = req.body ?? {};
+    const token = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
+    const identity = verifyToken(token);
+    if (!identity || identity.role === "customer" ||
+        !["admin", "admin_booking", "super_admin", "owner", "staff", "finance"].includes(String(identity.role))) {
+      res.status(403).json({ error: "Hanya petugas admin yang dapat membuat booking multi-jadwal" });
+      return;
+    }
+    if (!Array.isArray(rawSessions) || rawSessions.length < 2 || rawSessions.length > 52 ||
+        !rawName || !rawPhone || !Number.isInteger(Number(rawFacilityId)) ||
+        req.body.bookingType === "event" || req.body.customerType === "angkasa_pura" ||
+        req.body.downPaymentAmount != null || req.body.discountAmountPerSession != null ||
+        req.body.additionalCharges?.length || req.body.customPrice != null) {
+      res.status(400).json({ error: "Data multi-jadwal tidak valid atau menggunakan fitur yang belum didukung" });
+      return;
+    }
+    const facilityId = Number(rawFacilityId);
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, facilityId)).limit(1);
+    if (!facility || !facility.isActive || facility.bookingMode === "walk_in" ||
+        isGymFacility(facility) || isCustomPriceFacility(facility)) {
+      res.status(400).json({ error: "Fasilitas tidak tersedia untuk booking multi-jadwal" });
+      return;
+    }
+    const activityType = isMultigunaFacility(facility)
+      ? String(rawActivity ?? "") : null;
+    if (isMultigunaFacility(facility) &&
+        !["futsal","basket","voli"].includes(activityType ?? "")) {
+      res.status(400).json({ error: "Jenis olahraga Multiguna wajib dipilih" });
+      return;
+    }
+    const customerName = String(rawName).trim();
+    const customerPhone = normalizePhone(String(rawPhone).trim());
+    const customerEmail = String(rawEmail ?? "").trim();
+    if (!customerName || !customerPhone || customerPhone.replace(/\D/g, "").length < 9) {
+      res.status(400).json({ error: "Nama dan WhatsApp wajib valid" }); return;
+    }
+    const multiSessions: Array<{ date: string; startTime: string; durationHours: number }> = rawSessions.map((item: any) => ({
+      date: String(item?.date ?? ""),
+      startTime: String(item?.startTime ?? ""),
+      durationHours: Number(item?.durationHours),
+    })).sort((a, b) =>
+      a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+    for (const session of multiSessions) {
+      const err = recurringScheduleError(facility, session.date, session.startTime,
+        session.durationHours, { allowPastSchedule: isOperationalBookingRole(identity.role) });
+      if (err) { res.status(400).json({ error: err }); return; }
+    }
+    const minute = (s: string) => timeToMinutes(s);
+    for (let i = 0; i < multiSessions.length; i++) {
+      for (let j = i + 1; j < multiSessions.length; j++) {
+        const first = multiSessions[i], second = multiSessions[j];
+        if (first.date === second.date &&
+            minute(first.startTime) < minute(second.startTime) + second.durationHours * 60 &&
+            minute(second.startTime) < minute(first.startTime) + first.durationHours * 60) {
+          res.status(400).json({ error: "Ada jadwal bertabrakan dalam booking" }); return;
+        }
+      }
+    }
+    const isCorporate = payerType === "company";
+    const bodyId = Number(bodyCustomerId);
+    const customerId = Number.isInteger(bodyId) && bodyId > 0 ? bodyId : null;
+    let company: typeof usersTable.$inferSelect | undefined;
+    if (!isCorporate && customerId) {
+      const [account] = await db.select({ accountType: usersTable.accountType })
+        .from(usersTable).where(eq(usersTable.id, customerId)).limit(1);
+      if (!account || account.accountType === "company") {
+        res.status(403).json({ error: "Akun perusahaan harus menggunakan booking Corporate" }); return;
+      }
+    }
+    if (isCorporate) {
+      if (!customerId || Number(companyCustomerId) !== customerId) {
+        res.status(403).json({ error: "Pelanggan perusahaan harus terdaftar" }); return;
+      }
+      [company] = await db.select().from(usersTable)
+        .where(eq(usersTable.id, customerId)).limit(1);
+      if (!company || company.accountType !== "company" || !company.allowMonthlyBilling) {
+        res.status(403).json({ error: "Akun perusahaan belum berhak memakai invoice" }); return;
+      }
+      if (adminPaymentChoice === "paid") {
+        res.status(400).json({ error: "Pembayaran perusahaan mengikuti invoice" }); return;
+      }
+    }
+    const prepared: Array<{date:string;startTime:string;durationHours:number;price:number;tax:Awaited<ReturnType<typeof resolveCustomerTax>>;withholding:Awaited<ReturnType<typeof resolveWithholdingTax>>}> = [];
+    for (const session of multiSessions) {
+      const price = Number(facility.pricePerHour) * session.durationHours;
+      const tax = await resolveCustomerTax(price, {
+        customerId, companyCustomerId: company?.id ?? null, bookingDate: session.date,
+      });
+      const withholding = await resolveWithholdingTax(company?.id, tax.grandTotal, tax.dpp);
+      prepared.push({ ...session, price, tax, withholding });
+    }
+    // Generate order numbers before acquiring the single pool connection for
+    // the transaction (PROD DB_POOL_MAX=1). Generating them inside tx can deadlock.
+    const orderNumbers: string[] = [];
+    for (const _session of prepared) orderNumbers.push(await generateBookingOrderNumber());
+    const groupRef = "GRP-" + Date.now().toString() + "-" +
+      Math.floor(Math.random() * 100000).toString().padStart(5,"0");
+    const groupTotal = prepared.reduce((sum, item) => sum + item.tax.grandTotal, 0);
+    const created = await db.transaction(async (tx) => {
+      for (const date of [...new Set(multiSessions.map(item => item.date))].sort()) {
+        const dateInteger = Number(date.replace(/-/g,""));
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${facilityId}, ${dateInteger})`);
+      }
+      // All conflict checks and all writes share this transaction connection.
+      for (const session of prepared) {
+        const bookings = await tx.select({
+          startTime: bookingsTable.startTime,
+          endTime: bookingsTable.endTime,
+          status: bookingsTable.status,
+        }).from(bookingsTable).where(and(
+          eq(bookingsTable.facilityId, facilityId),
+          eq(bookingsTable.bookingDate, session.date)));
+        const blocked = await tx.select({
+          startTime: blockedSchedulesTable.startTime,
+          endTime: blockedSchedulesTable.endTime,
+        }).from(blockedSchedulesTable).where(and(
+          eq(blockedSchedulesTable.facilityId, facilityId),
+          eq(blockedSchedulesTable.date, session.date)));
+        const start = minute(session.startTime);
+        const end = start + session.durationHours * 60;
+        const overlap = (other: { startTime: string; endTime: string }) => {
+          const otherStart = minute(other.startTime);
+          const otherEnd = minute(other.endTime) || 24 * 60;
+          return start < otherEnd && end > otherStart;
+        };
+        if (bookings.some(b => !INACTIVE_STATUSES.includes(b.status) && overlap(b)) ||
+            blocked.some(overlap)) {
+          throw new Error("MULTI_SCHEDULE_CONFLICT:" + session.date + ":" + session.startTime);
+        }
+      }
+      await tx.insert(bookingGroupsTable).values({
+        groupRef, customerPhone, customerName,
+        totalPayment: String(groupTotal), status: "pending",
+        notes: "Booking admin multi-jadwal (" + prepared.length + " sesi)",
+      });
+      const rows = [];
+      for (const [index, item] of prepared.entries()) {
+        const orderNumber = orderNumbers[index];
+        const [row] = await tx.insert(bookingsTable).values({
+          orderNumber, groupRef, customerId,
+          bookedByUserId: identity.userId,
+          customerName, customerPhone, customerEmail,
+          facilityId, bookingDate: item.date, startTime: item.startTime,
+          endTime: addHours(item.startTime, item.durationHours),
+          durationHours: item.durationHours,
+          activityType,
+          totalPrice: String(item.price), basePrice: String(item.price),
+          source: "admin", bookingType: "regular",
+          discountAmount: "0", additionalCharges: [],
+          notes: notes ? String(notes).slice(0,2000) : null,
+          paymentDeadline: isCorporate ? null : (() => {
+            const deadline = new Date(item.date + "T23:59:59+07:00");
+            deadline.setDate(deadline.getDate() + 7);
+            return deadline;
+          })(),
+          ...taxSnapshotFields(item.tax),
+          pphRate: item.withholding.enabled ? String(item.withholding.rate) : null,
+          pphAmount: item.withholding.enabled ? String(item.withholding.amount) : null,
+          netAmount: String(item.withholding.netAmount),
+          ...(isCorporate ? {
+            payerType: "company" as const, companyCustomerId: company!.id,
+            bookedForName: customerName, bookedForPhone: customerPhone,
+            paymentRequiredNow: false,
+            billingStatus: "unbilled" as const,
+            status: company!.requirePerBookingApproval ? "waiting_confirmation" as const : "confirmed" as const,
+          } : {}),
+        }).returning();
+        if (!row) throw new Error("MULTI_SCHEDULE_INSERT_FAILED");
+        await tx.insert(bookingHistoryTable).values({
+          bookingId: row.id, fromStatus: null, toStatus: row.status,
+          changedByName: customerName,
+          note: isCorporate ? "Booking multi-jadwal perusahaan" : "Booking multi-jadwal dibuat",
+        });
+        rows.push({
+          ...row,
+          totalPrice: Number(row.totalPrice),
+          grandTotal: Number(row.grandTotal ?? item.price),
+          facilityName: facility.name,
+        });
+      }
+      return rows;
+    });
+    await syncBookingGroupTotal(groupRef).catch((err) =>
+      req.log.error({ err }, "Multi-schedule group total synchronization failed"));
+    for (const item of prepared) broadcastAvailabilityChange(facilityId, item.date);
+    for (const row of created) {
+      const item = prepared.find(p => p.date === row.bookingDate && p.startTime === row.startTime);
+      if (item?.tax.taxCode) {
+        recordTaxTransaction("booking", row.id, row.orderNumber,
+          item.tax, item.date).catch(() => {});
+      }
+    }
+    // Single report for the entire unpaid group; paid reports follow settlement.
+    if (adminPaymentChoice !== "paid" && created[0]) {
+      notifyAdminBookingReport({ bookingId: created[0].id, paymentStatus: "unpaid" })
+        .catch((err) => req.log.error({ err }, "Multi-jadwal WA report failed"));
+    }
+    res.status(201).json({
+      created, groupRef, skipped: [],
+      totalBookings: created.length, grandTotal: groupTotal,
+      totalDpp: prepared.reduce((sum, item) => sum + item.tax.dpp, 0),
+      totalPpnAmount: prepared.reduce((sum, item) => sum + item.tax.taxAmount, 0),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("MULTI_SCHEDULE_CONFLICT:")) {
+      res.status(409).json({ error: "Salah satu jadwal sudah terisi. Semua sesi dibatalkan, tidak ada booking baru." });
+    } else {
+      req.log.error({ err }, "Create admin multi-schedule booking failed");
+      res.status(500).json({ error: "Booking multi-jadwal gagal dan tidak disimpan" });
+    }
+  }
+});
+
 // POST /bookings/recurring/check
 router.post("/bookings/recurring/check", async (req, res) => {
   try {
@@ -2252,7 +2477,6 @@ router.post("/bookings/recurring/check", async (req, res) => {
 
 // POST /bookings/recurring — create all valid (non-conflicting) bookings
 router.post("/bookings/recurring", async (req, res) => {
-  const multiLocks: Array<{ facilityId: number; dateInteger: number }> = [];
   try {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours, activityType: rawActivityType,
@@ -2273,7 +2497,6 @@ router.post("/bookings/recurring", async (req, res) => {
       // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
       groupRef: externalGroupRefRaw,
       source: rawSource,
-      multiSessions: rawMultiSessions,
     } = req.body;
     const externalGroupRef: string | null = externalGroupRefRaw
       ? String(externalGroupRefRaw).trim().slice(0, 64) || null
@@ -2313,15 +2536,6 @@ router.post("/bookings/recurring", async (req, res) => {
       }
     }
     const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
-    const isMultiSession = rawMultiSessions !== undefined;
-    if (isMultiSession && (!isAdminRequest || rawSource !== "admin" ||
-        rawBookingTypeR === "event" || rawCustomerType === "angkasa_pura" ||
-        externalGroupRef || (Array.isArray(rawAdditionalCharges) && rawAdditionalCharges.length > 0) ||
-        downPaymentAmount != null || rawCustomPrice != null ||
-        Number(discountAmountPerSession ?? 0) !== 0)) {
-      res.status(403).json({ error: "Multi-jadwal hanya untuk admin booking reguler tanpa harga khusus/DP" });
-      return;
-    }
 
     // customerId hanya boleh dipercaya dari body ketika request datang dari admin/operator.
     const recurringSource = String(rawSource ?? "").trim().slice(0, 32);
@@ -2372,49 +2586,20 @@ router.post("/bookings/recurring", async (req, res) => {
       ? String(rawActivityType)
       : null;
     const endTime = addHours(startTime, durationHours);
-    const multiSessions = isMultiSession && Array.isArray(rawMultiSessions)
-      ? rawMultiSessions.map((row: any) => ({
-          date: String(row?.date ?? ""),
-          startTime: String(row?.startTime ?? ""),
-          durationHours: Number(row?.durationHours),
-        }))
-      : [];
-    if (isMultiSession && (
-      !Array.isArray(rawMultiSessions) || multiSessions.length < 2 ||
-      multiSessions.length > 52 || facility.bookingMode === "walk_in" ||
-      /gym|fitness/i.test(String(facility.name) + String(facility.category))
-    )) {
-      res.status(400).json({ error: "Multi-jadwal harus terdiri dari 2–52 sesi lapangan dengan slot waktu" });
-      return;
-    }
-    const dates: string[] = isMultiSession
-      ? multiSessions.map((row: { date: string }) => row.date)
-      : Array.isArray(specificDates) && specificDates.length > 0
-        ? specificDates : generateRecurringDates(startDate, repeatType, repeatCount);
+    const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
+      ? specificDates
+      : generateRecurringDates(startDate, repeatType, repeatCount);
     const uniqueDates = [...new Set(dates.map((date) => String(date)))];
-    if (!isMultiSession && uniqueDates.length !== dates.length) {
+    if (uniqueDates.length !== dates.length) {
       res.status(400).json({ error: "Tanggal recurring tidak boleh duplikat" });
       return;
     }
-    if (isMultiSession) {
-      for (let i = 0; i < multiSessions.length; i++) {
-        for (let j = i + 1; j < multiSessions.length; j++) {
-          if (multiSessions[i].date !== multiSessions[j].date) continue;
-          const aStart = timeToMinutes(multiSessions[i].startTime);
-          const bStart = timeToMinutes(multiSessions[j].startTime);
-          if (aStart < bStart + multiSessions[j].durationHours * 60 &&
-              bStart < aStart + multiSessions[i].durationHours * 60) {
-            res.status(400).json({ error: "Ada sesi saling bertabrakan dalam keranjang" });
-            return;
-          }
-        }
-      }
-    }
-    const scheduleErrors = dates
-      .map((date, i) => recurringScheduleError(
-        facility, date,
-        isMultiSession ? multiSessions[i].startTime : String(startTime),
-        isMultiSession ? multiSessions[i].durationHours : Number(durationHours),
+    const scheduleErrors = uniqueDates
+      .map((date) => recurringScheduleError(
+        facility,
+        date,
+        String(startTime),
+        Number(durationHours),
         { allowPastSchedule: isOperationalBookingRole(loggedInRole) },
       ))
       .filter(Boolean);
@@ -2491,16 +2676,13 @@ router.post("/bookings/recurring", async (req, res) => {
     // Rp100.000 tetap valid untuk 4 sesi @ Rp80.000 (total Rp320.000).
     const taxByDate = new Map<string, Awaited<ReturnType<typeof resolveCustomerTax>>>();
     let projectedGrandTotal = additionalChargeAmount;
-    for (const [sessionIndex, bookingDate] of dates.entries()) {
-      const projectedPrice = isMultiSession
-        ? Number(facility.pricePerHour) * multiSessions[sessionIndex].durationHours
-        : baseSessionPrice;
-      const taxCalc = await resolveCustomerTax(projectedPrice, {
+    for (const bookingDate of dates) {
+      const taxCalc = await resolveCustomerTax(baseSessionPrice, {
         customerId: effectiveCustomerId,
         companyCustomerId: verifiedCompanyCustomerId,
         bookingDate,
       });
-      taxByDate.set(String(sessionIndex), taxCalc);
+      taxByDate.set(bookingDate, taxCalc);
       const pphCalc = await resolveWithholdingTax(
         verifiedCompanyCustomerId,
         taxCalc.grandTotal,
@@ -2518,42 +2700,16 @@ router.post("/bookings/recurring", async (req, res) => {
       return;
     }
 
-    if (isMultiSession) {
-      for (const date of [...new Set(dates)].sort()) {
-        const facilityIdNumber = Number(facilityId);
-        const dateInteger = Number(date.replace(/-/g, ""));
-        await db.execute(sql`SELECT pg_advisory_lock(${facilityIdNumber}, ${dateInteger})`);
-        multiLocks.push({ facilityId: facilityIdNumber, dateInteger });
-      }
-      // Fail before first insert if any selected slot is occupied/blocked.
-      for (const item of multiSessions) {
-        if (await checkSlotConflict(Number(facilityId), item.date, item.startTime,
-              addHours(item.startTime, item.durationHours)) ||
-            !await checkSlotAvailable(Number(facilityId), item.date,
-              item.startTime, item.durationHours)) {
-          res.status(409).json({ error: `Slot ${item.date} ${item.startTime} tidak tersedia; tidak ada booking dibuat` });
-          return;
-        }
-      }
-    }
     const created: any[] = [];
     const skipped: string[] = [];
-    for (const [sessionIndex, bookingDate] of dates.entries()) {
-      const session = isMultiSession ? multiSessions[sessionIndex] : null;
-      const sessionStartTime = session ? session.startTime : String(startTime);
-      const sessionDuration = session ? session.durationHours : Number(durationHours);
-      const sessionEndTime = addHours(sessionStartTime, sessionDuration);
-      const sessionBasePrice = session ? Number(facility.pricePerHour) * sessionDuration : basePrice;
-      const sessionDiscount = session ? 0 : discount;
-      const sessionNetPrice = Math.max(0, sessionBasePrice - sessionDiscount);
+    for (const bookingDate of dates) {
       // Advisory lock per (facilityId, date) cegah double booking pada recurring
       const recFId = Number(facilityId);
       const recDInt = parseInt(bookingDate.replace(/-/g, ""), 10);
       await db.execute(sql`SELECT pg_advisory_lock(${recFId}, ${recDInt})`);
-      const conflict = await checkSlotConflict(recFId, bookingDate, sessionStartTime, sessionEndTime);
+      const conflict = await checkSlotConflict(recFId, bookingDate, startTime, endTime);
       if (conflict) {
         await db.execute(sql`SELECT pg_advisory_unlock(${recFId}, ${recDInt})`);
-        if (isMultiSession) throw new Error("MULTI_SLOT_CONFLICT");
         skipped.push(bookingDate);
         continue;
       }
@@ -2562,14 +2718,14 @@ router.post("/bookings/recurring", async (req, res) => {
       // to the first session that is actually created, not every session.
       const isFirstCreatedSession = created.length === 0;
       const sessionAdditionalCharges = isFirstCreatedSession ? additionalCharges : [];
-      const sessionTotalPrice = sessionNetPrice + additionalChargesTotal(sessionAdditionalCharges);
+      const sessionTotalPrice = baseSessionPrice + additionalChargesTotal(sessionAdditionalCharges);
       const taxCalc = isFirstCreatedSession
         ? await resolveCustomerTax(sessionTotalPrice, {
             customerId: effectiveCustomerId,
             companyCustomerId: verifiedCompanyCustomerId,
             bookingDate,
           })
-        : taxByDate.get(String(sessionIndex))!;
+        : taxByDate.get(bookingDate)!;
       const pphCalc = await resolveWithholdingTax(
         companyBillingUser?.id,
         taxCalc.grandTotal,
@@ -2586,16 +2742,16 @@ router.post("/bookings/recurring", async (req, res) => {
         source: recurringSource || "web",
         facilityId: Number(facilityId),
         bookingDate,
-        startTime: sessionStartTime,
-        endTime: sessionEndTime,
-        durationHours: sessionDuration,
+        startTime,
+        endTime,
+        durationHours,
         totalPrice: String(sessionTotalPrice),
         promoCode: isAp || isEventR ? null : (promoCode || null),
-        discountAmount: String(sessionDiscount),
+        discountAmount: String(discount),
         apDiscountAmount: isAp ? String(apAutoDiscountAmountR) : "0",
         bookingType: bookingTypeR,
         eventDiscountAmount: isEventR ? String(eventDiscountAmountCalcR) : null,
-        basePrice: String(sessionBasePrice),
+        basePrice: String(basePrice),
         customerType,
         idCardNumber: idCardNumber || null,
         verificationStatus: isAp ? (apAutoVerifiedR ? "verified" : "pending") : "not_required",
@@ -2770,11 +2926,6 @@ router.post("/bookings/recurring", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");
     res.status(500).json({ error: "Internal server error" });
-  } finally {
-    for (const lock of multiLocks.reverse()) {
-      await db.execute(sql`SELECT pg_advisory_unlock(${lock.facilityId}, ${lock.dateInteger})`)
-        .catch((err) => req.log.error({ err }, "Release multi-session lock failed"));
-    }
   }
 });
 

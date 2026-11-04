@@ -189,6 +189,12 @@ export default function AdminCheckoutForm() {
   const [createdPaymentId, setCreatedPaymentId] = useState<number | null>(null);
   const [createdPaymentError, setCreatedPaymentError] = useState("");
   const [repeatEnabled, setRepeatEnabled] = useState(false);
+  type BookingPattern = {
+    startDate: string; startTime: string; durationHours: number;
+    repeatType: "weekly" | "monthly"; repeatCount: number;
+    dates: string[]; pricePerSession: number;
+  };
+  const [multiPatterns, setMultiPatterns] = useState<BookingPattern[]>([]);
   const [repeatType, setRepeatType] = useState<"weekly" | "monthly">("weekly");
   const [repeatCount, setRepeatCount] = useState(4);
   const [repeatPreview, setRepeatPreview] = useState<null | {
@@ -291,7 +297,7 @@ export default function AdminCheckoutForm() {
   const formPaymentValid = paymentChoice === "unpaid" ||
     (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
       (paidMethod === "Transfer Bank" || paidMethod === "QRIS")));
-  const repeatFormValid = !repeatEnabled ||
+  const repeatFormValid = multiPatterns.length > 0 || !repeatEnabled ||
     (!isWalkIn && repeatCount >= 2 && repeatCount <= 52 && repeatPreviewCurrent && repeatAllAvailable);
   // bookingKind has a valid default; it is intentionally not an additional
   // explicit-completion requirement for enabling the submit button.
@@ -301,8 +307,8 @@ export default function AdminCheckoutForm() {
     selectedFacilityId &&
     activeFacilities.some((item: any) => String(item.id) === selectedFacilityId) &&
     (!isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
-    selectedDate &&
-    slotValid &&
+    (selectedDate || multiPatterns.length > 0) &&
+    (slotValid || multiPatterns.length > 0) &&
     !isSubmitting &&
     paymentChoice !== null &&
     formPaymentValid &&
@@ -796,12 +802,12 @@ export default function AdminCheckoutForm() {
       toast({ title: "Fasilitas sedang maintenance atau tidak tersedia untuk booking", variant: "destructive" });
       return;
     }
-    if (!selectedDate || (!isWalkIn && !startTime)) {
+    if (!multiPatterns.length && (!selectedDate || (!isWalkIn && !startTime))) {
       toast({ title: "Pilih tanggal dan jam booking", variant: "destructive" });
       return;
     }
 
-    if (!slotValid) {
+    if (!slotValid && !multiPatterns.length) {
       toast({ title: "Slot tidak tersedia atau belum diperiksa", variant: "destructive" });
       return;
     }
@@ -834,7 +840,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
-    if (repeatEnabled) {
+    if (repeatEnabled && !multiPatterns.length) {
       if (isWalkIn) { toast({ title: "Booking berulang hanya tersedia untuk fasilitas dengan slot waktu", variant: "destructive" }); return; }
       if (repeatCount < 2 || repeatCount > 52) { toast({ title: "Jumlah sesi berulang harus antara 2 sampai 52", variant: "destructive" }); return; }
       if (!repeatPreviewCurrent || !repeatPreview) { toast({ title: "Preview jadwal berulang belum siap", description: "Tunggu pemeriksaan semua tanggal selesai sebelum menyimpan.", variant: "destructive" }); return; }
@@ -871,7 +877,23 @@ export default function AdminCheckoutForm() {
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
         notes: notes || undefined,
       };
-      const res = repeatEnabled
+      const res = multiPatterns.length > 0
+        ? await fetch("/api/bookings/admin-multi-schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + (getToken() ?? "") },
+            body: JSON.stringify({
+              ...bookingPayload,
+              startDate: multiPatterns[0].startDate,
+              startTime: multiPatterns[0].startTime,
+              durationHours: multiPatterns[0].durationHours,
+              multiSessions: multiPatterns.flatMap((pattern) =>
+                pattern.dates.map((date) => ({
+                  date, startTime: pattern.startTime, durationHours: pattern.durationHours,
+                })),
+              ),
+            }),
+          })
+        : repeatEnabled
         ? await fetch("/api/bookings/recurring", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
@@ -893,7 +915,7 @@ export default function AdminCheckoutForm() {
         return;
       }
 
-      if (repeatEnabled) {
+      if (multiPatterns.length > 0 || repeatEnabled) {
         const createdRows = Array.isArray(data.created) ? data.created : [];
         const orders = createdRows.map((row: any) => String(row.orderNumber ?? "").trim()).filter(Boolean);
         if (orders.length === 0) {
@@ -1250,7 +1272,7 @@ export default function AdminCheckoutForm() {
             {/* Facility */}
             {!isMembership && <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
-              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setSelectedActivityType(""); setStartTime(""); }}>
+              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setSelectedActivityType(""); setStartTime(""); setMultiPatterns([]); }}>
                 <SelectTrigger id="facility">
                   <SelectValue placeholder="Pilih fasilitas..." />
                 </SelectTrigger>
@@ -1361,7 +1383,7 @@ export default function AdminCheckoutForm() {
                   <Checkbox id="admin-repeat-booking" checked={repeatEnabled} onCheckedChange={(checked) => setRepeatEnabled(Boolean(checked))} />
                   <div className="space-y-1">
                     <Label htmlFor="admin-repeat-booking" className="font-semibold flex items-center gap-2 cursor-pointer"><RefreshCw size={16} /> Booking Berulang</Label>
-                    <p className="text-xs text-muted-foreground">Buat beberapa sesi dengan hari dan jam yang sama. Untuk hari atau jam berbeda, gunakan pola booking terpisah.</p>
+                    <p className="text-xs text-muted-foreground">Tambahkan beberapa pola mingguan/bulanan. Seluruh sesi masuk satu grup booking dan satu pembayaran.</p>
                   </div>
                 </div>
                 {repeatEnabled && (
@@ -1411,6 +1433,58 @@ export default function AdminCheckoutForm() {
 
 
 
+            {!isMembership && !isWalkIn && repeatEnabled && repeatPreviewCurrent && repeatAllAvailable && repeatPreview && (
+              <Button type="button" variant="outline" className="w-full border-orange-300"
+                disabled={isActiveApMember || bookingKind === "event" ||
+                  multiPatterns.reduce((n,p) => n + p.dates.length, 0) + repeatPreview.dates.length > 52}
+                onClick={() => {
+                  const next: BookingPattern = {
+                    startDate: selectedDate, startTime: startTime.slice(11, 16),
+                    durationHours: Number(duration), repeatType, repeatCount,
+                    dates: repeatPreview.dates.map((row) => row.date),
+                    pricePerSession: Number(repeatPreview.pricePerSession),
+                  };
+                  const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+                  const overlaps = multiPatterns.some((pattern) =>
+                    pattern.dates.some((date) => next.dates.includes(date)) &&
+                    toMinutes(pattern.startTime) < toMinutes(next.startTime) + next.durationHours * 60 &&
+                    toMinutes(next.startTime) < toMinutes(pattern.startTime) + pattern.durationHours * 60
+                  );
+                  if (overlaps) {
+                    toast({ title: "Jadwal bertabrakan", description: "Pola ini bertabrakan dengan pola yang sudah ditambahkan.", variant: "destructive" });
+                    return;
+                  }
+                  setMultiPatterns((prev) => [...prev, next]);
+                  setRepeatEnabled(false);
+                  setBookingDay("");
+                  setStartTime("");
+                  toast({ title: "Pola jadwal ditambahkan", description: "Pilih tanggal dan jam lain untuk pola berikutnya." });
+                }}>
+                + Tambahkan Pola ke Booking
+              </Button>
+            )}
+            {!isMembership && multiPatterns.length > 0 && (
+              <div className="rounded-xl border border-orange-200 bg-orange-50/30 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold">Pola Jadwal dalam Satu Booking</p>
+                  <span className="text-xs text-muted-foreground">{multiPatterns.reduce((sum, pattern) => sum + pattern.dates.length, 0)} sesi</span>
+                </div>
+                {multiPatterns.map((pattern, index) => (
+                  <div key={index} className="rounded-lg bg-background border p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-semibold">{pattern.startDate} • {pattern.startTime} • {pattern.durationHours} jam</span>
+                      <Button type="button" variant="ghost" size="sm"
+                        onClick={() => setMultiPatterns((prev) => prev.filter((_, i) => i !== index))}>Hapus</Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{pattern.dates.length} sesi • {pattern.repeatType === "weekly" ? "Mingguan" : "Bulanan"} • {formatRupiah(pattern.pricePerSession)} / sesi</p>
+                    <details className="text-xs"><summary className="cursor-pointer">Lihat tanggal sesi</summary>
+                      <p className="pt-2 text-muted-foreground">{pattern.dates.join(" • ")}</p>
+                    </details>
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">Pola yang ditambahkan akan dibuat menjadi satu GRP. Hapus pola yang salah sebelum menyimpan. Maksimal 52 sesi.</p>
+              </div>
+            )}
             {/* Notes */}
             <div className="space-y-2">
               <Label htmlFor="notes">Catatan (Opsional)</Label>
@@ -1755,11 +1829,27 @@ export default function AdminCheckoutForm() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-2 text-center">
-                  <div className="rounded-lg bg-muted/40 px-2 py-3"><p className="text-lg font-bold">{repeatEnabled ? (repeatPreviewCurrent ? repeatCount : "—") : (selectedDate && (isWalkIn || slotValid) ? 1 : "—")}</p><p className="text-xs text-muted-foreground">Jumlah sesi</p></div>
-                  <div className="rounded-lg bg-muted/40 px-2 py-3"><p className="text-lg font-bold">{repeatEnabled ? (repeatPreviewCurrent ? repeatCount * Number(duration) : "—") : (selectedDate && (isWalkIn || slotValid) ? (isWalkIn ? "—" : duration) : "—")}</p><p className="text-xs text-muted-foreground">Total jam</p></div>
+                  <div className="rounded-lg bg-muted/40 px-2 py-3"><p className="text-lg font-bold">{multiPatterns.length > 0 ? multiPatterns.reduce((n,p) => n + p.dates.length, 0) : repeatEnabled ? (repeatPreviewCurrent ? repeatCount : "—") : (selectedDate && (isWalkIn || slotValid) ? 1 : "—")}</p><p className="text-xs text-muted-foreground">Jumlah sesi</p></div>
+                  <div className="rounded-lg bg-muted/40 px-2 py-3"><p className="text-lg font-bold">{multiPatterns.length > 0 ? multiPatterns.reduce((n,p) => n + p.dates.length * p.durationHours, 0) : repeatEnabled ? (repeatPreviewCurrent ? repeatCount * Number(duration) : "—") : (selectedDate && (isWalkIn || slotValid) ? (isWalkIn ? "—" : duration) : "—")}</p><p className="text-xs text-muted-foreground">Total jam</p></div>
                 </div>
-                {!selectedFacilityId || !selectedDate ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Pilih fasilitas dan jadwal untuk melihat rincian harga.</p> : null}
-            {!isMembership && selectedFacilityId && selectedDate &&
+                {!selectedFacilityId || (!selectedDate && !multiPatterns.length) ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Pilih fasilitas dan jadwal untuk melihat rincian harga.</p> : null}
+                {multiPatterns.length > 0 && (
+                  <div className="rounded-lg border p-3 space-y-2 text-sm">
+                    <p className="font-semibold">Ringkasan Multi-Jadwal</p>
+                    {multiPatterns.map((pattern, index) => (
+                      <div key={index} className="flex justify-between gap-2">
+                        <span>{pattern.startDate} • {pattern.startTime} • {pattern.dates.length} sesi</span>
+                        <strong>{formatRupiah(pattern.pricePerSession * pattern.dates.length)}</strong>
+                      </div>
+                    ))}
+                    <div className="flex justify-between gap-2 border-t pt-2 font-semibold">
+                      <span>{isCompanyPayer ? "Estimasi sebelum pajak perusahaan" : "Estimasi total"}</span>
+                      <strong>{formatRupiah(multiPatterns.reduce((sum, pattern) => sum + pattern.pricePerSession * pattern.dates.length, 0))}</strong>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Nilai final dan pajak dihitung ulang server. Pola yang belum ditambahkan tidak ikut tersimpan.</p>
+                  </div>
+                )}
+            {!isMembership && multiPatterns.length === 0 && selectedFacilityId && selectedDate &&
               (repeatEnabled ? (repeatPreviewCurrent && Boolean(repeatPreview)) : (isWalkIn || slotValid)) && (
               <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
                 <p className="font-semibold">Rincian Harga</p>
