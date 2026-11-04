@@ -24,7 +24,7 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
-import { downloadFromStorageUrl, deleteFromStorage } from "../lib/supabaseStorage";
+import { downloadFromStorageUrl, deleteUploadedProofStrict } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { isWithinGymGracePeriod, resolveGymRenewalStart } from "../services/gymMembershipEntitlement";
 import { x904PaymentConfirmedEventKey } from "../services/x904AutomationDecision";
@@ -1110,7 +1110,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     });
   } catch (err) {
     if (uploadedProofUrl && !registrationCommitted) {
-      try { await deleteFromStorage(uploadedProofUrl); }
+      try { await deleteUploadedProofStrict(uploadedProofUrl); }
       catch (cleanupErr) { req.log.error({err:cleanupErr},"Paid membership proof cleanup failed"); }
     }
     if (err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
