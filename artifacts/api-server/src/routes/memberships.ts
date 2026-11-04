@@ -1356,8 +1356,8 @@ async function reportGymPayment(
   let code = "—";
   let pin: string | null = null;
   if (booking.customerId != null) {
-    const result = await db.execute(sql`SELECT code FROM sport_center.users WHERE id = ${booking.customerId} LIMIT 1`);
-    code = String(result.rows[0]?.code ?? "—");
+    const result = await db.execute(sql`SELECT customer_code FROM sport_center.users WHERE id = ${booking.customerId} LIMIT 1`);
+    code = String(result.rows[0]?.customer_code ?? "—");
   }
   const mapped = await db.execute(sql`
     SELECT user_pin FROM sport_center.gym_x904_member_mapping
