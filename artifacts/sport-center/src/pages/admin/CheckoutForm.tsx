@@ -46,6 +46,7 @@ function previewGymRenewalPeriod(
   today: string,
   months: number,
   enabled: boolean,
+  requestedStart = "",
 ): {start: string; end: string} {
   const validDate = (value: string) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -59,9 +60,17 @@ function previewGymRenewalPeriod(
   const endMs = Date.parse(previousEnd + "T00:00:00Z");
   const todayMs = Date.parse(today + "T00:00:00Z");
   const inGrace = status === "active" && todayMs <= endMs + 7 * 86400000;
-  const startDate = inGrace
+  // A selected start is only allowed for a fully lapsed membership.
+  // The server enforces the same date range and checks it again at submit.
+  const earliest = new Date(todayMs - 30 * 86400000).toISOString().slice(0, 10);
+  const defaultStart = inGrace
     ? new Date(endMs + 86400000).toISOString().slice(0, 10)
     : today;
+  if (requestedStart && (inGrace || !validDate(requestedStart) ||
+      requestedStart < earliest || requestedStart > today || requestedStart <= previousEnd)) {
+    return {start:"", end:""};
+  }
+  const startDate = requestedStart || defaultStart;
   const start = new Date(startDate + "T00:00:00Z");
   const targetMonthIndex = start.getUTCMonth() + months;
   const targetYear = start.getUTCFullYear() + Math.floor(targetMonthIndex / 12);
@@ -109,6 +118,7 @@ export default function AdminCheckoutForm() {
   const [memberId, setMemberId] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [memberMonths, setMemberMonths] = useState("1");
+  const [renewalStartOverride, setRenewalStartOverride] = useState("");
   const [members, setMembers] = useState<Array<{id:number; name:string; phone:string; status:string; endDate:string}>>([]);
   const [memberLoadError, setMemberLoadError] = useState("");
   const [membershipResult, setMembershipResult] = useState("");
@@ -371,6 +381,7 @@ export default function AdminCheckoutForm() {
     jakartaDateOnly(),
     Number(memberMonths || 1),
     memberAction === "renew",
+    renewalStartOverride,
   );
   const renewalStartDate = renewalPeriodPreview.start;
   const renewalEndDate = renewalPeriodPreview.end;
@@ -434,7 +445,7 @@ export default function AdminCheckoutForm() {
            phone:isGuest ? guestPhone.trim() : selectedCustomer.phone,
            email:isGuest ? guestEmail.trim() : selectedCustomer.email,
            startDate:selectedDate, months:Number(memberMonths), notes}
-        : memberAction === "renew" ? {months:Number(memberMonths)}
+        : memberAction === "renew" ? {months:Number(memberMonths), ...(renewalStartOverride ? { startDate: renewalStartOverride } : {})}
           : {checkinDate:selectedDate, notes};
       const response = await fetch(endpoint, {method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer " + (getToken() ?? "")},body:JSON.stringify(payload)});
       const data = await response.json();
@@ -1459,6 +1470,19 @@ export default function AdminCheckoutForm() {
                   </div>
                 )}
                 {memberAction === "renew" && <>
+                  <Label htmlFor="gym-renewal-start">Tanggal mulai membership</Label>
+                  <Input id="gym-renewal-start" type="date"
+                    value={renewalStartOverride || previewGymRenewalPeriod(
+                      matchedMember?.status ?? "", matchedMember?.endDate ?? "", jakartaDateOnly(),
+                      Number(memberMonths || 1), true,
+                    ).start}
+                    min={new Date(Date.parse(jakartaDateOnly()+"T00:00:00Z")-30*86400000).toISOString().slice(0,10)}
+                    max={jakartaDateOnly()}
+                    disabled={!matchedMember || (matchedMember.status === "active" &&
+                      Date.parse(jakartaDateOnly()+"T00:00:00Z") <=
+                        Date.parse(matchedMember.endDate+"T00:00:00Z")+7*86400000)}
+                    onChange={(e)=>setRenewalStartOverride(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">Untuk membership lama yang sudah expired: tanggal mulai dapat disesuaikan hingga 30 hari ke belakang, tanpa mengubah tanggal pembayaran. Tanggal pembayaran diisi setelah tagihan dibuat.</p>
                   <Label>Perpanjangan</Label>
                   <Select value={memberMonths} onValueChange={setMemberMonths}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
