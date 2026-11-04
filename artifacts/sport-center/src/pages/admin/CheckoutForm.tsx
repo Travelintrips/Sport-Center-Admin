@@ -375,6 +375,45 @@ export default function AdminCheckoutForm() {
     return () => {window.clearTimeout(timer);controller.abort();};
   },[isMembership,memberAction,membershipX904Search]);
   const matchedMember = members.find(m => String(m.id) === memberId);
+  const gymCanConfirm = ["owner","admin","super_admin","finance","admin_booking"].includes(String(getCurrentRole()));
+  const {data: currentGymPayments,refetch: refreshGymPayments} = useQuery<Array<{
+    id:number;membershipId:number;periodStart:string;periodEnd:string;months:number;
+    amount:number;status:string;paymentProofUrl?:string|null;
+  }>>({
+    queryKey:["membership-checkout-payments",memberId],
+    enabled:isMembership && memberAction === "renew" && Boolean(memberId),
+    queryFn:async()=>{
+      const response=await fetch(`/api/memberships/${memberId}/payments`,{
+        headers:{Authorization:`Bearer ${getToken() ?? ""}`},
+      });
+      if(!response.ok)throw Error("Riwayat pembayaran membership gagal dimuat");
+      return response.json();
+    },
+  });
+  const unfinishedGymPayment = (currentGymPayments ?? []).find(p =>
+    p.status === "pending_payment" || p.status === "waiting_confirmation");
+
+  async function retryGymAdminConfirmation(membershipId:number,paymentId:number) {
+    if(!gymCanConfirm || membershipPaymentBusy) return;
+    setMembershipPaymentBusy(true);
+    try {
+      const response=await fetch(`/api/memberships/${membershipId}/admin-finalize-payment`,{
+        method:"POST",headers:{
+          Authorization:`Bearer ${getToken() ?? ""}`,"Content-Type":"application/json",
+        },body:JSON.stringify({paymentId}),
+      });
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error || "Pembayaran belum dapat diselesaikan");
+      setMembershipPaymentDone(true);
+      setMembershipProofUploaded(true);
+      setMembershipResult("Pembayaran sudah terkonfirmasi. Perpanjangan membership selesai.");
+      toast({title:"Pembayaran membership lunas",description:"Transaksi lama berhasil diselesaikan tanpa booking baru."});
+      await refreshGymPayments();
+    } catch(err) {
+      toast({title:"Konfirmasi belum selesai",description:err instanceof Error?err.message:"Silakan ulangi penyelesaian payment yang sama.",variant:"destructive"});
+    } finally {setMembershipPaymentBusy(false);}
+  }
+
   const renewalPeriodPreview = previewGymRenewalPeriod(
     matchedMember?.status ?? "",
     matchedMember?.endDate ?? "",
@@ -490,58 +529,44 @@ export default function AdminCheckoutForm() {
     setMembershipPaymentBusy(true);
     try {
       const token = getToken();
+      if (membershipProofUploaded) {
+        // Proof was durably saved in an earlier call. Never upload it a second time.
+        const current = unfinishedGymPayment ?? (await refreshGymPayments()).data?.find(p => p.status === "waiting_confirmation");
+        if (!current) throw Error("Payment ID tertunda belum tersedia; buka riwayat membership terlebih dahulu");
+        setMembershipPaymentBusy(false);
+        await retryGymAdminConfirmation(membershipPaymentTarget.membershipId,current.id);
+        return;
+      }
       const form = new FormData();
       if (membershipPaymentFile) form.append("proof", membershipPaymentFile);
       form.append("paymentMethod", membershipPaymentMethod);
       form.append("paymentDate", membershipPaymentDate);
-      if (!membershipProofUploaded) {
-        const uploaded = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}/admin-payment-proof-upload`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token ?? ""}` },
-          body: form,
-        });
-        const uploadResult = await uploaded.json();
-        if (!uploaded.ok) throw Error(uploadResult.error || "Upload bukti pembayaran gagal");
-        setMembershipProofUploaded(true);
-      }
-
-      const role = getCurrentRole();
-      if (role && role !== "staff") {
-        const confirmed = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}`, {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token ?? ""}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ status: "active", settlementProviderCode: "mandiri_direct" }),
-        });
-        const confirmedResult = await confirmed.json();
-        if (!confirmed.ok) throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi membership gagal");
+      const response = await fetch(`/api/memberships/${membershipPaymentTarget.membershipId}/admin-payment-proof-upload`, {
+        method:"POST",headers:{Authorization:`Bearer ${token ?? ""}`},body:form,
+      });
+      const result=await response.json();
+      if (!response.ok && response.status !== 202)
+        throw Error(result.error || "Unggah bukti pembayaran gagal");
+      setMembershipProofUploaded(true);
+      setMembershipPaymentFile(null);
+      await refreshGymPayments();
+      if (result.paymentStatus === "confirmed") {
         setMembershipPaymentDone(true);
         setMembershipResult(membershipPaymentTarget.action === "renew"
-          ? "Pembayaran dikonfirmasi. Perpanjangan membership selesai."
-          : "Pembayaran dikonfirmasi. Member baru sudah aktif.");
-        toast({
-          title: "Pembayaran dikonfirmasi",
-          description: membershipPaymentTarget.action === "renew"
-            ? "Perpanjangan membership selesai."
-            : "Pendaftaran member dan pembayaran selesai.",
-        });
+          ? "Pembayaran terkonfirmasi. Perpanjangan membership selesai."
+          : "Pembayaran terkonfirmasi. Pendaftaran membership selesai.");
+        toast({title:"Pembayaran membership lunas",description:"Bukti dan konfirmasi diproses oleh server dalam satu permintaan."});
+      } else if (gymCanConfirm) {
+        setMembershipResult("Bukti sudah disimpan. Konfirmasi belum selesai — gunakan tombol Selesaikan Konfirmasi.");
+        toast({title:"Bukti aman, konfirmasi perlu dilanjutkan",description:"Tidak perlu mengunggah ulang atau membuat tagihan baru.",variant:"destructive"});
       } else {
         setMembershipPaymentDone(true);
         setMembershipResult("Bukti pembayaran berhasil dikirim dan menunggu verifikasi.");
-        toast({title:"Bukti pembayaran dikirim",description:"Menunggu verifikasi oleh admin/finance."});
       }
-      setMembershipPaymentFile(null);
-    } catch (err) {
-      toast({
-        title: "Pembayaran membership gagal",
-        description: err instanceof Error ? err.message : "Silakan periksa kembali bukti pembayaran",
-        variant: "destructive",
-      });
-    } finally {
-      setMembershipPaymentBusy(false);
-    }
+    } catch(err) {
+      toast({title:"Periksa status pembayaran",description:err instanceof Error?err.message:"Jangan membuat tagihan baru sebelum memeriksa riwayat.",variant:"destructive"});
+      await refreshGymPayments();
+    } finally {setMembershipPaymentBusy(false);}
   }
 
   async function recordBookingPayment(
@@ -1493,6 +1518,30 @@ export default function AdminCheckoutForm() {
                 </>}
                 {memberAction === "checkin" && <p className="text-sm">Kunjungan member aktif tidak memerlukan durasi dan tidak menimbulkan tagihan baru.</p>}
               </>}
+              {memberAction === "renew" && unfinishedGymPayment && !membershipPaymentDone && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50/50 p-3 space-y-2">
+                  <p className="font-semibold text-sm">Tagihan perpanjangan belum selesai · Payment #{unfinishedGymPayment.id}</p>
+                  <p className="text-sm">Periode {unfinishedGymPayment.periodStart} – {unfinishedGymPayment.periodEnd} · {formatRupiah(Number(unfinishedGymPayment.amount))}</p>
+                  {unfinishedGymPayment.status === "waiting_confirmation" ? (
+                    <>
+                      <p className="text-xs">Bukti sudah tersimpan. Jangan unggah ulang atau membuat booking baru.</p>
+                      {gymCanConfirm && <Button type="button" disabled={membershipPaymentBusy}
+                        onClick={()=>retryGymAdminConfirmation(Number(memberId),unfinishedGymPayment.id)}>
+                        Selesaikan Konfirmasi Pembayaran
+                      </Button>}
+                    </>
+                  ) : (
+                    <Button type="button" variant="outline" onClick={()=>{
+                      setMembershipPaymentDone(false);setMembershipProofUploaded(false);
+                      setMembershipPaymentTarget({
+                        membershipId:Number(memberId),action:"renew",name:matchedMember?.name ?? "Member",
+                        periodStart:unfinishedGymPayment.periodStart,periodEnd:unfinishedGymPayment.periodEnd,
+                        amount:Number(unfinishedGymPayment.amount),
+                      });
+                    }}>Lanjutkan Pembayaran Tagihan Ini</Button>
+                  )}
+                </div>
+              )}
               {memberLoadError && <p className="text-xs text-destructive">{memberLoadError}</p>}
               {membershipResult && <p className="text-sm font-medium text-green-700">{membershipResult}</p>}
               {membershipPaymentTarget && (
