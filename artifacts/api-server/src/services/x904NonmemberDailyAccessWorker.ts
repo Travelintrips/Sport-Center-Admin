@@ -75,6 +75,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           AND a.identity_type='card' AND a.identity_label='VIS006' AND a.user_pin='15'
           AND ${testPin ?? null}::text='15'))
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
+      AND (${allowedRaw ?? null}::text IS NULL OR a.user_pin = ANY(string_to_array(${allowed?.join(',') ?? null}::text, ',')))
     ORDER BY a.confirmed_at LIMIT 25`);
 
   for (const row of due.rows as any[]) {
