@@ -95,6 +95,19 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(lookup).toContain("LIMIT 15");
   });
 
+  it("previews lapsed gym renewals from Jakarta today, not the old expiration", () => {
+    expect(ui).toContain("function previewGymRenewalPeriod(");
+    expect(ui).toContain("jakartaDateOnly(),");
+    expect(ui).toContain('status === "active" && todayMs <= endMs + 7 * 86400000');
+    expect(ui).toContain('new Date(endMs + 86400000).toISOString().slice(0, 10)');
+    expect(ui).toContain(': today;');
+    expect(ui).toContain('getUTCMonth() + months');
+    expect(ui).toContain('getUTCDate()');
+    expect(ui).not.toContain('start.setDate(start.getDate() + 1)');
+    expect(ui).toContain('periodStart: String(data.renewal?.periodStart ?? renewalStartDate ?? "")');
+    expect(ui).toContain('periodEnd: String(data.renewal?.periodEnd ?? renewalEndDate ?? "")');
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
