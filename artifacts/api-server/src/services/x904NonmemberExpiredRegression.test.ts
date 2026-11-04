@@ -12,7 +12,7 @@ describe('X904 nonmember expired state regression guard', () => {
     expect(worker).not.toContain("a.access_state IN ('pending','active','expired')");
   });
   test('completed readback still marks eligible suspension as expired', () => {
-    expect(worker).toContain("access_state=${unpaidVis006 ? 'pending' : 'expired'}");
+    expect(worker).toContain("SET access_state='expired'");
     expect(worker).toContain('last.result as any)?.readBackConfirmed === true');
   });
 });
