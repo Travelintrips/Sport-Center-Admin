@@ -1154,6 +1154,8 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     syncBookingRecordToBizportal(result.booking).catch(err => req.log.error({err},"Paid membership booking sync failed"));
     pushMembershipPaymentAsBankMutation(result.membership,result.payment,today,result.booking)
       .catch(err => req.log.error({err},"Paid membership mutation sync failed"));
+    reportGymPayment(result.membership,result.payment,result.booking,"confirmed",undefined,"new")
+      .catch(err => req.log.error({err},"[WA] Pendaftaran paid Gym group report failed"));
     await syncToPublic(result.membership);
     res.status(201).json({
       customerId:result.customerId, membershipId:result.membership.id,
@@ -1349,6 +1351,7 @@ async function reportGymPayment(
   booking: typeof bookingsTable.$inferSelect,
   event: "pending" | "confirmed",
   previousEnd?: string,
+  action: "new" | "renew" = "renew",
 ): Promise<void> {
   let code = "—";
   let pin: string | null = null;
@@ -1361,15 +1364,17 @@ async function reportGymPayment(
     WHERE membership_id = ${membership.id} AND device_serial = 'TDBD234200545'
       AND status = 'verified' LIMIT 1`);
   pin = mapped.rows[0] ? String(mapped.rows[0].user_pin) : null;
+  const baseUrl = await getBaseUrl();
+  const reviewUrl = baseUrl ? baseUrl.replace(/\\/$/,"") + "/admin/memberships?memberId=" + membership.id : null;
   await notifyGymMembershipWa({
-    event, bookingId: booking.id, orderNumber: booking.orderNumber,
+    event, action, bookingId: booking.id, orderNumber: booking.orderNumber,
     membershipId: membership.id, paymentId: payment.id,
     customerName: membership.name, customerCode: code,
     whatsapp: normalizedGymPhone(String(membership.phone ?? "")),x904Pin:pin,
     months: payment.months, periodStart:payment.periodStart,periodEnd:payment.periodEnd,
     previousPeriod:previousEnd ? previousEnd : undefined,
     amount:Number(payment.amount),paymentMethod:payment.paymentMethod,
-    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl,
+    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl ? reviewUrl : null,
   });
 }
 
