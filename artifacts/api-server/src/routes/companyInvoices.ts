@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
-import { eq, and, gte, lt, inArray, isNull, or, desc } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, isNull, or, desc, sql } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
@@ -594,16 +594,20 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     const { startDate, endDate } = periodDateRange(periodMonth);
 
+    await db.transaction(async (tx) => {
+      // Serialize all generate requests for the same company and billing period
+      // before reading unbilled bookings or existing invoices.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${String(companyCustomerId)}), hashtext(${String(periodMonth)}))`);
     const unbilledBookings = await db
       .select(invoiceBookingSelection)
       .from(bookingsTable)
       .where(invoiceBookingFilter(companyCustomerId, startDate, endDate));
 
-    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilities = await tx.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
 
     // Check for existing invoice
-    const invoicesForPeriod = await db.select().from(companyInvoicesTable).where(
+    const invoicesForPeriod = await tx.select().from(companyInvoicesTable).where(
       and(
         eq(companyInvoicesTable.companyCustomerId, companyCustomerId),
         eq(companyInvoicesTable.periodMonth, periodMonth)
@@ -638,12 +642,12 @@ async function handleGenerateInvoice(req: any, res: any) {
         return;
       }
 
-      const { updated, newTax } = await db.transaction(async (tx) => {
+      const { updated, newTax } = 
       // Add new bookings as items and recalculate totals
       await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
       // Rebuild invoice totals from the stored booking snapshots on each item.
-      const allItems = await tx.select().from(companyInvoiceItemsTable).where(
+      const allItems = await nestedTx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       const newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
@@ -654,7 +658,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         netAmount: newNetAmount,
       } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems), newTax);
 
-      const [updated] = await tx.update(companyInvoicesTable)
+      const [updated] = await nestedTx.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
            dppNilaiLain: String(newTax.dppNilaiLain),
@@ -674,7 +678,7 @@ async function handleGenerateInvoice(req: any, res: any) {
 
       // Mark new bookings as billed
       for (const b of unbilledBookings) {
-        await tx.update(bookingsTable)
+        await nestedTx.update(bookingsTable)
           .set({ billingStatus: "billed", companyInvoiceId: existingInvoice.id })
           .where(eq(bookingsTable.id, b.id));
       }
@@ -692,7 +696,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         userAgent,
       });
 
-      const updatedItems = await db.select().from(companyInvoiceItemsTable).where(
+      const updatedItems = await nestedTx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       return res.status(200).json({
@@ -716,9 +720,9 @@ async function handleGenerateInvoice(req: any, res: any) {
     const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
     const { pphRate, pphAmount, netAmount } = summarizeWithholdingTax(unbilledBookings, tax);
 
-    const { inv, updated, invoiceNumber } = await db.transaction(async (tx) => {
+    const { inv, updated, invoiceNumber } = await tx.transaction(async (nestedTx) => {
     // The database trigger serializes competing inserts and rejects invoice #3.
-    const [inv] = await tx.insert(companyInvoicesTable).values({
+    const [inv] = await nestedTx.insert(companyInvoicesTable).values({
       invoiceNumber: `PENDING-${randomUUID()}`,
       companyCustomerId,
       periodMonth,
@@ -739,7 +743,7 @@ async function handleGenerateInvoice(req: any, res: any) {
     }).returning();
 
     const invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
-    const [updated] = await tx.update(companyInvoicesTable)
+    const [updated] = await nestedTx.update(companyInvoicesTable)
       .set({ invoiceNumber })
       .where(eq(companyInvoicesTable.id, inv.id))
       .returning();
@@ -749,7 +753,7 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     // Mark bookings as billed
     for (const b of unbilledBookings) {
-      await tx.update(bookingsTable)
+      await nestedTx.update(bookingsTable)
         .set({ billingStatus: "billed", companyInvoiceId: inv.id })
         .where(eq(bookingsTable.id, b.id));
     }
@@ -776,10 +780,11 @@ async function handleGenerateInvoice(req: any, res: any) {
       userAgent,
     });
 
-    const items = await db.select().from(companyInvoiceItemsTable).where(
+    const items = await nestedTx.select().from(companyInvoiceItemsTable).where(
       eq(companyInvoiceItemsTable.invoiceId, inv.id)
     );
     res.status(201).json(mapInvoice(updated, company.companyName ?? company.name, items, company));
+    });
   } catch (err) {
     req.log.error({ err }, "Generate company invoice error");
     res.status(500).json({ error: "Internal server error" });
