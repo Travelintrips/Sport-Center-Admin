@@ -875,6 +875,55 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 // Admin-only, single-request registration for an already-paid Gym member.
 // All customer, membership, payment, booking and X904 entitlement writes are
 // transactional. An uploaded proof is never treated as payment verification.
+// Admin-only, read-only inventory search for the paid Gym membership form.
+// Return candidates, but never decide ownership or create an entitlement here.
+router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, res) => {
+  try {
+    const role = String((req as any).user?.role ?? "");
+    if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
+      res.status(403).json({ error: "Pencarian X904 memerlukan akses admin berwenang" });
+      return;
+    }
+    const term = String(req.query.q ?? "").trim().slice(0, 80);
+    if (term.length < 2) {
+      res.json({ candidates: [] });
+      return;
+    }
+    // Literal substring search: escape LIKE wildcard characters, not SQL.
+    const pattern = "%" + term.replace(/[\\%_]/g, (character) => "\\" + character) + "%";
+    const candidates = await db.execute(sql`
+      SELECT i.user_pin, i.device_uid, i.display_name,
+             m.membership_id AS mapped_membership_id,
+             m.status AS mapping_status,
+             gm.status::text AS membership_status
+      FROM sport_center.gym_x904_lan_users i
+      LEFT JOIN sport_center.gym_x904_member_mapping m
+        ON m.device_serial = i.device_serial AND m.user_pin = i.user_pin
+      LEFT JOIN sport_center.sport_memberships gm ON gm.id = m.membership_id
+      WHERE i.device_serial = 'TDBD234200545'
+        AND i.device_role = 0
+        AND i.device_uid > 0
+        AND (i.display_name ILIKE ${pattern} ESCAPE '\\'
+             OR i.user_pin ILIKE ${pattern} ESCAPE '\\')
+      ORDER BY CASE WHEN i.user_pin = ${term} THEN 0 ELSE 1 END,
+               i.display_name, i.user_pin
+      LIMIT 15
+    `);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ candidates: candidates.rows.map((row: any) => ({
+      pin: String(row.user_pin),
+      uid: Number(row.device_uid),
+      name: String(row.display_name ?? "").trim(),
+      available: row.mapped_membership_id == null,
+      mappedMembershipId: row.mapped_membership_id == null ? null : Number(row.mapped_membership_id),
+      membershipStatus: row.membership_status ?? null,
+    })) });
+  } catch (err) {
+    req.log.error({ err }, "X904 membership candidates search failed");
+    res.status(500).json({ error: "Gagal mencari identitas X904" });
+  }
+});
+
 router.post("/memberships/admin-register-paid", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
   try {
     const role = String((req as any).user?.role ?? "");
