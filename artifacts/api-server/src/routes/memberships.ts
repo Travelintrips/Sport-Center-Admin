@@ -992,7 +992,8 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       // Admin must confirm the device identity shown in the form; the server
       // compares it against its own inventory lookup, not browser lookup alone.
       if (!x904IdentityConfirmed || !x904VerifiedName ||
-          x904VerifiedName !== String(machineUsers.rows[0].display_name).trim()) {
+          x904VerifiedName !== String(machineUsers.rows[0].display_name).trim() ||
+          name !== String(machineUsers.rows[0].display_name).trim()) {
         throw new MembershipProofError(409,"Konfirmasi identitas PIN X904 tidak cocok. Verifikasi ulang nama di mesin.");
       }
       const mappings = await tx.execute(sql`
