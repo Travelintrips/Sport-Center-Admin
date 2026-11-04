@@ -877,7 +877,7 @@ function GenerateInvoiceDialog({
 
   const handleGenerate = async () => {
     if (!companyId) { toast({ title: "Pilih perusahaan", variant: "destructive" }); return; }
-    if (!existingInvoice && (preview?.bookingCount ?? 0) === 0) {
+    if ((preview?.bookingCount ?? 0) === 0) {
       toast({ title: "Tidak ada booking untuk ditagihkan pada periode ini", variant: "destructive" });
       return;
     }
@@ -896,11 +896,7 @@ function GenerateInvoiceDialog({
   };
 
   const monthOptions = getMonthOptions();
-  const canGenerate = !!companyId && (
-    existingInvoice
-      ? existingInvoice.status !== "paid" && (preview?.bookingCount ?? 0) > 0
-      : (preview?.bookingCount ?? 0) > 0
-  );
+  const canGenerate = !!companyId && !previewLoading && !previewError && (preview?.bookingCount ?? 0) > 0;
 
   return (
     <DialogContent className="max-w-md">
@@ -940,7 +936,7 @@ function GenerateInvoiceDialog({
             <AlertTriangle size={15} className="shrink-0 mt-0.5" />
             <div>
               {existingInvoice.status === "paid"
-                ? <><strong>Invoice sudah ada dan lunas:</strong> {existingInvoice.invoiceNumber}. Tidak dapat menambahkan booking baru.</>
+                ? <><strong>Invoice sebelumnya sudah lunas:</strong> {existingInvoice.invoiceNumber}. {(preview?.bookingCount ?? 0) > 0 ? `${preview?.bookingCount} booking baru akan dibuatkan invoice tambahan tanpa mengubah invoice lunas.` : "Tidak ada booking baru untuk invoice tambahan."}</>
                 : <><strong>Invoice sudah ada:</strong> {existingInvoice.invoiceNumber} (Belum Lunas). {(preview?.bookingCount ?? 0) > 0 ? `${preview?.bookingCount} booking baru akan ditambahkan ke invoice ini.` : "Tidak ada booking baru."}</>
               }
             </div>
@@ -1042,7 +1038,7 @@ function GenerateInvoiceDialog({
               ? "Memproses..."
               : existingInvoice && existingInvoice.status !== "paid"
                 ? "Tambah ke Invoice Existing"
-                : "Generate Invoice"}
+                : existingInvoice?.status === "paid" ? "Generate Invoice Tambahan" : "Generate Invoice"}
           </Button>
         </div>
       </div>
