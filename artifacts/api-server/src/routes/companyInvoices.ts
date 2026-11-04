@@ -538,13 +538,15 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
     const withholding = summarizeWithholdingTax(bookingList, tax);
     const { pphRate, pphAmount, netAmount } = withholding;
 
-    // Check if invoice already exists for this company + period
-    const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
+    // Multiple invoices can exist in the same month. Preview must match
+    // the generate endpoint: append to an open invoice, otherwise create a new one.
+    const invoicesForPeriod = await db.select().from(companyInvoicesTable).where(
       and(
         eq(companyInvoicesTable.companyCustomerId, compId),
         eq(companyInvoicesTable.periodMonth, String(periodMonth))
       )
-    ).limit(1);
+    ).orderBy(desc(companyInvoicesTable.createdAt), desc(companyInvoicesTable.id));
+    const existingInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid") ?? invoicesForPeriod[0];
 
     res.json({
       companyName: company.companyName ?? company.name,
