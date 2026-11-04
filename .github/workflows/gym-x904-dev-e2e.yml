@@ -35,6 +35,10 @@ jobs:
       - run: pnpm --dir . run typecheck:libs
       - name: Run isolated X904 E2E on CST-DEV (Direct Execution)
         run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-e2e.ts
+      - name: Run paid membership transaction with rollback on CST-DEV
+        run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-paid-dev-rollback.ts
+      - name: Exercise isolated multipart HTTP and BizPortal DEV guard
+        run: pnpm dlx tsx@4.23.15 artifacts/api-server/src/scripts/test-x904-multipart-sync-dev.ts
       - name: Upload Runtime Error Log if Failed
         if: failure()
         uses: actions/upload-artifact@v4
