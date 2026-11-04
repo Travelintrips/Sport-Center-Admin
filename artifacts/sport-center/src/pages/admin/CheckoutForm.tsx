@@ -479,7 +479,7 @@ export default function AdminCheckoutForm() {
     setMembershipResult("");
     try {
       const endpoint = memberAction === "new" ? "/api/memberships"
-        : "/api/memberships/" + memberId + (memberAction === "renew" ? (renewalStartOverride ? "/admin-renew" : "/renew") : "/checkin");
+        : "/api/memberships/" + memberId + (memberAction === "renew" ? (gymCanConfirm || renewalStartOverride ? "/admin-renew" : "/renew") : "/checkin");
       const payload = memberAction === "new"
         ? {name:isGuest ? guestName.trim() : selectedCustomer.name,
            phone:isGuest ? guestPhone.trim() : selectedCustomer.phone,
