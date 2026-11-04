@@ -896,7 +896,8 @@ function GenerateInvoiceDialog({
   };
 
   const monthOptions = getMonthOptions();
-  const canGenerate = !!companyId && !previewLoading && !previewError && (preview?.bookingCount ?? 0) > 0;
+  const invoiceLimitReached = Number((preview as any)?.invoiceCount ?? 0) >= 2;
+  const canGenerate = !!companyId && !previewLoading && !previewError && !invoiceLimitReached && (preview?.bookingCount ?? 0) > 0;
 
   return (
     <DialogContent className="max-w-md">
@@ -940,6 +941,12 @@ function GenerateInvoiceDialog({
                 : <><strong>Invoice sudah ada:</strong> {existingInvoice.invoiceNumber} (Belum Lunas). {(preview?.bookingCount ?? 0) > 0 ? `${preview?.bookingCount} booking baru akan ditambahkan ke invoice ini.` : "Tidak ada booking baru."}</>
               }
             </div>
+          </div>
+        )}
+
+        {companyId && !previewLoading && invoiceLimitReached && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Maksimal 2 invoice per perusahaan per periode telah tercapai. Tidak dapat membuat invoice ketiga.
           </div>
         )}
 
