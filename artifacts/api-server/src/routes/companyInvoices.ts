@@ -375,7 +375,7 @@ function mapInvoice(
   };
 }
 
-async function buildAndInsertItems(invoiceId: number, companyId: number, bookings: any[], facilityMap: Record<number, string>) {
+async function buildAndInsertItems(invoiceId: number, companyId: number, bookings: any[], facilityMap: Record<number, string>, executor: Pick<typeof db, "update" | "insert"> = db) {
   const normalizedBookings = [];
   for (const booking of bookings) {
     const withholding = calculateBookingWithholdingTax(booking);
@@ -398,7 +398,7 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
         Number(booking.netAmount ?? 0) !== normalizedBooking.netAmount
       )
     ) {
-      await db.update(bookingsTable)
+      await executor.update(bookingsTable)
         .set({
           pphRate: normalizedBooking.pphRate == null ? null : String(normalizedBooking.pphRate),
           pphAmount: normalizedBooking.pphAmount == null ? null : String(normalizedBooking.pphAmount),
@@ -434,7 +434,7 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
   if (items.length > 0) {
     // The same invoice-generation request can be retried or race with another
     // request. Keep one line per (invoice, booking) and make retries idempotent.
-    await db.insert(companyInvoiceItemsTable)
+    await executor.insert(companyInvoiceItemsTable)
       .values(items)
       .onConflictDoNothing();
   }
@@ -712,7 +712,9 @@ async function handleGenerateInvoice(req: any, res: any) {
     const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
     const { pphRate, pphAmount, netAmount } = summarizeWithholdingTax(unbilledBookings, tax);
 
-    const [inv] = await db.insert(companyInvoicesTable).values({
+    const { inv, updated, invoiceNumber } = await db.transaction(async (tx) => {
+    // The database trigger serializes competing inserts and rejects invoice #3.
+    const [inv] = await tx.insert(companyInvoicesTable).values({
       invoiceNumber: "TEMP",
       companyCustomerId,
       periodMonth,
@@ -733,20 +735,23 @@ async function handleGenerateInvoice(req: any, res: any) {
     }).returning();
 
     const invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
-    const [updated] = await db.update(companyInvoicesTable)
+    const [updated] = await tx.update(companyInvoicesTable)
       .set({ invoiceNumber })
       .where(eq(companyInvoicesTable.id, inv.id))
       .returning();
 
     // Insert line items
-    await buildAndInsertItems(inv.id, companyCustomerId, unbilledBookings, facilityMap);
+    await buildAndInsertItems(inv.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
     // Mark bookings as billed
     for (const b of unbilledBookings) {
-      await db.update(bookingsTable)
+      await tx.update(bookingsTable)
         .set({ billingStatus: "billed", companyInvoiceId: inv.id })
         .where(eq(bookingsTable.id, b.id));
     }
+
+    return { inv, updated, invoiceNumber };
+    });
 
     await logAudit({
       ...userInfo,
