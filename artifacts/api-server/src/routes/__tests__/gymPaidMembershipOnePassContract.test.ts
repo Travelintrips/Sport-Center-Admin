@@ -193,7 +193,7 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(renew).toContain('GYM_RENEWAL_PAYMENT_ALREADY_PENDING');
     expect(renew).toContain('inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"])');
     expect(renew).toContain('tx.insert(membershipPaymentsTable)');
-    expect(renew).toContain('ensureMembershipPaymentBooking(\n        existing, payment, tx, orderNumber,');
+    expect(renew).toMatch(/ensureMembershipPaymentBooking\(\s*existing, payment, tx, orderNumber,/);
     expect(renew.indexOf("FOR UPDATE")).toBeLessThan(renew.indexOf("tx.insert(membershipPaymentsTable)"));
     expect(renew.indexOf("GYM_RENEWAL_PAYMENT_ALREADY_PENDING")).toBeLessThan(
       renew.indexOf("tx.insert(membershipPaymentsTable)"));
