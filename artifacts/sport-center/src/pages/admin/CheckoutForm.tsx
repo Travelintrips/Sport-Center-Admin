@@ -1328,7 +1328,7 @@ export default function AdminCheckoutForm() {
             {isMembership && <div className="rounded-lg border p-4 space-y-3">
               <p className="font-semibold">Pengelolaan Member Gym</p>
               <Label>Tindakan Membership</Label>
-              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setMemberId("");setMembershipResult("");setMembershipPaymentTarget(null);setMembershipPaymentDone(false);setMembershipPaymentFile(null);}}>
+              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setMemberId("");setRenewalStartOverride("");setMembershipResult("");setMembershipPaymentTarget(null);setMembershipPaymentDone(false);setMembershipPaymentFile(null);}}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">Daftar Member Baru</SelectItem>
@@ -1421,7 +1421,7 @@ export default function AdminCheckoutForm() {
                 </div>}
               </> : <>
                 <Label>Cari Member Gym</Label>
-                <Select value={memberId} onValueChange={setMemberId}>
+                <Select value={memberId} onValueChange={(id)=>{setMemberId(id);setRenewalStartOverride("");}}>
                   <SelectTrigger><SelectValue placeholder="Pilih member berdasarkan nama / telepon" /></SelectTrigger>
                   <SelectContent position="popper" side="bottom" sideOffset={4} className="max-h-[min(360px,60vh)] overflow-y-auto">
                     <div className="sticky top-0 z-20 bg-popover px-2 py-2" onKeyDown={e => e.stopPropagation()}>
