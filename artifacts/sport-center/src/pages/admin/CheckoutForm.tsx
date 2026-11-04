@@ -1027,7 +1027,8 @@ export default function AdminCheckoutForm() {
 
             {isGuest && <div className="space-y-3 rounded-lg border p-3">
               <Label htmlFor="guestName">Nama Pemesan Baru *</Label>
-              <Input id="guestName" value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
+              <Input id="guestName" value={isMembership && memberAction === "new" && membershipX904Name ? membershipX904Name : guestName} onChange={(e) => setGuestName(e.target.value)} readOnly={isMembership && memberAction === "new" && Boolean(membershipX904Name)} placeholder={isMembership && memberAction === "new" ? "Pilih nama / PIN mesin X904 di bawah agar nama terisi otomatis" : undefined} required />
+              {isMembership && memberAction === "new" && <p className="text-xs text-muted-foreground">Nama mengikuti identitas pada mesin X904. Pilih PIN di bagian Pengelolaan Member Gym; untuk mengganti nama, gunakan tombol Ganti pada PIN.</p>}
               <Label htmlFor="guestPhone">Nomor WhatsApp *</Label>
               <Input id="guestPhone" type="tel" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} required />
               <Label htmlFor="guestEmail">{isMembership ? "Email *" : "Email (opsional)"}</Label>
@@ -1351,6 +1352,7 @@ export default function AdminCheckoutForm() {
                           onClick={()=>{
                             setMembershipX904Pin(item.pin);
                             setMembershipX904Name(item.name);
+                            if (isGuest && isMembership && memberAction === "new") setGuestName(item.name);
                             setMembershipX904SelectedUid(item.uid);
                             setMembershipX904IdentityConfirmed(false);
                             setMembershipX904Search(item.name + " · PIN " + item.pin);
