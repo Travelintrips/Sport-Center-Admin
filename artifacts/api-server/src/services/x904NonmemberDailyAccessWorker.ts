@@ -261,11 +261,18 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       }
 
       if (currentGroup === targetGroup) {
-        // Never attribute an existing Group 1 to this payment.
+        // A confirmed payment does not prove that an existing Group 1 was
+        // activated by this grant. Require a matching completed ACTIVATE ACK
+        // and a newer device snapshot before assigning the 12-hour clock.
         if (shouldBeActive) {
-          await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+          const reviewed = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
             SET access_state='review_required'
-            WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+            WHERE access_id=${Number(a.access_id)} AND verification_state='verified'
+              AND access_state <> 'review_required'
+            RETURNING access_id`);
+          if (reviewed.rows.length) console.warn("[x904-nonmember] unattributed group1 requires review", JSON.stringify({
+            accessId: Number(a.access_id), pin, reason: "GROUP1_WITHOUT_MATCHING_ACTIVATION_ACK",
+          }));
           return;
         }
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
