@@ -265,7 +265,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           return;
         }
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-          SET access_state=${unpaidVis006 ? 'pending' : 'expired'}
+          SET access_state='expired'
           WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
         return;
       }
