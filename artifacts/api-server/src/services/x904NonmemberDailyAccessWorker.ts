@@ -64,7 +64,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
     WHERE a.verification_state='verified'
       AND ((a.payment_id IS NOT NULL AND a.confirmed_at IS NOT NULL AND a.expires_at IS NOT NULL
-        AND (a.access_state IN ('pending','active','expired') OR p.status::text IN ('cancelled','rejected','refunded')))
+        AND (a.access_state IN ('pending','active') OR (a.access_state <> 'expired' AND p.status::text IN ('cancelled','rejected','refunded'))))
         OR (a.payment_id IS NULL AND a.access_state IN ('pending','review_required')
           AND a.identity_type='card' AND a.identity_label='VIS006' AND a.user_pin='15'
           AND ${testPin ?? null}::text='15'))
