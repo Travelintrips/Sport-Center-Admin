@@ -291,7 +291,7 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain("Akses X904 tetap memerlukan ACK/read-back perangkat");
     expect(ui).toContain("setLocation(\"/admin/bookings\")");
     expect(ui).toContain("showGymBookingCompletion(membershipPaymentTarget.membershipId");
-    expect(ui).toContain("payment.status===\"confirmed\"");
+    expect(ui).toContain('p.status==="confirmed"');
     expect(ui).toContain("setCompletedGymBooking(completed)");
   });
 
