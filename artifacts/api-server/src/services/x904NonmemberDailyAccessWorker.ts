@@ -228,6 +228,9 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         String(u.name ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") ===
           String(a.verified_name).trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") &&
         Number(u.role) === 0 && u.enabled === true);
+      // The authenticated inventory has no UID field; only the physical
+      // executor can attest UID. Never accept a successful group transition
+      // without its expected deviceUid in the completed ACK.
       if (entries.length !== 1) {
         if (targetGroup === 2) await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
