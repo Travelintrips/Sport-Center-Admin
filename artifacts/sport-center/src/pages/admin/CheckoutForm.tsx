@@ -22,6 +22,26 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft, RefreshCw, CalendarDays, XCircle, ChevronsUpDown, Check } from "lucide-react";
 import { getToken, getCurrentRole } from "@/lib/auth";
 
+type CompletedGymBooking = {
+  action: "new" | "renew";
+  membershipId: number;
+  paymentId: number;
+  name: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  paymentMethod: string;
+  paymentDate: string;
+};
+
+function formatGymCompletionDay(value: string): string {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return value || "—";
+  const parsed = new Date(value + "T00:00:00Z");
+  return new Intl.DateTimeFormat("id-ID", {
+    timeZone: "UTC", day: "numeric", month: "long", year: "numeric",
+  }).format(parsed);
+}
+
 function gymMemberStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     active: "Aktif",
@@ -153,6 +173,7 @@ export default function AdminCheckoutForm() {
   const [membershipPaymentFile, setMembershipPaymentFile] = useState<File | null>(null);
   const [membershipPaymentBusy, setMembershipPaymentBusy] = useState(false);
   const [membershipPaymentDone, setMembershipPaymentDone] = useState(false);
+  const [completedGymBooking, setCompletedGymBooking] = useState<CompletedGymBooking | null>(null);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
@@ -409,6 +430,45 @@ export default function AdminCheckoutForm() {
   const unfinishedGymPayment = (currentGymPayments ?? []).find(p =>
     p.status === "pending_payment" || p.status === "waiting_confirmation");
 
+  async function showGymBookingCompletion(
+    membershipId: number,
+    paymentId: number,
+    action: "new" | "renew",
+    fallback: Omit<CompletedGymBooking, "membershipId" | "paymentId" | "action">,
+  ) {
+    // Show a completed state only after the backend has confirmed the payment.
+    // Hydrate the exact period and payment date from the saved transaction,
+    // rather than the pre-payment member dropdown (which may still show grace_period).
+    let completed: CompletedGymBooking = {membershipId,paymentId,action,...fallback};
+    try {
+      const headers={Authorization:`Bearer ${getToken() ?? ""}`};
+      const [memberResponse,paymentsResponse]=await Promise.all([
+        fetch(`/api/memberships/${membershipId}`,{headers}),
+        fetch(`/api/memberships/${membershipId}/payments`,{headers}),
+      ]);
+      if (memberResponse.ok && paymentsResponse.ok) {
+        const member=await memberResponse.json();
+        const payments=await paymentsResponse.json() as Array<{
+          id:number;status:string;periodStart:string;periodEnd:string;
+          amount:number;paymentDate?:string|null;paymentMethod?:string|null;
+        }>;
+        const payment=payments.find(p=>p.id===paymentId && p.status==="confirmed");
+        if (payment) {
+          completed={
+            membershipId,paymentId,action,
+            name:String(member.name || fallback.name),
+            periodStart:payment.periodStart,periodEnd:payment.periodEnd,
+            amount:Number(payment.amount),paymentDate:payment.paymentDate || fallback.paymentDate,
+            paymentMethod:payment.paymentMethod || fallback.paymentMethod,
+          };
+        }
+      }
+    } catch {
+      // The confirmation response already succeeded; summary fetch is best effort.
+    }
+    setCompletedGymBooking(completed);
+  }
+
   async function retryGymAdminConfirmation(membershipId:number,paymentId:number) {
     if(!gymCanConfirm) return;
     setMembershipPaymentBusy(true);
@@ -420,6 +480,13 @@ export default function AdminCheckoutForm() {
       });
       const data=await response.json();
       if(!response.ok)throw Error(data.error || "Pembayaran belum dapat diselesaikan");
+      await showGymBookingCompletion(membershipId,paymentId,"renew",{
+        name:membershipPaymentTarget?.name || matchedMember?.name || "Member",
+        periodStart:membershipPaymentTarget?.periodStart || unfinishedGymPayment?.periodStart || "",
+        periodEnd:membershipPaymentTarget?.periodEnd || unfinishedGymPayment?.periodEnd || "",
+        amount:membershipPaymentTarget?.amount || Number(unfinishedGymPayment?.amount || 0),
+        paymentMethod:membershipPaymentMethod,paymentDate:membershipPaymentDate,
+      });
       setMembershipPaymentDone(true);
       setMembershipProofUploaded(true);
       setMembershipResult("Pembayaran sudah terkonfirmasi. Perpanjangan membership selesai.");
@@ -479,6 +546,12 @@ export default function AdminCheckoutForm() {
         });
         const result = await response.json();
         if(!response.ok) throw Error(result.error || "Pendaftaran dan pembayaran gagal");
+        await showGymBookingCompletion(Number(result.membershipId),Number(result.paymentId),"new",{
+          name:isGuest ? guestName.trim() : String(selectedCustomer?.name ?? "Member"),
+          periodStart:selectedDate,periodEnd:"",
+          amount:Number(memberMonths)*300000,
+          paymentMethod:membershipPaymentMethod,paymentDate:membershipPaymentDate,
+        });
         setMembershipPaymentDone(true);
         setMembershipPaymentFile(null);
         setMembershipResult(`Customer #${result.customerId} · Membership #${result.membershipId} · Pembayaran #${result.paymentId} terkonfirmasi. Akses X904 menunggu ACK perangkat.`);
@@ -567,6 +640,15 @@ export default function AdminCheckoutForm() {
       setMembershipPaymentFile(null);
       await refreshGymPayments();
       if (result.paymentStatus === "confirmed") {
+        await showGymBookingCompletion(membershipPaymentTarget.membershipId,Number(result.paymentId),
+          membershipPaymentTarget.action,{
+            name:membershipPaymentTarget.name,
+            periodStart:membershipPaymentTarget.periodStart,
+            periodEnd:membershipPaymentTarget.periodEnd,
+            amount:membershipPaymentTarget.amount,
+            paymentMethod:membershipPaymentMethod,
+            paymentDate:membershipPaymentDate,
+          });
         setMembershipPaymentDone(true);
         setMembershipResult(membershipPaymentTarget.action === "renew"
           ? "Pembayaran terkonfirmasi. Perpanjangan membership selesai."
@@ -976,6 +1058,55 @@ export default function AdminCheckoutForm() {
         </div>
       </div>
 
+      {isMembership && membershipPaymentDone && completedGymBooking ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ringkasan Membership Gym</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div role="status" className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-green-800 font-semibold">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+              {completedGymBooking.action === "renew"
+                ? "Pembayaran terkonfirmasi. Perpanjangan membership selesai."
+                : "Pembayaran terkonfirmasi. Pendaftaran membership selesai."}
+            </div>
+            <div className="rounded-xl border bg-muted/20 px-4 py-2">
+              {([
+                ["Member",completedGymBooking.name],
+                ["Membership",`#${completedGymBooking.membershipId}`],
+                ["Status pembayaran","Lunas"],
+                ["Status membership","Aktif Berbayar"],
+                ["Periode baru",`${completedGymBooking.periodStart} – ${completedGymBooking.periodEnd || "Lihat Riwayat Membership"}`],
+                ["Tagihan",formatRupiah(completedGymBooking.amount)],
+                ["Metode pembayaran",completedGymBooking.paymentMethod === "transfer" ? "Transfer Bank" : "QRIS Mandiri"],
+                ["Tanggal pembayaran",formatGymCompletionDay(completedGymBooking.paymentDate)],
+              ] as Array<[string,string]>).map(([label,value])=>(
+                <div key={label} className="flex justify-between gap-4 border-b last:border-b-0 py-2 text-sm">
+                  <span className="text-muted-foreground">{label}</span>
+                  <strong className="text-right">{value}</strong>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-4 space-y-2">
+              <p className="font-semibold">{completedGymBooking.action === "renew" ? "Pembayaran Perpanjangan Membership" : "Pembayaran Pendaftaran Membership"}</p>
+              <p className="text-sm text-muted-foreground">{completedGymBooking.name} · {completedGymBooking.periodStart} s/d {completedGymBooking.periodEnd}</p>
+              <div className="flex justify-between gap-4 text-sm"><span>Tagihan</span><strong>{formatRupiah(completedGymBooking.amount)}</strong></div>
+              <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800">
+                {completedGymBooking.action === "renew" ? "Perpanjangan dan pembayaran sudah selesai." : "Pendaftaran dan pembayaran sudah selesai."}
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">Akses X904 tetap memerlukan ACK/read-back perangkat sebelum dinyatakan aktif.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button type="button" variant="outline" className="w-full" onClick={()=>setLocation("/admin/memberships")}>
+                Lihat Riwayat Membership & Pembayaran
+              </Button>
+              <Button type="button" className="w-full" onClick={()=>setLocation("/admin/bookings")}>
+                Kembali ke Pemesanan
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <form onSubmit={handleSubmit}>
         <Card>
           <CardHeader>
@@ -1647,6 +1778,7 @@ export default function AdminCheckoutForm() {
           </CardFooter>
         </Card>
       </form>
+      )}
 
       <AlertDialog open={membershipConfirmOpen} onOpenChange={setMembershipConfirmOpen}>
         <AlertDialogContent>

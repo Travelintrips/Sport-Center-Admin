@@ -280,6 +280,21 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(routeFile).toContain('reportGymPayment(result.membership,result.payment,result.booking,"confirmed")');
   });
 
+  it("shows a concise post-confirmation Gym receipt and hides form fields", () => {
+    expect(ui).toContain("isMembership && membershipPaymentDone && completedGymBooking ? (");
+    expect(ui).toContain("Ringkasan Membership Gym");
+    expect(ui).toContain("Status pembayaran");
+    expect(ui).toContain("Aktif Berbayar");
+    expect(ui).toContain("Pembayaran terkonfirmasi. Perpanjangan membership selesai.");
+    expect(ui).toContain("Lihat Riwayat Membership & Pembayaran");
+    expect(ui).toContain("Kembali ke Pemesanan");
+    expect(ui).toContain("Akses X904 tetap memerlukan ACK/read-back perangkat");
+    expect(ui).toContain("setLocation(\"/admin/bookings\")");
+    expect(ui).toContain("showGymBookingCompletion(membershipPaymentTarget.membershipId");
+    expect(ui).toContain('p.status==="confirmed"');
+    expect(ui).toContain("setCompletedGymBooking(completed)");
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
