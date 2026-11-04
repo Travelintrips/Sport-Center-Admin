@@ -859,24 +859,6 @@ router.get("/memberships/:id/payments", adminMiddleware, async (req, res) => {
   }
 });
 
-router.get("/memberships/:id", adminMiddleware, async (req, res) => {
-  try {
-    const id = parseInt(String(req.params.id));
-    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
-    if (!membership) { res.status(404).json({ error: "Not found" }); return; }
-    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
-  } catch (err) {
-    req.log.error({ err }, "Get membership error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-
-// Admin-only, single-request registration for an already-paid Gym member.
-// All customer, membership, payment, booking and X904 entitlement writes are
-// transactional. An uploaded proof is never treated as payment verification.
-// Admin-only, read-only inventory search for the paid Gym membership form.
-// Return candidates, but never decide ownership or create an entitlement here.
 router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, res) => {
   try {
     const role = String((req as any).user?.role ?? "");
@@ -923,6 +905,25 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
   }
 });
 
+
+router.get("/memberships/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    if (!membership) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
+  } catch (err) {
+    req.log.error({ err }, "Get membership error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Admin-only, single-request registration for an already-paid Gym member.
+// All customer, membership, payment, booking and X904 entitlement writes are
+// transactional. An uploaded proof is never treated as payment verification.
+// Admin-only, read-only inventory search for the paid Gym membership form.
+// Return candidates, but never decide ownership or create an entitlement here.
 router.post("/memberships/admin-register-paid", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
   try {
     const role = String((req as any).user?.role ?? "");
