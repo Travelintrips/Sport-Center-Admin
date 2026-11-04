@@ -1629,15 +1629,24 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         const [updatedMembership] = await tx.update(gymMembershipsTable).set(data)
           .where(eq(gymMembershipsTable.id, id)).returning();
         if (!updatedMembership || !paymentBooking) throw new Error("MEMBERSHIP_ATOMIC_CONFIRM_FAILED");
-        // Durable membership-to-X904 receipt in the SAME payment transaction.
-        // Do not enqueue physical commands or touch other mapped users here.
-        await tx.execute(sql`
-          INSERT INTO sport_center.x904_automatic_entitlement_events
-            (membership_id,payment_id,reason,event_key)
-          VALUES (${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
-            ${x904PaymentConfirmedEventKey(updatedPayment.id)})
-          ON CONFLICT (event_key) DO NOTHING
+        // A missing X904 mapping must not roll back a legitimate financial confirmation.
+        // Preserve the existing verified-only RLS policy and never issue device commands here.
+        const mappedX904 = await tx.execute(sql`
+          SELECT 1 FROM sport_center.gym_x904_member_mapping
+          WHERE membership_id = ${id}
+            AND device_serial = 'TDBD234200545'
+            AND status = 'verified'
+          LIMIT 1
         `);
+        if (mappedX904.rows.length > 0) {
+          await tx.execute(sql`
+            INSERT INTO sport_center.x904_automatic_entitlement_events
+              (membership_id,payment_id,reason,event_key)
+            VALUES (${id},${updatedPayment.id},'PAYMENT_CONFIRMED',
+              ${x904PaymentConfirmedEventKey(updatedPayment.id)})
+            ON CONFLICT (event_key) DO NOTHING
+          `);
+        }
         return { membership: updatedMembership, payment: updatedPayment, booking: paymentBooking, confirmedAt };
       });
       membership = result.membership;
