@@ -30,6 +30,46 @@ function jakartaDateOnly(): string {
   }).format(new Date());
 }
 
+/**
+ * Mirror resolveGymRenewalStart from the API.
+ * A member whose active membership is still inside the 7-day grace window
+ * continues from the old end date; a lapsed member starts TODAY in Jakarta.
+ * Calendar arithmetic uses UTC to avoid browser timezone rollover.
+ * These are ISO calendar dates, not localized display strings.
+ */
+function previewGymRenewalPeriod(
+  status: string,
+  previousEnd: string,
+  today: string,
+  months: number,
+  enabled: boolean,
+): {start: string; end: string} {
+  const validDate = (value: string) => {
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+    const d = new Date(value + "T00:00:00Z");
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+  };
+  if (!enabled || !validDate(previousEnd) || !validDate(today) ||
+      !Number.isInteger(months) || months < 1 || months > 12) {
+    return {start: "", end: ""};
+  }
+  const endMs = Date.parse(previousEnd + "T00:00:00Z");
+  const todayMs = Date.parse(today + "T00:00:00Z");
+  const inGrace = status === "active" && todayMs <= endMs + 7 * 86400000;
+  const startDate = inGrace
+    ? new Date(endMs + 86400000).toISOString().slice(0, 10)
+    : today;
+  const start = new Date(startDate + "T00:00:00Z");
+  const targetMonthIndex = start.getUTCMonth() + months;
+  const targetYear = start.getUTCFullYear() + Math.floor(targetMonthIndex / 12);
+  const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const targetDay = Math.min(start.getUTCDate(), lastDay);
+  const periodEnd = new Date(Date.UTC(targetYear, targetMonth, targetDay))
+    .toISOString().slice(0, 10);
+  return {start: startDate, end: periodEnd};
+}
+
 export default function AdminCheckoutForm() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -844,22 +884,13 @@ export default function AdminCheckoutForm() {
     );
   }
 
-  const renewalPeriodPreview = (() => {
-    if (memberAction !== "renew" || !matchedMember?.endDate) return { start: "", end: "" };
-    const currentEnd = new Date(String(matchedMember.endDate) + "T00:00:00");
-    if (Number.isNaN(currentEnd.getTime())) return { start: "", end: "" };
-    const start = new Date(currentEnd);
-    start.setDate(start.getDate() + 1);
-    const months = Number(memberMonths || 1);
-    const targetYear = start.getFullYear() + Math.floor((start.getMonth() + months) / 12);
-    const targetMonth = (start.getMonth() + months) % 12;
-    const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
-    const end = new Date(targetYear, targetMonth, Math.min(start.getDate(), lastDay));
-    return {
-      start: start.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"}),
-      end: end.toLocaleDateString("id-ID", {day:"2-digit", month:"short", year:"numeric"}),
-    };
-  })();
+  const renewalPeriodPreview = previewGymRenewalPeriod(
+    matchedMember?.status ?? "",
+    matchedMember?.endDate ?? "",
+    jakartaDateOnly(),
+    Number(memberMonths || 1),
+    memberAction === "renew",
+  );
   const renewalStartDate = renewalPeriodPreview.start;
   const renewalEndDate = renewalPeriodPreview.end;
   const membershipCharge = 300000 * Number(memberMonths || 1);
