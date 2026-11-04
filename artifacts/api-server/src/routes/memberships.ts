@@ -1345,16 +1345,8 @@ async function handleMembershipRenewal(req: Request, res: Response) {
       }
       newStartDate = requestedStart;
     }
-    // Do not create a second pending renewal or a second financial booking.
-    const [unfinished] = await db.select({id:membershipPaymentsTable.id})
-      .from(membershipPaymentsTable)
-      .where(and(eq(membershipPaymentsTable.membershipId,id),
-        inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"])))
-      .limit(1);
-    if (unfinished) {
-      res.status(409).json({error:"Tagihan perpanjangan masih berjalan. Selesaikan pembayaran di Riwayat Membership sebelum membuat tagihan baru."});
-      return;
-    }
+    // The pending-payment test is repeated under the membership row lock below.
+    // This prevents concurrent double clicks creating separate invoices.
 
     const startD = new Date(`${newStartDate}T00:00:00Z`);
     const targetMonthIndex = startD.getUTCMonth() + months;
@@ -1365,16 +1357,32 @@ async function handleMembershipRenewal(req: Request, res: Response) {
     const newEndDate = new Date(Date.UTC(targetYear, targetMonth, targetDay)).toISOString().split("T")[0]!;
     const totalPrice = String(months * 300000);
 
-    const [payment] = await db.insert(membershipPaymentsTable).values({
-      membershipId: existing.id,
-      periodStart: newStartDate,
-      periodEnd: newEndDate,
-      months,
-      amount: totalPrice,
-      status: "pending_payment",
-    }).returning();
+    const orderNumber = await generateBookingOrderNumber();
+    const {payment, paymentBooking} = await db.transaction(async (tx) => {
+      // Serialize per membership, using the same row-lock strategy as check-in.
+      await tx.execute(sql`SELECT id FROM sport_center.sport_memberships
+        WHERE id = ${existing.id} FOR UPDATE`);
+      const [unfinished] = await tx.select({id:membershipPaymentsTable.id})
+        .from(membershipPaymentsTable)
+        .where(and(eq(membershipPaymentsTable.membershipId,existing.id),
+          inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"])))
+        .limit(1);
+      if (unfinished) throw new Error("GYM_RENEWAL_PAYMENT_ALREADY_PENDING");
 
-    const paymentBooking = await ensureMembershipPaymentBooking(existing, payment!);
+      const [payment] = await tx.insert(membershipPaymentsTable).values({
+        membershipId: existing.id,
+        periodStart: newStartDate,
+        periodEnd: newEndDate,
+        months,
+        amount: totalPrice,
+        status: "pending_payment",
+      }).returning();
+      if (!payment) throw new Error("GYM_RENEWAL_PAYMENT_INSERT_FAILED");
+      const paymentBooking = await ensureMembershipPaymentBooking(
+        existing, payment, tx, orderNumber,
+      );
+      return {payment, paymentBooking};
+    });
     syncBookingRecordToBizportal(paymentBooking).catch((err) =>
       req.log.error({ err }, "[membership] Gagal sync booking renewal ke Bizportal")
     );
@@ -1392,6 +1400,12 @@ async function handleMembershipRenewal(req: Request, res: Response) {
       paymentProofToken: createMembershipProofToken(existing.id, payment!.id),
     });
   } catch (err) {
+    if (err instanceof Error && err.message === "GYM_RENEWAL_PAYMENT_ALREADY_PENDING") {
+      res.status(409).json({
+        error:"Tagihan perpanjangan masih berjalan. Selesaikan pembayaran yang ada; jangan membuat tagihan baru.",
+      });
+      return;
+    }
     req.log.error({ err }, "Renew membership error");
     res.status(500).json({ error: "Internal server error" });
   }
