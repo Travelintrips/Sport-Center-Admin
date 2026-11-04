@@ -119,6 +119,24 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('periodEnd: String(data.renewal?.periodEnd ?? renewalEndDate ?? "")');
   });
 
+  it("keeps payment date only after renewal invoice creation while allowing a custom start date", () => {
+    const renewRoute = routeFile.split('async function handleMembershipRenewal(')[1]
+      ?.split('// Preserve the original public renewal contract.')[0] ?? "";
+    expect(renewRoute).toContain('const requestedStart = String(req.body?.startDate ?? "").trim()');
+    expect(renewRoute).toContain('Tanggal mulai khusus memerlukan akses admin');
+    expect(renewRoute).toContain('requestedStart <= existing.endDate');
+    expect(renewRoute).toContain('const earliest = new Date(todayMs - 30*86400000)');
+    expect(renewRoute).toContain('Tagihan perpanjangan masih berjalan');
+    expect(renewRoute).toContain('periodStart: newStartDate');
+    expect(routeFile).toContain('router.post("/memberships/:id/admin-renew", adminMiddleware, handleMembershipRenewal)');
+    expect(routeFile).toContain('router.post("/memberships/:id/renew", handleMembershipRenewal)');
+    expect(ui).toContain('Tanggal mulai membership');
+    expect(ui).toContain('setRenewalStartOverride');
+    expect(ui).toContain('...(renewalStartOverride ? { startDate: renewalStartOverride } : {})');
+    expect(ui).toContain('Tanggal pembayaran diisi setelah tagihan dibuat.');
+    expect(ui).toContain('id="checkout-membership-payment-date"');
+  });
+
   it("offers a single action for an already-paid Gym member", () => {
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
     expect(ui).toContain('/api/memberships/admin-register-paid');
