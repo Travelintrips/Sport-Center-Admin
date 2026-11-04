@@ -1309,7 +1309,7 @@ async function handleMembershipRenewal(req: Request, res: Response) {
       const parsedStart = new Date(requestedStart + "T00:00:00Z");
       const todayMs = Date.parse(todayStr + "T00:00:00Z");
       const inGrace = existing.status === "active" && isWithinGymGracePeriod(existing.endDate, todayStr);
-      const validDay = /^\\d{4}-\\d{2}-\\d{2}$/.test(requestedStart) &&
+      const validDay = /^\d{4}-\d{2}-\d{2}$/.test(requestedStart) &&
         !Number.isNaN(parsedStart.getTime()) && parsedStart.toISOString().slice(0, 10) === requestedStart;
       const earliest = new Date(todayMs - 30*86400000).toISOString().slice(0, 10);
       if (inGrace || !validDay || requestedStart < earliest || requestedStart > todayStr ||

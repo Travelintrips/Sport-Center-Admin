@@ -119,6 +119,24 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('periodEnd: String(data.renewal?.periodEnd ?? renewalEndDate ?? "")');
   });
 
+  it("accepts a valid custom renewal ISO date and rejects malformed inputs", () => {
+    const renewRoute = routeFile.split('async function handleMembershipRenewal(')[1]
+      ?.split('// Preserve the original public renewal contract.')[0] ?? "";
+    expect(renewRoute).toContain('const validDay = /^\\d{4}-\\d{2}-\\d{2}$/.test(requestedStart)'.replace(/\\\\/g, "\\"));
+    expect(renewRoute).not.toContain('const validDay = /^\\\\d{4}-\\\\d{2}-\\\\d{2}$/.test(requestedStart)');
+    const validISO = /^\d{4}-\d{2}-\d{2}$/;
+    const calendarDate = (value: string) => validISO.test(value) &&
+      !Number.isNaN(Date.parse(value + "T00:00:00Z")) &&
+      new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
+    expect(calendarDate("2026-11-03")).toBe(true);
+    expect(calendarDate("2026-02-30")).toBe(false);
+    expect(calendarDate("03/11/2026")).toBe(false);
+    const today = "2026-11-04", priorEnd = "2026-08-27";
+    const earliest = new Date(Date.parse(today + "T00:00:00Z") - 30 * 86400000).toISOString().slice(0, 10);
+    expect("2026-11-03" > priorEnd && "2026-11-03" >= earliest && "2026-11-03" <= today).toBe(true);
+    expect("2026-10-01" < earliest).toBe(true);
+  });
+
   it("keeps payment date only after renewal invoice creation while allowing a custom start date", () => {
     const renewRoute = routeFile.split('async function handleMembershipRenewal(')[1]
       ?.split('// Preserve the original public renewal contract.')[0] ?? "";
