@@ -889,7 +889,7 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
       res.json({ candidates: [] });
       return;
     }
-    // Parameterized literal substring search avoids fragile LIKE ESCAPE syntax.
+    // Parameterized literal substring search is safe for wildcard characters.
     const candidates = await db.execute(sql`
       SELECT i.user_pin, i.device_uid, i.display_name,
              m.membership_id AS mapped_membership_id,
