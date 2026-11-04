@@ -600,12 +600,15 @@ async function handleGenerateInvoice(req: any, res: any) {
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
 
     // Check for existing invoice
-    const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
+    const invoicesForPeriod = await db.select().from(companyInvoicesTable).where(
       and(
         eq(companyInvoicesTable.companyCustomerId, companyCustomerId),
         eq(companyInvoicesTable.periodMonth, periodMonth)
       )
-    ).limit(1);
+    ).orderBy(desc(companyInvoicesTable.createdAt), desc(companyInvoicesTable.id));
+    // Prefer an open invoice for aggregation. Paid invoices must never be modified.
+    const openInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid");
+    const existingInvoice = openInvoice ?? invoicesForPeriod[0];
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
