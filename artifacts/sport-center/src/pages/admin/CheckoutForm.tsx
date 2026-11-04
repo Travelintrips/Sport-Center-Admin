@@ -315,6 +315,7 @@ export default function AdminCheckoutForm() {
     (!isGymNonmember || (isHistoricalGymNonmember && !x904IdentityValue.trim()) ||
       (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
+    (multiPatterns.length === 0 || (!isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
     (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && selectedCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
   );
@@ -1151,7 +1152,7 @@ export default function AdminCheckoutForm() {
 
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
-              <Select value={bookingKind} onValueChange={setBookingKind}>
+              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); setMultiPatterns([]); setRepeatEnabled(false); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="personal">Personal / Umum</SelectItem>
@@ -1330,7 +1331,7 @@ export default function AdminCheckoutForm() {
               <div className="space-y-2">
                 <Label htmlFor="bookingDate">{isMembership ? "Tanggal Mulai Membership *" : "Tanggal Booking *"}</Label>
                 <Input id="bookingDate" type="date" value={bookingDay}
-                  onChange={(e) => { setBookingDay(e.target.value); setStartTime(""); }} required={bookingKind !== "membership"} />
+                  onChange={(e) => { setBookingDay(e.target.value); setStartTime(""); }} required={bookingKind !== "membership" && multiPatterns.length === 0} />
               </div>
               {!isMembership && !isWalkIn && <div className="space-y-2">
                 <Label htmlFor="duration">Durasi (jam) *</Label>
