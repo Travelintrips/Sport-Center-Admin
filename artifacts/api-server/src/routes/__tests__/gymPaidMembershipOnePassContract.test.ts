@@ -75,6 +75,14 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('membershipX904Name && !membershipX904Checking && !membershipX904Error');
   });
 
+  it("registers admin X904 candidate search before the dynamic membership ID route", () => {
+    const searchIndex = routeFile.indexOf('router.get("/memberships/admin-x904-candidates"');
+    const dynamicIndex = routeFile.indexOf('router.get("/memberships/:id"');
+    expect(searchIndex).toBeGreaterThan(-1);
+    expect(dynamicIndex).toBeGreaterThan(-1);
+    expect(searchIndex).toBeLessThan(dynamicIndex);
+  });
+
   it("searches X904 inventory as a literal substring without SQL LIKE ESCAPE", () => {
     const lookup = routeFile.split('router.get("/memberships/admin-x904-candidates"')[1]
       ?.split('router.post("/memberships/admin-register-paid"')[0] ?? "";
