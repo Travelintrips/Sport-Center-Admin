@@ -22,6 +22,21 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, ShoppingCart, CheckCircle2, ArrowLeft, RefreshCw, CalendarDays, XCircle, ChevronsUpDown, Check } from "lucide-react";
 import { getToken, getCurrentRole } from "@/lib/auth";
 
+function gymMemberStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    active: "Aktif",
+    grace_period: "Masa Tenggang",
+    pending_payment: "Menunggu Pembayaran",
+    waiting_confirmation: "Menunggu Konfirmasi Pembayaran",
+    confirmed: "Lunas",
+    expired: "Kedaluwarsa",
+    cancelled: "Dibatalkan",
+    review_required: "Perlu Verifikasi",
+    suspended: "Ditangguhkan",
+  };
+  return labels[status] ?? status.split("_").map(word => word ? word[0].toUpperCase() + word.slice(1) : "").join(" ");
+}
+
 function jakartaDateOnly(): string {
   // formatToParts keeps YYYY-MM-DD stable across browser/ICU locale variations.
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -1456,7 +1471,7 @@ export default function AdminCheckoutForm() {
                       <Input aria-label="Cari nama atau nomor telepon member Gym" placeholder="Cari nama / telepon member..." value={memberSearch} onChange={e => setMemberSearch(e.target.value)} onKeyDown={e => e.stopPropagation()} />
                     </div>
                     {members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.trim().toLowerCase()))).map(m =>
-                      <SelectItem key={m.id} value={String(m.id)}>{m.name} · {(m as any).displayPhone || m.phone} · {(m as any).displayStatus || m.status}</SelectItem>)}
+                      <SelectItem key={m.id} value={String(m.id)}>{m.name} · {(m as any).displayPhone || m.phone} · {gymMemberStatusLabel((m as any).displayStatus || m.status)}</SelectItem>)}
                     {members.length > 0 && !members.some(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.trim().toLowerCase()))) &&
                       <div className="px-3 py-2 text-sm text-muted-foreground">Member tidak ditemukan</div>}
                   </SelectContent>
@@ -1469,7 +1484,7 @@ export default function AdminCheckoutForm() {
                     </div>
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">Status</span>
-                      <strong>{matchedMember.status}</strong>
+                      <strong>{gymMemberStatusLabel((matchedMember as any).displayStatus || matchedMember.status)}</strong>
                     </div>
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">Berlaku hingga</span>
