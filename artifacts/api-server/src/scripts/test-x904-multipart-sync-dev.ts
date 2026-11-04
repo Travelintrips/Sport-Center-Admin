@@ -26,7 +26,7 @@ try{
   return fetch(url,{method:"POST",body:form});
  };
  const good=await send("image/png");
- if(good.status!==200 || !(await good.json()).accepted)throw Error("MULTIPART_IMAGE_REJECTED");
+ if(good.status!==200 || !(await good.json() as {accepted?:boolean}).accepted)throw Error("MULTIPART_IMAGE_REJECTED");
  const bad=await send("text/plain");
  if(bad.status!==400)throw Error("MULTIPART_TEXT_ACCEPTED");
  const missing=await send("image/png",false);
