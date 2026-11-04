@@ -890,7 +890,7 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
       return;
     }
     // Literal substring search: escape LIKE wildcard characters, not SQL.
-    const pattern = "%" + term.replace(/[\\%_]/g, "\\router.post("/memberships/admin-register-paid",") + "%";
+    const pattern = "%" + term.replace(/[\\%_]/g, (character) => "\\" + character) + "%";
     const candidates = await db.execute(sql`
       SELECT i.user_pin, i.device_uid, i.display_name,
              m.membership_id AS mapped_membership_id,
