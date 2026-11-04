@@ -1283,7 +1283,10 @@ router.post("/memberships", async (req, res) => {
 router.post("/memberships/:id/renew", async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const months = Math.max(1, parseInt(String(req.body?.months || 1)));
+    const months = Number(req.body?.months ?? 1);
+    if (!Number.isInteger(months) || ![1,2,3,6,12].includes(months)) {
+      res.status(400).json({error:"Durasi perpanjangan tidak valid"}); return;
+    }
 
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Membership tidak ditemukan" }); return; }
@@ -1294,7 +1297,37 @@ router.post("/memberships/:id/renew", async (req, res) => {
     // Renew every member from the prior expiry, including the seven-day grace.
     // Jakarta-local calendar date avoids a midnight UTC rollover on Hostinger.
     const todayStr = jakartaDateOnly();
-    const newStartDate = resolveGymRenewalStart(existing.status, existing.endDate, todayStr);
+    const defaultStart = resolveGymRenewalStart(existing.status, existing.endDate, todayStr);
+    const requestedStart = String(req.body?.startDate ?? "").trim();
+    let newStartDate = defaultStart;
+    if (requestedStart) {
+      // Custom dates are a privileged admin action; public renewals retain default policy.
+      const role = String((req as any).user?.role ?? "");
+      if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
+        res.status(403).json({error:"Tanggal mulai khusus memerlukan akses admin"}); return;
+      }
+      const parsedStart = new Date(requestedStart + "T00:00:00Z");
+      const todayMs = Date.parse(todayStr + "T00:00:00Z");
+      const inGrace = existing.status === "active" && isWithinGymGracePeriod(existing.endDate, todayStr);
+      const validDay = /^\\d{4}-\\d{2}-\\d{2}$/.test(requestedStart) &&
+        !Number.isNaN(parsedStart.getTime()) && parsedStart.toISOString().slice(0, 10) === requestedStart;
+      const earliest = new Date(todayMs - 30*86400000).toISOString().slice(0, 10);
+      if (inGrace || !validDay || requestedStart < earliest || requestedStart > todayStr ||
+          requestedStart <= existing.endDate) {
+        res.status(400).json({error:"Tanggal mulai harus setelah membership sebelumnya dan maksimal 30 hari sebelum hari ini"}); return;
+      }
+      newStartDate = requestedStart;
+    }
+    // Do not create a second pending renewal or a second financial booking.
+    const [unfinished] = await db.select({id:membershipPaymentsTable.id})
+      .from(membershipPaymentsTable)
+      .where(and(eq(membershipPaymentsTable.membershipId,id),
+        inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"])))
+      .limit(1);
+    if (unfinished) {
+      res.status(409).json({error:"Tagihan perpanjangan masih berjalan. Selesaikan pembayaran di Riwayat Membership sebelum membuat tagihan baru."});
+      return;
+    }
 
     const startD = new Date(`${newStartDate}T00:00:00Z`);
     const targetMonthIndex = startD.getUTCMonth() + months;
