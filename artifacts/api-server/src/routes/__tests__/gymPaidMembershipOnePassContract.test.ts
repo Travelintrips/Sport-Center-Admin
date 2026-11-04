@@ -20,7 +20,7 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(section).toContain("uploadedProofUrl = proofUrl");
     expect(section).toContain("registrationCommitted = true");
     expect(section).toContain("if (uploadedProofUrl && !registrationCommitted)");
-    expect(section).toContain("await deleteFromStorage(uploadedProofUrl)");
+    expect(section).toContain("await deleteUploadedProofStrict(uploadedProofUrl)");
   });
 
   it("creates customer, membership and one payment in a single transaction", () => {
