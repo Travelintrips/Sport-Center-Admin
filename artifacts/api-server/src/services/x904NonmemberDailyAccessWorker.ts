@@ -64,6 +64,44 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
 
+  // Inventory reconciliation is read-only unless a PIN has an independently
+  // verified nonmember grant. An absent member mapping is NOT proof of nonmembership.
+  // In particular, do not enqueue commands for legacy PINs based on Group 1 alone.
+  const inventory = await store.execute(sql`SELECT observed_at,user_count,users
+    FROM sport_center.gym_x904_access_snapshots
+    WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
+  if (inventory.rows.length === 1) {
+    const snapshot = inventory.rows[0] as any;
+    const observed = new Date(String(snapshot.observed_at));
+    const users = Array.isArray(snapshot.users) ? snapshot.users : [];
+    if (Number.isFinite(observed.getTime()) &&
+        now.getTime() >= observed.getTime() &&
+        now.getTime() - observed.getTime() <= FRESH_SNAPSHOT_MS &&
+        users.length === Number(snapshot.user_count)) {
+      const mappings = await store.execute(sql`SELECT user_pin
+        FROM sport_center.gym_x904_member_mapping WHERE device_serial=${DEVICE}`);
+      const memberPins = new Set(mappings.rows.map((r: any) => String(r.user_pin)));
+      const grants = await store.execute(sql`SELECT DISTINCT user_pin
+        FROM sport_center.x904_nonmember_daily_access
+        WHERE device_serial=${DEVICE} AND verification_state='verified'
+          AND identity_type IN ('card','pin')`);
+      const verifiedPins = new Set(grants.rows.map((r: any) => String(r.user_pin)));
+      const classes = { member: 0, verifiedNonmember: 0, exempt: 0, reviewRequired: 0 };
+      for (const user of users) {
+        const pin = String(user.pin ?? "");
+        const role = Number(user.role);
+        if (isX904AutoSuspendExempt(pin, role)) classes.exempt++;
+        else if (memberPins.has(pin)) classes.member++;
+        else if (verifiedPins.has(pin) && role === 0) classes.verifiedNonmember++;
+        else classes.reviewRequired++;
+      }
+      console.info("[x904-nonmember] inventory reconciliation", JSON.stringify({
+        observedAt: observed.toISOString(), classes,
+        note: "reviewRequired PINs are never suspended without verified ownership",
+      }));
+    }
+  }
+
   const due = await store.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
       a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
       p.status::text AS payment_status
