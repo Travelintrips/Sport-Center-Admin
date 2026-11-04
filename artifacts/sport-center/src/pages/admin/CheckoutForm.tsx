@@ -325,7 +325,7 @@ export default function AdminCheckoutForm() {
   const membershipReady = memberAction === "new"
     ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
-      && membershipX904Pin && membershipX904Name && membershipX904SelectedUid !== null && membershipX904IdentityConfirmed && !membershipX904Checking && !membershipX904Error)
+      && membershipX904Name && membershipX904IdentityConfirmed && membershipX904Pin && membershipX904SelectedUid !== null && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && (memberAction !== "checkin" || matchedMember.status === "active"));
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
