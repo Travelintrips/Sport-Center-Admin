@@ -193,7 +193,7 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(renew).toContain('GYM_RENEWAL_PAYMENT_ALREADY_PENDING');
     expect(renew).toContain('inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"])');
     expect(renew).toContain('tx.insert(membershipPaymentsTable)');
-    expect(renew).toContain('ensureMembershipPaymentBooking(\n        existing, payment, tx, orderNumber,');
+    expect(renew).toMatch(/ensureMembershipPaymentBooking\(\s*existing, payment, tx, orderNumber,/);
     expect(renew.indexOf("FOR UPDATE")).toBeLessThan(renew.indexOf("tx.insert(membershipPaymentsTable)"));
     expect(renew.indexOf("GYM_RENEWAL_PAYMENT_ALREADY_PENDING")).toBeLessThan(
       renew.indexOf("tx.insert(membershipPaymentsTable)"));
@@ -239,6 +239,45 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(ui).toContain('totalGrace');
     expect(ui).toContain('Dalam Periode Berbayar');
     expect(ui).toContain('Perlu Verifikasi Pembayaran');
+  });
+
+  it("admin Gym payment upload finalizes server-side and supports idempotent recovery", () => {
+    const upload = routeFile.split('router.post("/memberships/:id/admin-payment-proof-upload"')[1]
+      ?.split('router.post("/memberships/:id/admin-finalize-payment"')[0] ?? "";
+    expect(upload).toContain('applyMembershipPaymentProof(');
+    expect(upload).toContain('finalizeAdminGymPayment(id,pending.id)');
+    expect(upload).toContain('paymentStatus:"confirmed"');
+    expect(upload).toContain('code:"GYM_CONFIRM_RETRY_REQUIRED"');
+    expect(upload).toContain('paymentStatus:"waiting_confirmation"');
+    const retry=routeFile.split('router.post("/memberships/:id/admin-finalize-payment"')[1]
+      ?.split('router.post(')[0] ?? "";
+    expect(retry).toContain('authorizedGymPaymentRole(req)');
+    expect(retry).toContain('finalizeAdminGymPayment(id,paymentId)');
+    expect(retry).not.toContain('membershipProofUpload.single(');
+    const confirmation = routeFile.split('async function finalizeAdminGymPayment(')[1]
+      ?.split('// POST /memberships/:id/renew')[0] ?? "";
+    expect(confirmation).toContain('if (payment.status === "confirmed")');
+    expect(confirmation).toContain('fresh:false');
+    expect(confirmation).toContain('eq(membershipPaymentsTable.status,"waiting_confirmation")');
+    expect(confirmation).toContain('await db.transaction(');
+    expect(confirmation).toContain('if (result.fresh)');
+    expect(confirmation).toContain('x904PaymentConfirmedEventKey(paymentId)');
+    expect(ui).toContain("Selesaikan Konfirmasi Pembayaran");
+    expect(ui).toContain("Lanjutkan Pembayaran Tagihan Ini");
+    expect(ui).toContain('result.paymentStatus === "confirmed"');
+  });
+
+  it("generates membership pending and paid WA event reports without claiming X904 ACK", () => {
+    const report = readFileSync(resolve(process.cwd(), "src/lib/gymMembershipWaReport.ts"),"utf8");
+    expect(report).toContain("BOOKING PERPANJANGAN MEMBERSHIP GYM");
+    expect(report).toContain("*PEMBAYARAN MEMBERSHIP GYM*");
+    expect(report).toContain("MENUNGGU PEMBAYARAN");
+    expect(report).toContain("Status pembayaran: LUNAS");
+    expect(report).toContain("MENUNGGU ACK/READ-BACK");
+    expect(report).toContain("gym_membership_pending_report");
+    expect(report).toContain("gym_membership_paid_report");
+    expect(routeFile).toContain('reportGymPayment(existing,payment,paymentBooking,"pending"');
+    expect(routeFile).toContain('reportGymPayment(result.membership,result.payment,result.booking,"confirmed")');
   });
 
   it("offers a single action for an already-paid Gym member", () => {
