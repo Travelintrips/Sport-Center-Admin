@@ -127,7 +127,6 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             (testPin !== undefined && pin !== testPin)) continue;
         const match = await tx.execute(sql`SELECT device_uid FROM sport_center.gym_x904_lan_users
           WHERE device_serial=${DEVICE} AND user_pin=${pin}
-            AND last_seen_snapshot=${Number(snap.snapshot_id)}
             AND device_role=0 AND upper(trim(display_name))=upper(${name})`);
         if (match.rows.length !== 1) continue;
         const uid = Number((match.rows[0] as any).device_uid);
