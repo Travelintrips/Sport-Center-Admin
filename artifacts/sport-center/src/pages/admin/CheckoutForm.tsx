@@ -395,7 +395,7 @@ export default function AdminCheckoutForm() {
     p.status === "pending_payment" || p.status === "waiting_confirmation");
 
   async function retryGymAdminConfirmation(membershipId:number,paymentId:number) {
-    if(!gymCanConfirm || membershipPaymentBusy) return;
+    if(!gymCanConfirm) return;
     setMembershipPaymentBusy(true);
     try {
       const response=await fetch(`/api/memberships/${membershipId}/admin-finalize-payment`,{
