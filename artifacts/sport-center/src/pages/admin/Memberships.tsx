@@ -26,6 +26,8 @@ function formatCurrency(n: number) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  if (status === "grace_period") return <Badge className="bg-amber-100 text-amber-800 border-amber-200">Masa Tenggang — Belum Diperpanjang</Badge>;
+  if (status === "review_required") return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Perlu Verifikasi Pembayaran</Badge>;
   if (status === "active") return <Badge className="bg-green-100 text-green-700 border-green-200">Aktif</Badge>;
   if (status === "expired") return <Badge className="bg-gray-100 text-gray-600 border-gray-200">Kadaluarsa</Badge>;
   if (status === "cancelled") return <Badge className="bg-red-100 text-red-700 border-red-200">Dibatalkan</Badge>;
@@ -365,11 +367,12 @@ export default function AdminMemberships() {
       (m.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (m.email ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (m.phone ?? "").includes(search);
-    const matchStatus = filterStatus === "all" || m.status === filterStatus;
+    const matchStatus = filterStatus === "all" || ((m as any).displayStatus ?? m.status) === filterStatus;
     return matchSearch && matchStatus;
   });
 
-  const totalActive = (memberships || []).filter((m) => m.status === "active").length;
+  const totalActive = (memberships || []).filter(m => ((m as any).displayStatus ?? m.status) === "active").length;
+  const totalGrace = (memberships || []).filter(m => (m as any).displayStatus === "grace_period").length;
   const totalPending = (memberships || []).filter((m) => m.status === "waiting_confirmation" || m.status === "pending_payment").length;
   const totalRevenue = (memberships || [])
     .filter((m) => m.status === "active" || m.status === "expired")
@@ -508,7 +511,7 @@ export default function AdminMemberships() {
             </div>
             <div>
               <div className="text-2xl font-bold">{totalActive}</div>
-              <div className="text-sm text-muted-foreground">Member Aktif</div>
+              <div className="text-sm text-muted-foreground">Dalam Periode Berbayar</div><div className="text-xs text-amber-700">{totalGrace} masa tenggang (belum perpanjang)</div>
             </div>
           </CardContent>
         </Card>
@@ -594,6 +597,8 @@ export default function AdminMemberships() {
             <SelectItem value="waiting_confirmation">Menunggu Konfirmasi</SelectItem>
             <SelectItem value="pending_payment">Menunggu Bayar</SelectItem>
             <SelectItem value="active">Aktif</SelectItem>
+            <SelectItem value="grace_period">Masa Tenggang</SelectItem>
+            <SelectItem value="review_required">Perlu Verifikasi Pembayaran</SelectItem>
             <SelectItem value="expired">Kadaluarsa</SelectItem>
             <SelectItem value="cancelled">Dibatalkan</SelectItem>
           </SelectContent>
@@ -640,7 +645,7 @@ export default function AdminMemberships() {
                     </td>
                     <td className="px-4 py-4 hidden md:table-cell">
                       <div>{m.email}</div>
-                      <div className="text-xs text-muted-foreground">{m.phone}</div>
+                      <div className="text-xs text-muted-foreground">{(m as any).displayPhone || m.phone}</div>
                     </td>
                     <td className="px-4 py-4 hidden sm:table-cell">
                       <div>{m.startDate}</div>
@@ -651,7 +656,7 @@ export default function AdminMemberships() {
                       <div className="text-xs font-normal text-muted-foreground">{m.months} bulan</div>
                     </td>
                     <td className="px-4 py-4">
-                      <StatusBadge status={m.status} />
+                      <StatusBadge status={(m as any).displayStatus ?? m.status} />
                       {confirmedSuspendedIds.has(Number(m.id)) && (
                         <div className="mt-1">
                           <Badge className="bg-red-100 text-red-800 border-red-300" title="Perintah suspend otomatis selesai dan snapshot mesin X904 sesudahnya mengonfirmasi grup 2">
@@ -733,13 +738,13 @@ export default function AdminMemberships() {
                 <div className="text-muted-foreground">Email</div>
                 <div className="font-medium break-all">{viewMember.email}</div>
                 <div className="text-muted-foreground">Telepon</div>
-                <div className="font-medium">{viewMember.phone}</div>
+                <div className="font-medium">{viewMember.displayPhone || viewMember.phone}</div>
                 <div className="text-muted-foreground">Durasi</div>
                 <div className="font-medium">{viewMember.months} bulan</div>
                 <div className="text-muted-foreground">Total Bayar</div>
                 <div className="font-bold text-primary">{formatCurrency(viewMember.totalPrice)}</div>
                 <div className="text-muted-foreground">Status</div>
-                <div><StatusBadge status={viewMember.status} /></div>
+                <div><StatusBadge status={viewMember.displayStatus ?? viewMember.status} /></div>
                 {viewMember.paymentMethod && (
                   <>
                     <div className="text-muted-foreground">Metode Bayar</div>
