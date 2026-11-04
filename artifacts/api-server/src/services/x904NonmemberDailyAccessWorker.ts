@@ -12,21 +12,19 @@ const MAX_ATTEMPTS = 3;
 export function startX904NonmemberAccessWorker(): void {
   const enabled = process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true";
   const onlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
-  const allowed = process.env.GYM_X904_NONMEMBER_ALLOWED_PINS;
   const validPin = onlyPin === undefined || /^[0-9]{1,8}$/.test(onlyPin);
   const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
   const validActor = Number.isSafeInteger(actor) && actor > 0;
-  const validAllowlist = allowed === undefined || (allowed.length > 0 && allowed.split(",").every(pin => /^[0-9]{1,8}$/.test(pin.trim())));
   console.info("[x904-nonmember] worker startup", JSON.stringify({
     enabled,
     onlyPin: validPin ? (onlyPin ?? null) : "INVALID",
-    allowedPins: validAllowlist ? (allowed ?? null) : "INVALID",
+    grantScope: "verified_paid_nonmember_grants",
     actor: validActor ? actor : "INVALID",
     manualAccessEnabled: process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true",
     userWriteEnabled: process.env.GYM_X904_USER_WRITE_ENABLED === "true",
     intervalMs: 60000,
   }));
-  if (!enabled || !validPin || !validActor || !validAllowlist || (onlyPin === undefined && allowed === undefined)) return;
+  if (!enabled || !validPin || !validActor) return;
   let running = false;
   const tick = async () => {
     if (running) return;
@@ -51,10 +49,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   // Optional controlled rollout: when configured, no other PIN may be processed.
   const testPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   if (testPin !== undefined && !/^[0-9]{1,8}$/.test(testPin)) return;
-  const allowedRaw = process.env.GYM_X904_NONMEMBER_ALLOWED_PINS;
-  const allowed = allowedRaw?.split(",").map(pin => pin.trim());
-  if (allowed && (allowed.length === 0 || allowed.some(pin => !/^[0-9]{1,8}$/.test(pin)))) return;
-  if (testPin === undefined && !allowed) return;
+  // The legacy PIN allowlist is not an authorization source. Authorization
+  // requires a verified paid grant, current device attestation and ACK.
 
   const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
   if (!Number.isSafeInteger(actor) || actor <= 0) return;
