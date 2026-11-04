@@ -7,7 +7,7 @@ const worker = readFileSync(join(process.cwd(), 'src/services/x904NonmemberDaily
 
 describe('X904 nonmember expired state regression guard', () => {
   test('completed expired grants are not selected for reprocessing', () => {
-    expect(worker).toContain("a.access_state IN ('pending','active')");
+    expect(worker).toContain("a.access_state IN ('pending','active','review_required')");
     expect(worker).toContain("a.access_state <> 'expired' AND p.status::text IN ('cancelled','rejected','refunded')");
     expect(worker).not.toContain("a.access_state IN ('pending','active','expired')");
   });
