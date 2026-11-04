@@ -159,6 +159,47 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(transaction).not.toContain('DISABLE_USER');
   });
 
+  it("links membership payment bookings only when email AND normalized mobile uniquely match a customer", () => {
+    const resolver = routeFile.split("function normalizedGymPhone(")[1]
+      ?.split("async function ensureMembershipPaymentBooking(")[0] ?? "";
+    const booking = routeFile.split("async function ensureMembershipPaymentBooking(")[1]
+      ?.split("async function syncMembershipPaymentBookings(")[0] ?? "";
+    expect(resolver).toContain('value.replace(/\\D/g, "")');
+    expect(resolver).toContain('digits.startsWith("0")');
+    expect(resolver).toContain('digits.startsWith("8")');
+    expect(resolver).toContain('lower(trim(${usersTable.email})) = ${email}');
+    expect(resolver).toContain('user.role === "customer"');
+    expect(resolver).toContain('normalizedGymPhone(String(user.phone ?? "")) === phone');
+    expect(resolver).toContain('matches.length === 1 ? matches[0]!.id : null');
+    expect(booking).toContain('const matchedCustomerId = await resolveGymBookingCustomerId(membership, executor)');
+    expect(booking).toContain('customerId: matchedCustomerId');
+    expect(booking).toContain('existing.customerId == null && matchedCustomerId != null');
+    expect(booking).toContain('membershipPaymentId: values.membershipPaymentId');
+    const normalize = (value: string) => {
+      const digits = value.replace(/\\D/g, "");
+      return digits.startsWith("0") ? "62" + digits.slice(1) :
+        digits.startsWith("8") ? "62" + digits : digits;
+    };
+    expect(normalize("085772435968")).toBe("6285772435968");
+    expect(normalize("6285772435968")).toBe("6285772435968");
+    expect(normalize("08123456789")).not.toBe(normalize("085772435968"));
+  });
+
+  it("serializes the renewal pending check and payment booking in one transaction", () => {
+    const renew = routeFile.split("async function handleMembershipRenewal(")[1]
+      ?.split("// Preserve the original public renewal contract.")[0] ?? "";
+    expect(renew).toContain('await db.transaction(async (tx) =>');
+    expect(renew).toContain('FOR UPDATE');
+    expect(renew).toContain('GYM_RENEWAL_PAYMENT_ALREADY_PENDING');
+    expect(renew).toContain('inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"])');
+    expect(renew).toContain('tx.insert(membershipPaymentsTable)');
+    expect(renew).toContain('ensureMembershipPaymentBooking(\n        existing, payment, tx, orderNumber,');
+    expect(renew.indexOf("FOR UPDATE")).toBeLessThan(renew.indexOf("tx.insert(membershipPaymentsTable)"));
+    expect(renew.indexOf("GYM_RENEWAL_PAYMENT_ALREADY_PENDING")).toBeLessThan(
+      renew.indexOf("tx.insert(membershipPaymentsTable)"));
+    expect(renew).toContain('res.status(409)');
+  });
+
   it("keeps payment date only after renewal invoice creation while allowing a custom start date", () => {
     const renewRoute = routeFile.split('async function handleMembershipRenewal(')[1]
       ?.split('// Preserve the original public renewal contract.')[0] ?? "";
