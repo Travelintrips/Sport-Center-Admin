@@ -1330,7 +1330,7 @@ export default function AdminCheckoutForm() {
                   )}
                   {membershipX904Pin && membershipX904Name && (
                     <div className="flex items-center justify-between rounded-md border p-2">
-                      <p className="text-xs text-emerald-700">Terpilih: {membershipX904Name} · PIN {membershipX904Pin} · UID {membershipX904SelectedUid}</p>
+                      <p className="text-xs text-emerald-700">Nama di mesin: {membershipX904Name} · PIN {membershipX904Pin} · UID {membershipX904SelectedUid}</p>
                       <Button type="button" variant="ghost" size="sm" onClick={()=>{
                         setMembershipX904Pin("");setMembershipX904Name("");
                         setMembershipX904SelectedUid(null);setMembershipX904IdentityConfirmed(false);
