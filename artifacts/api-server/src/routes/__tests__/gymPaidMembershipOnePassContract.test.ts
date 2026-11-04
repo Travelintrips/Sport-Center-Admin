@@ -137,6 +137,28 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect("2026-10-01" < earliest).toBe(true);
   });
 
+  it("keeps financial confirmation separate from unverified X904 mapping", () => {
+    const patch = routeFile.split('router.patch("/memberships/:id"')[1] ?? "";
+    const transaction = patch.split('const result = await db.transaction(async (tx) => {')[1]
+      ?.split('confirmationStage = "post_commit_projection"')[0] ?? "";
+    expect(transaction).toContain('const mappedX904 = await tx.execute(sql');
+    expect(transaction).toContain('FROM sport_center.gym_x904_member_mapping');
+    expect(transaction).toContain("AND status = 'verified'");
+    expect(transaction).toContain("AND device_serial = 'TDBD234200545'");
+    expect(transaction).toContain('if (mappedX904.rows.length > 0)');
+    expect(transaction).toContain('INSERT INTO sport_center.x904_automatic_entitlement_events');
+    expect(transaction.indexOf('if (mappedX904.rows.length > 0)')).toBeLessThan(
+      transaction.indexOf('INSERT INTO sport_center.x904_automatic_entitlement_events'));
+    expect(transaction).toContain('ON CONFLICT (event_key) DO NOTHING');
+    expect(transaction).toContain('tx.update(membershipPaymentsTable)');
+    expect(transaction).toContain('tx.update(gymMembershipsTable)');
+    expect(transaction).toContain('ensureMembershipPaymentBooking(current, updatedPayment, tx)');
+    // No mapping mutation, arbitrary entitlement bypass, or physical door command.
+    expect(transaction).not.toContain('INSERT INTO sport_center.gym_x904_member_mapping');
+    expect(transaction).not.toContain('ACTIVATE_USER');
+    expect(transaction).not.toContain('DISABLE_USER');
+  });
+
   it("keeps payment date only after renewal invoice creation while allowing a custom start date", () => {
     const renewRoute = routeFile.split('async function handleMembershipRenewal(')[1]
       ?.split('// Preserve the original public renewal contract.')[0] ?? "";
