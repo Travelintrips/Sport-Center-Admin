@@ -3,6 +3,12 @@
 DO $$
 BEGIN
   IF EXISTS (
+    SELECT 1 FROM sport_center.company_invoices
+    GROUP BY company_customer_id, period_month HAVING count(*) > 2
+  ) THEN
+    RAISE EXCEPTION 'More than two invoices already exist in a company/month; audit before migration';
+  END IF;
+  IF EXISTS (
     SELECT 1 FROM sport_center.company_invoice_items
     WHERE booking_id IS NOT NULL
     GROUP BY booking_id HAVING count(*) > 1
