@@ -8,7 +8,7 @@ if (!url || !/^postgres(?:ql)?:\/\/[^@/]+@127\.0\.0\.1:5544[45]\/x904_nonmember(
 const pool = new pg.Pool({ connectionString: url, max: 2 });
 const db = drizzle(pool);
 const run = (query: string) => pool.query(query);
-const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY","GYM_X904_NONMEMBER_ONLY_PIN"] as const;
+const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY","GYM_X904_NONMEMBER_ONLY_PIN","GYM_X904_NONMEMBER_ALLOWED_PINS"] as const;
 const oldEnv = envKeys.map(key => process.env[key]);
 const migration = readFileSync("migrations/20261031_x904_nonmember_daily_access.sql","utf8");
 const activationClockMigration = readFileSync("migrations/20261102_x904_nonmember_verified_activation_clock.sql","utf8");
@@ -40,6 +40,7 @@ beforeAll(async () => {
   process.env.GYM_X904_MANUAL_ACCESS_ENABLED = "true";
   process.env.GYM_X904_USER_WRITE_ENABLED = "true";
   process.env.GYM_X904_AUTOMATIC_REQUESTED_BY = "301";
+  process.env.GYM_X904_NONMEMBER_ALLOWED_PINS = "15,78,90,13,17,11,237,500,501,502,503,504";
 });
 afterAll(async () => {
   envKeys.forEach((key,i) => oldEnv[i] === undefined ? delete process.env[key] : process.env[key] = oldEnv[i]!);
