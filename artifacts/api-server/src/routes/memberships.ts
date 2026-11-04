@@ -22,6 +22,7 @@ import {
 } from "../lib/bizportalSync";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
+import { notifyGymMembershipWa } from "../lib/gymMembershipWaReport";
 import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { downloadFromStorageUrl } from "../lib/supabaseStorage";
@@ -1336,6 +1337,101 @@ router.post("/memberships", async (req, res) => {
   }
 });
 
+
+const ADMIN_GYM_PAYMENT_ROLES = new Set(["owner","admin","super_admin","finance","admin_booking"]);
+function authorizedGymPaymentRole(req: Request) {
+  return ADMIN_GYM_PAYMENT_ROLES.has(String((req as any).user?.role ?? ""));
+}
+
+async function reportGymPayment(
+  membership: typeof gymMembershipsTable.$inferSelect,
+  payment: typeof membershipPaymentsTable.$inferSelect,
+  booking: typeof bookingsTable.$inferSelect,
+  event: "pending" | "confirmed",
+  previousEnd?: string,
+): Promise<void> {
+  let code = "—";
+  let pin: string | null = null;
+  if (booking.customerId != null) {
+    const result = await db.execute(sql`SELECT code FROM sport_center.users WHERE id = ${booking.customerId} LIMIT 1`);
+    code = String(result.rows[0]?.code ?? "—");
+  }
+  const mapped = await db.execute(sql`
+    SELECT user_pin FROM sport_center.gym_x904_member_mapping
+    WHERE membership_id = ${membership.id} AND device_serial = 'TDBD234200545'
+      AND status = 'verified' LIMIT 1`);
+  pin = mapped.rows[0] ? String(mapped.rows[0].user_pin) : null;
+  await notifyGymMembershipWa({
+    event, bookingId: booking.id, orderNumber: booking.orderNumber,
+    membershipId: membership.id, paymentId: payment.id,
+    customerName: membership.name, customerCode: code,
+    whatsapp: normalizedGymPhone(String(membership.phone ?? "")),x904Pin:pin,
+    months: payment.months, periodStart:payment.periodStart,periodEnd:payment.periodEnd,
+    previousPeriod:previousEnd ? previousEnd : undefined,
+    amount:Number(payment.amount),paymentMethod:payment.paymentMethod,
+    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl,
+  });
+}
+
+/** Server-side completion. A retry by the SAME payment id never re-confirms or emits a second event. */
+async function finalizeAdminGymPayment(id: number, paymentId: number) {
+  const result = await db.transaction(async tx => {
+    const [current] = await tx.select().from(gymMembershipsTable)
+      .where(eq(gymMembershipsTable.id,id)).for("update").limit(1);
+    const [payment] = await tx.select().from(membershipPaymentsTable)
+      .where(and(eq(membershipPaymentsTable.id,paymentId),eq(membershipPaymentsTable.membershipId,id)))
+      .for("update").limit(1);
+    if (!current || !payment) throw new MembershipProofError(404,"Membership/payment tidak ditemukan");
+    if (payment.status === "confirmed") {
+      const [booking] = await tx.select().from(bookingsTable)
+        .where(eq(bookingsTable.membershipPaymentId,paymentId)).limit(1);
+      if (!booking) throw new MembershipProofError(409,"Booking pembayaran belum dapat diverifikasi");
+      return {membership:current,payment,booking,fresh:false,confirmedAt:payment.confirmedAt ?? new Date()};
+    }
+    if (payment.status !== "waiting_confirmation")
+      throw new MembershipProofError(409,"Pembayaran belum siap dikonfirmasi; jangan buat tagihan ulang");
+    if (!payment.paymentProofUrl || !["qris","transfer"].includes(String(payment.paymentMethod)))
+      throw new MembershipProofError(409,"Bukti dan metode pembayaran wajib lengkap");
+    if (!payment.paymentDate)
+      throw new MembershipProofError(409,"Tanggal pembayaran belum tercatat");
+    const confirmedAt = new Date();
+    const [confirmedPayment] = await tx.update(membershipPaymentsTable).set({
+      status:"confirmed", confirmedAt, settlementProviderCode:"mandiri_direct",
+      mutationKey:`SC-MBP-${paymentId}`,accountingRef:`MB-${id}-P${paymentId}`,
+      updatedAt:confirmedAt,
+    }).where(and(eq(membershipPaymentsTable.id,paymentId),
+      eq(membershipPaymentsTable.status,"waiting_confirmation"))).returning();
+    if (!confirmedPayment) throw new Error("GYM_PAYMENT_STATE_CHANGED");
+    const booking = await ensureMembershipPaymentBooking(current,confirmedPayment,tx);
+    const [membership] = await tx.update(gymMembershipsTable).set({
+      status:"active", startDate:payment.periodStart,endDate:payment.periodEnd,
+      months:payment.months,totalPrice:payment.amount,paymentMethod:payment.paymentMethod,
+      paymentProofUrl:payment.paymentProofUrl,updatedAt:confirmedAt,
+    }).where(eq(gymMembershipsTable.id,id)).returning();
+    if (!membership || !booking) throw new Error("GYM_PAYMENT_ATOMIC_CONFIRM_FAILED");
+    const mapped = await tx.execute(sql`
+      SELECT 1 FROM sport_center.gym_x904_member_mapping
+      WHERE membership_id = ${id} AND device_serial = 'TDBD234200545'
+        AND status = 'verified' LIMIT 1`);
+    if (mapped.rows.length) {
+      await tx.execute(sql`
+        INSERT INTO sport_center.x904_automatic_entitlement_events
+          (membership_id,payment_id,reason,event_key)
+        VALUES (${id},${paymentId},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(paymentId)})
+        ON CONFLICT (event_key) DO NOTHING`);
+    }
+    return {membership,payment:confirmedPayment,booking,fresh:true,confirmedAt};
+  });
+  if (result.fresh) {
+    syncMembershipToBizportal(result.membership).catch(() => {});
+    syncBookingRecordToBizportal(result.booking).catch(() => {});
+    pushMembershipPaymentAsBankMutation(result.membership,result.payment,result.confirmedAt,result.booking).catch(() => {});
+    reportGymPayment(result.membership,result.payment,result.booking,"confirmed").catch(() => {});
+    syncToPublic(result.membership).catch(() => {});
+  }
+  return result;
+}
+
 // POST /memberships/:id/renew — public, perpanjang membership yang ada (update record, bukan buat baru)
 async function handleMembershipRenewal(req: Request, res: Response) {
   try {
@@ -1416,6 +1512,9 @@ async function handleMembershipRenewal(req: Request, res: Response) {
     syncBookingRecordToBizportal(paymentBooking).catch((err) =>
       req.log.error({ err }, "[membership] Gagal sync booking renewal ke Bizportal")
     );
+    reportGymPayment(existing,payment,paymentBooking,"pending",
+      existing.startDate + " – " + existing.endDate).catch(err =>
+      req.log.error({err},"[WA] Gagal mengantre laporan membership pending"));
     res.json({
       ...existing,
       totalPrice: Number(existing.totalPrice),
@@ -1463,22 +1562,59 @@ router.post("/memberships/:id/admin-payment-proof-upload", adminMiddleware, memb
     const safeExt: Record<string,string> = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp","image/heic":".heic","image/heif":".heif"};
     const objectName = `membership-${id}-payment-${pending.id}-${randomUUID()}${safeExt[req.file.mimetype.toLowerCase()]}`;
     const proofUrl = await uploadFile(BUCKETS.proof,objectName,req.file.buffer,req.file.mimetype);
-    const actorRole = String((req as any).user?.role ?? "");
-    const hasSelfConfirmationAuthority = ["owner", "admin", "super_admin", "finance", "admin_booking"].includes(actorRole);
+    const authorized = authorizedGymPaymentRole(req);
     const membership = await applyMembershipPaymentProof(
-      id,
-      pending.id,
-      String(req.body?.paymentMethod ?? ""),
-      proofUrl,
-      req.body?.paymentDate,
-      req.log,
-      !hasSelfConfirmationAuthority,
+      id, pending.id, String(req.body?.paymentMethod ?? ""), proofUrl,
+      req.body?.paymentDate, req.log, !authorized,
     );
-    res.json({...membership,totalPrice:Number(membership.totalPrice)});
+    if (authorized) {
+      try {
+        const confirmed = await finalizeAdminGymPayment(id,pending.id);
+        res.json({ ...confirmed.membership, totalPrice:Number(confirmed.membership.totalPrice),
+          paymentId:pending.id,paymentStatus:"confirmed",alreadyConfirmed:!confirmed.fresh });
+      } catch (confirmError) {
+        req.log.error({err:confirmError,membershipId:id,paymentId:pending.id},
+          "Admin Gym payment proof saved; confirmation needs retry");
+        res.status(202).json({
+          ...membership,totalPrice:Number(membership.totalPrice),
+          paymentId:pending.id,paymentStatus:"waiting_confirmation",
+          code:"GYM_CONFIRM_RETRY_REQUIRED",
+          message:"Bukti tersimpan. Konfirmasi belum selesai; lanjutkan menggunakan payment ID yang sama.",
+        });
+      }
+    } else {
+      res.json({...membership,totalPrice:Number(membership.totalPrice),
+        paymentId:pending.id,paymentStatus:"waiting_confirmation"});
+    }
   } catch(err) {
     if(err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
     req.log.error({err},"Admin membership payment proof upload failed");
     res.status(500).json({error:"Gagal mengunggah bukti pembayaran"});
+  }
+});
+
+// Admin retry for an already-uploaded proof. Never re-upload or create a booking.
+router.post("/memberships/:id/admin-finalize-payment",adminMiddleware,async(req,res) => {
+  if (!authorizedGymPaymentRole(req)) {
+    res.status(403).json({error:"Konfirmasi pembayaran memerlukan admin berwenang"});return;
+  }
+  const id = Number(req.params.id),paymentId = Number(req.body?.paymentId);
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(paymentId) || paymentId <= 0) {
+    res.status(400).json({error:"Membership ID dan Payment ID wajib valid"});return;
+  }
+  try {
+    const result = await finalizeAdminGymPayment(id,paymentId);
+    res.json({paymentStatus:"confirmed",paymentId,
+      alreadyConfirmed:!result.fresh,membershipId:id,bookingId:result.booking.id,
+      orderNumber:result.booking.orderNumber});
+  } catch(err) {
+    req.log.error({err,id,paymentId},"Admin membership payment recovery failed");
+    const e=err instanceof MembershipProofError?err:null;
+    res.status(e?.status ?? 503).json({
+      code:"GYM_CONFIRM_RETRY_REQUIRED",
+      error:e?.message ?? "Konfirmasi belum selesai. Bukti aman; ulangi penyelesaian payment yang sama.",
+      paymentId,
+    });
   }
 });
 
@@ -1761,6 +1897,8 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     // External projections are never sent before the database transaction commits.
     syncMembershipToBizportal(membership).catch(() => {});
     if (confirmedBundle) {
+      reportGymPayment(membership,confirmedBundle.payment,confirmedBundle.booking,"confirmed").catch(err =>
+        req.log.error({err},"[WA] Membership paid group report failed"));
       syncBookingRecordToBizportal(confirmedBundle.booking).catch((err) =>
         req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
       );
