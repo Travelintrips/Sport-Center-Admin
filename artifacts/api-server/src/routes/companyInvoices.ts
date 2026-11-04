@@ -642,8 +642,6 @@ async function handleGenerateInvoice(req: any, res: any) {
         return;
       }
 
-      let updated: typeof companyInvoicesTable.$inferSelect;
-      let newTax: ReturnType<typeof summarizeBookingTax>;
       // Add new bookings as items and recalculate totals
       await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
@@ -651,7 +649,7 @@ async function handleGenerateInvoice(req: any, res: any) {
       const allItems = await tx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
-      newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
+      const newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
       const newSubtotal = newTax.totalAmount;
       const {
         pphRate: newPphRate,
@@ -659,7 +657,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         netAmount: newNetAmount,
       } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems), newTax);
 
-      [updated] = await tx.update(companyInvoicesTable)
+      const [updated] = await tx.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
            dppNilaiLain: String(newTax.dppNilaiLain),
@@ -682,8 +680,6 @@ async function handleGenerateInvoice(req: any, res: any) {
         await tx.update(bookingsTable)
           .set({ billingStatus: "billed", companyInvoiceId: existingInvoice.id })
           .where(eq(bookingsTable.id, b.id));
-      }
-
       }
 
 
