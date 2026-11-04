@@ -102,66 +102,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     }
   }
 
-  // Reconcile only identities absent from both current and historical memberships.
-  // Opt-in; physical execution and ACK remain owned by the VMSC executor.
-  if (process.env.GYM_X904_NONMEMBER_LEGACY_RECONCILE_ENABLED === "true") {
-    await store.transaction(async tx => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
-      const latest = await tx.execute(sql`SELECT snapshot_id,observed_at,user_count,users
-        FROM sport_center.gym_x904_access_snapshots
-        WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
-      const snap = latest.rows[0] as any;
-      const observed = snap && new Date(String(snap.observed_at));
-      const users = Array.isArray(snap?.users) ? snap.users : [];
-      if (!snap || !Number.isFinite(observed.getTime()) ||
-          now.getTime() < observed.getTime() ||
-          now.getTime() - observed.getTime() > FRESH_SNAPSHOT_MS ||
-          users.length !== Number(snap.user_count)) return;
-      let queued = 0;
-      for (const u of users) {
-        if (queued >= 10) break;
-        const pin = String(u.pin ?? ""), name = String(u.name ?? "").trim();
-        if (!/^[0-9]{1,8}$/.test(pin) || !name || u.enabled !== true ||
-            Number(u.group) !== 1 || Number(u.role) !== 0 ||
-            isX904AutoSuspendExempt(pin, 0) ||
-            (testPin !== undefined && pin !== testPin)) continue;
-        const match = await tx.execute(sql`SELECT device_uid FROM sport_center.gym_x904_lan_users
-          WHERE device_serial=${DEVICE} AND user_pin=${pin}
-            AND device_role=0 AND upper(trim(display_name))=upper(${name})
-            AND last_seen_at >= ${new Date(observed.getTime() - FRESH_SNAPSHOT_MS)}`);
-        if (match.rows.length !== 1) continue;
-        const uid = Number((match.rows[0] as any).device_uid);
-        if (!Number.isSafeInteger(uid) || uid <= 0) continue;
-        const protectedIdentity = await tx.execute(sql`SELECT
-          EXISTS(SELECT 1 FROM sport_center.gym_x904_member_mapping
-            WHERE device_serial=${DEVICE} AND user_pin=${pin}) AS mapped,
-          EXISTS(SELECT 1 FROM sport_center.sport_memberships
-            WHERE lower(trim(name))=lower(trim(${name}))) AS current_member,
-          EXISTS(SELECT 1 FROM sport_center.sport_memberships_sync
-            WHERE lower(trim(name))=lower(trim(${name}))) AS former_member,
-          EXISTS(SELECT 1 FROM sport_center.x904_nonmember_daily_access
-            WHERE device_serial=${DEVICE} AND user_pin=${pin}) AS has_grant,
-          EXISTS(SELECT 1 FROM sport_center.x904_user_commands
-            WHERE device_serial=${DEVICE} AND user_pin=${pin}
-              AND state IN ('queued','claimed')) AS in_flight`);
-        const p = protectedIdentity.rows[0] as any;
-        if (!p || p.mapped || p.current_member || p.former_member || p.has_grant || p.in_flight) continue;
-        const key = x904AutomaticCommandKey("never-member-reconcile:" + pin, "SUSPEND_USER", pin);
-        const payload = JSON.stringify({
-          source: "AUTO_NONMEMBER_LEGACY_RECONCILIATION",
-          reason: "NO_MEMBERSHIP_HISTORY_NO_PAID_GRANT",
-          expectedUid: uid, expectedName: name,
-        });
-        const result = await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
-          (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
-          VALUES (${DEVICE},'SUSPEND_USER',${pin},${payload}::jsonb,${actor},${key})
-          ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
-        if (result.rows.length) queued++;
-      }
-      console.info("[x904-nonmember] never-member queued", JSON.stringify({ queued }));
-    });
-  }
-
+  // Only independently verified paid grants can enqueue X904 access commands.
   const due = await store.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
       a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
       p.status::text AS payment_status
