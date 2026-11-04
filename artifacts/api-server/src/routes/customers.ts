@@ -59,6 +59,13 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
   const totalSpent = userBookings
     .filter((b) => b.status !== "cancelled" && b.status !== "expired" && b.status !== "rejected" && b.status !== "refunded")
     .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
+  const gymVisits = userBookings.filter(b =>
+    b.source === "gym_membership" && b.membershipPaymentId == null);
+  const transactionBookings = userBookings.filter(b =>
+    b.source !== "gym_membership" || b.membershipPaymentId != null);
+  const latestDate = (rows: typeof userBookings) => rows
+    .map(b => String(b.bookingDate ?? ""))
+    .filter(Boolean).sort().at(-1) ?? null;
   return {
     id: u.id,
     name: u.name,
@@ -80,6 +87,10 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
     withholdingTaxRate: u.withholdingTaxRate == null ? 10 : Number(u.withholdingTaxRate),
     accountStatus: u.accountStatus ?? "active",
     totalBookings: userBookings.length,
+    transactionBookings: transactionBookings.length,
+    gymVisits: gymVisits.length,
+    lastTransactionDate: latestDate(transactionBookings),
+    lastGymVisitDate: latestDate(gymVisits),
     totalSpent,
     createdAt: u.createdAt,
   };
