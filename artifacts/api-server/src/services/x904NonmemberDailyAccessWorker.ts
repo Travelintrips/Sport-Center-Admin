@@ -124,8 +124,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         if (!/^[0-9]{1,8}$/.test(pin) || !name || u.enabled !== true ||
             Number(u.group) !== 1 || Number(u.role) !== 0 ||
             isX904AutoSuspendExempt(pin, 0) ||
-            (testPin !== undefined && pin !== testPin) ||
-            (allowed && !allowed.includes(pin))) continue;
+            (testPin !== undefined && pin !== testPin)) continue;
         const match = await tx.execute(sql`SELECT device_uid FROM sport_center.gym_x904_lan_users
           WHERE device_serial=${DEVICE} AND user_pin=${pin}
             AND last_seen_snapshot=${Number(snap.snapshot_id)}
