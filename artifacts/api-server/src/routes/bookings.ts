@@ -1605,6 +1605,15 @@ router.post("/bookings", async (req, res) => {
           (card && (Number(row.device_uid) !== card.deviceUid || String(row.display_name ?? "").replace(/\s+/g, "").toUpperCase() !== card.displayName.replace(/\s+/g, "").toUpperCase()))) {
         res.status(409).json({ error: "Identitas X904 tidak cocok dengan inventaris mesin." }); return;
       }
+      // Fail closed before booking/payment for ordinary PINs owned by members or exempt roles.
+      if (identityType === "pin") {
+        const ownership = await db.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
+          WHERE device_serial='TDBD234200545' AND user_pin=${userPin} LIMIT 1`);
+        if (ownership.rows.length > 0 || ['12', '79', '237'].includes(userPin)) {
+          res.status(409).json({ error: "PIN X904 memiliki kepemilikan membership atau pengecualian akses; tidak dapat digunakan untuk booking nonmember otomatis." });
+          return;
+        }
+      }
       verifiedX904Identity = { identityType, identityLabel: card ? identityValue : `PIN:${identityValue}`, userPin: String(row.user_pin), deviceUid: Number(row.device_uid), displayName: String(row.display_name).trim() };
     }
     // Keep existing Gym booking clients compatible. The new admin form requires

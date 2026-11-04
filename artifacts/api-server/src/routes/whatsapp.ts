@@ -921,6 +921,15 @@ router.post("/wa/booking", async (req, res) => {
         res.status(409).json({ error: "Data kartu/PIN tidak cocok dengan identitas terverifikasi X904." });
         return;
       }
+      // Fail closed before booking/payment for ordinary PINs owned by members or exempt roles.
+      if (identityType === "pin") {
+        const ownership = await db.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
+          WHERE device_serial='TDBD234200545' AND user_pin=${userPin} LIMIT 1`);
+        if (ownership.rows.length > 0 || ['12', '79', '237'].includes(userPin)) {
+          res.status(409).json({ error: "PIN X904 memiliki kepemilikan membership atau pengecualian akses; tidak dapat digunakan untuk booking nonmember otomatis." });
+          return;
+        }
+      }
       bookingCustomerName = String(row.display_name).trim();
       verifiedX904Identity = {
         identityType,
