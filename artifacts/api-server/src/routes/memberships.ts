@@ -282,6 +282,32 @@ async function syncBookingRecordToBizportal(booking: typeof bookingsTable.$infer
  * The payment booking is the order candidate used by Bizportal
  * reconciliation. It never creates a second membership payment.
  */
+// Match existing customer only with BOTH email and normalized Indonesian mobile.
+ // Never link an X904 PIN or merge customers based on a name alone.
+function normalizedGymPhone(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.startsWith("0")) return "62" + digits.slice(1);
+  if (digits.startsWith("8")) return "62" + digits;
+  return digits;
+}
+
+async function resolveGymBookingCustomerId(
+  membership: typeof gymMembershipsTable.$inferSelect,
+  executor: DbExecutor,
+): Promise<number | null> {
+  const email = String(membership.email ?? "").trim().toLowerCase();
+  const phone = normalizedGymPhone(String(membership.phone ?? ""));
+  if (!email || !phone || !email.includes("@")) return null;
+  const candidates = await executor.select({
+    id: usersTable.id, phone: usersTable.phone, role: usersTable.role,
+  }).from(usersTable)
+    .where(sql`lower(trim(${usersTable.email})) = ${email}`)
+    .limit(10);
+  const matches = candidates.filter(user =>
+    user.role === "customer" && normalizedGymPhone(String(user.phone ?? "")) === phone);
+  return matches.length === 1 ? matches[0]!.id : null;
+}
+
 async function ensureMembershipPaymentBooking(
   membership: typeof gymMembershipsTable.$inferSelect,
   payment: typeof membershipPaymentsTable.$inferSelect,
@@ -299,6 +325,7 @@ async function ensureMembershipPaymentBooking(
     throw new Error("Fasilitas Gym belum tersedia");
   }
 
+  const matchedCustomerId = await resolveGymBookingCustomerId(membership, executor);
   const amount = Math.round(Number(payment.amount));
   const { dpp, ppnAmount } = membershipTaxBreakdown(amount);
   const status = membershipBookingStatus(payment.status);
@@ -335,7 +362,7 @@ async function ensureMembershipPaymentBooking(
   if (existing) {
     const [updated] = await executor
       .update(bookingsTable)
-      .set(values)
+      .set({ ...values, ...(existing.customerId == null && matchedCustomerId != null ? { customerId: matchedCustomerId } : {}) })
       .where(eq(bookingsTable.id, existing.id))
       .returning();
     return updated ?? existing;
@@ -346,7 +373,7 @@ async function ensureMembershipPaymentBooking(
     .insert(bookingsTable)
     .values({
       orderNumber,
-      customerId: null,
+      customerId: matchedCustomerId,
       customerName: values.customerName,
       customerEmail: values.customerEmail,
       customerPhone: values.customerPhone,
