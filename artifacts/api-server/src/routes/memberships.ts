@@ -24,7 +24,7 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
-import { downloadFromStorageUrl } from "../lib/supabaseStorage";
+import { downloadFromStorageUrl, deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { isWithinGymGracePeriod, resolveGymRenewalStart } from "../services/gymMembershipEntitlement";
 import { x904PaymentConfirmedEventKey } from "../services/x904AutomationDecision";
@@ -925,6 +925,8 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 // Admin-only, read-only inventory search for the paid Gym membership form.
 // Return candidates, but never decide ownership or create an entitlement here.
 router.post("/memberships/admin-register-paid", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
+  let uploadedProofUrl: string | null = null;
+  let registrationCommitted = false;
   try {
     const role = String((req as any).user?.role ?? "");
     if (!["owner", "admin", "super_admin", "finance", "admin_booking"].includes(role)) {
@@ -970,6 +972,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     // A customer record without credentials is safe to invite later.
     const objectName = `membership-paid-intake-${randomUUID()}${extensions[mime]}`;
     const proofUrl = await uploadFile(BUCKETS.proof, objectName, proof.buffer, mime);
+    uploadedProofUrl = proofUrl;
     const orderNumber = await generateBookingOrderNumber();
     const today = new Date();
     const end = new Date(startDate + "T00:00:00Z");
@@ -1093,6 +1096,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       }
       return {customerId:customer.id,membership:active,payment,booking:linkedBooking};
     });
+    registrationCommitted = true;
     syncMembershipToBizportal(result.membership).catch(err => req.log.error({err},"Paid membership sync failed"));
     syncBookingRecordToBizportal(result.booking).catch(err => req.log.error({err},"Paid membership booking sync failed"));
     pushMembershipPaymentAsBankMutation(result.membership,result.payment,today,result.booking)
@@ -1105,6 +1109,10 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       x904Status:"pending_device_ack",
     });
   } catch (err) {
+    if (uploadedProofUrl && !registrationCommitted) {
+      try { await deleteFromStorage(uploadedProofUrl); }
+      catch (cleanupErr) { req.log.error({err:cleanupErr},"Paid membership proof cleanup failed"); }
+    }
     if (err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
     req.log.error({err},"Register paid Gym membership failed");
     res.status(500).json({error:"Pendaftaran atau konfirmasi pembayaran gagal. Periksa riwayat sebelum mencoba lagi."});
