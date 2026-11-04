@@ -647,10 +647,10 @@ async function handleGenerateInvoice(req: any, res: any) {
       await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
       // Rebuild invoice totals from the stored booking snapshots on each item.
-      const allItems = await nestedTx.select().from(companyInvoiceItemsTable).where(
+      const allItems = await tx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
-      const newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
+      newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
       const newSubtotal = newTax.totalAmount;
       const {
         pphRate: newPphRate,
@@ -658,7 +658,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         netAmount: newNetAmount,
       } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems), newTax);
 
-      const [updated] = await nestedTx.update(companyInvoicesTable)
+      [updated] = await tx.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
            dppNilaiLain: String(newTax.dppNilaiLain),
@@ -678,13 +678,13 @@ async function handleGenerateInvoice(req: any, res: any) {
 
       // Mark new bookings as billed
       for (const b of unbilledBookings) {
-        await nestedTx.update(bookingsTable)
+        await tx.update(bookingsTable)
           .set({ billingStatus: "billed", companyInvoiceId: existingInvoice.id })
           .where(eq(bookingsTable.id, b.id));
       }
 
-      return { updated, newTax };
-      });
+      }
+
 
       await logAudit({
         ...userInfo,
@@ -696,7 +696,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         userAgent,
       });
 
-      const updatedItems = await nestedTx.select().from(companyInvoiceItemsTable).where(
+      const updatedItems = await tx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       return res.status(200).json({
@@ -720,9 +720,12 @@ async function handleGenerateInvoice(req: any, res: any) {
     const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
     const { pphRate, pphAmount, netAmount } = summarizeWithholdingTax(unbilledBookings, tax);
 
-    const { inv, updated, invoiceNumber } = await tx.transaction(async (nestedTx) => {
+    let inv: typeof companyInvoicesTable.$inferSelect;
+    let updated: typeof companyInvoicesTable.$inferSelect;
+    let invoiceNumber: string;
+    {
     // The database trigger serializes competing inserts and rejects invoice #3.
-    const [inv] = await nestedTx.insert(companyInvoicesTable).values({
+    [inv] = await tx.insert(companyInvoicesTable).values({
       invoiceNumber: `PENDING-${randomUUID()}`,
       companyCustomerId,
       periodMonth,
@@ -742,8 +745,8 @@ async function handleGenerateInvoice(req: any, res: any) {
       notes: notes ?? null,
     }).returning();
 
-    const invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
-    const [updated] = await nestedTx.update(companyInvoicesTable)
+    invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
+    const [updated] = await tx.update(companyInvoicesTable)
       .set({ invoiceNumber })
       .where(eq(companyInvoicesTable.id, inv.id))
       .returning();
@@ -753,13 +756,13 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     // Mark bookings as billed
     for (const b of unbilledBookings) {
-      await nestedTx.update(bookingsTable)
+      await tx.update(bookingsTable)
         .set({ billingStatus: "billed", companyInvoiceId: inv.id })
         .where(eq(bookingsTable.id, b.id));
     }
 
-    return { inv, updated, invoiceNumber };
-    });
+    }
+
 
     await logAudit({
       ...userInfo,
@@ -780,7 +783,7 @@ async function handleGenerateInvoice(req: any, res: any) {
       userAgent,
     });
 
-    const items = await nestedTx.select().from(companyInvoiceItemsTable).where(
+    const items = await tx.select().from(companyInvoiceItemsTable).where(
       eq(companyInvoiceItemsTable.invoiceId, inv.id)
     );
     res.status(201).json(mapInvoice(updated, company.companyName ?? company.name, items, company));
