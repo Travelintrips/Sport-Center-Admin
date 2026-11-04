@@ -638,11 +638,12 @@ async function handleGenerateInvoice(req: any, res: any) {
         return;
       }
 
+      const { updated, newTax } = await db.transaction(async (tx) => {
       // Add new bookings as items and recalculate totals
-      await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap);
+      await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap, tx);
 
       // Rebuild invoice totals from the stored booking snapshots on each item.
-      const allItems = await db.select().from(companyInvoiceItemsTable).where(
+      const allItems = await tx.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       const newTax = summarizeBookingTax(invoiceItemsAsTaxRows(allItems));
@@ -653,7 +654,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         netAmount: newNetAmount,
       } = summarizeWithholdingTax(invoiceItemsAsTaxRows(allItems), newTax);
 
-      const [updated] = await db.update(companyInvoicesTable)
+      const [updated] = await tx.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
            dppNilaiLain: String(newTax.dppNilaiLain),
@@ -673,10 +674,13 @@ async function handleGenerateInvoice(req: any, res: any) {
 
       // Mark new bookings as billed
       for (const b of unbilledBookings) {
-        await db.update(bookingsTable)
+        await tx.update(bookingsTable)
           .set({ billingStatus: "billed", companyInvoiceId: existingInvoice.id })
           .where(eq(bookingsTable.id, b.id));
       }
+
+      return { updated, newTax };
+      });
 
       await logAudit({
         ...userInfo,
@@ -715,7 +719,7 @@ async function handleGenerateInvoice(req: any, res: any) {
     const { inv, updated, invoiceNumber } = await db.transaction(async (tx) => {
     // The database trigger serializes competing inserts and rejects invoice #3.
     const [inv] = await tx.insert(companyInvoicesTable).values({
-      invoiceNumber: "TEMP",
+      invoiceNumber: `PENDING-${randomUUID()}`,
       companyCustomerId,
       periodMonth,
       totalAmount: String(totalAmount),
