@@ -813,7 +813,37 @@ router.get("/memberships", adminMiddleware, async (req, res) => {
     const { status } = req.query;
     let memberships = await db.select().from(gymMembershipsTable).orderBy(gymMembershipsTable.createdAt);
     if (status) memberships = memberships.filter((m) => m.status === status);
-    res.json(memberships.map((m) => ({ ...m, totalPrice: Number(m.totalPrice) })));
+    const payments = await db.select({
+      membershipId: membershipPaymentsTable.membershipId,
+      periodStart: membershipPaymentsTable.periodStart,
+      periodEnd: membershipPaymentsTable.periodEnd,
+      status: membershipPaymentsTable.status,
+      amount: membershipPaymentsTable.amount,
+    }).from(membershipPaymentsTable);
+    const today = jakartaDateOnly();
+    const confirmedByMembership = new Map<number, typeof payments>();
+    for (const payment of payments) {
+      if (payment.status !== "confirmed" || Number(payment.amount) <= 0) continue;
+      confirmedByMembership.set(payment.membershipId,
+        [...(confirmedByMembership.get(payment.membershipId) ?? []),payment]);
+    }
+    res.json(memberships.map(m => {
+      const confirmed = confirmedByMembership.get(m.id) ?? [];
+      const covered = confirmed.some(p => p.periodStart <= today && p.periodEnd >= today);
+      const lastPaidEnd = confirmed.map(p => p.periodEnd).sort().at(-1);
+      const inGrace = m.status === "active" && m.endDate < today &&
+        lastPaidEnd === m.endDate && isWithinGymGracePeriod(m.endDate,today);
+      const displayStatus = m.status === "cancelled" ? "cancelled"
+        : covered ? "active"
+        : inGrace ? "grace_period"
+        : m.status === "waiting_confirmation" || m.status === "pending_payment" ? m.status
+        : m.endDate < today ? "expired" : "review_required";
+      return {
+        ...m, totalPrice: Number(m.totalPrice),
+        displayStatus,
+        displayPhone: normalizedGymPhone(String(m.phone ?? "")),
+      };
+    }));
   } catch (err) {
     req.log.error({ err }, "List memberships error");
     res.status(500).json({ error: "Internal server error" });
