@@ -105,17 +105,31 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
       .from(bookingsTable)
       .orderBy(bookingsTable.customerPhone, bookingsTable.createdAt);
 
-    // Gabungkan: registered users mendapat id, past bookers pakai id negatif (agar tidak bentrok)
-    const registeredPhones = new Set(registeredUsers.map((u) => u.phone).filter(Boolean));
-    const pastCustomers = pastBookings
-      .filter((b) => b.customerPhone && !registeredPhones.has(b.customerPhone))
-      .map((b, i) => ({
-        id: -(i + 1),
+    // Reuse the same two-factor identity rule as the main customer list.
+    // A different phone with the same email is NOT automatically the same person.
+    const uniqueRegistered = new Map<string, number[]>();
+    for (const user of registeredUsers) {
+      const key = canonicalIdentityKey(user.email,user.phone);
+      if (key) uniqueRegistered.set(key,[...(uniqueRegistered.get(key) ?? []),user.id]);
+    }
+    const seenGuestKeys = new Set<string>();
+    const pastCustomers: Array<{id:number;name:string;email:string|null;phone:string|null;accountType:"personal"}> = [];
+    for (const b of pastBookings) {
+      const phoneKey = normalizePhoneKey(b.customerPhone);
+      if (!phoneKey) continue;
+      const key = canonicalIdentityKey(b.customerEmail,b.customerPhone);
+      if (key && (uniqueRegistered.get(key)?.length ?? 0) === 1) continue;
+      const guestKey = key ?? "phone:" + phoneKey;
+      if (seenGuestKeys.has(guestKey)) continue;
+      seenGuestKeys.add(guestKey);
+      pastCustomers.push({
+        id: -(pastCustomers.length + 1),
         name: b.customerName,
         email: b.customerEmail,
         phone: b.customerPhone,
-        accountType: "personal" as const,
-      }));
+        accountType: "personal",
+      });
+    }
 
     const role = String((req as any).user?.role ?? "");
     const includeIdCardNumber = ["owner", "super_admin", "admin", "admin_booking", "finance", "staff"].includes(role);
