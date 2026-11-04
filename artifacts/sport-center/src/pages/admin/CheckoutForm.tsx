@@ -1430,7 +1430,7 @@ export default function AdminCheckoutForm() {
                       <Input aria-label="Cari nama atau nomor telepon member Gym" placeholder="Cari nama / telepon member..." value={memberSearch} onChange={e => setMemberSearch(e.target.value)} onKeyDown={e => e.stopPropagation()} />
                     </div>
                     {members.filter(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.trim().toLowerCase()))).map(m =>
-                      <SelectItem key={m.id} value={String(m.id)}>{m.name} · {m.phone} · {m.status}</SelectItem>)}
+                      <SelectItem key={m.id} value={String(m.id)}>{m.name} · {(m as any).displayPhone || m.phone} · {(m as any).displayStatus || m.status}</SelectItem>)}
                     {members.length > 0 && !members.some(m => [m.name,m.phone].some(v => String(v).toLowerCase().includes(memberSearch.trim().toLowerCase()))) &&
                       <div className="px-3 py-2 text-sm text-muted-foreground">Member tidak ditemukan</div>}
                   </SelectContent>
