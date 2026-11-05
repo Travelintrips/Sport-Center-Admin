@@ -125,6 +125,7 @@ export default function AdminCheckoutForm() {
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [customerPickerListHeight, setCustomerPickerListHeight] = useState(280);
   const [companyCustomerDetail, setCompanyCustomerDetail] = useState<null | {
     id: number; name: string; phone: string | null; email: string | null;
     accountType: string; picEmail?: string | null;
@@ -1318,8 +1319,17 @@ export default function AdminCheckoutForm() {
             <div className="space-y-2">
               <Label htmlFor="customer">Nama Pemesan <span className="text-destructive">*</span></Label>
               <Popover open={customerPickerOpen} onOpenChange={(open) => {
+                if (open) {
+                  // Fit the search results in the space below the input. The
+                  // popover must remain below the field instead of flipping
+                  // above and covering the Booking Admin page header.
+                  const triggerBottom = document.getElementById("customer")?.getBoundingClientRect().bottom ?? 0;
+                  const available = window.innerHeight - triggerBottom - 76;
+                  setCustomerPickerListHeight(Math.max(96, Math.min(280, available)));
+                } else {
+                  setCustomerSearch("");
+                }
                 setCustomerPickerOpen(open);
-                if (!open) setCustomerSearch("");
               }}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1345,7 +1355,7 @@ export default function AdminCheckoutForm() {
                   align="start"
                   side="bottom"
                   sideOffset={4}
-                  collisionPadding={12}
+                  avoidCollisions={false}
                   className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden p-0"
                 >
                   <Command shouldFilter={false}>
@@ -1356,7 +1366,10 @@ export default function AdminCheckoutForm() {
                       value={customerSearch}
                       onValueChange={setCustomerSearch}
                     />
-                    <CommandList className="max-h-[min(300px,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain">
+                    <CommandList
+                      className="overflow-y-auto overscroll-contain"
+                      style={{ maxHeight: customerPickerListHeight }}
+                    >
                       <CommandItem value="__guest__" onSelect={() => {
                         setSelectedCustomerId("__guest__");
                         setCustomerPickerOpen(false);
