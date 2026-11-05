@@ -3277,6 +3277,15 @@ function MergeGroupDialog({
   );
 }
 
+/** Human card holder is kept in each booking's notes, never the X904 card name. */
+function getVisCardHolder(notes: unknown): { card: string; name: string } | null {
+  if (typeof notes !== "string") return null;
+  const match = notes.match(/(?:^|\\s*\\|\\s*)Pemakai kartu (VIS00[1-6]): ([^|\\r\\n]+)/);
+  if (!match) return null;
+  const name = match[2].trim();
+  return name ? { card: match[1], name } : null;
+}
+
 /* ─── Main Component ────────────────────────────────────────────── */
 
 type BookingPageData = {
@@ -5329,6 +5338,11 @@ export default function AdminBookings() {
                             {b.payerType === "company" && (b as any).companyName && (
                               <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
                                 a/n {b.customerName}
+                              </div>
+                            )}
+                            {getVisCardHolder(b.notes) && (
+                              <div className="mt-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 leading-tight">
+                                Pemakai kartu: {getVisCardHolder(b.notes)?.name}
                               </div>
                             )}
                             <div className="text-[11px] text-slate-400">{b.customerPhone}</div>
