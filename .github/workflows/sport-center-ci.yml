@@ -153,6 +153,9 @@ jobs:
       - name: Verify self-service facility choices keep Gym/X904 separate
         run: node --test scripts/test-public-facility-selector.mjs
 
+      - name: Verify optional Gym PIN never becomes public machine authorization
+        run: node --test scripts/test-gym-guest-optional-pin-safe.mjs
+
       - name: Verify public Gym self-booking without X904 access grants
         run: node --test scripts/test-gym-public-self-booking.mjs
 
