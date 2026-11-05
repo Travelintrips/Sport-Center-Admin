@@ -48,8 +48,18 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
   `);
   if(verifiedActor.rows.length!==1)return;
   const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
-  const events=await store.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
-    WHERE state='pending' ORDER BY event_id LIMIT 20`);
+  // In single-PIN mode, unrelated older pending events must not starve the
+  // allowlisted member. This query only reads events; command safeguards below
+  // still verify the mapping, payment, device snapshot, and read-back.
+  const events=await store.execute(sql`SELECT e.event_id,e.membership_id,e.event_key
+    FROM sport_center.x904_automatic_entitlement_events e
+    WHERE e.state='pending'
+      ${allVerified ? sql`` : sql`AND EXISTS (
+        SELECT 1 FROM sport_center.gym_x904_member_mapping mp
+        WHERE mp.membership_id=e.membership_id AND mp.status='verified'
+          AND mp.device_serial='TDBD234200545' AND mp.user_pin=${pins[0]}
+      )`}
+    ORDER BY e.event_id LIMIT 20`);
   for(const ev of events.rows){
     await store.transaction(async tx=>{
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904201)`);
