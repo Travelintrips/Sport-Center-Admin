@@ -400,6 +400,8 @@ export interface BookingNotifData {
   groupRef?: string | null;
   /** Suppress the generic admin booking message when a dedicated admin report is emitted. */
   adminReport?: boolean;
+  /** Suppress only the recipient customer on the booking-created event. */
+  suppressCustomerMessage?: boolean;
 }
 
 // Jika booking ini bagian dari keranjang multi-lapangan (groupRef), rangkum semua sesi
@@ -459,7 +461,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       msg += `\n🔍 Cek status booking:\n${data.statusUrl}`;
     }
     msg += groupSummary;
-    await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
+    if (!data.suppressCustomerMessage) await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   } else {
     // Fallback: pesan hardcoded jika template belum di-set
     const msg =
@@ -480,7 +482,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       (data.statusUrl ? `🔍 Cek status booking:\n${data.statusUrl}\n\n` : "") +
       groupSummary +
       `\n\nTerima kasih! 🏆`;
-    await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
+    if (!data.suppressCustomerMessage) await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   }
 
   if (data.adminReport !== false) {
@@ -839,16 +841,23 @@ export interface CompanyBookingNotifData {
   companyName: string;
   periodMonth: string;
   picPhone?: string;
+  suppressCustomerMessage?: boolean;
 }
 
 export async function notifyCompanyBookingCreated(data: CompanyBookingNotifData): Promise<void> {
   const customerMsg = `Halo ${data.customerName},\n\nBooking Anda *${data.orderNumber}* untuk *${data.facilityName}* pada *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}* telah *DIKONFIRMASI* ✅\n\nPembayaran akan ditagihkan melalui *Tagihan Bulanan Perusahaan* periode ${data.periodMonth}.\n\nTerima kasih! 🏆`;
-  await sendWAToCustomer(data.customerPhone, customerMsg);
+  if (!data.suppressCustomerMessage) await sendWAToCustomer(data.customerPhone, customerMsg);
 
   const adminMsg = `📋 *Booking Perusahaan Baru*\nOrder: *${data.orderNumber}*\nPerusahaan: ${data.companyName}\nFasilitas: ${data.facilityName}\nTanggal: ${data.bookingDate} | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp${data.totalPrice}`;
   await sendWAToAdmins(adminMsg);
 
-  if (data.picPhone) {
+  // A PIC with the same phone must not re-receive an opted-out customer message.
+  const canonicalPhone = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    return digits.startsWith("0") ? "62" + digits.slice(1) : digits;
+  };
+  if (data.picPhone && !(data.suppressCustomerMessage &&
+      canonicalPhone(data.picPhone) === canonicalPhone(data.customerPhone))) {
     const picMsg = `📋 *Notifikasi Booking Perusahaan*\n\nHalo PIC *${data.companyName}*,\n\nAda booking baru atas nama perusahaan Anda.\n\nOrder: *${data.orderNumber}*\nPemesan: ${data.customerName}\nFasilitas: ${data.facilityName}\nTanggal: *${data.bookingDate}* | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp ${data.totalPrice}\n\nBooking ini akan masuk dalam tagihan bulanan perusahaan. Terima kasih!`;
     await sendWAToCustomer(data.picPhone, picMsg);
   }

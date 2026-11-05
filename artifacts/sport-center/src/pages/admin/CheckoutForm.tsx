@@ -187,6 +187,7 @@ export default function AdminCheckoutForm() {
   const [createdBookingId, setCreatedBookingId] = useState<number | null>(null);
   const [createdBookingAmount, setCreatedBookingAmount] = useState<number>(0);
   const [paymentChoice, setPaymentChoice] = useState<"paid" | "unpaid" | null>(null);
+  const [suppressCustomerWhatsApp, setSuppressCustomerWhatsApp] = useState(false);
   const [paymentProof, setPaymentProof] = useState<File | null>(null);
   const [paidMethod, setPaidMethod] = useState("Transfer Bank");
   const [bookingPaymentDate, setBookingPaymentDate] = useState(jakartaDateOnly);
@@ -1016,6 +1017,7 @@ export default function AdminCheckoutForm() {
         ...(isGymNonmember && (!isHistoricalGymNonmember || x904IdentityValue.trim())
           ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         adminPaymentChoice: paymentChoice,
+        ...(bookingKind === "corporate" ? { suppressCustomerWhatsApp } : {}),
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
         notes: notes || undefined,
       };
@@ -1112,6 +1114,9 @@ export default function AdminCheckoutForm() {
         toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}. Status: belum dibayar; belum ada record pembayaran.` });
       }
 
+      // Reset opt-out for each new booking so a previous customer's choice
+      // never silently affects the next booking.
+      setSuppressCustomerWhatsApp(false);
       // Reset form
       setSelectedCustomerId("");
       setGuestName("");
@@ -1293,7 +1298,7 @@ export default function AdminCheckoutForm() {
 
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
-              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); setMultiPatterns([]); setRepeatEnabled(false); }}>
+              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); setMultiPatterns([]); setRepeatEnabled(false); setSuppressCustomerWhatsApp(false); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="personal">Personal / Umum</SelectItem>
@@ -1410,6 +1415,21 @@ export default function AdminCheckoutForm() {
             {!isGuest && selectedCustomer && <div className="space-y-2">
               <Label>Nomor Telepon / WhatsApp</Label>
               <Input value={bookingCustomer?.phone ?? ""} readOnly />
+              {bookingKind === "corporate" && (
+                <label htmlFor="suppress-corporate-customer-wa" className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm cursor-pointer">
+                  <Checkbox
+                    id="suppress-corporate-customer-wa"
+                    checked={suppressCustomerWhatsApp}
+                    onCheckedChange={(value) => setSuppressCustomerWhatsApp(value === true)}
+                  />
+                  <span>
+                    <span className="font-medium">Tidak Kirim Pesan</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Jangan kirim WhatsApp booking baru ke nomor pemesan ini. Laporan ke grup admin tetap dikirim.
+                    </span>
+                  </span>
+                </label>
+              )}
               {isCompanyPayer && companyCustomerDetailState === "loading" && (
                 <p className="text-xs text-muted-foreground">Memverifikasi data akun perusahaan...</p>
               )}
@@ -1991,7 +2011,7 @@ export default function AdminCheckoutForm() {
                 </div>
               )}
               <Button type="submit" className="w-full h-11 text-base font-bold"
-                disabled={isSubmitting || (!isCompanyPayer && multiPatterns.length === 0 && !canSubmitBooking)}>
+                disabled={!canSubmitBooking}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking"
