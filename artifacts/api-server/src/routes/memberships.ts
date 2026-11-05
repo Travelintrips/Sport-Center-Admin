@@ -1364,8 +1364,6 @@ async function reportGymPayment(
     WHERE membership_id = ${membership.id} AND device_serial = 'TDBD234200545'
       AND status = 'verified' LIMIT 1`);
   pin = mapped.rows[0] ? String(mapped.rows[0].user_pin) : null;
-  const baseUrl = await getBaseUrl();
-  const reviewUrl = baseUrl ? baseUrl.replace(/\/$/,"") + "/admin/memberships?memberId=" + membership.id : null;
   await notifyGymMembershipWa({
     event, action, bookingId: booking.id, orderNumber: booking.orderNumber,
     membershipId: membership.id, paymentId: payment.id,
@@ -1374,7 +1372,7 @@ async function reportGymPayment(
     months: payment.months, periodStart:payment.periodStart,periodEnd:payment.periodEnd,
     previousPeriod:previousEnd ? previousEnd : undefined,
     amount:Number(payment.amount),paymentMethod:payment.paymentMethod,
-    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl ? reviewUrl : null,
+    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl || null,
   });
 }
 
