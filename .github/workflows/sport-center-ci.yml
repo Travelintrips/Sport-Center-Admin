@@ -141,6 +141,9 @@ jobs:
       - name: Verify public homepage links to self-booking without login
         run: node --test scripts/test-home-self-booking-cta.mjs
 
+      - name: Verify booking mandiri premium presentation preserves access safety
+        run: node --test scripts/test-booking-mandiri-premium-ui.mjs
+
       - name: Verify self-service facility choices keep Gym/X904 separate
         run: node --test scripts/test-public-facility-selector.mjs
 
