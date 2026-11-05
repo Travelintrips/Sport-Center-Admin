@@ -89,6 +89,16 @@ export async function autoReserveVisAfterFundsVerified(input: {
         WHERE funds_reference=${ref} LIMIT 1`);
       if (reused.rows.length) throw new VisReservationError(409,"bank_reference_reused",
         "Referensi bank sudah dipakai oleh booking lain.");
+      // Do not reuse a reference already bound to a confirmed payment for
+      // another booking, including those outside the Gym visitor flow.
+      const otherPayment = await tx.execute(sql`SELECT 1 FROM sport_center.sport_payments
+        WHERE booking_id<>${Number(booking.id)}
+          AND status::text='confirmed'
+          AND (reference_number=${ref} OR provider_reference=${ref}
+            OR provider_trade_no=${ref} OR merchant_trade_no=${ref})
+        LIMIT 1`);
+      if (otherPayment.rows.length) throw new VisReservationError(409,"bank_reference_other_booking",
+        "Referensi bank sudah digunakan dalam pembayaran booking lain.");
       // Only known machine cards with correct UID/role/name can be picked.
       // A card still assigned, already on another payment/door entitlement,
       // or owned by a member/privileged user is not available.
