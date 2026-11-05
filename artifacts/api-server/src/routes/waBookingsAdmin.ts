@@ -27,6 +27,8 @@ import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
+import { autoReserveVisAfterFundsVerified, VisReservationError } from "../services/x904GymVisitorCardReservations";
+import { notifyGymVisitorCardReserved } from "../lib/notifications";
 
 const router = Router();
 
@@ -505,6 +507,49 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
   });
 
   res.json({ success: true, sentTo });
+});
+
+// Staff verifies an official bank transaction; VIS card selection is atomic
+// and automatic. No X904 door command or grant is created here.
+router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware, async (req, res) => {
+  const admin = (req as any).user;
+  const adminEmail = String(admin?.email ?? "").trim();
+  if (!adminEmail) { res.status(403).json({ error: "Identitas admin tidak tersedia." }); return; }
+  try {
+    const assigned = await autoReserveVisAfterFundsVerified({
+      orderNumber: String(req.params.orderNumber),
+      officialBankReference: String(req.body?.officialBankReference ?? ""),
+      officialFundsChecked: req.body?.officialFundsChecked === true,
+      verifiedBy: adminEmail,
+    });
+    if (assigned.newReservation) {
+      const [booking] = await db.select().from(bookingsTable)
+        .where(eq(bookingsTable.orderNumber, String(req.params.orderNumber))).limit(1);
+      if (booking) {
+        await logAudit({
+          action: "gym_guest_vis_card_auto_reserved", entity: "booking", entityId: booking.id,
+          userName: adminEmail,
+          after: { cardCode: assigned.cardCode, state: assigned.state, payment: "official_bank_attested" },
+        });
+        const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+        // Failure of WhatsApp dispatch must never duplicate the reservation.
+        notifyGymVisitorCardReserved({
+          bookingId: booking.id, orderNumber: booking.orderNumber,
+          customerName: booking.customerName, customerPhone: booking.customerPhone,
+          cardCode: assigned.cardCode, statusUrl,
+        }).catch(error => console.error("[gym-vis] customer notification failed",error));
+      }
+    }
+    res.json({ success: true, cardCode: assigned.cardCode,
+      state: assigned.state, alreadyReserved: !assigned.newReservation,
+      message: "Kartu VIS dialokasikan otomatis. Pengunjung dapat melihatnya di tiket booking; kartu fisik diserahkan saat tiba." });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error: error.message, code: error.code }); return;
+    }
+    console.error("[gym-vis] auto allocation action failed",error);
+    res.status(503).json({error:"Alokasi VIS gagal dan tidak ada perintah akses pintu yang diterbitkan."});
+  }
 });
 
 export default router;
