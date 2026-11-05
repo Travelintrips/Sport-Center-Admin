@@ -21,7 +21,7 @@ export default function GymNonmemberEntry() {
           setError(gym.length ? "Ada lebih dari satu fasilitas Gym. Hubungi petugas untuk memilih fasilitas." : "Fasilitas Gym harian belum tersedia.");
           return;
         }
-        window.location.replace("/wa/booking/" + encodeURIComponent(String(gym[0].id)) + "?nonmember=1");
+        window.location.replace("/wa/booking/" + encodeURIComponent(String(gym[0].id)) + "?nonmember=1&self=1");
       })
       .catch(() => { if (active) setError("Tidak dapat memuat fasilitas Gym. Silakan coba lagi."); });
     return () => { active = false; };
@@ -29,7 +29,7 @@ export default function GymNonmemberEntry() {
 
   return <main className="mx-auto max-w-lg px-5 py-16 text-center">
     <h1 className="text-2xl font-bold">Akses Harian Gym Nonmember</h1>
-    <p className="mt-3 text-gray-600">Pilih PIN X904 atau kartu VIS001–VIS006, isi nomor WhatsApp wajib, pilih QRIS/transfer, dan unggah bukti pembayaran pada formulir berikutnya. Akses hanya aktif setelah verifikasi petugas dan konfirmasi mesin.</p>
+    <p className="mt-3 text-gray-600">Booking dan bayar mandiri tanpa membuat akun. Isi nama serta WhatsApp, pilih QRIS/transfer, lalu unggah bukti. Akses X904 memerlukan verifikasi identitas dan penyerahan kartu oleh petugas.</p>
     <p className="mt-6" role="status">{error || "Membuka formulir pembayaran Gym..."}</p>
     <Link href="/gym" className="mt-6 inline-block underline">Kembali ke Gym</Link>
   </main>;
