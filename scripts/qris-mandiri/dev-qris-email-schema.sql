@@ -28,3 +28,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS qris_email_transactions_dev_reference_unique
 
 -- Intentionally no FK/update trigger to sport_payments:
 -- email ingestion must not auto-confirm or mutate the canonical payment ledger.
+
+
+-- Defense in depth: this DEV ingestion table is server-only.
+ALTER TABLE sport_center.qris_email_transactions_dev ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE sport_center.qris_email_transactions_dev FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE sport_center.qris_email_transactions_dev_id_seq FROM PUBLIC, anon, authenticated;
