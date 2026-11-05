@@ -12,6 +12,7 @@ import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { getFonnteConfig } from "../lib/fonnteConfig";
+import { allocateInvoicePphRounding, discloseInvoicePphRounding } from "../lib/invoicePphAllocation";
 import {
   calculateBookingWithholdingTax,
   calculateInclusiveInvoiceTax,
@@ -327,6 +328,8 @@ function mapInvoice(
   const withholding = calculateWithholdingTax(grandTotal, dpp, pphEnabled, pphRate);
   const pphAmount = withholding.amount;
   const netAmount = withholding.netAmount;
+  const roundingAdjustments = discloseInvoicePphRounding(items ?? [], pphRate, pphAmount);
+  const roundingByItemId = new Map(roundingAdjustments.map((entry) => [entry.itemId, entry.adjustment]));
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -371,7 +374,9 @@ function mapInvoice(
       taxAmount: Number(item.taxAmount ?? 0),
       totalAmount: Number(item.totalAmount ?? 0),
       pphAmount: Number(item.pphAmount ?? 0),
+      roundingAdjustment: roundingByItemId.get(item.id) ?? 0,
     })),
+    pphRoundingAdjustments: roundingAdjustments,
   };
 }
 
@@ -386,27 +391,9 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
       netAmount: withholding.netAmount,
     };
 
-    // Invoice generation consumes unbilled bookings. Persist the corrected
-    // snapshot before creating invoice items so the booking and invoice use
-    // the same PPh rounding. Never rewrite billed/paid legacy bookings here.
-    if (
-      booking.billingStatus === "unbilled" &&
-      booking.companyCustomerId === companyId &&
-      (
-        Number(booking.pphRate ?? 0) !== Number(normalizedBooking.pphRate ?? 0) ||
-        Number(booking.pphAmount ?? 0) !== Number(normalizedBooking.pphAmount ?? 0) ||
-        Number(booking.netAmount ?? 0) !== normalizedBooking.netAmount
-      )
-    ) {
-      await executor.update(bookingsTable)
-        .set({
-          pphRate: normalizedBooking.pphRate == null ? null : String(normalizedBooking.pphRate),
-          pphAmount: normalizedBooking.pphAmount == null ? null : String(normalizedBooking.pphAmount),
-          netAmount: String(normalizedBooking.netAmount),
-          updatedAt: new Date(),
-        })
-        .where(eq(bookingsTable.id, booking.id));
-    }
+    // Invoice items get normalized per-session PPh, but historical booking
+    // financial snapshots must remain untouched. Rounding differences are
+    // allocated on invoice items only (never on sport_bookings).
     normalizedBookings.push(normalizedBooking);
   }
 
@@ -437,6 +424,28 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
     await executor.insert(companyInvoiceItemsTable)
       .values(items)
       .onConflictDoNothing();
+  }
+}
+
+
+/**
+ * Called within the invoice generation transaction, only for invoices without
+ * settled/partial payments. Corrects Rp1 item rounding to the canonical
+ * invoice-level withholding value without touching source booking rows.
+ */
+async function reconcileUnpaidInvoicePphItems(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  invoiceId: number,
+  targetPphAmount: number,
+) {
+  const items = await tx.select().from(companyInvoiceItemsTable)
+    .where(eq(companyInvoiceItemsTable.invoiceId, invoiceId));
+  const allocations = allocateInvoicePphRounding(items, targetPphAmount);
+  for (const allocation of allocations) {
+    if (allocation.roundingAdjustment === 0) continue;
+    await tx.update(companyInvoiceItemsTable)
+      .set({ pphAmount: String(allocation.allocatedPph) })
+      .where(eq(companyInvoiceItemsTable.id, allocation.item.id));
   }
 }
 
@@ -546,7 +555,9 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
         eq(companyInvoicesTable.periodMonth, String(periodMonth))
       )
     ).orderBy(desc(companyInvoicesTable.createdAt), desc(companyInvoicesTable.id));
-    const existingInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid") ?? invoicesForPeriod[0];
+    const existingInvoice = invoicesForPeriod.find((invoice) =>
+      invoice.status === "unpaid" && Number(invoice.paidAmount ?? 0) === 0,
+    ) ?? invoicesForPeriod[0];
 
     res.json({
       companyName: company.companyName ?? company.name,
@@ -614,7 +625,9 @@ async function handleGenerateInvoice(req: any, res: any) {
       )
     ).orderBy(desc(companyInvoicesTable.createdAt), desc(companyInvoicesTable.id));
     // Prefer an open invoice for aggregation. Paid invoices must never be modified.
-    const openInvoice = invoicesForPeriod.find((invoice) => invoice.status !== "paid");
+    const openInvoice = invoicesForPeriod.find((invoice) =>
+      invoice.status === "unpaid" && Number(invoice.paidAmount ?? 0) === 0,
+    );
     const existingInvoice = openInvoice ?? invoicesForPeriod[0];
 
     // Maximum two invoices per company per billing month.
@@ -628,8 +641,9 @@ async function handleGenerateInvoice(req: any, res: any) {
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
 
-    if (existingInvoice && existingInvoice.status !== "paid") {
-      // Invoice exists and unpaid — add new unbilled bookings to it
+    if (openInvoice && existingInvoice) {
+      // Append only to a fully unpaid invoice. Settled and partially paid
+      // invoices stay immutable; new bookings require a separate invoice.
       if (unbilledBookings.length === 0) {
         res.status(409).json({
           error: `Invoice periode ini sudah ada: ${existingInvoice.invoiceNumber}. Tidak ada booking baru untuk ditambahkan.`,
@@ -674,6 +688,12 @@ async function handleGenerateInvoice(req: any, res: any) {
         })
         .where(eq(companyInvoicesTable.id, existingInvoice.id))
         .returning();
+
+      // Only redistribute rounding when this invoice has no money allocated.
+      // Existing paid/partially-paid invoice allocations are immutable.
+      if (existingInvoice.status === "unpaid" && Number(existingInvoice.paidAmount ?? 0) === 0) {
+        await reconcileUnpaidInvoicePphItems(tx, existingInvoice.id, newPphAmount);
+      }
 
       // Mark new bookings as billed
       for (const b of unbilledBookings) {
@@ -750,6 +770,7 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     // Insert line items
     await buildAndInsertItems(inv.id, companyCustomerId, unbilledBookings, facilityMap, tx);
+    await reconcileUnpaidInvoicePphItems(tx, inv.id, pphAmount);
 
     // Mark bookings as billed
     for (const b of unbilledBookings) {
@@ -873,6 +894,10 @@ router.post("/company-invoices/:id/rebuild-items", adminMiddleware, async (req, 
     const id = parseInt(String(req.params.id));
     const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
     if (!inv) { res.status(404).json({ error: "Not found" }); return; }
+    if (inv.status !== "unpaid" || Number(inv.paidAmount ?? 0) > 0) {
+      res.status(409).json({ error: "Invoice yang sudah memiliki pembayaran tidak boleh dibangun ulang." });
+      return;
+    }
 
     // Delete existing items and rebuild from scratch
     await db.delete(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));

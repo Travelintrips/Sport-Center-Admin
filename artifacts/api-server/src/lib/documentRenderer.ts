@@ -1,4 +1,5 @@
 
+import { discloseInvoicePphRounding } from "./invoicePphAllocation";
 import {
   db,
   companyDocumentTemplatesTable,
@@ -310,6 +311,17 @@ export async function renderDocument(params: {
     const collectedByCustomer = inv.ppnCollectedByCustomer === true || inv.ppnTreatment === "collected_by_customer";
 
     const itemsTable = buildInvoiceTableHtml(items);
+    const roundingNotes = discloseInvoicePphRounding(
+      items, Number(inv.pphRate ?? 0), Number(inv.pphAmount ?? 0),
+    );
+    const roundingDisclosure = roundingNotes.length
+      ? `<div style="margin-top:8px;color:#6b7280;font-size:11px;">Penyesuaian pembulatan PPh per sesi: ${
+          roundingNotes.map((item) =>
+            (String(item.orderNumber ?? item.itemId).replace(/[^A-Za-z0-9_-]/g, "") +
+              " (" + (item.adjustment > 0 ? "+" : "") + item.adjustment + " rupiah)"),
+          ).join(", ")
+        }. Total PPh dan neto mengikuti invoice; harga bruto booking tidak berubah.</div>`
+      : "";
 
     const corpTaxRows = dppCorp > 0 ? `
           <tr><td style="padding:4px 16px;">Subtotal</td><td style="text-align:right;font-weight:600;">${formatIDR(subtotal)}</td></tr>
@@ -335,6 +347,7 @@ export async function renderDocument(params: {
         </div>
       </div>
       ${itemsTable}
+      ${roundingDisclosure}
       <div style="display:flex;justify-content:flex-end;margin-top:8px;">
         <table style="font-size:13px;min-width:320px;">
           ${corpTaxRows}
