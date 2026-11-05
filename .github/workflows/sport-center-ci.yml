@@ -141,6 +141,9 @@ jobs:
       - name: Verify public homepage links to self-booking without login
         run: node --test scripts/test-home-self-booking-cta.mjs
 
+      - name: Verify bright split hero keeps booking safety and real building image
+        run: node --test scripts/test-booking-mandiri-bright-hero.mjs
+
       - name: Verify booking mandiri premium presentation preserves access safety
         run: node --test scripts/test-booking-mandiri-premium-ui.mjs
 
