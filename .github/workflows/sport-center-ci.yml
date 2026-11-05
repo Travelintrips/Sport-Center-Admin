@@ -138,6 +138,9 @@ jobs:
       - name: Verify Gym public bookings appear in WA Approval without unsafe paid action
         run: node --test scripts/test-wa-approval-gym-guest.mjs
 
+      - name: Verify shared premium checkout leaves booking behavior intact
+        run: node --test scripts/test-public-checkout-premium-ui.mjs
+
       - name: Verify public homepage links to self-booking without login
         run: node --test scripts/test-home-self-booking-cta.mjs
 
