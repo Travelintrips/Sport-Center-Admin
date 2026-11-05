@@ -125,6 +125,11 @@ export default function AdminCheckoutForm() {
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [companyCustomerDetail, setCompanyCustomerDetail] = useState<null | {
+    id: number; name: string; phone: string | null; email: string | null;
+    accountType: string; picEmail?: string | null;
+  }>(null);
+  const [companyCustomerDetailState, setCompanyCustomerDetailState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
@@ -259,6 +264,45 @@ export default function AdminCheckoutForm() {
   const isMembership = bookingKind === "membership";
   const hideRegularBookingFields = isMembership && memberAction !== "new";
   const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
+  // The admin customer dropdown is a listing cache. The canonical customer
+  // details endpoint must establish company ownership before Corporate submit.
+  useEffect(() => {
+    setCompanyCustomerDetail(null);
+    if (!isCompanyPayer || !selectedCustomerId || selectedCustomerId === "__guest__" ||
+        !Number.isInteger(Number(selectedCustomerId)) || Number(selectedCustomerId) <= 0) {
+      setCompanyCustomerDetailState("idle");
+      return;
+    }
+    const controller = new AbortController();
+    setCompanyCustomerDetailState("loading");
+    fetch("/api/customers/" + encodeURIComponent(selectedCustomerId), {
+      headers: { Authorization: "Bearer " + (getToken() ?? "") },
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw Error("Tidak dapat memeriksa akun perusahaan");
+      return response.json();
+    }).then((data) => {
+      if (controller.signal.aborted) return;
+      if (Number(data.id) !== Number(selectedCustomerId) || data.accountType !== "company") {
+        throw Error("Pemesan tidak terdaftar sebagai akun perusahaan");
+      }
+      setCompanyCustomerDetail({
+        id: Number(data.id), name: String(data.name ?? ""),
+        phone: data.phone ?? null, email: data.email ?? null,
+        accountType: String(data.accountType), picEmail: data.picEmail ?? null,
+      });
+      setCompanyCustomerDetailState("ready");
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setCompanyCustomerDetail(null);
+        setCompanyCustomerDetailState("error");
+      }
+    });
+    return () => controller.abort();
+  }, [isCompanyPayer, selectedCustomerId]);
+  const verifiedCompanyCustomer = isCompanyPayer && companyCustomerDetailState === "ready"
+    && companyCustomerDetail?.id === Number(selectedCustomerId) ? companyCustomerDetail : null;
+  const bookingCustomer = verifiedCompanyCustomer ?? selectedCustomer;
   const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
   const apMember = selectedCustomer?.apMember ?? null;
@@ -299,7 +343,8 @@ export default function AdminCheckoutForm() {
   const bookingScheduleValid = multiPatterns.length > 0 || (repeatEnabled ? recurringScheduleValid : slotValid);
   const customerFormValid = isGuest
     ? Boolean(guestName.trim() && /^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))
-    : Boolean(selectedCustomer?.name && selectedCustomer?.phone);
+    : Boolean((isCompanyPayer ? verifiedCompanyCustomer : selectedCustomer)?.name &&
+      (isCompanyPayer ? verifiedCompanyCustomer : selectedCustomer)?.phone);
   const formPaymentValid = paymentChoice === "unpaid" ||
     (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
       (paidMethod === "Transfer Bank" || paidMethod === "QRIS")));
@@ -322,8 +367,10 @@ export default function AdminCheckoutForm() {
     ...(!formPaymentValid ? ["Lengkapi bukti dan tanggal pembayaran."] : []),
     ...(isWalkIn || isActiveApMember || bookingKind === "event"
       ? ["Jenis fasilitas atau pelanggan ini tidak mendukung booking multi-jadwal."] : []),
-    ...(isCompanyPayer && (paymentChoice !== "unpaid" || isGuest || selectedCustomer?.accountType !== "company")
-      ? ["Corporate harus menggunakan akun perusahaan terdaftar dan Belum Bayar."] : []),
+    ...(isCompanyPayer && (paymentChoice !== "unpaid" || isGuest || !verifiedCompanyCustomer)
+      ? [companyCustomerDetailState === "loading"
+          ? "Memverifikasi akun perusahaan..."
+          : "Corporate harus menggunakan akun perusahaan terdaftar dan Belum Bayar."] : []),
     ...(!isCompanyPayer && selectedCustomer?.accountType === "company"
       ? ["Ubah jenis pemesanan menjadi Corporate untuk pelanggan perusahaan."] : []),
   ];
@@ -342,7 +389,7 @@ export default function AdminCheckoutForm() {
       (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
     (multiPatterns.length === 0 || (!isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
-    (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && selectedCustomer?.accountType === "company")) &&
+    (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && verifiedCompanyCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
   );
 
@@ -867,7 +914,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Untuk akun perusahaan, pilih jenis Corporate atau pembayar perusahaan", variant: "destructive" });
       return;
     }
-    if (corporate && (isGuest || selectedCustomer?.accountType !== "company")) {
+    if (corporate && (isGuest || !verifiedCompanyCustomer)) {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
     }
@@ -875,7 +922,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih customer yang terdaftar; data tamu perlu didaftarkan terlebih dahulu", variant: "destructive" });
       return;
     }
-    if (!isGuest && (!selectedCustomer?.name || !selectedCustomer?.phone)) {
+    if (!isGuest && (!bookingCustomer?.name || !bookingCustomer?.phone)) {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
@@ -893,15 +940,15 @@ export default function AdminCheckoutForm() {
     try {
       const bookingPayload = {
         customerId: guestBooking ? null : Number(selectedCustomerId),
-        customerName: isGuest ? guestName.trim() : selectedCustomer.name,
-        customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
+        customerName: isGuest ? guestName.trim() : bookingCustomer.name,
+        customerPhone: isGuest ? guestPhone.trim() : bookingCustomer.phone,
         // Company name is not an email address. Prefer a valid PIC email for corporate bookings.
         customerEmail: isGuest ? guestEmail.trim() : (
           corporate
-            ? [selectedCustomer.picEmail, selectedCustomer.email]
+            ? [bookingCustomer.picEmail, bookingCustomer.email]
                 .map((value: unknown) => String(value ?? "").trim())
                 .find((value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) ?? ""
-            : (selectedCustomer.email ?? "")
+            : (bookingCustomer.email ?? "")
         ),
         facilityId: Number(selectedFacilityId),
         ...(isMultigunaFacility ? {activityType:selectedActivityType} : {}),
@@ -1294,7 +1341,13 @@ export default function AdminCheckoutForm() {
             </div>}
             {!isGuest && selectedCustomer && <div className="space-y-2">
               <Label>Nomor Telepon / WhatsApp</Label>
-              <Input value={selectedCustomer.phone ?? ""} readOnly />
+              <Input value={(isCompanyPayer ? verifiedCompanyCustomer?.phone : selectedCustomer.phone) ?? ""} readOnly />
+              {isCompanyPayer && companyCustomerDetailState === "loading" && (
+                <p className="text-xs text-muted-foreground">Memverifikasi data akun perusahaan...</p>
+              )}
+              {isCompanyPayer && companyCustomerDetailState === "error" && (
+                <p role="alert" className="text-xs text-destructive">Akun perusahaan belum dapat diverifikasi. Pilih ulang pelanggan atau periksa data perusahaan.</p>
+              )}
               {isActiveApMember && (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
