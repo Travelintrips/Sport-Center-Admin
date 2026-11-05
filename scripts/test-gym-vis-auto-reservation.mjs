@@ -87,7 +87,7 @@ test("release requires physical return plus verified X904 status, not time-only 
 test("VIS return checks unresolved X904 grants across all bookings for the physical PIN",()=>{
  const returnMethod=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
  assert.match(returnMethod,/WHERE device_serial='TDBD234200545'/);
- assert.match(returnMethod,/AND user_pin=\\$\\{String\\(row\\.user_pin\\)\\}/);
- assert.match(returnMethod,/access_state IN \\('pending','active','review_required'\\)/);
- assert.doesNotMatch(returnMethod,/WHERE booking_id=\\$\\{Number\\(row\\.booking_id\\)\\}/);
+ assert.match(returnMethod,/AND user_pin=\$\{String\(row\.user_pin\)\}/);
+ assert.match(returnMethod,/access_state IN \('pending','active','review_required'\)/);
+ assert.doesNotMatch(returnMethod,/WHERE booking_id=\$\{Number\(row\.booking_id\)\}/);
 });
