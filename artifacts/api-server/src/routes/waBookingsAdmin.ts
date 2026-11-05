@@ -27,6 +27,8 @@ import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
+import { autoReserveVisAfterFundsVerified, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
+import { notifyGymVisitorCardReserved } from "../lib/notifications";
 
 const router = Router();
 
@@ -153,8 +155,25 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
     ? await resolveGymGuestName(booking.customerName).catch(() => null)
     : null;
 
+  let visCardReservation: { cardCode: string; state: string } | null = null;
+  if (booking.source === "gym_public_guest") {
+    try {
+      const reservations = await db.execute(sql`SELECT card_code,state
+        FROM sport_center.gym_vis_card_reservations
+        WHERE booking_id=${booking.id} LIMIT 1`);
+      if (reservations.rows.length === 1) {
+        visCardReservation = {
+          cardCode: String(reservations.rows[0].card_code),
+          state: String(reservations.rows[0].state),
+        };
+      }
+    } catch (error) {
+      console.warn("[gym-vis] admin reservation lookup unavailable", error);
+    }
+  }
   res.json({
     booking,
+    visCardReservation,
     x904IdentityMatch: x904IdentityMatch?.route === "registered"
       ? {
           route: "registered",
@@ -505,6 +524,74 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
   });
 
   res.json({ success: true, sentTo });
+});
+
+// Staff verifies an official bank transaction; VIS card selection is atomic
+// and automatic. No X904 door command or grant is created here.
+router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware, async (req, res) => {
+  const admin = (req as any).user;
+  const adminEmail = String(admin?.email ?? "").trim();
+  if (!adminEmail) { res.status(403).json({ error: "Identitas admin tidak tersedia." }); return; }
+  try {
+    const assigned = await autoReserveVisAfterFundsVerified({
+      orderNumber: String(req.params.orderNumber),
+      officialBankReference: String(req.body?.officialBankReference ?? ""),
+      officialFundsChecked: req.body?.officialFundsChecked === true,
+      verifiedBy: adminEmail,
+    });
+    if (assigned.newReservation) {
+      const [booking] = await db.select().from(bookingsTable)
+        .where(eq(bookingsTable.orderNumber, String(req.params.orderNumber))).limit(1);
+      if (booking) {
+        await logAudit({
+          action: "gym_guest_vis_card_auto_reserved", entity: "booking", entityId: booking.id,
+          userName: adminEmail,
+          after: { cardCode: assigned.cardCode, state: assigned.state, payment: "official_bank_attested" },
+        });
+        const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+        // Failure of WhatsApp dispatch must never duplicate the reservation.
+        notifyGymVisitorCardReserved({
+          bookingId: booking.id, orderNumber: booking.orderNumber,
+          customerName: booking.customerName, customerPhone: booking.customerPhone,
+          cardCode: assigned.cardCode, statusUrl,
+        }).catch(error => console.error("[gym-vis] customer notification failed",error));
+      }
+    }
+    res.json({ success: true, cardCode: assigned.cardCode,
+      state: assigned.state, alreadyReserved: !assigned.newReservation,
+      message: "Kartu VIS dialokasikan otomatis. Pengunjung dapat melihatnya di tiket booking; kartu fisik diserahkan saat tiba." });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error: error.message, code: error.code }); return;
+    }
+    console.error("[gym-vis] auto allocation action failed",error);
+    res.status(503).json({error:"Alokasi VIS gagal dan tidak ada perintah akses pintu yang diterbitkan."});
+  }
+});
+
+router.post("/admin/wa-bookings/:orderNumber/return-vis", adminMiddleware, async (req, res) => {
+  const actor = String((req as any).user?.email ?? "").trim();
+  if (!actor) { res.status(403).json({ error: "Identitas petugas tidak tersedia." }); return; }
+  try {
+    const outcome = await returnVerifiedVisCard({
+      orderNumber: String(req.params.orderNumber),
+      physicalCardReturned: req.body?.physicalCardReturned === true,
+      x904ReadbackChecked: req.body?.x904ReadbackChecked === true,
+      returnedBy: actor,
+    });
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
+    if (booking) await logAudit({
+      action: "gym_guest_vis_card_returned", entity: "booking", entityId: booking.id,
+      userName: actor, after: { cardCode: outcome.cardCode, returnState: outcome.state, x904ReadbackChecked: true },
+    });
+    res.json({ success: true, ...outcome });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error:error.message, code:error.code }); return;
+    }
+    res.status(503).json({ error:"Pengembalian kartu belum dapat diselesaikan." });
+  }
 });
 
 export default router;

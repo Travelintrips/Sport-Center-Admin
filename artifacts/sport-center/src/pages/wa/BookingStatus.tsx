@@ -23,6 +23,7 @@ interface BookingStatus {
   netAmount?: number | null;
   status: string;
   source: string;
+  visitorCard?: { code: string; state: string } | null;
   notes: string | null;
   paymentDeadline: string | null;
   checkedInAt: string | null;
@@ -178,6 +179,29 @@ export default function WaBookingStatus() {
             )}
           </CardContent>
         </Card>
+
+        {booking.source === "gym_public_guest" && booking.visitorCard && (
+          <Card className="overflow-hidden border-orange-200 bg-gradient-to-br from-orange-50 to-white shadow-sm">
+            <CardContent className="p-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-orange-700">Tiket Kartu Pengunjung Gym</p>
+              <p className="mt-2 text-3xl font-black text-[#142441]">{booking.visitorCard.code}</p>
+              <p className="mt-2 text-sm font-medium text-slate-700">
+                Kartu sudah dialokasikan otomatis. Tunjukkan nomor booking ini saat datang untuk mengambil kartu fisik dari petugas.
+              </p>
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                Nomor VIS bukan kode untuk membuka pintu. Kartu fisik hanya dapat digunakan setelah pemeriksaan kedatangan, jadwal, dan ACK/read-back X904.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+        {booking.source === "gym_public_guest" && booking.status === "confirmed" && !booking.visitorCard && (
+          <Card className="border-blue-200 bg-blue-50">
+            <CardContent className="p-4 text-sm text-blue-900">
+              Pembayaran booking sudah confirmed. Alokasi kartu VIS masih menunggu verifikasi dana resmi atau ketersediaan kartu.
+              Pengunjung tetap dapat menunjukkan nomor booking ini saat tiba.
+            </CardContent>
+          </Card>
+        )}
 
         {/* Booking details */}
         <Card className="shadow-sm">
