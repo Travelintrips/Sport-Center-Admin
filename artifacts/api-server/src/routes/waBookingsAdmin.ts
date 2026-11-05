@@ -35,7 +35,7 @@ function formatIDR(n: number): string {
 
 // ─── GET /api/admin/wa-bookings ───────────────────────────────────────────────
 router.get("/admin/wa-bookings", adminMiddleware, async (req, res) => {
-  const { status, search, page = "1", limit = "30" } = req.query as Record<string, string>;
+  const { status, source = "all", search, page = "1", limit = "30" } = req.query as Record<string, string>;
   const pageNum = Math.max(1, parseInt(page) || 1);
   const limitNum = Math.min(100, parseInt(limit) || 30);
   const offset = (pageNum - 1) * limitNum;
@@ -43,9 +43,16 @@ router.get("/admin/wa-bookings", adminMiddleware, async (req, res) => {
   const conditions: ReturnType<typeof eq>[] = [
     or(
       eq(bookingsTable.source, "whatsapp_chat"),
-      eq(bookingsTable.source, "whatsapp")
+      eq(bookingsTable.source, "whatsapp"),
+      eq(bookingsTable.source, "gym_public_guest")
     ) as any,
   ];
+  // Filters are intersected with the allowlist above: never expose unrelated admin bookings.
+  if (source === "wa") {
+    conditions.push(or(eq(bookingsTable.source, "whatsapp_chat"), eq(bookingsTable.source, "whatsapp")) as any);
+  } else if (source === "gym_public_guest") {
+    conditions.push(eq(bookingsTable.source, "gym_public_guest"));
+  }
   if (status && status !== "all") {
     conditions.push(eq(bookingsTable.status, status as any));
   }
@@ -290,6 +297,14 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   const [booking] = await db.select().from(bookingsTable)
     .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
   if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+  // A public Gym guest is a booking only, not a verified X904 entitlement.
+  // Do not allow this legacy WA one-click paid action to create a payment
+  // with no supporting proof and independent fund verification.
+  if (booking.source === "gym_public_guest") {
+    res.status(409).json({
+      error: "Booking Gym mandiri wajib diverifikasi melalui menu Booking Admin. Tombol Lunas cepat WA tidak tersedia untuk booking ini.",
+    }); return;
+  }
   if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(booking.status)) {
     res.status(400).json({ error: `Status tidak valid untuk mark paid: ${booking.status}` }); return;
   }
