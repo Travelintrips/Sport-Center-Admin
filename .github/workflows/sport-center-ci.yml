@@ -156,6 +156,9 @@ jobs:
       - name: Verify PIN and UID visible only to logged-in admin
         run: node --test scripts/test-gym-name-admin-only-pin.mjs
 
+      - name: Verify automatic VIS reservation after official funds check
+        run: node --test scripts/test-gym-vis-auto-reservation.mjs
+
       - name: Verify Gym name match and visitor-card routing without public X904 grants
         run: node --test scripts/test-gym-guest-name-x904-route.mjs
 
