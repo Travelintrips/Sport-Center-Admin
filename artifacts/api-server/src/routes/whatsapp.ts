@@ -861,6 +861,30 @@ router.get("/wa/x904-identity", async (req, res) => {
           name.replace(/\s+/g, "").toUpperCase() !== card.displayName.replace(/\s+/g, "").toUpperCase()))) {
       res.status(409).json({ error: "Identitas X904 tidak cocok dengan inventaris terverifikasi." }); return;
     }
+    // The public identity picker must enforce the same authorization as booking.
+    // VIS cards have separate fixed UID/name attestation and are unaffected.
+    if (type === "pin") {
+      if (["12", "79", "237"].includes(pin)) {
+        res.status(409).json({ error: "PIN X904 termasuk pengecualian akses nonmember." });
+        return;
+      }
+      const registry = await db.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
+          AND device_uid=${Number(row.device_uid)}
+          AND upper(regexp_replace(trim(display_name), '[[:space:]]+', ' ', 'g')) =
+              upper(regexp_replace(trim(${name}::text), '[[:space:]]+', ' ', 'g'))
+          AND verification_state='verified' AND revoked_at IS NULL LIMIT 1`);
+      if (registry.rows.length !== 1) {
+        res.status(409).json({ error: "PIN nonmember belum terverifikasi pada registry X904." });
+        return;
+      }
+      const owner = await db.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin} LIMIT 1`);
+      if (owner.rows.length > 0) {
+        res.status(409).json({ error: "PIN X904 memiliki kepemilikan membership." });
+        return;
+      }
+    }
     res.setHeader("Cache-Control", "no-store");
     res.json({ valid: true, displayName: name, identityType: type, identityValue: value });
   } catch {

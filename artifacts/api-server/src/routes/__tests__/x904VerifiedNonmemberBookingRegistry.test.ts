@@ -41,4 +41,19 @@ describe("X904 verified nonmember registry booking gate", () => {
       expect(source.slice(registryCheck, registryCheck + 250)).toContain('identityType === "pin"');
     });
   }
+  test("public identity lookup enforces registry before returning valid", () => {
+    const source = readFileSync(join(process.cwd(), "src/routes", "whatsapp.ts"), "utf8");
+    const start = source.indexOf('router.get("/wa/x904-identity"');
+    const finish = source.indexOf('router.post("/wa/booking"', start);
+    const lookup = source.slice(start, finish);
+    expect(start).toBeGreaterThan(-1);
+    expect(finish).toBeGreaterThan(start);
+    expect(lookup).toContain("x904_verified_nonmember_identities");
+    expect(lookup).toContain("verification_state='verified'");
+    expect(lookup).toContain("revoked_at IS NULL");
+    expect(lookup).toContain("gym_x904_member_mapping");
+    expect(lookup).toContain('if (type === "pin")');
+    expect(lookup.indexOf('res.status(409)')).toBeLessThan(lookup.indexOf("res.json({ valid: true"));
+  });
+
 });
