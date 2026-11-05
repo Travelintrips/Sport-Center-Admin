@@ -22,6 +22,6 @@ describe("Gym membership payment WhatsApp proof link", () => {
     expect(report).toContain('Tersimpan di sistem (tautan bukti belum tersedia)');
     expect(report).toContain('"Belum tersedia"');
     expect(report).toContain('await sendWAToAdmins(report');
-    expect(report).toContain('MENUNGGU ACK/READ-BACK');
+    expect(report).toContain('Status akses X904: Akses mesin akan dinyatakan aktif setelah verifikasi perangkat berhasil.');
   });
 });
