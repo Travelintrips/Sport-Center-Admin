@@ -126,19 +126,21 @@ export default function AdminWaBookings() {
   const qc = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
 
-  const queryKey = ["wa-bookings", activeTab, search];
+  const queryKey = ["wa-bookings", activeTab, sourceFilter, search];
 
   const { data, isLoading, refetch } = useQuery({
     queryKey,
     queryFn: () => {
       const params = new URLSearchParams({ limit: "50" });
       if (activeTab !== "all") params.set("status", activeTab);
+      if (sourceFilter !== "all") params.set("source", sourceFilter);
       if (search) params.set("search", search);
       return apiFetch(`/admin/wa-bookings?${params}`);
     },
@@ -207,7 +209,7 @@ export default function AdminWaBookings() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black">WA Booking Approval</h1>
-          <p className="text-muted-foreground text-sm">Booking masuk via WhatsApp Chat — kelola persetujuan & pembayaran</p>
+          <p className="text-muted-foreground text-sm">Booking masuk via WhatsApp dan Gym mandiri — cek status dan verifikasi pembayaran</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2 w-fit">
           <RefreshCw className="w-4 h-4" /> Refresh
@@ -227,6 +229,22 @@ export default function AdminWaBookings() {
             }`}
           >
             {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Source filter, independent of the existing booking-status filter */}
+      <div className="flex gap-2 flex-wrap" aria-label="Filter sumber booking">
+        {[
+          { value: "all", label: "Semua Sumber" },
+          { value: "wa", label: "WhatsApp" },
+          { value: "gym_public_guest", label: "Gym Mandiri" },
+        ].map(option => (
+          <button key={option.value} type="button"
+            aria-pressed={sourceFilter === option.value}
+            onClick={() => setSourceFilter(option.value)}
+            className={`rounded-lg border px-3 py-1.5 text-sm ${sourceFilter === option.value ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted"}`}>
+            {option.label}
           </button>
         ))}
       </div>
@@ -256,6 +274,7 @@ export default function AdminWaBookings() {
           <thead>
             <tr className="border-b bg-muted/40">
               <th className="px-4 py-3 text-left font-semibold">Order</th>
+              <th className="px-4 py-3 text-left font-semibold">Sumber</th>
               <th className="px-4 py-3 text-left font-semibold">Customer</th>
               <th className="px-4 py-3 text-left font-semibold">Fasilitas</th>
               <th className="px-4 py-3 text-left font-semibold">Jadwal</th>
@@ -267,17 +286,22 @@ export default function AdminWaBookings() {
           <tbody>
             {isLoading && Array.from({ length: 8 }).map((_, i) => (
               <tr key={i} className="border-b">
-                {Array.from({ length: 7 }).map((_, j) => (
+                {Array.from({ length: 8 }).map((_, j) => (
                   <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
                 ))}
               </tr>
             ))}
             {!isLoading && bookings.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">Tidak ada booking WA ditemukan</td></tr>
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">Tidak ada booking untuk filter yang dipilih</td></tr>
             )}
             {bookings.map((b) => (
               <tr key={b.id} className="border-b hover:bg-muted/30 transition-colors">
                 <td className="px-4 py-3 font-mono font-semibold text-primary">{b.orderNumber}</td>
+                <td className="px-4 py-3">
+                  <Badge variant="outline" className="whitespace-nowrap">
+                    {b.source === "gym_public_guest" ? "Gym Mandiri" : "WhatsApp"}
+                  </Badge>
+                </td>
                 <td className="px-4 py-3">
                   <div className="font-medium">{b.customerName}</div>
                   {b.bookerName && b.bookerName !== b.customerName && (
@@ -293,7 +317,12 @@ export default function AdminWaBookings() {
                   <div className="text-xs text-muted-foreground">{b.startTime}–{b.endTime}</div>
                 </td>
                 <td className="px-4 py-3 font-semibold">{formatIDR(b.grandTotal ?? b.totalPrice)}</td>
-                <td className="px-4 py-3">{statusBadge(b.status)}</td>
+                <td className="px-4 py-3">
+                  {statusBadge(b.status)}
+                  {b.source === "gym_public_guest" && ["pending_payment", "waiting_confirmation"].includes(b.status) && (
+                    <p className="mt-1 text-xs text-amber-700">Verifikasi di Booking Admin</p>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1 flex-wrap">
                     <Button
@@ -322,7 +351,7 @@ export default function AdminWaBookings() {
                         </Button>
                       </>
                     )}
-                    {["pending_payment", "waiting_confirmation"].includes(b.status) && (
+                    {b.source !== "gym_public_guest" && ["pending_payment", "waiting_confirmation"].includes(b.status) && (
                       <Button
                         size="sm" variant="ghost"
                         className="h-7 px-2 text-xs text-blue-700 hover:bg-blue-50 gap-1"
@@ -356,7 +385,7 @@ export default function AdminWaBookings() {
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <MessageSquare className="w-5 h-5 text-primary" />
-              Detail WA Booking — {selectedOrder}
+              Detail Booking — {selectedOrder}
             </SheetTitle>
           </SheetHeader>
 
@@ -405,6 +434,17 @@ export default function AdminWaBookings() {
                   )}
                 </div>
 
+                {detail.booking.source === "gym_public_guest" && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <p className="font-semibold">Gym Mandiri — pembayaran perlu verifikasi dana.</p>
+                    <p className="mt-1">Jangan konfirmasi lunas hanya dari screenshot/OCR. Cek bukti dan dana masuk
+                    melalui menu Booking Admin. Akses X904 tetap memerlukan verifikasi identitas.</p>
+                    <a className="mt-2 inline-block font-semibold underline"
+                       href={`/admin/bookings?search=${encodeURIComponent(detail.booking.orderNumber)}`}>
+                       Buka Booking Admin untuk verifikasi
+                    </a>
+                  </div>
+                )}
                 {/* Quick actions */}
                 <div className="flex gap-2 pt-2 flex-wrap">
                   {detail.booking.status === "waiting_admin_approval" && (
@@ -420,7 +460,7 @@ export default function AdminWaBookings() {
                       </Button>
                     </>
                   )}
-                  {["pending_payment", "waiting_confirmation"].includes(detail.booking.status) && (
+                  {detail.booking.source !== "gym_public_guest" && ["pending_payment", "waiting_confirmation"].includes(detail.booking.status) && (
                     <Button size="sm" className="gap-1 bg-blue-600 hover:bg-blue-700"
                       onClick={() => { paidMutation.mutate(detail.booking.orderNumber); setSelectedOrder(null); }}
                       disabled={paidMutation.isPending}>
