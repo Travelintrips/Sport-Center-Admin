@@ -15,7 +15,7 @@ test("same-phone same-day public guest bookings are locked and rechecked inside 
   assert.match(section, /booking_date=/);
   assert.match(section, /GYM_PUBLIC_GUEST_DUPLICATE_BOOKING/);
   assert.ok(section.indexOf("pg_advisory_xact_lock") < section.indexOf("SELECT 1 FROM sport_center.sport_bookings"));
-  assert.ok(section.indexOf("SELECT 1 FROM sport_center.sport_bookings") < section.indexOf("tx.insert(bookingsTable)"));
+  assert.ok(api.indexOf("SELECT 1 FROM sport_center.sport_bookings", transactionStart) < insertStart);
 });
 
 test("duplicate error is 409, guest has no login account and no X904 entitlement", () => {
