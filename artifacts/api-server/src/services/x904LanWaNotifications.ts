@@ -125,7 +125,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
           AND access.device_uid=u.device_uid
           AND access.verification_state='verified'
           AND lower(btrim(access.verified_name))=lower(btrim(u.display_name))
-          AND access.identity_type='card'
+          AND access.identity_type IN ('card','pin')
         LIMIT 1
       ) visitor ON true
       WHERE l.device_serial=${serial}
