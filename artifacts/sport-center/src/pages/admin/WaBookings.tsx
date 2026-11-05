@@ -134,6 +134,8 @@ export default function AdminWaBookings() {
   const [rejectReason, setRejectReason] = useState("");
   const [visBankReference, setVisBankReference] = useState("");
   const [visFundsChecked, setVisFundsChecked] = useState(false);
+  const [visCardReturned, setVisCardReturned] = useState(false);
+  const [visReadbackChecked, setVisReadbackChecked] = useState(false);
 
   const queryKey = ["wa-bookings", activeTab, sourceFilter, search];
 
@@ -198,6 +200,22 @@ export default function AdminWaBookings() {
       invalidate();
     },
     onError: (e: any) => toast({ title: "Alokasi kartu VIS ditolak", description: e.message, variant: "destructive" }),
+  });
+
+  const returnVisMutation = useMutation({
+    mutationFn: (orderNumber: string) =>
+      mutate(`/admin/wa-bookings/${orderNumber}/return-vis`, {
+        physicalCardReturned: visCardReturned,
+        x904ReadbackChecked: visReadbackChecked,
+      }),
+    onSuccess: (data: { cardCode: string }) => {
+      toast({ title: `Kartu ${data.cardCode} berhasil dikembalikan`,
+        description: "Kartu baru tersedia kembali setelah pemeriksaan hak akses X904." });
+      setVisCardReturned(false);
+      setVisReadbackChecked(false);
+      invalidate();
+    },
+    onError: (e: any) => toast({ title: "Pengembalian VIS ditolak", description: e.message, variant: "destructive" }),
   });
 
   const paidMutation = useMutation({
@@ -468,6 +486,28 @@ export default function AdminWaBookings() {
                       <p className="mt-2">Nama membutuhkan verifikasi manual. Jangan berikan PIN atau kartu pengunjung otomatis.</p>
                     )}
                   </div>
+                )}
+                {detail.booking.source === "gym_public_guest" &&
+                  detail.visCardReservation &&
+                  ["reserved","collected"].includes(detail.visCardReservation.state) && (
+                  <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                    <p className="font-bold">Pengembalian kartu VIS</p>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={visCardReturned}
+                        onChange={e => setVisCardReturned(e.target.checked)} />
+                      Kartu fisik sudah benar-benar kembali ke petugas.
+                    </label>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={visReadbackChecked}
+                        onChange={e => setVisReadbackChecked(e.target.checked)} />
+                      Saya sudah memeriksa read-back X904 dan memastikan tidak ada akses tamu yang masih berjalan.
+                    </label>
+                    <Button type="button" variant="outline" className="w-full"
+                      disabled={!visCardReturned || !visReadbackChecked || returnVisMutation.isPending}
+                      onClick={() => returnVisMutation.mutate(detail.booking.orderNumber)}>
+                      Tandai Kartu Dikembalikan
+                    </Button>
+                  </section>
                 )}
                 {detail.booking.source === "gym_public_guest" && detail.visCardReservation && (
                   <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
