@@ -11,11 +11,11 @@ describe("X904 nonmember safety regression", () => {
     now: new Date("2026-11-05T01:00:00Z"),
   };
 
-  test.each(["12", "79", "237"])("exempt PIN %s never activates", userPin => {
-    expect(decideNonmemberX904Access({ ...base, userPin })).toBe("hold");
+  test.each(["12", "79", "237"])("exempt PIN %s never auto-suspends", userPin => {
+    expect(decideNonmemberX904Access({ ...base, userPin, currentGroup: 1, now: new Date("2026-11-06T01:00:00Z") })).toBe("hold");
   });
   test("role 14 never activates", () => {
-    expect(decideNonmemberX904Access({ ...base, deviceRole: 14 })).toBe("hold");
+    expect(decideNonmemberX904Access({ ...base, deviceRole: 14, currentGroup: 1, now: new Date("2026-11-06T01:00:00Z") })).toBe("hold");
   });
   test("verified ordinary nonmember may activate", () => {
     expect(decideNonmemberX904Access(base)).toBe("activate");
