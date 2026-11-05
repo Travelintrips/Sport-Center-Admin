@@ -1,5 +1,6 @@
 // Exact pending title: BOOKING PERPANJANGAN MEMBERSHIP GYM
 import { sendWAToAdmins } from "./notifications";
+import { getOrCreatePaymentProofShortUrl } from "./paymentProofShortLink";
 
 export interface GymMembershipWaData {
   event: "pending" | "confirmed";
@@ -36,6 +37,16 @@ Customer: ${data.customerCode}
 Membership ID: #${data.membershipId}`;
   const price = "Rp" + data.amount.toLocaleString("id-ID");
   const period = `*${day(data.periodStart)} – ${day(data.periodEnd)}*`;
+  // Direct evidence link via the existing branded proof endpoint, never the
+  // admin membership detail page. Raw Storage URLs are not exposed on failure.
+  const shortProofUrl = data.event === "confirmed" && data.proofUrl
+    ? await getOrCreatePaymentProofShortUrl(data.proofUrl)
+    : null;
+  const proofText = !data.proofUrl
+    ? "Belum tersedia"
+    : shortProofUrl && shortProofUrl !== data.proofUrl
+      ? shortProofUrl
+      : "Tersimpan di sistem (tautan bukti belum tersedia)";
   const report = data.event === "pending"
     ? `📋 *BOOKING ${data.action === "new" ? "PENDAFTARAN" : "PERPANJANGAN"} MEMBERSHIP GYM*
 
@@ -69,7 +80,7 @@ Nominal: *${price}*
 Metode: ${data.paymentMethod === "transfer" ? "Transfer Bank" : "QRIS Mandiri"}
 Tanggal pembayaran: ${day(data.paymentDate || "")}
 ✅ Status pembayaran: LUNAS
-Bukti pembayaran (buka detail Sport Center): ${data.proofUrl || "Tersimpan di sistem"}
+Bukti pembayaran: ${proofText}
 
 ⏳ Status akses X904: MENUNGGU ACK/READ-BACK
 Akses mesin X904 akan dinyatakan aktif setelah verifikasi perangkat berhasil.`;
