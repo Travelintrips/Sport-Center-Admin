@@ -3,6 +3,15 @@ param([switch]$ExecuteClaimed)
 $ErrorActionPreference='Stop'
 $mutex=$null;$owned=$false;$zk=$null;$connected=$false
 function Require([bool]$ok,[string]$code){if(-not $ok){throw $code}}
+# Only paid, verified Gym nonmember grants are subject to daily opening hours.
+# Manual/member group commands and SUSPEND_USER must continue to work outside
+# business hours. Recheck immediately before the physical device write.
+function AssertGymPaidActivationOpen($command) {
+  if ([string]$command.commandType -cne 'ACTIVATE_USER' -or
+      [string]$command.payload.source -cne 'AUTO_NONMEMBER_GYM_12H') { return }
+  $wib=[DateTime]::UtcNow.AddHours(7)
+  Require ($wib.Hour -ge 6 -and $wib.Hour -lt 23) 'GYM_CLOSED'
+}
 try {
   $raw=[Console]::In.ReadToEnd()
   Require ($raw.Length -gt 0 -and $raw.Length -lt 16384) 'INVALID_INPUT'
@@ -19,6 +28,7 @@ try {
     [Console]::WriteLine('{"dryRun":true,"readBackConfirmed":false,"errorCode":null}')
     exit 0
   }
+  AssertGymPaidActivationOpen $cmd
   $mutex=New-Object System.Threading.Mutex($false,'Global\X904_VMSC_PRIMARY_SYNC')
   try {$owned=$mutex.WaitOne(0)} catch [System.Threading.AbandonedMutexException] {$owned=$true}
   Require $owned 'DEVICE_BUSY'
@@ -66,6 +76,7 @@ try {
     }
   }
   if($before -ne $desired){
+    AssertGymPaidActivationOpen $cmd
     Require ([bool]$zk.SetUserGroup(1,[int]$cmd.userPin,$desired)) 'SET_GROUP_FAILED'
   }
   $after=0
