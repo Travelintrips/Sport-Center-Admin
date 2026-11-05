@@ -1019,6 +1019,20 @@ router.post("/wa/booking", async (req, res) => {
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     const booking = await db.transaction(async (tx) => {
+      if (publicGymGuest) {
+        // Serialize same-phone/day guest bookings BEFORE checking for duplicates.
+        // Lock is scoped to this transaction and does not affect admin/member flows.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(
+          hashtext('gym_public_guest'),
+          hashtext(${String(customerPhone) + ":" + String(bookingDate)})
+        )`);
+        const existing = await tx.execute(sql`SELECT 1 FROM sport_center.sport_bookings
+          WHERE source='gym_public_guest' AND customer_phone=${String(customerPhone)}
+            AND booking_date=${String(bookingDate)}
+            AND status IN ('pending_payment','paid','waiting_confirmation','confirmed','completed')
+          LIMIT 1`);
+        if (existing.rows.length > 0) throw new Error("GYM_PUBLIC_GUEST_DUPLICATE_BOOKING");
+      }
       // Lock registry ownership for the booking transaction, so an approval
       // revoked after preflight cannot create a paid access grant.
       if (verifiedX904Identity?.identityType === "pin") {
@@ -1135,6 +1149,10 @@ router.post("/wa/booking", async (req, res) => {
       } : null,
     });
   } catch (err) {
+    if (err instanceof Error && err.message === "GYM_PUBLIC_GUEST_DUPLICATE_BOOKING") {
+      res.status(409).json({ error: "Sudah ada booking Gym untuk tanggal ini. Gunakan status booking sebelumnya, jangan membayar dua kali." });
+      return;
+    }
     console.error("[wa/booking] error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
