@@ -169,9 +169,12 @@ export async function returnVerifiedVisCard(input: {
       if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned" };
       if (!["reserved","collected"].includes(String(row.state)))
         throw new VisReservationError(409,"invalid_return_state","Status kartu tidak dapat dikembalikan.");
+      // Reject return if ANY booking still has a live/pending grant for this physical PIN.
+      // Another booking can retain an entitlement even when this booking is finished.
       const grant = await tx.execute(sql`SELECT 1
         FROM sport_center.x904_nonmember_daily_access
-        WHERE booking_id=${Number(row.booking_id)}
+        WHERE device_serial='TDBD234200545'
+          AND user_pin=${String(row.user_pin)}
           AND access_state IN ('pending','active','review_required')
         LIMIT 1`);
       if (grant.rows.length) throw new VisReservationError(409,"access_still_pending",
