@@ -102,9 +102,14 @@ export async function generateRekapPemakaian(
           eq(bookingsTable.status, "paid"),
           eq(bookingsTable.status, "waiting_confirmation"),
         )!,
-        // Membership visits are appended from gym_checkins below so they
-        // retain their actual check-in time and are not counted twice.
-        or(isNull(bookingsTable.source), ne(bookingsTable.source, "gym_membership"))!,
+        // A gym membership payment is a financial booking, NOT a visit.
+        // Both the zero-value gym_membership booking and its original payment
+        // booking must be excluded: real daily visits come from gym_checkins.
+        // Keep ordinary one-day Gym visitor bookings in the usage report.
+        or(isNull(bookingsTable.source), and(
+          ne(bookingsTable.source, "gym_membership"),
+          ne(bookingsTable.source, "gym_membership_payment"),
+        ))!,
       ),
     )
     .orderBy(bookingsTable.startTime);
