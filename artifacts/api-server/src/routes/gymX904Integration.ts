@@ -150,6 +150,115 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
 });
 
 // Only the last completed, authenticated device snapshot is eligible for active-user UI.
+// Verification queue for existing nonmember candidates. This route does NOT
+// enqueue commands or change machine access; the existing registry worker owns that.
+router.get("/admin/gym-x904/nonmember-registry-review", adminMiddleware, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const actor = (req as any).user;
+  if (!actor || !["owner","super_admin"].includes(actor.role))
+    return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  try {
+    const rows = await db.execute(sql`
+      SELECT r.user_pin,r.device_uid,r.display_name,r.verification_state,
+        (SELECT count(*)::int FROM sport_center.gym_x904_member_mapping m
+         WHERE m.device_serial=r.device_serial AND m.user_pin=r.user_pin) AS mapping_count,
+        (SELECT count(*)::int FROM sport_center.gym_x904_lan_users u
+         WHERE u.device_serial=r.device_serial AND u.user_pin<>r.user_pin
+           AND lower(trim(u.display_name))=lower(trim(r.display_name))) AS duplicate_name_count,
+        (SELECT count(*)::int FROM sport_center.sport_memberships m
+         WHERE lower(trim(m.name))=lower(trim(r.display_name))) AS membership_name_count,
+        (SELECT count(*)::int FROM sport_center.x904_nonmember_daily_access a
+         WHERE a.device_serial=r.device_serial AND a.user_pin=r.user_pin
+           AND a.access_state IN ('pending','active')) AS live_grants,
+        (SELECT count(*)::int FROM sport_center.x904_user_commands c
+         WHERE c.device_serial=r.device_serial AND c.user_pin=r.user_pin
+           AND c.state IN ('queued','claimed')) AS pending_commands
+      FROM sport_center.x904_verified_nonmember_identities r
+      WHERE r.device_serial='TDBD234200545'
+        AND r.verification_state='review_required' AND r.revoked_at IS NULL
+      ORDER BY r.user_pin::integer LIMIT 150`);
+    return res.json({candidates:rows.rows,source:"verified-device-registry",requiresOperatorConfirmation:true});
+  } catch {
+    return res.status(503).json({error:"REGISTRY_REVIEW_UNAVAILABLE"});
+  }
+});
+
+router.post("/admin/gym-x904/nonmember-registry-review/verify", adminMiddleware, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const actor = (req as any).user;
+  if (!actor || !["owner","super_admin"].includes(actor.role))
+    return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
+  const {pin,uid,confirmPin,confirmedNonmember} = req.body ?? {};
+  if (typeof pin!=="string" || !/^[0-9]{1,8}$/.test(pin) ||
+      confirmPin!==pin || !Number.isSafeInteger(uid) || uid<=0 ||
+      confirmedNonmember!==true)
+    return res.status(400).json({error:"EXPLICIT_PIN_UID_NONMEMBER_CONFIRMATION_REQUIRED"});
+  // Never treat existing VIS, operational or test PINs as legacy nonmembers.
+  if (["237","79","12","200","10","78","90","13","17","11","15"].includes(pin))
+    return res.status(409).json({error:"PROTECTED_PIN"});
+  try {
+    const outcome = await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
+      const candidate = await tx.execute(sql`SELECT user_pin,device_uid,display_name
+        FROM sport_center.x904_verified_nonmember_identities
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
+          AND verification_state='review_required' AND revoked_at IS NULL FOR UPDATE`);
+      if (candidate.rows.length!==1 || Number(candidate.rows[0].device_uid)!==uid)
+        return "REGISTRY_CHANGED_OR_NOT_PENDING";
+      const name=String(candidate.rows[0].display_name).trim();
+      if (!name || /^(VIS\s*0*[1-6]|KARTU\s*\d+|TEST\b)/i.test(name))return "SPECIAL_MACHINE_IDENTITY";
+      const inventory=await tx.execute(sql`SELECT device_uid,display_name,device_role
+        FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}`);
+      if (inventory.rows.length!==1 || Number(inventory.rows[0].device_uid)!==uid ||
+          Number(inventory.rows[0].device_role)!==0 ||
+          String(inventory.rows[0].display_name).trim().toLocaleUpperCase("id-ID")!==name.toLocaleUpperCase("id-ID"))
+        return "INVENTORY_IDENTITY_MISMATCH";
+      const snap=await tx.execute(sql`SELECT observed_at,user_count,users
+        FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+      if (snap.rows.length!==1)return "SNAPSHOT_UNAVAILABLE";
+      const observed=new Date(String(snap.rows[0].observed_at));
+      const users=Array.isArray(snap.rows[0].users)?snap.rows[0].users:[];
+      if (!Number.isFinite(observed.getTime()) || observed.getTime()>Date.now() ||
+          Date.now()-observed.getTime()>300000 || users.length!==Number(snap.rows[0].user_count))
+        return "SNAPSHOT_STALE";
+      const entries=users.filter((u:any)=>String(u.pin)===pin);
+      if (entries.length!==1 || entries[0].enabled!==true || Number(entries[0].role)!==0 ||
+          ![1,2].includes(Number(entries[0].group)) ||
+          String(entries[0].name??"").trim().toLocaleUpperCase("id-ID")!==name.toLocaleUpperCase("id-ID"))
+        return "SNAPSHOT_IDENTITY_MISMATCH";
+      const conflicts=await tx.execute(sql`SELECT
+        (SELECT count(*)::int FROM sport_center.gym_x904_member_mapping m
+         WHERE m.device_serial='TDBD234200545' AND m.user_pin=${pin}) AS mapping_count,
+        (SELECT count(*)::int FROM sport_center.sport_memberships m
+         WHERE lower(trim(m.name))=lower(trim(${name}))) AS membership_name_count,
+        (SELECT count(*)::int FROM sport_center.gym_x904_lan_users u
+         WHERE u.device_serial='TDBD234200545' AND u.user_pin<>${pin}
+           AND lower(trim(u.display_name))=lower(trim(${name}))) AS duplicate_name_count,
+        (SELECT count(*)::int FROM sport_center.x904_nonmember_daily_access a
+         WHERE a.device_serial='TDBD234200545' AND a.user_pin=${pin}
+           AND a.access_state IN ('pending','active')) AS live_grants,
+        (SELECT count(*)::int FROM sport_center.x904_user_commands c
+         WHERE c.device_serial='TDBD234200545' AND c.user_pin=${pin}
+           AND c.state IN ('queued','claimed')) AS pending_commands`);
+      const row=conflicts.rows[0] as any;
+      if (!row || ["mapping_count","membership_name_count","duplicate_name_count","live_grants","pending_commands"]
+          .some(k=>Number(row[k])!==0))return "CONFLICT_REQUIRES_MANUAL_RECONCILIATION";
+      const changed=await tx.execute(sql`UPDATE sport_center.x904_verified_nonmember_identities
+        SET verification_state='verified',verified_by=${"admin:"+String(actor.userId)},verified_at=now(),updated_at=now()
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
+          AND device_uid=${uid} AND verification_state='review_required'
+          AND revoked_at IS NULL RETURNING user_pin`);
+      return changed.rows.length===1?"VERIFIED":"REGISTRY_CHANGED_OR_NOT_PENDING";
+    });
+    if(outcome!=="VERIFIED")return res.status(409).json({error:outcome});
+    return res.json({ok:true,pin,state:"verified",commandEnqueued:false});
+  } catch {
+    return res.status(503).json({error:"REGISTRY_VERIFICATION_UNAVAILABLE"});
+  }
+});
+
 router.get("/admin/gym-x904/users", adminMiddleware, async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {

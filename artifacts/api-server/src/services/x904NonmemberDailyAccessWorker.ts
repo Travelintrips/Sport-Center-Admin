@@ -40,6 +40,23 @@ export function startX904NonmemberAccessWorker(): void {
   timer.unref();
 }
 
+/**
+ * Advance-paid Gym visits only become eligible on their booking day, at the
+ * facility's scheduled start. Accept the stored YYYY-MM-DD / HH:mm shape only.
+ * Fail closed on absent/corrupt dates; never open a door early.
+ */
+export function x904NonmemberScheduledStart(bookingDate: unknown, startTime: unknown): number | null {
+  const date = String(bookingDate ?? "").trim();
+  const time = String(startTime ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) return null;
+  const scheduled = Date.parse(`${date}T${time.length === 5 ? time + ":00" : time}+07:00`);
+  if (!Number.isFinite(scheduled)) return null;
+  // Date.parse normalizes invalid dates; reject that normalization.
+  const rebuilt = new Date(scheduled + 7 * 3600000).toISOString().slice(0, 10);
+  if (rebuilt !== date) return null;
+  return scheduled;
+}
+
 /** Enqueue only. The existing VMSC group executor owns physical writes and ACK. */
 export async function processX904NonmemberDailyAccess(store: Store = db, now = new Date()): Promise<void> {
   if (process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true" ||
@@ -101,9 +118,21 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   // Legacy nonmember ownership confirmed by the Sport Center operator on 2026-11-05.
   // Explicitly scoped to these three identities; absence of member mapping
   // never authorizes any other PIN. No payment/grant is fabricated.
-  const verifiedLegacyNonmembers: Readonly<Record<string, string>> = {
-    "109": "sugi", "116": "angel", "147": "HELMI S",
-  };
+  // A registry row requires independent operator verification, a fixed UID and
+  // exact name. Never infer nonmembership merely from missing member mapping.
+  const registryReady = await store.execute(sql`SELECT to_regclass('sport_center.x904_verified_nonmember_identities') IS NOT NULL AS ready`);
+  // Missing migration must not interrupt the existing paid-grant / VIS worker.
+  const verifiedRows = registryReady.rows[0]?.ready === true
+    ? await store.execute(sql`SELECT user_pin,device_uid,display_name
+        FROM sport_center.x904_verified_nonmember_identities
+        WHERE device_serial=${DEVICE} AND verification_state='verified'
+          AND revoked_at IS NULL`)
+    : { rows: [] };
+  if (registryReady.rows[0]?.ready !== true)
+    console.warn("[x904-nonmember] registry unavailable; legacy reconciliation skipped");
+  const verifiedLegacyNonmembers = verifiedRows.rows.map((r: any) => ({
+    pin: String(r.user_pin), uid: Number(r.device_uid), name: String(r.display_name),
+  }));
   const legacySnapshot = await store.execute(sql`SELECT observed_at,user_count,users
     FROM sport_center.gym_x904_access_snapshots
     WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
@@ -115,10 +144,22 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         now.getTime() >= observedAt.getTime() &&
         now.getTime() - observedAt.getTime() <= FRESH_SNAPSHOT_MS &&
         users.length === Number(snapshot.user_count)) {
-      for (const [pin, expectedName] of Object.entries(verifiedLegacyNonmembers)) {
+      for (const { pin, uid, name: expectedName } of verifiedLegacyNonmembers) {
         if (testPin !== undefined && testPin !== pin) continue;
         await store.transaction(async tx => {
           await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
+          // Recheck registry authorization under lock. A previously fetched
+          // verified identity may have been revoked or edited since the cycle
+          // began; never enqueue a suspend based on that stale authorization.
+          const approved = await tx.execute(sql`SELECT device_uid,display_name
+            FROM sport_center.x904_verified_nonmember_identities
+            WHERE device_serial=${DEVICE} AND user_pin=${pin}
+              AND verification_state='verified' AND revoked_at IS NULL
+            FOR UPDATE`);
+          if (approved.rows.length !== 1 ||
+              Number(approved.rows[0].device_uid) !== uid ||
+              String(approved.rows[0].display_name).trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") !==
+                expectedName.trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID")) return;
           // Fail closed if any membership mapping exists, regardless of status.
           const owner = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
             WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
@@ -135,7 +176,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
           if (deviceUser.rows.length !== 1) return;
           const identity = deviceUser.rows[0] as any;
-          if (!Number.isSafeInteger(Number(identity.device_uid)) || Number(identity.device_uid) <= 0 ||
+          if (!Number.isSafeInteger(Number(identity.device_uid)) || Number(identity.device_uid) <= 0 || Number(identity.device_uid) !== uid ||
               Number(identity.device_role) !== 0 ||
               String(identity.display_name).trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") !==
                 expectedName.toLocaleUpperCase("id-ID")) return;
@@ -150,11 +191,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
                 (command_type='SUSPEND_USER' AND payload->>'source'='AUTO_NONMEMBER_LEGACY_VERIFIED'))
             LIMIT 1`);
           if (existing.rows.length) return;
-          const key = x904AutomaticCommandKey("verified-legacy-nonmember:20261105", "SUSPEND_USER", pin);
+          const key = x904AutomaticCommandKey(`verified-legacy-nonmember:${pin}:${uid}`, "SUSPEND_USER", pin);
           const payload = JSON.stringify({
             expectedUid: Number(identity.device_uid), expectedName,
             source: "AUTO_NONMEMBER_LEGACY_VERIFIED",
-            verifiedBy: "operator", verifiedAt: "2026-11-05", attempt: 1,
+            verifiedBy: "registry", attempt: 1,
           });
           await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
             (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
@@ -186,9 +227,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
-          p.status::text AS payment_status
+          p.status::text AS payment_status,
+          booking.booking_date AS booking_date, booking.start_time AS booking_start_time
         FROM sport_center.x904_nonmember_daily_access a
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+        LEFT JOIN sport_center.sport_bookings booking ON booking.id=a.booking_id
         WHERE a.access_id=${Number(row.access_id)} FOR UPDATE OF a`);
       if (locked.rows.length !== 1) return;
       const a = locked.rows[0] as any;
@@ -199,6 +242,14 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
+      const scheduledStart = x904NonmemberScheduledStart(a.booking_date, a.booking_start_time);
+      if (scheduledStart === null) {
+        console.warn("[x904-nonmember] booking schedule invalid; access held", JSON.stringify({accessId:Number(a.access_id)}));
+        return;
+      }
+      // A paid future reservation is not an authorization to use the door
+      // before its booking date/time. Existing activated grants can finish.
+      if (a.activated_at == null && now.getTime() < scheduledStart) return;
       // Do not apply the VIS card allowlist to verified paid nonmember PIN grants.
       // Membership ownership, exempt roles/PINs, device identity and payment
       // verification below remain mandatory for every PIN.

@@ -142,6 +142,31 @@ export default function AdminMemberships() {
     finally{setPaymentUploading(false);}
   }
 
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
+  async function saveEmail() {
+    if (!viewMember?.id || savingEmail) return;
+    const email = emailDraft.trim().toLowerCase();
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailError("Masukkan alamat email yang valid."); return;
+    }
+    setSavingEmail(true); setEmailError("");
+    try {
+      const response = await fetch(`${API}/memberships/${viewMember.id}/email`, {
+        method: "PATCH", headers: authHeaders(), body: JSON.stringify({ email }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Gagal menyimpan email");
+      setViewMember((current: any) => current ? { ...current, email: data.email } : current);
+      setEditingEmail(false);
+      queryClient.invalidateQueries({ queryKey: getListMembershipsQueryKey() });
+      toast({ title: "Email member diperbarui", description: "Pembayaran dan akses X904 tidak berubah." });
+    } catch (error) {
+      setEmailError(error instanceof Error ? error.message : "Gagal menyimpan email");
+    } finally { setSavingEmail(false); }
+  }
   const [editingContact, setEditingContact] = useState(false);
   const [contactPhone, setContactPhone] = useState("");
   const [contactError, setContactError] = useState("");
@@ -410,6 +435,9 @@ export default function AdminMemberships() {
 
   function openMember(m: any) {
     setViewMember(m);
+    setEditingEmail(false);
+    setEmailDraft(String(m.email || ""));
+    setEmailError("");
     setEditingContact(false);
     setContactPhone(String(m.displayPhone || m.phone || ""));
     setContactError("");
@@ -760,16 +788,40 @@ export default function AdminMemberships() {
       {/* Dialog detail member */}
       {viewMember && (
         <Dialog open={!!viewMember} onOpenChange={() => setViewMember(null)}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Detail Member</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="space-y-5 flex-1 min-h-0 overflow-y-auto pr-2">
+              <div className="grid grid-cols-[minmax(85px,0.3fr)_minmax(0,1fr)] gap-x-5 gap-y-3 text-sm">
                 <div className="text-muted-foreground">Nama</div>
                 <div className="font-medium">{viewMember.name}</div>
                 <div className="text-muted-foreground">Email</div>
-                <div className="font-medium break-all">{viewMember.email}</div>
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="font-medium break-all">{viewMember.email}</span>
+                  {canEditContact && !editingEmail && (
+                    <Button size="sm" variant="outline" type="button" onClick={() => {
+                      setEmailDraft(String(viewMember.email || "")); setEmailError(""); setEditingEmail(true);
+                    }}><Pencil size={12} className="mr-1" /> Edit Email</Button>
+                  )}
+                </div>
+                {editingEmail && (
+                  <div className="col-span-2 rounded-lg border p-3 space-y-2">
+                    <Label htmlFor="gym-member-email">Email baru</Label>
+                    <Input id="gym-member-email" type="email" autoComplete="off" value={emailDraft}
+                      onChange={event => setEmailDraft(event.target.value)}
+                      placeholder="member@example.com" disabled={savingEmail} />
+                    {emailError && <p className="text-xs text-destructive">{emailError}</p>}
+                    <p className="text-xs text-muted-foreground">Tidak mengubah akun login, histori pembayaran, atau PIN X904.</p>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" type="button" disabled={savingEmail}
+                        onClick={() => { setEditingEmail(false); setEmailError(""); }}>Batal</Button>
+                      <Button size="sm" type="button" disabled={savingEmail} onClick={saveEmail}>
+                        <Save size={12} className="mr-1" /> {savingEmail ? "Menyimpan..." : "Simpan Email"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="text-muted-foreground">WhatsApp</div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">{viewMember.displayPhone || viewMember.phone}</span>

@@ -140,6 +140,9 @@ export default function AdminCheckoutForm() {
   const [selectedActivityType, setSelectedActivityType] = useState("");
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
+  const [x904NameSearch, setX904NameSearch] = useState("");
+  const [x904MachineUsers, setX904MachineUsers] = useState<Array<{userPin:string;deviceUid:number;displayName:string}>>([]);
+  const [x904NameLookupError, setX904NameLookupError] = useState("");
   const [membershipX904Pin, setMembershipX904Pin] = useState("");
   const [membershipX904Search, setMembershipX904Search] = useState("");
   const [membershipX904Candidates, setMembershipX904Candidates] = useState<Array<{pin:string;uid:number;name:string;available:boolean;mappedMembershipId:number|null;membershipStatus:string|null}>>([]);
@@ -244,6 +247,41 @@ export default function AdminCheckoutForm() {
   // Backdated admin bookings are accounting/history only, never a fresh door entitlement.
   const isHistoricalGymNonmember = isGymNonmember && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate) &&
     selectedDate < jakartaDateOnly();
+  // Name search is only a picker for an existing numeric PIN; booking
+  // and device authorization still validate the PIN on the server.
+  useEffect(() => {
+    if (!isGymNonmember || x904IdentityType !== "pin") return;
+    const controller = new AbortController();
+    setX904NameLookupError("");
+    void (async () => {
+      try {
+        const response = await fetch("/api/admin/gym-x904/users", {
+          headers: { Authorization: "Bearer " + (getToken() ?? "") },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Daftar nama mesin belum tersedia. PIN angka tetap dapat digunakan.");
+        const data = await response.json();
+        if (!controller.signal.aborted) setX904MachineUsers(Array.isArray(data.users)
+          ? data.users.filter((u: any) => Number(u.deviceRole) === 0 &&
+              /^[0-9]{1,8}$/.test(String(u.userPin)) && Number(u.deviceUid) > 0 &&
+              String(u.displayName ?? "").trim())
+            .map((u: any) => ({userPin:String(u.userPin),deviceUid:Number(u.deviceUid),
+              displayName:String(u.displayName).trim()})) : []);
+      } catch (error) {
+        if (!controller.signal.aborted) setX904NameLookupError(error instanceof Error ? error.message : "Daftar mesin belum tersedia.");
+      }
+    })();
+    return () => controller.abort();
+  }, [isGymNonmember, x904IdentityType]);
+  const x904NameMatches = x904NameSearch.trim().length >= 2
+    ? x904MachineUsers.filter(u =>
+        u.displayName.toLocaleLowerCase("id-ID").includes(x904NameSearch.trim().toLocaleLowerCase("id-ID")) ||
+        u.userPin.includes(x904NameSearch.trim())).slice(0, 8)
+    : [];
+  useEffect(() => {
+    if (isGymNonmember && isGuest && x904VerifiedName && !x904VerificationError)
+      setGuestName(previous => previous.trim() ? previous : x904VerifiedName);
+  }, [isGymNonmember, isGuest, x904VerifiedName, x904VerificationError]);
   useEffect(() => {
     setX904VerifiedName("");
     setX904VerificationError("");
@@ -1494,9 +1532,29 @@ export default function AdminCheckoutForm() {
               {x904IdentityType === "card" ? <Select value={x904IdentityValue} onValueChange={setX904IdentityValue}>
                 <SelectTrigger><SelectValue placeholder="Pilih kartu VIS001–VIS006" /></SelectTrigger>
                 <SelectContent>{Array.from({length: 6}, (_, i) => `VIS${String(i + 1).padStart(3, "0")}`).map((card) => <SelectItem key={card} value={card}>{card}</SelectItem>)}</SelectContent>
-              </Select> : <Input aria-label="PIN mesin X904" inputMode="numeric" value={x904IdentityValue} onChange={(event) => setX904IdentityValue(event.target.value)} placeholder="Masukkan PIN mesin" />}
+              </Select> : <div className="space-y-2">
+                <Label htmlFor="admin-x904-name-search" className="text-xs">Cari nama atau PIN pada mesin</Label>
+                <Input id="admin-x904-name-search" aria-label="Cari nama atau PIN pada mesin" autoComplete="off"
+                  value={x904NameSearch} onChange={event => setX904NameSearch(event.target.value)}
+                  placeholder="Contoh: YUDA atau 8" />
+                {x904NameMatches.length > 0 && <div className="max-h-40 overflow-auto rounded-md border" role="listbox" aria-label="Pilih identitas mesin">
+                  {x904NameMatches.map(user => <button type="button" key={user.userPin + ":" + user.deviceUid}
+                    className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted"
+                    onClick={() => {setX904IdentityValue(user.userPin);setX904NameSearch("");setX904VerifiedName("");setX904VerificationError("");}}>
+                    <span>{user.displayName}</span><span className="text-muted-foreground">PIN {user.userPin}</span>
+                  </button>)}
+                </div>}
+                {x904NameSearch.trim().length >= 2 && !x904NameMatches.length && !x904NameLookupError &&
+                  <p className="text-xs text-muted-foreground">Nama tidak ditemukan dalam snapshot mesin. Masukkan PIN angka di bawah.</p>}
+                {x904NameLookupError && <p className="text-xs text-amber-700">{x904NameLookupError}</p>}
+                <Label htmlFor="admin-x904-pin" className="text-xs">PIN mesin X904 (angka)</Label>
+                <Input id="admin-x904-pin" aria-label="PIN mesin X904" inputMode="numeric"
+                  value={x904IdentityValue}
+                  onChange={event => setX904IdentityValue(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
+                  placeholder="Contoh: 8" />
+              </div>}
               {x904Verifying && <p className="text-xs">Memverifikasi identitas mesin...</p>}
-              {x904VerifiedName && <p className="text-xs text-emerald-700">Terverifikasi: {x904VerifiedName}</p>}
+              {x904VerifiedName && <p className="text-xs text-emerald-700">Terverifikasi: {x904VerifiedName}. Lengkapi data pemesan, tanggal, dan status pembayaran untuk melanjutkan.</p>}
               {x904VerificationError && <p className="text-xs text-destructive">{x904VerificationError}</p>}
               {isHistoricalGymNonmember ? (
                 <p className="text-xs text-amber-700">Booking tanggal lampau hanya untuk pencatatan. VIS001–VIS006 boleh dipilih kembali sebagai referensi historis, tanpa aktivasi, suspend, atau perpanjangan akses X904. Identitas boleh dikosongkan.</p>
@@ -1999,6 +2057,18 @@ export default function AdminCheckoutForm() {
                   <p className="font-semibold">Periksa persyaratan Booking Perusahaan:</p>
                   <ul className="ml-4 list-disc space-y-1">
                     {corporateSubmitBlockers.map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                </div>
+              )}
+              {isGymNonmember && !canSubmitBooking && !isSubmitting && (
+                <div role="status" className="rounded-lg border px-3 py-2 text-sm">
+                  <p className="font-semibold">Lengkapi untuk melanjutkan booking Gym:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    {(!selectedCustomerId || !customerFormValid) && <li>Isi nama pemesan dan nomor WhatsApp yang valid.</li>}
+                    {!selectedDate && <li>Pilih tanggal booking.</li>}
+                    {(!x904VerifiedName || x904VerificationError || x904Verifying) && <li>Verifikasi PIN mesin atau pilih nama dari daftar X904.</li>}
+                    {!paymentChoice && <li>Pilih status pembayaran (Sudah Bayar / Belum Bayar).</li>}
+                    {paymentChoice === "paid" && !formPaymentValid && <li>Lengkapi bukti, metode, dan tanggal pembayaran.</li>}
                   </ul>
                 </div>
               )}
