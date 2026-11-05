@@ -893,7 +893,7 @@ router.post("/wa/booking", async (req, res) => {
       if (!gymWalkIn || x904IdentityType != null || x904IdentityValue != null) {
         res.status(400).json({ error: "Booking Gym mandiri tidak menerima pemilihan PIN/kartu X904." }); return;
       }
-      if (!/^[\\p{L}\\p{M}\\p{N} .'-]{2,100}$/u.test(bookingCustomerName) ||
+      if (!/^[\p{L}\p{M}\p{N} .'-]{2,100}$/u.test(bookingCustomerName) ||
           !/^628[0-9]{7,13}$/.test(guestPhone)) {
         res.status(400).json({ error: "Isi nama pengunjung dan nomor WhatsApp 628xxxxxxxxxx yang valid." }); return;
       }
@@ -901,7 +901,7 @@ router.post("/wa/booking", async (req, res) => {
         res.status(400).json({ error: "Pilih QRIS atau Transfer Bank." }); return;
       }
       const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
-      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(bookingDate)) || String(bookingDate) < todayWib) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bookingDate)) || String(bookingDate) < todayWib) {
         res.status(400).json({ error: "Tanggal kunjungan harus hari ini atau tanggal mendatang." }); return;
       }
     }
