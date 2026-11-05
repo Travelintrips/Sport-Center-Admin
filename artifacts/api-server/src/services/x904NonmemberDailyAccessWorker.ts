@@ -98,6 +98,73 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     }
   }
 
+  // Legacy nonmember ownership confirmed by the Sport Center operator on 2026-11-05.
+  // Explicitly scoped to these three identities; absence of member mapping
+  // never authorizes any other PIN. No payment/grant is fabricated.
+  const verifiedLegacyNonmembers: Readonly<Record<string, string>> = {
+    "109": "sugi", "116": "angel", "147": "HELMI S",
+  };
+  const legacySnapshot = await store.execute(sql`SELECT observed_at,user_count,users
+    FROM sport_center.gym_x904_access_snapshots
+    WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
+  if (legacySnapshot.rows.length === 1) {
+    const snapshot = legacySnapshot.rows[0] as any;
+    const observedAt = new Date(String(snapshot.observed_at));
+    const users = Array.isArray(snapshot.users) ? snapshot.users : [];
+    if (Number.isFinite(observedAt.getTime()) &&
+        now.getTime() >= observedAt.getTime() &&
+        now.getTime() - observedAt.getTime() <= FRESH_SNAPSHOT_MS &&
+        users.length === Number(snapshot.user_count)) {
+      for (const [pin, expectedName] of Object.entries(verifiedLegacyNonmembers)) {
+        if (testPin !== undefined && testPin !== pin) continue;
+        await store.transaction(async tx => {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
+          // Fail closed if any membership mapping exists, regardless of status.
+          const owner = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
+            WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
+          if (owner.rows.length) return;
+          const matches = users.filter((u: any) =>
+            String(u.pin) === pin &&
+            String(u.name ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") ===
+              expectedName.toLocaleUpperCase("id-ID") &&
+            Number(u.role) === 0 && u.enabled === true);
+          if (matches.length !== 1 || isX904AutoSuspendExempt(pin, Number(matches[0].role))) return;
+          if (Number(matches[0].group) !== 1) return;
+          const deviceUser = await tx.execute(sql`SELECT device_uid,display_name,device_role
+            FROM sport_center.gym_x904_lan_users
+            WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
+          if (deviceUser.rows.length !== 1) return;
+          const identity = deviceUser.rows[0] as any;
+          if (!Number.isSafeInteger(Number(identity.device_uid)) || Number(identity.device_uid) <= 0 ||
+              Number(identity.device_role) !== 0 ||
+              String(identity.display_name).trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") !==
+                expectedName.toLocaleUpperCase("id-ID")) return;
+          // A paid, currently valid grant takes priority over legacy cleanup.
+          const grant = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
+            WHERE device_serial=${DEVICE} AND user_pin=${pin}
+              AND access_state IN ('pending','active') LIMIT 1`);
+          if (grant.rows.length) return;
+          const existing = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+            WHERE device_serial=${DEVICE} AND user_pin=${pin}
+              AND (state IN ('queued','claimed') OR
+                (command_type='SUSPEND_USER' AND payload->>'source'='AUTO_NONMEMBER_LEGACY_VERIFIED'))
+            LIMIT 1`);
+          if (existing.rows.length) return;
+          const key = x904AutomaticCommandKey("verified-legacy-nonmember:20261105", "SUSPEND_USER", pin);
+          const payload = JSON.stringify({
+            expectedUid: Number(identity.device_uid), expectedName,
+            source: "AUTO_NONMEMBER_LEGACY_VERIFIED",
+            verifiedBy: "operator", verifiedAt: "2026-11-05", attempt: 1,
+          });
+          await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
+            (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
+            VALUES (${DEVICE},'SUSPEND_USER',${pin},${payload}::jsonb,${actor},${key})
+            ON CONFLICT (idempotency_key) DO NOTHING`);
+        });
+      }
+    }
+  }
+
   // Only independently verified paid grants can enqueue X904 access commands.
   const due = await store.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
       a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
