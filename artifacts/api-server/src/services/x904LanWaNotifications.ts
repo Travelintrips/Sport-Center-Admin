@@ -77,7 +77,7 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
     const daily = await tx.execute(sql`
       SELECT l.event_id,l.device_serial,l.user_pin,l.device_time,
         COALESCE(NULLIF(trim(u.display_name),''),'Pengguna X904') AS display_name,
-        membership.status AS membership_status,
+        COALESCE(verified_membership.status, membership.status) AS membership_status,
         visitor.is_verified_visitor AS is_verified_visitor
       FROM sport_center.gym_x904_lan_logs l
       LEFT JOIN sport_center.gym_x904_lan_state state
@@ -85,10 +85,27 @@ export async function dispatchX904LanScanNotifications(): Promise<void> {
       LEFT JOIN sport_center.gym_x904_lan_users u
         ON u.device_serial=l.device_serial AND u.user_pin=l.user_pin
         AND u.last_seen_snapshot=state.last_snapshot_id
+      -- Verified PIN-to-membership identity is authoritative; names can differ.
+      LEFT JOIN LATERAL (
+        SELECT m.status::text AS status
+        FROM sport_center.gym_x904_member_mapping map
+        JOIN sport_center.sport_memberships m ON m.id=map.membership_id
+        WHERE u.device_role=0
+          AND map.device_serial=l.device_serial
+          AND map.user_pin=l.user_pin
+          AND map.status='verified'
+        LIMIT 1
+      ) verified_membership ON true
+      -- Legacy unique-name fallback applies only when this PIN has NO mapping.
+      -- Never override review_required or another unverified mapping by name.
       LEFT JOIN LATERAL (
         SELECT m.status::text AS status
         FROM sport_center.sport_memberships m
         WHERE u.device_role=0
+          AND NOT EXISTS (
+            SELECT 1 FROM sport_center.gym_x904_member_mapping mapped
+            WHERE mapped.device_serial=l.device_serial AND mapped.user_pin=l.user_pin
+          )
           AND lower(btrim(m.name))=lower(btrim(u.display_name))
           AND (SELECT count(*) FROM sport_center.sport_memberships same
                WHERE lower(btrim(same.name))=lower(btrim(u.display_name)))=1
