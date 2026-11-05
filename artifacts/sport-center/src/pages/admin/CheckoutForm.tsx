@@ -125,6 +125,12 @@ export default function AdminCheckoutForm() {
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [customerPickerListHeight, setCustomerPickerListHeight] = useState(280);
+  const [companyCustomerDetail, setCompanyCustomerDetail] = useState<null | {
+    id: number; name: string; phone: string | null; email: string | null;
+    accountType: string; picEmail?: string | null;
+  }>(null);
+  const [companyCustomerDetailState, setCompanyCustomerDetailState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
@@ -181,6 +187,7 @@ export default function AdminCheckoutForm() {
   const [createdBookingId, setCreatedBookingId] = useState<number | null>(null);
   const [createdBookingAmount, setCreatedBookingAmount] = useState<number>(0);
   const [paymentChoice, setPaymentChoice] = useState<"paid" | "unpaid" | null>(null);
+  const [suppressCustomerWhatsApp, setSuppressCustomerWhatsApp] = useState(false);
   const [paymentProof, setPaymentProof] = useState<File | null>(null);
   const [paidMethod, setPaidMethod] = useState("Transfer Bank");
   const [bookingPaymentDate, setBookingPaymentDate] = useState(jakartaDateOnly);
@@ -259,6 +266,65 @@ export default function AdminCheckoutForm() {
   const isMembership = bookingKind === "membership";
   const hideRegularBookingFields = isMembership && memberAction !== "new";
   const isCompanyPayer = bookingKind === "corporate" || (bookingKind === "event" && eventPayer === "corporate");
+  // The admin customer dropdown is a listing cache. The canonical customer
+  // details endpoint must establish company ownership before Corporate submit.
+  useEffect(() => {
+    setCompanyCustomerDetail(null);
+    if (!isCompanyPayer || !selectedCustomerId || selectedCustomerId === "__guest__" ||
+        !Number.isInteger(Number(selectedCustomerId)) || Number(selectedCustomerId) <= 0) {
+      setCompanyCustomerDetailState("idle");
+      return;
+    }
+    const controller = new AbortController();
+    setCompanyCustomerDetailState("loading");
+    fetch("/api/customers/" + encodeURIComponent(selectedCustomerId), {
+      headers: { Authorization: "Bearer " + (getToken() ?? "") },
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw Error("Tidak dapat memeriksa akun perusahaan");
+      return response.json();
+    }).then((data) => {
+      if (controller.signal.aborted) return;
+      if (Number(data.id) !== Number(selectedCustomerId) || data.accountType !== "company") {
+        throw Error("Pemesan tidak terdaftar sebagai akun perusahaan");
+      }
+      setCompanyCustomerDetail({
+        id: Number(data.id), name: String(data.name ?? ""),
+        phone: data.phone ?? null, email: data.email ?? null,
+        accountType: String(data.accountType), picEmail: data.picEmail ?? null,
+      });
+      setCompanyCustomerDetailState("ready");
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setCompanyCustomerDetail(null);
+        setCompanyCustomerDetailState("error");
+      }
+    });
+    return () => controller.abort();
+  }, [isCompanyPayer, selectedCustomerId]);
+  // The authenticated customer list already contains company account metadata.
+  // A failed secondary detail request must not invalidate a listed company.
+  // The booking API independently verifies persisted billing authorization.
+  const listedCompanyCustomer = isCompanyPayer &&
+    Number(selectedCustomer?.id) === Number(selectedCustomerId) &&
+    Number(selectedCustomerId) > 0 &&
+    selectedCustomer?.accountType === "company"
+      ? selectedCustomer : null;
+  const detailedCompanyCustomer = isCompanyPayer && companyCustomerDetailState === "ready" &&
+    companyCustomerDetail?.id === Number(selectedCustomerId)
+      ? companyCustomerDetail : null;
+  const verifiedCompanyCustomer = detailedCompanyCustomer ?? listedCompanyCustomer;
+  // Prefer the detailed contact, falling back to the authenticated list/PIC
+  // for the read-only WhatsApp field and booking contact snapshot.
+  const bookingCustomer = verifiedCompanyCustomer
+    ? {
+        ...selectedCustomer,
+        ...verifiedCompanyCustomer,
+        phone: detailedCompanyCustomer?.phone?.trim() ||
+          selectedCustomer?.phone?.trim() ||
+          selectedCustomer?.picPhone?.trim() || null,
+      }
+    : selectedCustomer;
   const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
   const apMember = selectedCustomer?.apMember ?? null;
@@ -291,16 +357,72 @@ export default function AdminCheckoutForm() {
   const repeatCurrentKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
   const repeatAllAvailable = Boolean(repeatPreview && repeatPreview.dates.length === repeatCount && repeatPreview.dates.every((row) => row.available));
   const repeatPreviewCurrent = repeatPreviewKey === repeatCurrentKey && repeatCheckState === "ready";
+  // A complete recurring preview is the authoritative availability check for
+  // all of its dates. The single-day slot endpoint may disagree for historic
+  // admin bookings, so do not gate a recurring submission on that separate API.
+  const recurringScheduleValid = repeatEnabled && !isWalkIn &&
+    repeatCount >= 2 && repeatCount <= 52 && repeatPreviewCurrent && repeatAllAvailable;
+  const bookingScheduleValid = multiPatterns.length > 0 || (repeatEnabled ? recurringScheduleValid : slotValid);
   const customerFormValid = isGuest
     ? Boolean(guestName.trim() && /^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))
-    : Boolean(selectedCustomer?.name && selectedCustomer?.phone);
+    : Boolean((!isCompanyPayer || verifiedCompanyCustomer) &&
+      bookingCustomer?.name && bookingCustomer?.phone);
   const formPaymentValid = paymentChoice === "unpaid" ||
     (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
       (paidMethod === "Transfer Bank" || paidMethod === "QRIS")));
-  const repeatFormValid = multiPatterns.length > 0 || !repeatEnabled ||
-    (!isWalkIn && repeatCount >= 2 && repeatCount <= 52 && repeatPreviewCurrent && repeatAllAvailable);
+  const repeatFormValid = multiPatterns.length > 0 || !repeatEnabled || recurringScheduleValid;
   // bookingKind has a valid default; it is intentionally not an additional
   // explicit-completion requirement for enabling the submit button.
+  // Multi-jadwal has no active single-day slot after the admin adds a pattern.
+  // Keep the primary action clickable for this mode and explain any remaining
+  // validation problem, rather than silently disabling it.
+  const multiScheduleBlockers: string[] = multiPatterns.length === 0 ? [] : [
+    ...(!selectedCustomerId || !customerFormValid ? ["Pilih pelanggan dengan nama dan nomor WhatsApp yang valid."] : []),
+    ...(!selectedFacilityId || !activeFacilities.some((item: any) => String(item.id) === selectedFacilityId)
+      ? ["Pilih fasilitas aktif."] : []),
+    ...(isMultigunaFacility && !multigunaActivities.some((item) => item.value === selectedActivityType)
+      ? ["Pilih jenis olahraga (Futsal, Basket, atau Voli)."] : []),
+    ...(multiPatterns.reduce((sum, pattern) => sum + pattern.dates.length, 0) > 52
+      ? ["Maksimal 52 sesi dalam satu grup."] : []),
+    ...(isSubmitting ? ["Sedang memproses booking."] : []),
+    ...(paymentChoice !== "unpaid" && paymentChoice !== "paid" ? ["Pilih status pembayaran."] : []),
+    ...(!formPaymentValid ? ["Lengkapi bukti dan tanggal pembayaran."] : []),
+    ...(isWalkIn || isActiveApMember || bookingKind === "event"
+      ? ["Jenis fasilitas atau pelanggan ini tidak mendukung booking multi-jadwal."] : []),
+    ...(isCompanyPayer && (paymentChoice !== "unpaid" || isGuest || !verifiedCompanyCustomer)
+      ? [companyCustomerDetailState === "loading"
+          ? "Memverifikasi akun perusahaan..."
+          : "Corporate harus menggunakan akun perusahaan terdaftar dan Belum Bayar."] : []),
+    ...(!isCompanyPayer && selectedCustomer?.accountType === "company"
+      ? ["Ubah jenis pemesanan menjadi Corporate untuk pelanggan perusahaan."] : []),
+  ];
+  // Explicit Corporate validation feedback. The final submit handler and backend
+  // retain all original requirements; the button only ceases to hide errors.
+  const corporateSubmitBlockers: string[] = !isCompanyPayer || multiPatterns.length > 0 ? [] : [
+    ...(!selectedCustomerId ? ["Pilih pelanggan perusahaan."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState === "loading" && !verifiedCompanyCustomer
+      ? ["Memverifikasi akun perusahaan..."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState === "error" && !verifiedCompanyCustomer
+      ? ["Verifikasi perusahaan gagal. Pilih ulang pelanggan."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState !== "loading" && !verifiedCompanyCustomer
+      ? ["Akun perusahaan belum terverifikasi."] : []),
+    ...(selectedCustomerId && !bookingCustomer?.phone ? ["Nomor WhatsApp pelanggan belum tersedia."] : []),
+    ...(!selectedFacilityId ? ["Pilih fasilitas."] : []),
+    ...(selectedFacilityId && !activeFacilities.some((f: any) => String(f.id) === selectedFacilityId)
+      ? ["Fasilitas tidak aktif."] : []),
+    ...(isMultigunaFacility && !multigunaActivities.some(a => a.value === selectedActivityType)
+      ? ["Pilih olahraga Multiguna."] : []),
+    ...(!selectedDate ? ["Pilih tanggal booking."] : []),
+    ...(selectedDate && !isWalkIn && !startTime ? ["Pilih jam mulai."] : []),
+    ...(selectedDate && !isWalkIn && startTime && !bookingScheduleValid
+      ? [repeatEnabled
+        ? (repeatCheckState === "loading" ? "Memeriksa jadwal berulang..." : "Preview jadwal berulang belum valid.")
+        : slotState === "loading" ? "Memeriksa ketersediaan..."
+        : slotState === "error" ? "Gagal memeriksa ketersediaan slot."
+        : "Jam telah dipilih, tetapi slot belum dinyatakan tersedia oleh server. Periksa tanggal atau jam lain."]
+      : []),
+    ...(paymentChoice !== "unpaid" ? ["Pilih Belum Bayar untuk perusahaan."] : []),
+  ];
   const canSubmitBooking = Boolean(
     selectedCustomerId &&
     customerFormValid &&
@@ -308,7 +430,7 @@ export default function AdminCheckoutForm() {
     activeFacilities.some((item: any) => String(item.id) === selectedFacilityId) &&
     (!isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
     (selectedDate || multiPatterns.length > 0) &&
-    (slotValid || multiPatterns.length > 0) &&
+    bookingScheduleValid &&
     !isSubmitting &&
     paymentChoice !== null &&
     formPaymentValid &&
@@ -316,7 +438,7 @@ export default function AdminCheckoutForm() {
       (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
     (multiPatterns.length === 0 || (!isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
-    (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && selectedCustomer?.accountType === "company")) &&
+    (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && verifiedCompanyCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
   );
 
@@ -783,6 +905,22 @@ export default function AdminCheckoutForm() {
       setLocation("/admin/memberships");
       return;
     }
+    if (corporateSubmitBlockers.length > 0) {
+      toast({
+        title: "Periksa booking perusahaan",
+        description: corporateSubmitBlockers.join(" "),
+        variant: "destructive",
+      });
+      return;
+    }
+    if (multiPatterns.length > 0 && multiScheduleBlockers.length > 0) {
+      toast({
+        title: "Booking belum dapat dibuat",
+        description: multiScheduleBlockers.join(" "),
+        variant: "destructive",
+      });
+      return;
+    }
     if (!selectedCustomerId) {
       toast({ title: "Pilih customer terlebih dahulu", variant: "destructive" });
       return;
@@ -808,8 +946,12 @@ export default function AdminCheckoutForm() {
       return;
     }
 
-    if (!slotValid && !multiPatterns.length) {
-      toast({ title: "Slot tidak tersedia atau belum diperiksa", variant: "destructive" });
+    if (!bookingScheduleValid) {
+      toast({
+        title: repeatEnabled ? "Jadwal berulang belum siap" : "Slot tidak tersedia atau belum diperiksa",
+        description: repeatEnabled ? "Pastikan seluruh sesi pada preview telah dinyatakan tersedia." : undefined,
+        variant: "destructive",
+      });
       return;
     }
     if (paymentChoice !== "paid" && paymentChoice !== "unpaid") {
@@ -829,7 +971,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Untuk akun perusahaan, pilih jenis Corporate atau pembayar perusahaan", variant: "destructive" });
       return;
     }
-    if (corporate && (isGuest || selectedCustomer?.accountType !== "company")) {
+    if (corporate && (isGuest || !verifiedCompanyCustomer)) {
       toast({ title: "Pilih akun perusahaan yang terdaftar", variant: "destructive" });
       return;
     }
@@ -837,7 +979,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Pilih customer yang terdaftar; data tamu perlu didaftarkan terlebih dahulu", variant: "destructive" });
       return;
     }
-    if (!isGuest && (!selectedCustomer?.name || !selectedCustomer?.phone)) {
+    if (!isGuest && (!bookingCustomer?.name || !bookingCustomer?.phone)) {
       toast({ title: "Customer harus memiliki nama dan nomor WhatsApp", variant: "destructive" });
       return;
     }
@@ -855,15 +997,15 @@ export default function AdminCheckoutForm() {
     try {
       const bookingPayload = {
         customerId: guestBooking ? null : Number(selectedCustomerId),
-        customerName: isGuest ? guestName.trim() : selectedCustomer.name,
-        customerPhone: isGuest ? guestPhone.trim() : selectedCustomer.phone,
+        customerName: isGuest ? guestName.trim() : bookingCustomer.name,
+        customerPhone: isGuest ? guestPhone.trim() : bookingCustomer.phone,
         // Company name is not an email address. Prefer a valid PIC email for corporate bookings.
         customerEmail: isGuest ? guestEmail.trim() : (
           corporate
-            ? [selectedCustomer.picEmail, selectedCustomer.email]
+            ? [bookingCustomer.picEmail, bookingCustomer.email]
                 .map((value: unknown) => String(value ?? "").trim())
                 .find((value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) ?? ""
-            : (selectedCustomer.email ?? "")
+            : (bookingCustomer.email ?? "")
         ),
         facilityId: Number(selectedFacilityId),
         ...(isMultigunaFacility ? {activityType:selectedActivityType} : {}),
@@ -875,6 +1017,7 @@ export default function AdminCheckoutForm() {
         ...(isGymNonmember && (!isHistoricalGymNonmember || x904IdentityValue.trim())
           ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         adminPaymentChoice: paymentChoice,
+        ...(bookingKind === "corporate" ? { suppressCustomerWhatsApp } : {}),
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
         notes: notes || undefined,
       };
@@ -971,6 +1114,9 @@ export default function AdminCheckoutForm() {
         toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}. Status: belum dibayar; belum ada record pembayaran.` });
       }
 
+      // Reset opt-out for each new booking so a previous customer's choice
+      // never silently affects the next booking.
+      setSuppressCustomerWhatsApp(false);
       // Reset form
       setSelectedCustomerId("");
       setGuestName("");
@@ -1152,7 +1298,7 @@ export default function AdminCheckoutForm() {
 
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
-              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); setMultiPatterns([]); setRepeatEnabled(false); }}>
+              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); setMultiPatterns([]); setRepeatEnabled(false); setSuppressCustomerWhatsApp(false); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="personal">Personal / Umum</SelectItem>
@@ -1178,8 +1324,17 @@ export default function AdminCheckoutForm() {
             <div className="space-y-2">
               <Label htmlFor="customer">Nama Pemesan <span className="text-destructive">*</span></Label>
               <Popover open={customerPickerOpen} onOpenChange={(open) => {
+                if (open) {
+                  // Fit the search results in the space below the input. The
+                  // popover must remain below the field instead of flipping
+                  // above and covering the Booking Admin page header.
+                  const triggerBottom = document.getElementById("customer")?.getBoundingClientRect().bottom ?? 0;
+                  const available = window.innerHeight - triggerBottom - 76;
+                  setCustomerPickerListHeight(Math.max(96, Math.min(280, available)));
+                } else {
+                  setCustomerSearch("");
+                }
                 setCustomerPickerOpen(open);
-                if (!open) setCustomerSearch("");
               }}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1205,7 +1360,7 @@ export default function AdminCheckoutForm() {
                   align="start"
                   side="bottom"
                   sideOffset={4}
-                  collisionPadding={12}
+                  avoidCollisions={false}
                   className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden p-0"
                 >
                   <Command shouldFilter={false}>
@@ -1216,7 +1371,10 @@ export default function AdminCheckoutForm() {
                       value={customerSearch}
                       onValueChange={setCustomerSearch}
                     />
-                    <CommandList className="max-h-[min(300px,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain">
+                    <CommandList
+                      className="overflow-y-auto overscroll-contain"
+                      style={{ maxHeight: customerPickerListHeight }}
+                    >
                       <CommandItem value="__guest__" onSelect={() => {
                         setSelectedCustomerId("__guest__");
                         setCustomerPickerOpen(false);
@@ -1256,7 +1414,28 @@ export default function AdminCheckoutForm() {
             </div>}
             {!isGuest && selectedCustomer && <div className="space-y-2">
               <Label>Nomor Telepon / WhatsApp</Label>
-              <Input value={selectedCustomer.phone ?? ""} readOnly />
+              <Input value={bookingCustomer?.phone ?? ""} readOnly />
+              {bookingKind === "corporate" && (
+                <label htmlFor="suppress-corporate-customer-wa" className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm cursor-pointer">
+                  <Checkbox
+                    id="suppress-corporate-customer-wa"
+                    checked={suppressCustomerWhatsApp}
+                    onCheckedChange={(value) => setSuppressCustomerWhatsApp(value === true)}
+                  />
+                  <span>
+                    <span className="font-medium">Tidak Kirim Pesan</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Jangan kirim WhatsApp booking baru ke nomor pemesan ini. Laporan ke grup admin tetap dikirim.
+                    </span>
+                  </span>
+                </label>
+              )}
+              {isCompanyPayer && companyCustomerDetailState === "loading" && (
+                <p className="text-xs text-muted-foreground">Memverifikasi data akun perusahaan...</p>
+              )}
+              {isCompanyPayer && companyCustomerDetailState === "error" && (
+                <p role="alert" className="text-xs text-destructive">Akun perusahaan belum dapat diverifikasi. Pilih ulang pelanggan atau periksa data perusahaan.</p>
+              )}
               {isActiveApMember && (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1814,12 +1993,31 @@ export default function AdminCheckoutForm() {
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            {!isMembership && <Button type="submit" className="w-full h-11 text-base font-bold" disabled={!canSubmitBooking}>
+            {!isMembership && <div className="w-full space-y-2">
+              {isCompanyPayer && multiPatterns.length === 0 && corporateSubmitBlockers.length > 0 && (
+                <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p className="font-semibold">Periksa persyaratan Booking Perusahaan:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    {corporateSubmitBlockers.map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                </div>
+              )}
+              {multiPatterns.length > 0 && multiScheduleBlockers.length > 0 && (
+                <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p className="font-semibold">Periksa sebelum membuat booking:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    {multiScheduleBlockers.map((message) => <li key={message}>{message}</li>)}
+                  </ul>
+                </div>
+              )}
+              <Button type="submit" className="w-full h-11 text-base font-bold"
+                disabled={!canSubmitBooking}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking"
               }
-            </Button>}
+              </Button>
+            </div>}
           </CardFooter>
         </Card>
         {!isMembership && (

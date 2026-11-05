@@ -1536,6 +1536,12 @@ router.post("/bookings", async (req, res) => {
       }
     }
     const isCompanyBilling = !!companyBillingUser;
+    // Only an authenticated admin-created Corporate booking may suppress the
+    // customer-facing booking-created WhatsApp. Admin/group reports stay enabled.
+    const suppressCustomerBookingWhatsApp =
+      isAdminRequest && bookingSource === "admin" &&
+      req.body.suppressCustomerWhatsApp === true &&
+      req.body.payerType === "company";
     const isPendingCompany = !isCompanyBilling && !!pendingCompanyUser;
     const effectiveCompanyCustomerId = companyBillingUser?.id ?? pendingCompanyUser?.id ?? null;
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
@@ -2004,6 +2010,7 @@ router.post("/bookings", async (req, res) => {
         companyName: companyBillingUser!.companyName ?? companyBillingUser!.name ?? "",
         periodMonth: bookingMonth,
         picPhone: companyBillingUser!.picPhone ?? undefined,
+        suppressCustomerMessage: suppressCustomerBookingWhatsApp,
       }).catch(() => {});
     } else {
       // Deadline = 7 hari setelah tanggal bermain (end of day WIB)
@@ -2039,6 +2046,7 @@ router.post("/bookings", async (req, res) => {
         statusUrl: statusUrl || undefined,
         groupRef: incomingGroupRef,
         adminReport: !(isAdminRequest && bookingSource === "admin"),
+        suppressCustomerMessage: suppressCustomerBookingWhatsApp,
       }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       if (isAdminRequest && bookingSource === "admin" && adminPaymentChoice === "unpaid") {
