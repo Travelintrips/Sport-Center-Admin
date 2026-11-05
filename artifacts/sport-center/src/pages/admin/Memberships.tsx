@@ -149,7 +149,7 @@ export default function AdminMemberships() {
   async function saveEmail() {
     if (!viewMember?.id || savingEmail) return;
     const email = emailDraft.trim().toLowerCase();
-    if (email.length > 254 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setEmailError("Masukkan alamat email yang valid."); return;
     }
     setSavingEmail(true); setEmailError("");
