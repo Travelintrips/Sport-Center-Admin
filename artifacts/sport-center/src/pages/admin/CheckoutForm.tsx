@@ -291,14 +291,19 @@ export default function AdminCheckoutForm() {
   const repeatCurrentKey = [selectedFacilityId, selectedDate, startTime.slice(11, 16), duration, repeatType, repeatCount].join("|");
   const repeatAllAvailable = Boolean(repeatPreview && repeatPreview.dates.length === repeatCount && repeatPreview.dates.every((row) => row.available));
   const repeatPreviewCurrent = repeatPreviewKey === repeatCurrentKey && repeatCheckState === "ready";
+  // A complete recurring preview is the authoritative availability check for
+  // all of its dates. The single-day slot endpoint may disagree for historic
+  // admin bookings, so do not gate a recurring submission on that separate API.
+  const recurringScheduleValid = repeatEnabled && !isWalkIn &&
+    repeatCount >= 2 && repeatCount <= 52 && repeatPreviewCurrent && repeatAllAvailable;
+  const bookingScheduleValid = multiPatterns.length > 0 || (repeatEnabled ? recurringScheduleValid : slotValid);
   const customerFormValid = isGuest
     ? Boolean(guestName.trim() && /^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))
     : Boolean(selectedCustomer?.name && selectedCustomer?.phone);
   const formPaymentValid = paymentChoice === "unpaid" ||
     (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
       (paidMethod === "Transfer Bank" || paidMethod === "QRIS")));
-  const repeatFormValid = multiPatterns.length > 0 || !repeatEnabled ||
-    (!isWalkIn && repeatCount >= 2 && repeatCount <= 52 && repeatPreviewCurrent && repeatAllAvailable);
+  const repeatFormValid = multiPatterns.length > 0 || !repeatEnabled || recurringScheduleValid;
   // bookingKind has a valid default; it is intentionally not an additional
   // explicit-completion requirement for enabling the submit button.
   const canSubmitBooking = Boolean(
@@ -308,7 +313,7 @@ export default function AdminCheckoutForm() {
     activeFacilities.some((item: any) => String(item.id) === selectedFacilityId) &&
     (!isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
     (selectedDate || multiPatterns.length > 0) &&
-    (slotValid || multiPatterns.length > 0) &&
+    bookingScheduleValid &&
     !isSubmitting &&
     paymentChoice !== null &&
     formPaymentValid &&
@@ -808,8 +813,12 @@ export default function AdminCheckoutForm() {
       return;
     }
 
-    if (!slotValid && !multiPatterns.length) {
-      toast({ title: "Slot tidak tersedia atau belum diperiksa", variant: "destructive" });
+    if (!bookingScheduleValid) {
+      toast({
+        title: repeatEnabled ? "Jadwal berulang belum siap" : "Slot tidak tersedia atau belum diperiksa",
+        description: repeatEnabled ? "Pastikan seluruh sesi pada preview telah dinyatakan tersedia." : undefined,
+        variant: "destructive",
+      });
       return;
     }
     if (paymentChoice !== "paid" && paymentChoice !== "unpaid") {
