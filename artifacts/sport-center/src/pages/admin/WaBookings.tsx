@@ -434,6 +434,16 @@ export default function AdminWaBookings() {
                   )}
                 </div>
 
+                {detail.booking.source === "gym_public_guest" && detail.booking.notes && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+                    <p className="font-semibold text-[#142441]">Identitas X904 yang diajukan pengunjung</p>
+                    <p className="mt-1 break-words">{detail.booking.notes}</p>
+                    <p className="mt-2 text-xs text-amber-800">
+                      Data dari pengunjung belum terverifikasi. Cocokkan PIN, UID, nama, dan kepemilikan secara independen.
+                      Jangan aktifkan X904 sebelum pembayaran sah dan verifikasi petugas selesai.
+                    </p>
+                  </div>
+                )}
                 {detail.booking.source === "gym_public_guest" && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <p className="font-semibold">Gym Mandiri — pembayaran perlu verifikasi dana.</p>
