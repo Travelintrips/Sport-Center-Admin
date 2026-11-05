@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useSearch } from "wouter";
+import { Link, useParams, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, Building2, CheckCircle, Clock, Download, MapPin, Phone, QrCode, Upload, ZoomIn } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowLeft, Building2, CalendarDays, CheckCircle, Clock, CreditCard, Download, MapPin, Phone, QrCode, ShieldCheck, Upload, ZoomIn } from "lucide-react";
+import buildingImg from "@assets/1780087062_1780089778393.png";
 
 interface Facility {
   id: number;
@@ -513,18 +514,18 @@ export default function WaBookingForm() {
 
   if (result) {
     return (
-      <div className="min-h-screen bg-orange-50 flex items-center justify-center p-4">
-        <Card className="max-w-sm w-full shadow-lg">
+      <div className="min-h-screen bg-[#f7f8fb] flex items-center justify-center p-4 sm:p-8">
+        <Card className="max-w-xl w-full overflow-hidden rounded-3xl border-slate-200 shadow-[0_20px_70px_rgba(15,23,42,0.10)]">
           <CardHeader className="text-center pb-2">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <CheckCircle className="w-9 h-9 text-green-600" />
             </div>
-            <CardTitle className="text-green-700 font-black text-xl">
+            <CardTitle className="text-green-700 font-black text-2xl">
               {proofConfirmed ? "Booking Dikonfirmasi!" : "Booking Berhasil!"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+            <div className="bg-slate-50 rounded-2xl p-5 space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-500">Order</span>
                 <span className="font-bold">{result.orderNumber}</span>
@@ -588,29 +589,55 @@ export default function WaBookingForm() {
   }
 
   return (
-    <div className="min-h-screen bg-orange-50 pb-8">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 pt-8 pb-6">
-        <p className="text-orange-100 text-sm font-medium uppercase tracking-wide mb-1">Form Booking</p>
-        <h1 className="font-black text-2xl">{facility?.name}</h1>
-        <div className="flex items-center gap-3 mt-2 text-sm text-orange-100">
-          <span className="flex items-center gap-1">
-            <Clock className="w-4 h-4" />
-            {facility?.openTime} – {facility?.closeTime}
-          </span>
-          <span className="flex items-center gap-1">
-            <MapPin className="w-4 h-4" />
-            {facility?.category}
-          </span>
+    <main className="min-h-screen bg-[#f7f8fb] pb-16 text-slate-900">
+      {/* Shared premium checkout header for every public Sport Center facility. */}
+      <section className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-white via-[#fffbf7] to-orange-50">
+        <div className="mx-auto max-w-6xl px-4 pb-8 pt-6 sm:px-6 sm:pb-10 lg:px-8">
+          <Link href="/booking/mandiri" className="mb-7 inline-flex min-h-9 items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-orange-600">
+            <ArrowLeft className="h-4 w-4" /> Semua fasilitas
+          </Link>
+          <div className="grid items-center gap-7 md:grid-cols-[1fr_260px] lg:grid-cols-[1fr_350px]">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-orange-700">
+                <ShieldCheck className="h-4 w-4" /> Booking langsung tanpa login
+              </span>
+              <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.16em] text-orange-600">Sport Center Bandara Soekarno-Hatta</p>
+              <h1 className="mt-2 text-3xl font-black leading-tight tracking-tight text-[#142441] sm:text-4xl">{facility?.name}</h1>
+              <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
+                Lengkapi informasi pengunjung, pilih jadwal, lalu bayar dengan metode yang tersedia.
+                Semua dilakukan dalam satu halaman.
+              </p>
+              <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 shadow-sm"><Clock className="h-4 w-4 text-orange-600" /> {facility?.openTime}–{facility?.closeTime} WIB</span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 shadow-sm"><MapPin className="h-4 w-4 text-orange-600" /> {facility?.category}</span>
+                <span className="rounded-lg bg-orange-600 px-3 py-2 font-extrabold text-white">
+                  Rp {facility?.pricePerHour.toLocaleString("id-ID")}{gymWalkIn ? "/kunjungan" : "/jam"}
+                </span>
+              </div>
+            </div>
+            <div className="relative hidden overflow-hidden rounded-2xl border-4 border-white shadow-[0_15px_35px_rgba(15,23,42,0.12)] md:block">
+              <img src={buildingImg} alt="Gedung Sport Center Bandara Soekarno-Hatta" className="aspect-[5/3] h-full w-full object-cover brightness-105" decoding="async" />
+            </div>
+          </div>
         </div>
-        <div className="mt-3">
-          <Badge className="bg-white/20 text-white border-white/30 font-bold text-base">
-            Rp {facility?.pricePerHour.toLocaleString("id-ID")}{gymWalkIn ? "" : "/jam"}
-          </Badge>
-        </div>
-      </div>
+      </section>
 
-      <div className="px-4 pt-4 max-w-md mx-auto">
+      <div className="mx-auto max-w-6xl px-4 pt-7 sm:px-6 lg:px-8">
+        <div className="mb-7 grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-3 text-center shadow-sm sm:gap-3 sm:p-4">
+          {[
+            { icon: Phone, title: "Data pemesan", sub: "Identitas" },
+            { icon: CalendarDays, title: "Pilih jadwal", sub: "Tanggal & jam" },
+            { icon: CreditCard, title: "Pembayaran", sub: "QRIS / transfer" },
+          ].map(({ icon: Icon, title, sub }, index) => (
+            <div key={title} className="flex flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 sm:flex-row sm:gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-600"><Icon className="h-4 w-4" /></div>
+              <div className="text-center sm:text-left">
+                <p className="text-xs font-bold text-[#142441] sm:text-sm">{index + 1}. {title}</p>
+                <p className="hidden text-xs text-slate-500 sm:block">{sub}</p>
+              </div>
+            </div>
+          ))}
+        </div>
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-2 text-sm text-red-700">
             <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -625,12 +652,13 @@ export default function WaBookingForm() {
             petugas akan mencocokkan identitas dan menyerahkan kartu jika diperlukan.
           </div>
         )}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Data Pemesan</CardTitle>
+        <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
+          <div className="space-y-6">
+          <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
+            <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
+              <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">Data Pemesan</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4 p-5 sm:p-6">
               {gymWalkIn && !publicGymGuest ? (
                 <div className="space-y-1 rounded-lg border border-blue-200 bg-blue-50 p-3">
                   <Label className="text-sm font-semibold">Nama sesuai data X904</Label>
@@ -700,11 +728,11 @@ export default function WaBookingForm() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Jadwal Booking</CardTitle>
+          <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
+            <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
+              <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">Jadwal Booking</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4 p-5 sm:p-6">
               {!gymWalkIn && (
                 <div className="space-y-1">
                   <Label className="text-sm font-semibold">Durasi *</Label>
@@ -818,9 +846,11 @@ export default function WaBookingForm() {
             </CardContent>
           </Card>
 
+          </div>
+          <aside aria-label="Ringkasan dan pembayaran booking" className="space-y-6 lg:sticky lg:top-5">
           {/* Price summary */}
           {(form.startTime || dedicatedNonmember) && (
-            <Card className="border-orange-200 bg-orange-50">
+            <Card className="overflow-hidden rounded-2xl border-orange-200 bg-gradient-to-b from-orange-50 to-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
               <CardContent className="pt-4 pb-3 space-y-1.5">
                 {paymentOptions.length > 0 && (
                   <div className="space-y-2.5 pb-3">
@@ -951,13 +981,13 @@ export default function WaBookingForm() {
             </Card>
           )}
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">
+          <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
+            <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
+              <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">
                 Upload Bukti Bayar
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4 p-5 sm:p-6">
               <p className="text-xs text-gray-600">
                 Setelah melakukan pembayaran, upload foto atau screenshot bukti di sini.
                 Bukti pembayaran wajib diupload sebelum booking dapat dikirim.
@@ -1027,7 +1057,7 @@ export default function WaBookingForm() {
 
           {(() => {
             const missing: string[] = [];
-            if (dedicatedNonmember && !x904VerifiedName) missing.push(x904Verifying ? "Verifikasi PIN/kartu sedang berlangsung" : "PIN/kartu X904 belum terverifikasi");
+            if (dedicatedNonmember && !publicGymGuest && !x904VerifiedName) missing.push(x904Verifying ? "Verifikasi PIN/kartu sedang berlangsung" : "PIN/kartu X904 belum terverifikasi");
             if (!form.customerName) missing.push("Nama pemesan belum tersedia");
             if (!form.customerPhone.trim() || (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim()))) missing.push("Isi nomor WhatsApp valid (628...)");
             if (!form.bookingDate) missing.push("Pilih tanggal kunjungan");
@@ -1063,7 +1093,7 @@ export default function WaBookingForm() {
               !form.startTime ||
               !proofFile
             }
-            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-base py-6 rounded-xl">
+            className="min-h-14 w-full rounded-xl bg-orange-600 py-4 text-base font-extrabold text-white shadow-lg shadow-orange-600/15 transition hover:bg-orange-700">
             {submitting || uploadingProof || proofScanning ? (
               <span className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1073,10 +1103,11 @@ export default function WaBookingForm() {
                     ? "Memeriksa Bukti..."
                     : "Memproses..."}
               </span>
-            ) : "🏅 Booking Sekarang"}
+            ) : "Konfirmasi & Buat Booking"}
           </Button>
+          </aside>
         </form>
       </div>
-    </div>
+    </main>
   );
 }
