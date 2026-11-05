@@ -246,7 +246,7 @@ router.post("/admin/gym-x904/nonmember-registry-review/verify", adminMiddleware,
       if (!row || ["mapping_count","membership_name_count","duplicate_name_count","live_grants","pending_commands"]
           .some(k=>Number(row[k])!==0))return "CONFLICT_REQUIRES_MANUAL_RECONCILIATION";
       const changed=await tx.execute(sql`UPDATE sport_center.x904_verified_nonmember_identities
-        SET verification_state='verified',verified_by=${"admin:"+String(actor.id)},verified_at=now(),updated_at=now()
+        SET verification_state='verified',verified_by=${"admin:"+String(actor.userId)},verified_at=now(),updated_at=now()
         WHERE device_serial='TDBD234200545' AND user_pin=${pin}
           AND device_uid=${uid} AND verification_state='review_required'
           AND revoked_at IS NULL RETURNING user_pin`);
