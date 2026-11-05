@@ -9,6 +9,7 @@ const publicApi=read("artifacts/api-server/src/routes/whatsapp.ts");
 const ticket=read("artifacts/sport-center/src/pages/wa/BookingStatus.tsx");
 const admin=read("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
 const wa=read("artifacts/api-server/src/lib/notifications.ts");
+const existingCheckout=read("artifacts/api-server/src/routes/whatsapp.ts");
 
 test("hard uniqueness constraints prevent double allocations and reused bank references",()=>{
  assert.match(migration,/UNIQUE \(booking_id\)/);
@@ -61,6 +62,13 @@ test("staff cannot assign without official bank attestation; public ticket is ca
  const status=publicApi.slice(publicApi.indexOf('router.get("/wa/status/:orderNumber"'),publicApi.indexOf('// GET /api/wa/action/:token'));
  assert.match(status,/SELECT card_code,state/);
  assert.doesNotMatch(status,/visitorCard.*user_pin/);
+});
+
+test("legacy VIS checkouts cannot reuse reserved visitor cards",()=>{
+ assert.match(existingCheckout,/X904_VIS_CARD_RESERVED/);
+ assert.match(existingCheckout,/pg_advisory_xact_lock\(90400661\)/);
+ assert.match(existingCheckout,/to_regclass\('sport_center\.gym_vis_card_reservations'\)/);
+ assert.match(existingCheckout,/state IN \('reserved','collected'\)/);
 });
 
 test("release requires physical return plus verified X904 status, not time-only expiry",()=>{
