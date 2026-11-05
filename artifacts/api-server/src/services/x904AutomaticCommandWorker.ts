@@ -1,5 +1,6 @@
 import {chooseX904AutomaticCommand,x904MachineCommandResult,x904AutomaticCommandKey} from "./x904AutomationDecision";
 import { isX904AutoSuspendExempt } from "./x904NonmemberAccessPolicy";
+import {resolveX904AutomaticPinScope} from "./x904AutomaticPinScope";
 import {db} from "@workspace/db";
 import {sql} from "drizzle-orm";
 import {resolvePaidX904Automation} from "./gymMembershipEntitlement";
@@ -25,15 +26,9 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
   if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
   // Roll out to verified members only under a separate explicit opt-in.
   // Existing production configuration remains single-PIN until approved.
-  const scope=process.env.GYM_X904_AUTOMATIC_SCOPE;
-  const allVerified=scope==="all_verified";
-  const allowlistMode=scope==="allowlist";
-  const pins=(process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS??"").split(",").map(x=>x.trim()).filter(Boolean);
-  // Explicit multi-PIN opt-in. Fail closed on duplicates, malformed entries,
-  // exempt PINs, empty lists, or an unexpectedly large rollout.
-  if(!allVerified && (!pins.length || (!allowlistMode && pins.length!==1) ||
-    (allowlistMode && pins.length>20) || new Set(pins).size!==pins.length ||
-    pins.some(pin=>!/^[0-9]{1,8}$/.test(pin) || isX904AutoSuspendExempt(pin,0))))return;
+  const pinScope=resolveX904AutomaticPinScope(process.env.GYM_X904_AUTOMATIC_SCOPE,process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS);
+  if(!pinScope)return;
+  const {allVerified,allowlistMode,pins}=pinScope;
   // Only one outstanding automatic machine mutation at a time.
   if(allVerified || allowlistMode) {
     const outstanding=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
