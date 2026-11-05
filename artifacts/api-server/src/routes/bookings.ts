@@ -1632,8 +1632,8 @@ router.post("/bookings", async (req, res) => {
           FROM sport_center.x904_verified_nonmember_identities
           WHERE device_serial='TDBD234200545' AND user_pin=${userPin}
             AND device_uid=${Number(row.device_uid)}
-            AND upper(regexp_replace(trim(display_name), '\\s+', ' ', 'g')) =
-                upper(regexp_replace(trim(${String(row.display_name)}::text), '\\s+', ' ', 'g'))
+            AND upper(regexp_replace(trim(display_name), '[[:space:]]+', ' ', 'g')) =
+                upper(regexp_replace(trim(${String(row.display_name)}::text), '[[:space:]]+', ' ', 'g'))
             AND verification_state='verified' AND revoked_at IS NULL LIMIT 1`);
         if (registry.rows.length !== 1) {
           res.status(409).json({ error: "PIN nonmember belum terverifikasi pada registry X904. Verifikasi identitas lewat admin sebelum membuat booking berbayar." });
@@ -1869,8 +1869,8 @@ router.post("/bookings", async (req, res) => {
           WHERE device_serial='TDBD234200545'
             AND user_pin=${verifiedX904Identity.userPin}
             AND device_uid=${verifiedX904Identity.deviceUid}
-            AND upper(regexp_replace(trim(display_name), '\\s+', ' ', 'g')) =
-                upper(regexp_replace(trim(${verifiedX904Identity.displayName}::text), '\\s+', ' ', 'g'))
+            AND upper(regexp_replace(trim(display_name), '[[:space:]]+', ' ', 'g')) =
+                upper(regexp_replace(trim(${verifiedX904Identity.displayName}::text), '[[:space:]]+', ' ', 'g'))
             AND verification_state='verified' AND revoked_at IS NULL
           FOR SHARE`);
         if (verified.rows.length !== 1) throw new Error("X904_NONMEMBER_REGISTRY_CHANGED");
