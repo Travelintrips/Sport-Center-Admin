@@ -620,7 +620,6 @@ router.get("/memberships/checkins", adminMiddleware, async (req, res) => {
         checkinDate: gymCheckinsTable.checkinDate,
         checkedInAt: gymCheckinsTable.checkedInAt,
         notes: gymCheckinsTable.notes,
-        x904EventId: gymCheckinsTable.x904EventId,
         memberName: gymMembershipsTable.name,
         memberPhone: gymMembershipsTable.phone,
       })
@@ -639,7 +638,7 @@ router.get("/memberships/checkins", adminMiddleware, async (req, res) => {
     );
     res.setHeader("Cache-Control", "no-store");
     res.json(checkins.map(checkin => {
-      const eventId = eventByCheckin.get(checkin.id) ?? checkin.x904EventId;
+      const eventId = eventByCheckin.get(checkin.id);
       // Do not classify an unlinked auto-annotation as a manual scan.
       const source = eventId ? "x904_auto"
         : /^Auto check-in X904/i.test(String(checkin.notes ?? "")) ? "unknown"
