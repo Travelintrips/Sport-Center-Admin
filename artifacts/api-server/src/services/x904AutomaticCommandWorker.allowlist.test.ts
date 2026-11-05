@@ -15,10 +15,12 @@ describe('X904 bounded multi-PIN allowlist regression',()=>{
     expect(resolveX904AutomaticPinScope('allowlist','154,')).toBeNull();
     expect(resolveX904AutomaticPinScope('allowlist',',154')).toBeNull();
     expect(resolveX904AutomaticPinScope('allowlist','154,,55')).toBeNull();
-    expect(resolveX904AutomaticPinScope('single','154,')).toBeNull();
+    expect(resolveX904AutomaticPinScope('single_pin','154,')).toBeNull();
     expect(resolveX904AutomaticPinScope('allowlist',Array.from({length:21},(_,i)=>String(100+i)).join(','))).toBeNull();
   });
-  test('keeps single-PIN scope strict and refuses accidental multi-PIN rollout',()=>{
+  test('preserves deployed single_pin and strict single-PIN scope',()=>{
+    expect(resolveX904AutomaticPinScope('single_pin','154')).toEqual({allVerified:false,allowlistMode:false,pins:['154']});
+    expect(resolveX904AutomaticPinScope('single_pin','154,55')).toBeNull();
     expect(resolveX904AutomaticPinScope('single','154')).toEqual({allVerified:false,allowlistMode:false,pins:['154']});
     expect(resolveX904AutomaticPinScope('single','154,55')).toBeNull();
     expect(resolveX904AutomaticPinScope('unexpected','154')).toBeNull();
