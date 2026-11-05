@@ -885,7 +885,27 @@ router.post("/wa/booking", async (req, res) => {
     if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
 
     const gymWalkIn = isGymWalkInFacility(facility);
-    if (gymWalkIn && (!x904IdentityType || !String(x904IdentityValue ?? "").trim())) {
+    // Public self-service is an unbound reservation, NEVER a physical door grant.
+    // The person may pay without registration; PIN/card assignment is a separate verified step.
+    const publicGymGuest = req.body.publicGymGuest === true;
+    if (publicGymGuest) {
+      const guestPhone = String(customerPhone ?? "").trim();
+      if (!gymWalkIn || x904IdentityType != null || x904IdentityValue != null) {
+        res.status(400).json({ error: "Booking Gym mandiri tidak menerima pemilihan PIN/kartu X904." }); return;
+      }
+      if (!/^[\\p{L}\\p{M}\\p{N} .'-]{2,100}$/u.test(bookingCustomerName) ||
+          !/^628[0-9]{7,13}$/.test(guestPhone)) {
+        res.status(400).json({ error: "Isi nama pengunjung dan nomor WhatsApp 628xxxxxxxxxx yang valid." }); return;
+      }
+      if (!["qris", "transfer"].includes(String(req.body.paymentMethod ?? ""))) {
+        res.status(400).json({ error: "Pilih QRIS atau Transfer Bank." }); return;
+      }
+      const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(bookingDate)) || String(bookingDate) < todayWib) {
+        res.status(400).json({ error: "Tanggal kunjungan harus hari ini atau tanggal mendatang." }); return;
+      }
+    }
+    if (gymWalkIn && !publicGymGuest && (!x904IdentityType || !String(x904IdentityValue ?? "").trim())) {
       res.status(400).json({ error: "Masukkan PIN X904 atau pilih kartu VIS001–VIS006 untuk akses Gym harian." });
       return;
     }
@@ -979,9 +999,20 @@ router.post("/wa/booking", async (req, res) => {
     }
 
     const totalPrice = Number(facility.pricePerHour) * effectiveDurationHours;
-    const customer = await ensureCustomer(customerPhone, bookingCustomerName);
+    if (publicGymGuest) {
+      const duplicate = await db.execute(sql`SELECT 1 FROM sport_center.sport_bookings
+        WHERE source='gym_public_guest' AND customer_phone=${String(customerPhone)}
+          AND booking_date=${String(bookingDate)}
+          AND status IN ('pending_payment','paid','waiting_confirmation','confirmed','completed')
+        LIMIT 1`);
+      if (duplicate.rows.length > 0) {
+        res.status(409).json({ error: "Sudah ada booking Gym untuk nomor WhatsApp dan tanggal ini. Periksa status booking sebelumnya agar tidak membayar dua kali." }); return;
+      }
+    }
+    // Guest mode must not create a password-bearing customer/login account.
+    const customer = publicGymGuest ? null : await ensureCustomer(customerPhone, bookingCustomerName);
     const taxCalc = await resolveCustomerTax(totalPrice, {
-      customerId: customer.id,
+      customerId: customer?.id ?? undefined,
       bookingDate,
     });
     const orderNumber = await generateBookingOrderNumber();
@@ -1005,9 +1036,9 @@ router.post("/wa/booking", async (req, res) => {
       const [created] = await tx.insert(bookingsTable).values({
       orderNumber,
       customerName: bookingCustomerName,
-      customerEmail: customer.email,
+      customerEmail: customer?.email ?? "",
       customerPhone,
-      customerId: customer.id,
+      customerId: customer?.id ?? null,
       facilityId: Number(facilityId),
       bookingDate,
       startTime,
@@ -1017,8 +1048,8 @@ router.post("/wa/booking", async (req, res) => {
       discountAmount: "0",
       apDiscountAmount: "0",
       basePrice: String(totalPrice),
-      source: "whatsapp",
-      notes: notes || null,
+      source: publicGymGuest ? "gym_public_guest" : "whatsapp",
+      notes: publicGymGuest ? "Gym nonmember mandiri; identitas X904 menunggu verifikasi/penyerahan kartu" : (notes || null),
       paymentDeadline,
       status: "pending_payment",
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -1039,7 +1070,7 @@ router.post("/wa/booking", async (req, res) => {
       }
       await tx.insert(bookingHistoryTable).values({
         bookingId: created.id, fromStatus: null, toStatus: "pending_payment",
-        changedByName: bookingCustomerName, note: "Booking dibuat via WhatsApp",
+        changedByName: bookingCustomerName, note: publicGymGuest ? "Booking Gym mandiri tanpa akun; belum ada hak akses X904" : "Booking dibuat via WhatsApp",
       });
       return created;
     });
@@ -1086,7 +1117,7 @@ router.post("/wa/booking", async (req, res) => {
       action: "wa_booking_created",
       entity: "booking",
       entityId: booking.id,
-      after: { orderNumber, source: "whatsapp", facilityId, bookingDate, startTime, endTime },
+      after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime },
     });
 
     res.status(201).json({
