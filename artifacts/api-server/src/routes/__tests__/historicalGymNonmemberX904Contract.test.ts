@@ -15,7 +15,9 @@ describe("historical admin Gym booking must not mutate X904 access", () => {
   });
 
   it("stores optional verified historical card only as a booking note", () => {
-    expect(bookingRoute).toContain("notes: isHistoricalGymNonmember && verifiedX904Identity");
+    expect(bookingRoute).toContain("isHistoricalGymNonmember && verifiedX904Identity");
+    expect(bookingRoute).toContain("Pemakai kartu");
+    expect(bookingRoute).toContain("x904VisitorName");
     expect(bookingRoute).toContain("X904 historis (referensi saja, tanpa akses)");
     expect(bookingRoute).toContain('const card = identityType === "card" ? resolveX904NonmemberCard(identityValue) : null');
   });
