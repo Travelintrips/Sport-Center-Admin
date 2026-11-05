@@ -75,52 +75,76 @@ export default function GymNonmemberEntry() {
 
   return (
     <main className="min-h-screen bg-[#f7f8fa] text-slate-900">
-      <section className="relative isolate overflow-hidden bg-[#0b1730] text-white">
-        {/* Reuse the actual Sport Center building photo already used on Home. */}
-        <img
-          src={buildingImg}
-          alt="Gedung Sport Center Bandara Soekarno-Hatta"
-          className="absolute inset-0 -z-20 h-full w-full object-cover object-center"
-          decoding="async"
-          fetchPriority="high"
-        />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#09162b]/95 via-[#09162b]/85 to-[#09162b]/30" />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#09162b]/70 via-transparent to-transparent" />
-        <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 sm:pb-20 sm:pt-10 lg:pb-24">
-          <nav aria-label="Navigasi halaman" className="mb-16 flex items-center justify-between gap-4 sm:mb-20">
-            <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 transition-colors hover:text-white">
+      <section className="relative overflow-hidden bg-gradient-to-br from-white via-[#fffaf5] to-[#fff4e8]">
+        <div className="pointer-events-none absolute -right-24 -top-32 h-80 w-80 rounded-full bg-orange-100/70 blur-3xl" />
+        <div className="mx-auto max-w-7xl px-5 pb-10 pt-6 sm:px-8 sm:pb-12 lg:pb-14 lg:pt-8">
+          <nav aria-label="Navigasi halaman" className="mb-8 flex flex-wrap items-center justify-between gap-3 sm:mb-10">
+            <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-orange-600">
               <ChevronRight className="h-4 w-4 rotate-180" /> Kembali ke Beranda
             </Link>
-            <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-medium tracking-wide backdrop-blur-sm">
+            <span className="hidden rounded-full border border-orange-100 bg-white/90 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-600 shadow-sm sm:inline-flex">
               SPORT CENTER BANDARA SOEKARNO-HATTA
             </span>
           </nav>
 
-          <div className="max-w-3xl">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-orange-300/30 bg-orange-500/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.15em] text-orange-200 backdrop-blur">
-              <Sparkles className="h-4 w-4" /> Booking online tanpa login
+          <div className="grid items-center gap-8 lg:min-h-[410px] lg:grid-cols-[0.95fr_1.05fr] lg:gap-10">
+            <div className="relative z-10 max-w-xl">
+              <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] text-orange-700">
+                <Sparkles className="h-4 w-4" /> Booking online tanpa login
+              </div>
+              <h1 className="text-4xl font-black leading-[1.09] tracking-tight text-[#142441] sm:text-5xl xl:text-[3.4rem]">
+                Pilih Olahragamu.<br />
+                <span className="text-orange-600">Booking Lebih Mudah.</span>
+              </h1>
+              <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
+                Booking fasilitas Sport Center Bandara Soekarno-Hatta dengan praktis.
+                Pilih jadwal, lakukan pemesanan, dan unggah bukti pembayaran.
+                Tidak perlu membuat akun atau login.
+              </p>
+              <div className="mt-7 flex flex-wrap items-center gap-3">
+                <a href="#pilih-fasilitas" className="inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-orange-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-orange-600">
+                  Pilih Fasilitas & Booking <ArrowRight className="h-5 w-5" />
+                </a>
+                <Link href="/facilities" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-[#142441] shadow-sm transition hover:border-orange-200 hover:bg-orange-50">
+                  Lihat Info Fasilitas
+                </Link>
+              </div>
+              <div className="mt-8 flex flex-wrap gap-x-5 gap-y-3 text-sm font-medium text-slate-600">
+                <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-orange-600" /> Tanpa login</span>
+                <span className="inline-flex items-center gap-2"><CalendarDays className="h-4 w-4 text-orange-600" /> Booking online</span>
+                <span className="inline-flex items-center gap-2"><CreditCard className="h-4 w-4 text-orange-600" /> QRIS & transfer</span>
+              </div>
             </div>
-            <h1 className="text-4xl font-black leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.6rem]">
-              Pilih Olahragamu.<br />
-              <span className="text-orange-400">Booking Lebih Mudah.</span>
-            </h1>
-            <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-200 sm:text-lg">
-              Temukan fasilitas olahraga pilihanmu di Sport Center Bandara Soekarno-Hatta.
-              Pilih jadwal, lakukan pemesanan, dan unggah bukti pembayaran. Tidak perlu membuat akun atau login.
-            </p>
-            <a href="#pilih-fasilitas" className="mt-8 inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-orange-500 px-6 py-3 font-bold text-white shadow-lg shadow-orange-950/20 transition hover:bg-orange-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
-              Lihat Pilihan Fasilitas <ArrowRight className="h-5 w-5" />
-            </a>
-          </div>
-          <div className="mt-12 flex flex-wrap gap-x-7 gap-y-3 text-sm font-medium text-white/90">
-            <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-orange-300" /> Tidak perlu akun</span>
-            <span className="inline-flex items-center gap-2"><CalendarDays className="h-4 w-4 text-orange-300" /> Booking langsung online</span>
-            <span className="inline-flex items-center gap-2"><CreditCard className="h-4 w-4 text-orange-300" /> QRIS & transfer bank</span>
+
+            <div className="relative min-w-0">
+              <div className="pointer-events-none absolute -bottom-4 -right-4 h-full w-full rounded-[2rem] border border-orange-200/70 bg-orange-100/60" />
+              <div className="relative aspect-[4/3] max-h-[465px] overflow-hidden rounded-[1.75rem] border-[5px] border-white bg-slate-100 shadow-[0_24px_65px_rgba(15,23,42,0.16)] sm:aspect-[16/11] lg:aspect-[5/4]">
+                <img
+                  src={buildingImg}
+                  alt="Gedung Sport Center Bandara Soekarno-Hatta"
+                  className="h-full w-full object-cover object-center brightness-[1.08] contrast-[1.04] saturate-[1.06]"
+                  decoding="async"
+                  fetchPriority="high"
+                />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-slate-900/55 to-transparent" />
+                <div className="absolute bottom-5 left-5 right-5 flex flex-wrap items-center gap-2 text-xs font-semibold text-white sm:text-sm">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/20 px-3 py-2 backdrop-blur-md">
+                    <MapPin className="h-4 w-4" /> Kawasan Bandara Soekarno-Hatta
+                  </span>
+                </div>
+              </div>
+              <div className="absolute -left-4 top-5 hidden rounded-2xl border border-slate-100 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm sm:block">
+                <div className="flex items-center gap-2 text-sm font-bold text-[#142441]">
+                  <ShieldCheck className="h-5 w-5 text-orange-600" /> Booking Mandiri
+                </div>
+                <p className="mt-0.5 text-xs text-slate-500">Mudah, praktis, tanpa akun</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="pilih-fasilitas" aria-label="Pilihan fasilitas Sport Center" className="scroll-mt-6 mx-auto max-w-7xl px-5 pb-16 pt-14 sm:px-8 sm:pt-16">
+      <section id="pilih-fasilitas" aria-label="Pilihan fasilitas Sport Center" className="scroll-mt-6 mx-auto max-w-7xl px-5 pb-16 pt-11 sm:px-8 sm:pt-14">
         <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <span className="text-xs font-extrabold uppercase tracking-[0.2em] text-orange-600">Jelajahi fasilitas</span>
@@ -140,7 +164,7 @@ export default function GymNonmemberEntry() {
           <p role="status" className="rounded-2xl bg-white p-8 text-center text-slate-600">Belum ada fasilitas berbayar yang tersedia untuk booking mandiri.</p>
         )}
 
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {facilities.map(facility => {
             const gym = isGym(facility);
             const url = getPublicBookingLink(facility);
