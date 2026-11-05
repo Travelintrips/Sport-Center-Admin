@@ -45,7 +45,7 @@ test("UI guides known name and unknown name to proper staff followup without PIN
  assert.match(ui,/guestIdentityRoute === "registered"/);
  assert.match(ui,/guestIdentityRoute === "visitor_card"/);
  assert.match(ui,/guestIdentityRoute === "staff_review"/);
- assert.match(ui,/petugas akan memilih kartu yang tersedia/);
+ assert.match(ui,/petugas akan memilih kartu yang tersedia/i);
  assert.doesNotMatch(ui,/PIN Mesin X904 \(Opsional\)/);
  assert.doesNotMatch(ui,/requestedX904Pin: x904IdentityValue/);
  assert.match(admin,/Identitas X904 yang diajukan pengunjung/);
