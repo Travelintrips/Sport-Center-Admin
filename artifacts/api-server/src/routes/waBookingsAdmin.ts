@@ -26,6 +26,7 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
+import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
 
 const router = Router();
 
@@ -146,8 +147,23 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
     .orderBy(desc(auditLogsTable.createdAt))
     .limit(30);
 
+  // Admin-only identity detail. Never expose the matched PIN/UID in
+  // public booking notes, the public name-preview, or order-status endpoints.
+  const x904IdentityMatch = booking.source === "gym_public_guest"
+    ? await resolveGymGuestName(booking.customerName).catch(() => null)
+    : null;
+
   res.json({
     booking,
+    x904IdentityMatch: x904IdentityMatch?.route === "registered"
+      ? {
+          route: "registered",
+          userPin: x904IdentityMatch.userPin,
+          deviceUid: x904IdentityMatch.deviceUid,
+          displayName: x904IdentityMatch.displayName,
+          ownershipVerified: false,
+        }
+      : { route: x904IdentityMatch?.route ?? "staff_review", userPin: null, deviceUid: null, ownershipVerified: false },
     facility: facility ?? null,
     session: session[0] ?? null,
     messages: (session[0] as any)?.messages ?? [],
