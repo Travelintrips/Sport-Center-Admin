@@ -306,6 +306,27 @@ export default function AdminCheckoutForm() {
   const repeatFormValid = multiPatterns.length > 0 || !repeatEnabled || recurringScheduleValid;
   // bookingKind has a valid default; it is intentionally not an additional
   // explicit-completion requirement for enabling the submit button.
+  // Multi-jadwal has no active single-day slot after the admin adds a pattern.
+  // Keep the primary action clickable for this mode and explain any remaining
+  // validation problem, rather than silently disabling it.
+  const multiScheduleBlockers: string[] = multiPatterns.length === 0 ? [] : [
+    ...(!selectedCustomerId || !customerFormValid ? ["Pilih pelanggan dengan nama dan nomor WhatsApp yang valid."] : []),
+    ...(!selectedFacilityId || !activeFacilities.some((item: any) => String(item.id) === selectedFacilityId)
+      ? ["Pilih fasilitas aktif."] : []),
+    ...(isMultigunaFacility && !multigunaActivities.some((item) => item.value === selectedActivityType)
+      ? ["Pilih jenis olahraga (Futsal, Basket, atau Voli)."] : []),
+    ...(multiPatterns.reduce((sum, pattern) => sum + pattern.dates.length, 0) > 52
+      ? ["Maksimal 52 sesi dalam satu grup."] : []),
+    ...(isSubmitting ? ["Sedang memproses booking."] : []),
+    ...(paymentChoice !== "unpaid" && paymentChoice !== "paid" ? ["Pilih status pembayaran."] : []),
+    ...(!formPaymentValid ? ["Lengkapi bukti dan tanggal pembayaran."] : []),
+    ...(isWalkIn || isActiveApMember || bookingKind === "event"
+      ? ["Jenis fasilitas atau pelanggan ini tidak mendukung booking multi-jadwal."] : []),
+    ...(isCompanyPayer && (paymentChoice !== "unpaid" || isGuest || selectedCustomer?.accountType !== "company")
+      ? ["Corporate harus menggunakan akun perusahaan terdaftar dan Belum Bayar."] : []),
+    ...(!isCompanyPayer && selectedCustomer?.accountType === "company"
+      ? ["Ubah jenis pemesanan menjadi Corporate untuk pelanggan perusahaan."] : []),
+  ];
   const canSubmitBooking = Boolean(
     selectedCustomerId &&
     customerFormValid &&
@@ -786,6 +807,14 @@ export default function AdminCheckoutForm() {
 
     if (bookingKind === "membership") {
       setLocation("/admin/memberships");
+      return;
+    }
+    if (multiPatterns.length > 0 && multiScheduleBlockers.length > 0) {
+      toast({
+        title: "Booking belum dapat dibuat",
+        description: multiScheduleBlockers.join(" "),
+        variant: "destructive",
+      });
       return;
     }
     if (!selectedCustomerId) {
@@ -1823,12 +1852,23 @@ export default function AdminCheckoutForm() {
           </CardContent>
 
           <CardFooter className="border-t pt-5">
-            {!isMembership && <Button type="submit" className="w-full h-11 text-base font-bold" disabled={!canSubmitBooking}>
+            {!isMembership && <div className="w-full space-y-2">
+              {multiPatterns.length > 0 && multiScheduleBlockers.length > 0 && (
+                <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p className="font-semibold">Periksa sebelum membuat booking:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    {multiScheduleBlockers.map((message) => <li key={message}>{message}</li>)}
+                  </ul>
+                </div>
+              )}
+              <Button type="submit" className="w-full h-11 text-base font-bold"
+                disabled={isSubmitting || (multiPatterns.length === 0 && !canSubmitBooking)}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking"
               }
-            </Button>}
+              </Button>
+            </div>}
           </CardFooter>
         </Card>
         {!isMembership && (
