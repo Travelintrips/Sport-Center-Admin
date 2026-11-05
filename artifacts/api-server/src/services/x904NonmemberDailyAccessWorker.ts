@@ -125,7 +125,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           if (owner.rows.length) return;
           const matches = users.filter((u: any) =>
             String(u.pin) === pin &&
-            String(u.name ?? "").trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") ===
+            String(u.name ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") ===
               expectedName.toLocaleUpperCase("id-ID") &&
             Number(u.role) === 0 && u.enabled === true);
           if (matches.length !== 1 || isX904AutoSuspendExempt(pin, Number(matches[0].role))) return;
@@ -137,7 +137,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           const identity = deviceUser.rows[0] as any;
           if (!Number.isSafeInteger(Number(identity.device_uid)) || Number(identity.device_uid) <= 0 ||
               Number(identity.device_role) !== 0 ||
-              String(identity.display_name).trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") !==
+              String(identity.display_name).trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") !==
                 expectedName.toLocaleUpperCase("id-ID")) return;
           // A paid, currently valid grant takes priority over legacy cleanup.
           const grant = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
