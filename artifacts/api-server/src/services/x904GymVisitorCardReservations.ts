@@ -134,3 +134,46 @@ export async function autoReserveVisAfterFundsVerified(input: {
       "Kartu belum berhasil dialokasikan. Tidak ada akses pintu yang diaktifkan.");
   }
 }
+
+/** Reuse only after confirmed physical card return and safe X904 read-back. */
+export async function returnVerifiedVisCard(input: {
+  orderNumber: string;
+  physicalCardReturned: true;
+  x904ReadbackChecked: true;
+  returnedBy: string;
+}): Promise<{ cardCode: string; state: "returned" }> {
+  if (input.physicalCardReturned !== true || input.x904ReadbackChecked !== true ||
+      !String(input.returnedBy ?? "").trim()) {
+    throw new VisReservationError(400,"return_verification_required",
+      "Petugas harus mengonfirmasi kartu fisik kembali dan X904 telah dibaca ulang.");
+  }
+  try {
+    return await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
+      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id
+        FROM sport_center.gym_vis_card_reservations r
+        JOIN sport_center.sport_bookings b ON b.id=r.booking_id
+        WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
+      if (!result.rows.length) throw new VisReservationError(404,"no_reservation","Kartu VIS belum dialokasikan.");
+      const row = result.rows[0] as any;
+      if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned" };
+      if (!["reserved","collected"].includes(String(row.state)))
+        throw new VisReservationError(409,"invalid_return_state","Status kartu tidak dapat dikembalikan.");
+      const grant = await tx.execute(sql`SELECT 1
+        FROM sport_center.x904_nonmember_daily_access
+        WHERE booking_id=${Number(row.booking_id)}
+          AND access_state IN ('pending','active','review_required')
+        LIMIT 1`);
+      if (grant.rows.length) throw new VisReservationError(409,"access_still_pending",
+        "Masih ada hak akses X904 belum selesai. Verifikasi suspend/read-back terlebih dahulu.");
+      await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
+        SET state='returned',returned_at=now()
+        WHERE id=${Number(row.id)} AND state IN ('reserved','collected')`);
+      return { cardCode:String(row.card_code),state:"returned" };
+    });
+  } catch (error) {
+    if (error instanceof VisReservationError) throw error;
+    console.error("[gym-vis] return failed",error);
+    throw new VisReservationError(503,"vis_return_unavailable","Pengembalian kartu belum dapat diverifikasi.");
+  }
+}
