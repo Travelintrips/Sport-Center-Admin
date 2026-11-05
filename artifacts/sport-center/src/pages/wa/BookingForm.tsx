@@ -98,6 +98,7 @@ export default function WaBookingForm() {
   const searchParams = new URLSearchParams(search);
   const phoneFromWA = searchParams.get("phone") ?? "";
   const dedicatedNonmember = searchParams.get("nonmember") === "1";
+  const publicGymGuest = dedicatedNonmember && searchParams.get("self") === "1";
   const dateFromWA = searchParams.get("date") ?? "";
   const startTimeFromWA = searchParams.get("startTime") ?? "";
   const durationFromWA = searchParams.get("duration") ?? "1";
@@ -433,7 +434,7 @@ export default function WaBookingForm() {
       setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
       return;
     }
-    if (dedicatedNonmember && (!x904VerifiedName || x904Verifying)) {
+    if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
       return;
     }
@@ -445,7 +446,7 @@ export default function WaBookingForm() {
       setError("Unggah foto bukti pembayaran sebelum mengirim untuk verifikasi.");
       return;
     }
-    if (gymWalkIn && !x904IdentityValue.trim()) {
+    if (gymWalkIn && !publicGymGuest && !x904IdentityValue.trim()) {
       setError("Masukkan PIN X904 atau pilih kartu VIS001–VIS006.");
       return;
     }
@@ -467,7 +468,9 @@ export default function WaBookingForm() {
           durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
-          ...(gymWalkIn && x904IdentityValue.trim() ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
+          ...(publicGymGuest ? { publicGymGuest: true } : {}),
+          ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
+            ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         }),
       });
       const data = await resp.json();
@@ -546,6 +549,12 @@ export default function WaBookingForm() {
               </div>
             </div>
 
+            {publicGymGuest && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
+                untuk verifikasi identitas serta penyerahan kartu VIS / pemeriksaan PIN X904.
+              </p>
+            )}
             <p className="text-sm text-gray-600 text-center">
               {proofConfirmed
                 ? "Bukti pembayaran cocok dan booking otomatis dikonfirmasi."
@@ -609,13 +618,20 @@ export default function WaBookingForm() {
           </div>
         )}
 
+        {publicGymGuest && (
+          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+            <strong>Booking mandiri tanpa login.</strong> Isi nama asli dan nomor WhatsApp, pilih QRIS atau transfer, lalu unggah bukti.
+            Pembayaran harus diverifikasi sebelum akses diberikan. PIN/kartu X904 tidak dapat dipilih dari website publik;
+            petugas akan mencocokkan identitas dan menyerahkan kartu jika diperlukan.
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-bold text-gray-700 uppercase tracking-wide">Data Pemesan</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {gymWalkIn ? (
+              {gymWalkIn && !publicGymGuest ? (
                 <div className="space-y-1 rounded-lg border border-blue-200 bg-blue-50 p-3">
                   <Label className="text-sm font-semibold">Nama sesuai data X904</Label>
                   <p className="text-xs text-blue-800">
@@ -649,7 +665,7 @@ export default function WaBookingForm() {
                 </div>
                 <p className="text-xs text-gray-500">Format: 628xxx (tanpa + atau 0 di depan)</p>
               </div>
-              {gymWalkIn && (
+              {gymWalkIn && !publicGymGuest && (
                 <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50/50 p-3">
                   <div>
                     <Label className="text-sm font-semibold">Identitas akses X904 (nonmember)</Label>

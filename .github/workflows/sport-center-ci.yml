@@ -132,6 +132,9 @@ jobs:
       - name: Verify Gym X904 admin isolation and navigation
         run: node scripts/verify-gym-x904-admin-contract.mjs
 
+      - name: Verify public Gym self-booking without X904 access grants
+        run: node --test scripts/test-gym-public-self-booking.mjs
+
       - name: Verify X904 ADMS safety contract
         run: |
           node scripts/verify-x904-adms-safety-contract.mjs
