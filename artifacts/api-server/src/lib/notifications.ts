@@ -988,6 +988,28 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
   await sendWAToCustomer(data.customerPhone, msg);
 }
 
+/** Customer receives the assigned card number automatically, never the machine PIN. */
+export async function notifyGymVisitorCardReserved(data: {
+  bookingId: number;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  cardCode: string;
+  statusUrl: string;
+}): Promise<void> {
+  const message =
+    "🏋️ *Kartu Pengunjung Gym Sudah Dialokasikan*\n\n" +
+    "Halo *" + data.customerName + "*, pembayaran booking *" + data.orderNumber +
+    "* telah diverifikasi.\n\n" +
+    "🎫 Kartu pengunjung: *" + data.cardCode + "*\n" +
+    "📍 Ambil kartu fisik di petugas Sport Center saat tiba.\n" +
+    "🔐 Nomor kartu bukan kode pembuka pintu; akses mesin hanya setelah kartu diserahkan, jadwal berlaku, dan verifikasi X904 berhasil.\n" +
+    "🔎 Tiket & status: " + data.statusUrl;
+  await sendWAToCustomer(data.customerPhone, message, {
+    bookingId: data.bookingId, orderNumber: data.orderNumber, event: "gym_vis_card_reserved",
+  });
+}
+
 export interface WaPaymentRejectedData extends BookingNotifData {
   uploadProofUrl: string;
   reason?: string;
