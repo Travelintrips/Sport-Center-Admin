@@ -103,6 +103,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   // never authorizes any other PIN. No payment/grant is fabricated.
   // A registry row requires independent operator verification, a fixed UID and
   // exact name. Never infer nonmembership merely from missing member mapping.
+  const registryReady = await store.execute(sql`SELECT to_regclass('sport_center.x904_verified_nonmember_identities') IS NOT NULL AS ready`);
+  if (registryReady.rows[0]?.ready !== true) {
+    console.warn("[x904-nonmember] registry unavailable; legacy reconciliation disabled");
+    return;
+  }
   const verifiedRows = await store.execute(sql`SELECT user_pin,device_uid,display_name
     FROM sport_center.x904_verified_nonmember_identities
     WHERE device_serial=${DEVICE} AND verification_state='verified'
