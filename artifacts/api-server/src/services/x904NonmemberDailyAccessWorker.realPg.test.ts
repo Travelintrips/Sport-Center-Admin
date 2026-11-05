@@ -12,6 +12,7 @@ const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENA
 const oldEnv = envKeys.map(key => process.env[key]);
 const migration = readFileSync("migrations/20261031_x904_nonmember_daily_access.sql","utf8");
 const activationClockMigration = readFileSync("migrations/20261102_x904_nonmember_verified_activation_clock.sql","utf8");
+const businessHoursMigration = readFileSync("migrations/20261105_x904_nonmember_2300_wib_cutoff.sql","utf8");
 
 beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
@@ -31,6 +32,7 @@ beforeAll(async () => {
       WHERE state IN ('queued','claimed');`);
   await run(migration);
   await run(activationClockMigration);
+  await run(businessHoursMigration);
   // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
   await run("DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF; END $;");
   // Registry is isolated to this disposable PostgreSQL test database.
