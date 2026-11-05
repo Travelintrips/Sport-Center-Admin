@@ -17,6 +17,7 @@ test("hard uniqueness constraints prevent double allocations and reused bank ref
  assert.match(migration,/CREATE UNIQUE INDEX IF NOT EXISTS gym_vis_res_card_active_uniq/);
  assert.match(migration,/WHERE state IN \('reserved','collected'\)/);
  assert.match(migration,/REVOKE ALL ON sport_center\.gym_vis_card_reservations FROM PUBLIC, anon, authenticated/);
+ assert.match(migration,/ENABLE ROW LEVEL SECURITY/);
  for(const code of ["VIS001","VIS002","VIS003","VIS004","VIS005","VIS006"])assert.ok(migration.includes(code));
 });
 
@@ -32,6 +33,8 @@ test("only official verified funds plus confirmed unique payment can reserve a p
  assert.match(service,/paymentResult|payResult/);
  assert.match(service,/payment_ambiguous/);
  assert.match(service,/bank_reference_reused/);
+ assert.match(service,/bank_reference_other_booking/);
+ assert.match(service,/provider_trade_no/);
  assert.match(service,/x904_nonmember_daily_access/);
  assert.match(service,/access_state IN \('pending','active','review_required'\)/);
  assert.doesNotMatch(service,/ACTIVATE_USER|SUSPEND_USER|x904_user_commands/);
