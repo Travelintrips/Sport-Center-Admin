@@ -142,6 +142,36 @@ export default function AdminMemberships() {
     finally{setPaymentUploading(false);}
   }
 
+  const [editingContact, setEditingContact] = useState(false);
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactError, setContactError] = useState("");
+  const [savingContact, setSavingContact] = useState(false);
+  const canEditContact = ["owner", "super_admin", "admin"].includes(String(getCurrentRole()));
+  async function saveContact() {
+    if (!viewMember?.id || savingContact) return;
+    const normalized = contactPhone.replace(/\D/g, "").replace(/^0/, "62").replace(/^8/, "628");
+    if (!/^628[0-9]{8,11}$/.test(normalized)) {
+      setContactError("Gunakan nomor WhatsApp Indonesia yang valid, misalnya +628121887857.");
+      return;
+    }
+    setSavingContact(true);
+    setContactError("");
+    try {
+      const response = await fetch(`${API}/memberships/${viewMember.id}/contact`, {
+        method: "PATCH", headers: authHeaders(), body: JSON.stringify({ phone: normalized }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Gagal menyimpan nomor WhatsApp");
+      setViewMember((current: any) => current ? { ...current, phone: data.phone, displayPhone: data.displayPhone } : current);
+      setEditingContact(false);
+      queryClient.invalidateQueries({ queryKey: getListMembershipsQueryKey() });
+      toast({ title: "Kontak member diperbarui", description: "Nomor WA baru tersimpan tanpa mengubah transaksi lama." });
+    } catch (err) {
+      setContactError(err instanceof Error ? err.message : "Gagal menyimpan kontak");
+    } finally {
+      setSavingContact(false);
+    }
+  }
   const [editingDates, setEditingDates] = useState(false);
   const [editStartDate, setEditStartDate] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
@@ -380,6 +410,9 @@ export default function AdminMemberships() {
 
   function openMember(m: any) {
     setViewMember(m);
+    setEditingContact(false);
+    setContactPhone(String(m.displayPhone || m.phone || ""));
+    setContactError("");
     setEditingDates(false);
     setEditStartDate(m.startDate ?? "");
     setEditEndDate(m.endDate ?? "");
@@ -640,7 +673,7 @@ export default function AdminMemberships() {
                     className={`hover:bg-muted/30 transition-colors ${isCheckedIn ? "bg-green-50/40" : ""}`}
                   >
                     <td className="px-4 py-4">
-                      <div className="font-medium">{m.name}</div>
+                      <button type="button" className="font-medium text-left text-primary hover:underline focus-visible:underline focus-visible:outline-none" onClick={() => openMember(m)} title="Lihat detail dan edit kontak member">{m.name}</button>
                       <div className="text-xs text-muted-foreground md:hidden">{m.email}</div>
                     </td>
                     <td className="px-4 py-4 hidden md:table-cell">
@@ -737,8 +770,34 @@ export default function AdminMemberships() {
                 <div className="font-medium">{viewMember.name}</div>
                 <div className="text-muted-foreground">Email</div>
                 <div className="font-medium break-all">{viewMember.email}</div>
-                <div className="text-muted-foreground">Telepon</div>
-                <div className="font-medium">{viewMember.displayPhone || viewMember.phone}</div>
+                <div className="text-muted-foreground">WhatsApp</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium">{viewMember.displayPhone || viewMember.phone}</span>
+                  {canEditContact && !editingContact && (
+                    <Button size="sm" variant="outline" type="button" onClick={() => {
+                      setContactPhone(String(viewMember.displayPhone || viewMember.phone || ""));
+                      setContactError("");
+                      setEditingContact(true);
+                    }}><Pencil size={12} className="mr-1" /> Edit WA</Button>
+                  )}
+                </div>
+                {editingContact && (
+                  <div className="col-span-2 rounded-lg border p-3 space-y-2">
+                    <Label htmlFor="gym-member-wa">Nomor WhatsApp baru</Label>
+                    <Input id="gym-member-wa" type="tel" value={contactPhone}
+                      onChange={(event) => setContactPhone(event.target.value)}
+                      placeholder="+628121887857" disabled={savingContact} />
+                    {contactError && <p className="text-xs text-destructive">{contactError}</p>}
+                    <p className="text-xs text-muted-foreground">Mengubah kontak member, bukan data pembayaran atau akses X904.</p>
+                    <div className="flex gap-2 justify-end">
+                      <Button size="sm" variant="ghost" type="button" disabled={savingContact}
+                        onClick={() => { setEditingContact(false); setContactError(""); }}>Batal</Button>
+                      <Button size="sm" type="button" disabled={savingContact} onClick={saveContact}>
+                        <Save size={12} className="mr-1" /> {savingContact ? "Menyimpan..." : "Simpan WA"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="text-muted-foreground">Durasi</div>
                 <div className="font-medium">{viewMember.months} bulan</div>
                 <div className="text-muted-foreground">Total Bayar</div>
