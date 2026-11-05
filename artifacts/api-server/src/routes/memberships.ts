@@ -1721,6 +1721,69 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
 });
 
 // Contact-only update: never touch payment, membership entitlement, X904 or historic bookings.
+router.patch("/memberships/:id/email", adminMiddleware, async (req, res) => {
+  try {
+    const role = String((req as any).user?.role ?? "");
+    if (!["owner", "super_admin", "admin"].includes(role)) {
+      res.status(403).json({ error: "Tidak berwenang mengubah email member" });
+      return;
+    }
+    const id = Number(req.params.id);
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    if (!Number.isSafeInteger(id) || id <= 0 || email.length > 254 ||
+        !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      res.status(400).json({ error: "Email atau ID membership tidak valid" });
+      return;
+    }
+    const result = await db.transaction(async (tx) => {
+      const [current] = await tx.select().from(gymMembershipsTable)
+        .where(eq(gymMembershipsTable.id, id)).for("update").limit(1);
+      if (!current) return null;
+      const oldEmail = String(current.email ?? "").trim().toLowerCase();
+      if (oldEmail === email) return current;
+      const membershipConflict = await tx.execute(sql`
+        SELECT id FROM sport_center.sport_memberships
+        WHERE id <> ${id} AND lower(trim(email)) = ${email} LIMIT 1
+      `);
+      const customerConflict = await tx.execute(sql`
+        SELECT id FROM sport_center.sport_customers
+        WHERE lower(trim(email)) = ${email} LIMIT 1
+      `);
+      if (membershipConflict.rows.length || customerConflict.rows.length) throw new Error("EMAIL_ALREADY_IN_USE");
+      const matches = await tx.execute(sql`
+        SELECT id FROM sport_center.sport_customers
+        WHERE lower(trim(email)) = ${oldEmail}
+          AND phone = ${String(current.phone ?? "")}
+        FOR UPDATE LIMIT 2
+      `);
+      if (matches.rows.length > 1) throw new Error("AMBIGUOUS_CONTACT_IDENTITY");
+      if (matches.rows.length === 1) {
+        await tx.execute(sql`UPDATE sport_center.sport_customers SET email = ${email}
+          WHERE id = ${Number(matches.rows[0].id)}
+            AND lower(trim(email)) = ${oldEmail}
+            AND phone = ${String(current.phone ?? "")}`);
+      }
+      const [updated] = await tx.update(gymMembershipsTable)
+        .set({ email, updatedAt: new Date() })
+        .where(eq(gymMembershipsTable.id, id)).returning();
+      return updated;
+    });
+    if (!result) { res.status(404).json({ error: "Membership tidak ditemukan" }); return; }
+    syncToPublic(result).catch(err => req.log.error({ err }, "Gym email public projection failed"));
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ...result, totalPrice: Number(result.totalPrice) });
+  } catch (err) {
+    if (err instanceof Error && err.message === "EMAIL_ALREADY_IN_USE") {
+      res.status(409).json({ error: "Email sudah digunakan member atau pelanggan lain" }); return;
+    }
+    if (err instanceof Error && err.message === "AMBIGUOUS_CONTACT_IDENTITY") {
+      res.status(409).json({ error: "Profil pelanggan ambigu; email tidak diubah" }); return;
+    }
+    req.log.error({ err }, "Gym membership email update failed");
+    res.status(500).json({ error: "Gagal mengubah email member" });
+  }
+});
+
 router.patch("/memberships/:id/contact", adminMiddleware, async (req, res) => {
   try {
     const role = String((req as any).user?.role ?? "");
