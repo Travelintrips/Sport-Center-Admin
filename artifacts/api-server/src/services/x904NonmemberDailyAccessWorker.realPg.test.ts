@@ -31,6 +31,16 @@ beforeAll(async () => {
       WHERE state IN ('queued','claimed');`);
   await run(migration);
   await run(activationClockMigration);
+  // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
+  await run("DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF; END $;");
+  // Registry is isolated to this disposable PostgreSQL test database.
+  await run(readFileSync("sql/x904_verified_nonmember_identities.sql", "utf8"));
+  await run(`CREATE TABLE sport_center.gym_x904_lan_users(
+    device_serial text,user_pin text,device_uid integer,display_name text,device_role integer);
+    INSERT INTO sport_center.gym_x904_lan_users VALUES
+      ('TDBD234200545','601',601,'TEST VERIFIED',0),
+      ('TDBD234200545','602',602,'TEST REVOKED',0),
+      ('TDBD234200545','603',603,'TEST RACE',0);`);
   await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
     INSERT INTO sport_center.sport_bookings VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
@@ -270,4 +280,62 @@ test('paid VIS006 review_required becomes expired after verified suspend and new
     expect((await run(`SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=${access}`)).rows[0].access_state).toBe('expired');
     expect((await run(`SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'='${access}'`)).rows[0].n).toBe(1);
   } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
+test("registry verified nonmember enqueues once, revoked and mid-cycle revoked never enqueue", async () => {
+  const device = "TDBD234200545";
+  const at = new Date();
+  const addRegistry = async (pin: string, state: "verified" | "revoked") => {
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at,revoked_at)
+      VALUES ('${device}','${pin}',${Number(pin)},'${pin === "601" ? "TEST VERIFIED" : pin === "602" ? "TEST REVOKED" : "TEST RACE"}',
+       '${state}','isolated-test',now(),${state === "revoked" ? "now()" : "null"})`);
+  };
+  await addRegistry("601", "verified");
+  await addRegistry("602", "verified");
+  await addRegistry("603", "verified");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = "601";
+  try {
+    await addSnapshot(new Date(at.getTime() - 1000), "601", "TEST VERIFIED", 1);
+    await processX904NonmemberDailyAccess(db as any, at);
+    const count = async (pin: string) => Number((await run(`SELECT count(*)::int AS n
+      FROM sport_center.x904_user_commands
+      WHERE user_pin='${pin}' AND command_type='SUSPEND_USER'
+        AND payload->>'source'='AUTO_NONMEMBER_LEGACY_VERIFIED'`)).rows[0].n);
+    expect(await count("601")).toBe(1);
+    await processX904NonmemberDailyAccess(db as any, at);
+    expect(await count("601")).toBe(1);
+
+    process.env.GYM_X904_NONMEMBER_ONLY_PIN = "602";
+    await run(`UPDATE sport_center.x904_verified_nonmember_identities
+      SET verification_state='revoked',revoked_at=now()
+      WHERE device_serial='${device}' AND user_pin='602'`);
+    await addSnapshot(new Date(at.getTime() - 1000), "602", "TEST REVOKED", 1);
+    await processX904NonmemberDailyAccess(db as any, at);
+    expect(await count("602")).toBe(0);
+
+    // Revoke after the initial registry SELECT but before its transaction:
+    // the transaction must re-read and reject the stale approval.
+    process.env.GYM_X904_NONMEMBER_ONLY_PIN = "603";
+    await addSnapshot(new Date(at.getTime() - 1000), "603", "TEST RACE", 1);
+    let revokedDuringRead = false;
+    const raceStore = {
+      execute: async (statement: any) => {
+        const result = await db.execute(statement);
+        if (!revokedDuringRead && result.rows.some((r: any) => r.user_pin === "603" && r.device_uid === 603)) {
+          revokedDuringRead = true;
+          await run(`UPDATE sport_center.x904_verified_nonmember_identities
+            SET verification_state='revoked',revoked_at=now()
+            WHERE device_serial='${device}' AND user_pin='603'`);
+        }
+        return result;
+      },
+      transaction: db.transaction.bind(db),
+    };
+    await processX904NonmemberDailyAccess(raceStore as any, at);
+    expect(revokedDuringRead).toBe(true);
+    expect(await count("603")).toBe(0);
+  } finally {
+    delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  }
 });
