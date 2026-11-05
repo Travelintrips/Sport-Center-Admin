@@ -581,7 +581,7 @@ export default function WaBookingForm() {
 
             {publicGymGuest && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                PIN yang dimasukkan belum merupakan hak akses. Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
+                Pencocokan nama X904 belum merupakan hak akses. Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
                 untuk verifikasi identitas serta penyerahan kartu VIS / pemeriksaan PIN X904.
               </p>
             )}
