@@ -300,16 +300,27 @@ export default function AdminCheckoutForm() {
     });
     return () => controller.abort();
   }, [isCompanyPayer, selectedCustomerId]);
-  const verifiedCompanyCustomer = isCompanyPayer && companyCustomerDetailState === "ready"
-    && companyCustomerDetail?.id === Number(selectedCustomerId) ? companyCustomerDetail : null;
-  // Customer picker has the current phone even when the detail endpoint has
-  // not loaded yet or returns an older record with a blank phone. Preserve
-  // that value for display and booking, but NEVER bypass company verification.
+  // The authenticated customer list already contains company account metadata.
+  // A failed secondary detail request must not invalidate a listed company.
+  // The booking API independently verifies persisted billing authorization.
+  const listedCompanyCustomer = isCompanyPayer &&
+    Number(selectedCustomer?.id) === Number(selectedCustomerId) &&
+    Number(selectedCustomerId) > 0 &&
+    selectedCustomer?.accountType === "company"
+      ? selectedCustomer : null;
+  const detailedCompanyCustomer = isCompanyPayer && companyCustomerDetailState === "ready" &&
+    companyCustomerDetail?.id === Number(selectedCustomerId)
+      ? companyCustomerDetail : null;
+  const verifiedCompanyCustomer = detailedCompanyCustomer ?? listedCompanyCustomer;
+  // Prefer the detailed contact, falling back to the authenticated list/PIC
+  // for the read-only WhatsApp field and booking contact snapshot.
   const bookingCustomer = verifiedCompanyCustomer
     ? {
         ...selectedCustomer,
         ...verifiedCompanyCustomer,
-        phone: verifiedCompanyCustomer.phone?.trim() || selectedCustomer?.phone?.trim() || null,
+        phone: detailedCompanyCustomer?.phone?.trim() ||
+          selectedCustomer?.phone?.trim() ||
+          selectedCustomer?.picPhone?.trim() || null,
       }
     : selectedCustomer;
   const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
@@ -387,8 +398,10 @@ export default function AdminCheckoutForm() {
   // retain all original requirements; the button only ceases to hide errors.
   const corporateSubmitBlockers: string[] = !isCompanyPayer || multiPatterns.length > 0 ? [] : [
     ...(!selectedCustomerId ? ["Pilih pelanggan perusahaan."] : []),
-    ...(selectedCustomerId && companyCustomerDetailState === "loading" ? ["Memverifikasi akun perusahaan..."] : []),
-    ...(selectedCustomerId && companyCustomerDetailState === "error" ? ["Verifikasi perusahaan gagal. Pilih ulang pelanggan."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState === "loading" && !verifiedCompanyCustomer
+      ? ["Memverifikasi akun perusahaan..."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState === "error" && !verifiedCompanyCustomer
+      ? ["Verifikasi perusahaan gagal. Pilih ulang pelanggan."] : []),
     ...(selectedCustomerId && companyCustomerDetailState !== "loading" && !verifiedCompanyCustomer
       ? ["Akun perusahaan belum terverifikasi."] : []),
     ...(selectedCustomerId && !bookingCustomer?.phone ? ["Nomor WhatsApp pelanggan belum tersedia."] : []),
