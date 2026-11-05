@@ -37,3 +37,6 @@ CREATE INDEX IF NOT EXISTS gym_vis_res_payment_idx
   ON sport_center.gym_vis_card_reservations (payment_id);
 REVOKE ALL ON sport_center.gym_vis_card_reservations FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON SEQUENCE sport_center.gym_vis_card_reservations_id_seq FROM PUBLIC, anon, authenticated;
+
+-- Defensive isolation even if sport_center is added to exposed Data API schemas.
+ALTER TABLE sport_center.gym_vis_card_reservations ENABLE ROW LEVEL SECURITY;
