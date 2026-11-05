@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { isX904AutoSuspendExempt, NONMEMBER_ACCESS_MS, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry } from "./x904NonmemberAccessPolicy";
+import { isX904AutoSuspendExempt, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
 
 type Store = Pick<typeof db, "execute" | "transaction">;
