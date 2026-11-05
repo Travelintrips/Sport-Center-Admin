@@ -253,7 +253,8 @@ function Router() {
       <Route path="/admin/events" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
-      {/* Additional public nonmember entry; existing checkout and booking routes remain unchanged. */}
+      {/* Public self-service facility selector; preserve the original Gym entry URL. */}
+      <Route path="/booking/mandiri" component={GymNonmemberEntry} />
       <Route path="/gym/nonmember" component={GymNonmemberEntry} />
 
       {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
