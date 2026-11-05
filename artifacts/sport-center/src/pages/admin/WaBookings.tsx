@@ -132,6 +132,8 @@ export default function AdminWaBookings() {
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
+  const [visBankReference, setVisBankReference] = useState("");
+  const [visFundsChecked, setVisFundsChecked] = useState(false);
 
   const queryKey = ["wa-bookings", activeTab, sourceFilter, search];
 
@@ -180,6 +182,22 @@ export default function AdminWaBookings() {
       invalidate();
     },
     onError: (e: any) => toast({ title: "Gagal reject", description: e.message, variant: "destructive" }),
+  });
+
+  const autoAllocateVisMutation = useMutation({
+    mutationFn: (orderNumber: string) =>
+      mutate(`/admin/wa-bookings/${orderNumber}/auto-allocate-vis`, {
+        officialBankReference: visBankReference.trim(),
+        officialFundsChecked: visFundsChecked,
+      }),
+    onSuccess: (data: { cardCode: string }) => {
+      toast({ title: `Kartu ${data.cardCode} dialokasikan`,
+        description: "Nomor kartu tersedia di tiket pelanggan dan notifikasi WhatsApp." });
+      setVisBankReference("");
+      setVisFundsChecked(false);
+      invalidate();
+    },
+    onError: (e: any) => toast({ title: "Alokasi kartu VIS ditolak", description: e.message, variant: "destructive" }),
   });
 
   const paidMutation = useMutation({
@@ -450,6 +468,40 @@ export default function AdminWaBookings() {
                       <p className="mt-2">Nama membutuhkan verifikasi manual. Jangan berikan PIN atau kartu pengunjung otomatis.</p>
                     )}
                   </div>
+                )}
+                {detail.booking.source === "gym_public_guest" && detail.visCardReservation && (
+                  <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+                    <p className="font-bold">Kartu VIS telah dialokasikan otomatis</p>
+                    <p className="mt-1 text-xl font-black">{detail.visCardReservation.cardCode}</p>
+                    <p className="mt-1">Status: {detail.visCardReservation.state}. Kartu fisik harus diserahkan petugas; ini belum mengaktifkan X904.</p>
+                  </div>
+                )}
+                {detail.booking.source === "gym_public_guest" &&
+                  detail.x904IdentityMatch?.route === "visitor_card" &&
+                  detail.booking.status === "confirmed" && !detail.visCardReservation && (
+                  <section className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-slate-900">
+                    <p className="font-bold">Alokasi kartu VIS otomatis setelah dana resmi masuk</p>
+                    <p className="text-xs text-amber-900">
+                      Pastikan pembayaran sudah confirmed di Booking Admin dan cocokan transaksi pada mutasi bank resmi.
+                      Sistem akan memilih kartu VIS tersedia otomatis, tanpa memilih PIN atau kartu manual.
+                    </p>
+                    <Input placeholder="Nomor referensi resmi mutasi bank"
+                      aria-label="Nomor referensi resmi mutasi bank"
+                      value={visBankReference}
+                      onChange={e => setVisBankReference(e.target.value.toUpperCase())} />
+                    <label className="flex items-start gap-2 text-xs leading-relaxed">
+                      <input type="checkbox" checked={visFundsChecked} onChange={e => setVisFundsChecked(e.target.checked)}
+                        className="mt-0.5" />
+                      Saya sudah memeriksa dana benar-benar masuk ke rekening resmi, bukan hanya berdasarkan screenshot/OCR.
+                    </label>
+                    <Button type="button" className="w-full"
+                      disabled={!visFundsChecked || visBankReference.trim().length < 6 ||
+                        autoAllocateVisMutation.isPending}
+                      onClick={() => autoAllocateVisMutation.mutate(detail.booking.orderNumber)}>
+                      Alokasikan Kartu VIS Otomatis
+                    </Button>
+                    <p className="text-xs text-slate-500">Tidak ada perintah pembukaan pintu X904 dari tindakan ini.</p>
+                  </section>
                 )}
                 {detail.booking.source === "gym_public_guest" && detail.booking.notes && (
                   <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
