@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { isX904AutoSuspendExempt, NONMEMBER_ACCESS_MS } from "./x904NonmemberAccessPolicy";
+import { isX904AutoSuspendExempt, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry, x904NonmemberSameWibDate } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
 
 type Store = Pick<typeof db, "execute" | "transaction">;
@@ -250,6 +250,15 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       // A paid future reservation is not an authorization to use the door
       // before its booking date/time. Existing activated grants can finish.
       if (a.activated_at == null && now.getTime() < scheduledStart) return;
+      // A pending booking belongs to its scheduled WIB date. If activation
+      // was missed, never activate it after the facility reopens next day.
+      // Advance payments for future reservations may activate on that day.
+      if (a.activated_at == null && !x904NonmemberSameWibDate(now, new Date(scheduledStart))) {
+        await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+          SET access_state='review_required'
+          WHERE access_id=${Number(a.access_id)} AND access_state IN ('pending','active')`);
+        return;
+      }
       // Do not apply the VIS card allowlist to verified paid nonmember PIN grants.
       // Membership ownership, exempt roles/PINs, device identity and payment
       // verification below remain mandatory for every PIN.
@@ -272,9 +281,19 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           WHERE access_id=${Number(a.access_id)} AND access_state IN ('pending','active')`);
         return;
       }
+      // Never activate outside 06:00–23:00 WIB. For an already active grant,
+      // its effective expiry is the earlier of 12 hours and closing at 23:00
+      // on the original activation day; it cannot reopen tomorrow morning.
+      const activeStart = a.activated_at ? new Date(String(a.activated_at)) : null;
+      const expiry = activeStart
+        ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
+        : null;
       const shouldBeActive = a.payment_status === "confirmed" &&
+        x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
-        (a.activated_at == null || now.getTime() < new Date(String(a.expires_at)).getTime());
+        // The clock starts on verified ACTIVATE ACK, not at advance payment.
+        (activeStart === null || (expiry !== null &&
+          Number.isFinite(expiry.getTime()) && now.getTime() < expiry.getTime()));
       const targetGroup = shouldBeActive ? 1 : 2;
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
       // A cancelled payment without verified activation must never suspend a
@@ -316,7 +335,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           WHERE other.device_serial=${DEVICE} AND other.user_pin=${pin}
             AND other.access_id<>${Number(a.access_id)}
             AND pay.status::text='confirmed'
-            AND other.confirmed_at<=${now} AND other.expires_at>${now}
+            AND other.confirmed_at<=${now}
+            AND other.activated_at IS NOT NULL
+            AND LEAST(other.expires_at,
+              ((other.activated_at AT TIME ZONE 'Asia/Jakarta')::date + time '23:00')
+                AT TIME ZONE 'Asia/Jakarta')>${now}
           LIMIT 1`);
         if (overlapping.rows.length) return;
       }
@@ -390,7 +413,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
               }
               await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
                 SET activated_at=COALESCE(activated_at,${ackTime}),
-                    expires_at=COALESCE(activated_at,${ackTime}) + interval '12 hours',
+                    expires_at=LEAST(
+                      COALESCE(activated_at,${ackTime}) + interval '12 hours',
+                      ((COALESCE(activated_at,${ackTime}) AT TIME ZONE 'Asia/Jakarta')::date + time '23:00')
+                        AT TIME ZONE 'Asia/Jakarta'),
                     access_state='active'
                 WHERE access_id=${Number(a.access_id)} AND verification_state='verified'
                   AND payment_id=${Number(a.payment_id)}`);
