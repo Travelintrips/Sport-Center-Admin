@@ -64,12 +64,13 @@ Total tagihan: *${price}*
 Status: ⏳ MENUNGGU PEMBAYARAN`
     : `*PEMBAYARAN MEMBERSHIP GYM*
 
-${common}
-PIN X904: ${data.x904Pin || "Belum diverifikasi"}
+👤 *INFORMASI MEMBER*
+Nama: ${data.customerName}
+Membership ID: #${data.membershipId}
 
 🧾 *DETAIL BOOKING*
 No. Booking: ${data.orderNumber}
-Jenis: Perpanjangan Membership
+Jenis: ${bookingKind}
 Paket: ${data.months} Bulan
 
 📅 Periode baru:
@@ -82,8 +83,7 @@ Tanggal pembayaran: ${day(data.paymentDate || "")}
 ✅ Status pembayaran: LUNAS
 Bukti pembayaran: ${proofText}
 
-⏳ Status akses X904: MENUNGGU ACK/READ-BACK
-Akses mesin X904 akan dinyatakan aktif setelah verifikasi perangkat berhasil.`;
+Status akses X904: Akses mesin akan dinyatakan aktif setelah verifikasi perangkat berhasil.`;
   await sendWAToAdmins(report,{
     bookingId:data.bookingId,orderNumber:data.orderNumber,
     event:data.event === "pending" ? "gym_membership_pending_report" : "gym_membership_paid_report",

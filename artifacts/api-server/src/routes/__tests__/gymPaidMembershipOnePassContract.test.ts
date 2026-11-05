@@ -273,7 +273,7 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(report).toContain("*PEMBAYARAN MEMBERSHIP GYM*");
     expect(report).toContain("MENUNGGU PEMBAYARAN");
     expect(report).toContain("Status pembayaran: LUNAS");
-    expect(report).toContain("MENUNGGU ACK/READ-BACK");
+    expect(report).toContain("Status akses X904: Akses mesin akan dinyatakan aktif setelah verifikasi perangkat berhasil.");
     expect(report).toContain("gym_membership_pending_report");
     expect(report).toContain("gym_membership_paid_report");
     expect(routeFile).toContain('reportGymPayment(existing,payment,paymentBooking,"pending"');
