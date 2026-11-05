@@ -1620,6 +1620,17 @@ router.post("/bookings", async (req, res) => {
           return;
         }
       }
+      // An unresolved *historical* review_required grant must not block a
+      // new verified booking. Pending or physically active grants are still
+      // exclusive to prevent two simultaneous access owners for one PIN.
+      const liveAccess = await db.execute(sql`
+        SELECT access_id FROM sport_center.x904_nonmember_daily_access
+        WHERE device_serial='TDBD234200545' AND user_pin=${userPin}
+          AND access_state IN ('pending','active') LIMIT 1`);
+      if (liveAccess.rows.length) {
+        res.status(409).json({ error: "PIN/kartu X904 masih memiliki akses berjalan atau aktivasi tertunda. Selesaikan akses sebelumnya sebelum membuat booking baru." });
+        return;
+      }
       verifiedX904Identity = { identityType, identityLabel: card ? identityValue : `PIN:${identityValue}`, userPin: String(row.user_pin), deviceUid: Number(row.device_uid), displayName: String(row.display_name).trim() };
     }
     // Keep existing Gym booking clients compatible. The new admin form requires
@@ -2121,6 +2132,13 @@ router.post("/bookings", async (req, res) => {
       await db.execute(sql`SELECT pg_advisory_unlock(${slotLockKey.fId}, ${slotLockKey.dInt})`).catch(() => {});
     }
     req.log.error({ err }, "Create booking error");
+    // Race-safe fallback for the unique active/pending grant constraint.
+    // Do not expose PostgreSQL internals or claim that payment was accepted.
+    const pgError = err as { code?: string; constraint?: string };
+    if (pgError?.code === "23505" && pgError?.constraint === "x904_nonmember_one_live_access_per_pin_idx") {
+      res.status(409).json({ error: "Kartu/PIN X904 masih dipakai oleh akses yang sedang aktif atau tertunda. Periksa riwayat akses sebelum mengulangi pembayaran." });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
