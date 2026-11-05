@@ -106,7 +106,7 @@ export default function GymNonmemberEntry() {
             </h1>
             <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-200 sm:text-lg">
               Temukan fasilitas olahraga pilihanmu di Sport Center Bandara Soekarno-Hatta.
-              Pilih jadwal, lakukan pemesanan, dan unggah bukti pembayaran—tanpa perlu membuat akun.
+              Pilih jadwal, lakukan pemesanan, dan unggah bukti pembayaran. Tidak perlu membuat akun atau login.
             </p>
             <a href="#pilih-fasilitas" className="mt-8 inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-orange-500 px-6 py-3 font-bold text-white shadow-lg shadow-orange-950/20 transition hover:bg-orange-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
               Lihat Pilihan Fasilitas <ArrowRight className="h-5 w-5" />
