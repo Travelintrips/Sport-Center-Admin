@@ -452,7 +452,7 @@ export default function AdminWaBookings() {
                       <p className="mt-2 text-amber-700">Belum ada pembayaran atau bukti yang tercatat. Jangan tandai lunas.</p>
                     ) : (
                       <div className="mt-2 space-y-3">
-                        {detail.payments.map(payment => (
+                        {detail.payments.map((payment: DetailData["payments"][number]) => (
                           <div key={payment.id} className="rounded-md bg-muted/40 p-3 space-y-1">
                             <p><span className="text-muted-foreground">Status:</span> <strong>{payment.status}</strong></p>
                             <p><span className="text-muted-foreground">Metode:</span> {payment.paymentMethod || "-"}</p>
