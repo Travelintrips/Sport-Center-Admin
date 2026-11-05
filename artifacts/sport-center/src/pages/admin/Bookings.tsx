@@ -40,6 +40,8 @@ import {
   X,
   User,
   Users,
+  Phone,
+  Mail,
   Building2,
   Hash,
   CalendarDays,
@@ -421,6 +423,57 @@ function getGroupStatus(rows: any[]): string | null {
   return null;
 }
 
+/**
+ * Read-only contact information for booking detail and group detail.
+ * Prefer the contact stored at booking creation, then use the registered
+ * customer's profile only when the snapshot is incomplete.
+ */
+function BookingCustomerContact({
+  bookings,
+}: {
+  bookings: Array<{
+    customerPhone?: string | null;
+    customerEmail?: string | null;
+    customerId?: number | null;
+  }>;
+}) {
+  const phoneFromBooking = bookings.map((b) => b.customerPhone?.trim()).find(Boolean) ?? "";
+  const emailFromBooking = bookings.map((b) => b.customerEmail?.trim()).find(Boolean) ?? "";
+  const customerId = bookings.map((b) => Number(b.customerId)).find((id) => Number.isInteger(id) && id > 0);
+  const needsProfile = Boolean(customerId) && (!phoneFromBooking || !emailFromBooking);
+  const profile = useQuery<{
+    id: number;
+    phone?: string | null;
+    email?: string | null;
+    picPhone?: string | null;
+    picEmail?: string | null;
+  }>({
+    queryKey: ["admin-booking-customer-contact", customerId],
+    enabled: needsProfile,
+    queryFn: async ({ signal }) => {
+      const response = await fetch("/api/customers/" + customerId, {
+        headers: { Authorization: "Bearer " + (getToken() ?? "") },
+        signal,
+      });
+      if (!response.ok) throw new Error("Data kontak pelanggan tidak tersedia");
+      const data = await response.json();
+      if (Number(data.id) !== customerId) throw new Error("Identitas pelanggan tidak cocok");
+      return data;
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  const phone = phoneFromBooking || profile.data?.phone?.trim() || profile.data?.picPhone?.trim() || "Belum tercatat";
+  const email = emailFromBooking || profile.data?.picEmail?.trim() || profile.data?.email?.trim() || "Belum tercatat";
+  return (
+    <>
+      <InfoRow icon={Phone} label="No. Telepon / WhatsApp" value={phone} span />
+      <InfoRow icon={Mail} label="Email" value={email} span />
+    </>
+  );
+}
+
 function BookingGroupSessionsDialog({
   groupRef,
   sessions,
@@ -440,6 +493,8 @@ function BookingGroupSessionsDialog({
     return aKey.localeCompare(bKey);
   });
   const total = getGroupInvoiceTax(sortedSessions)?.netAmount ?? 0;
+  const groupCustomerName = sortedSessions.map((row) => row.customerName?.trim()).find(Boolean) || "Belum tercatat";
+
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -467,6 +522,16 @@ function BookingGroupSessionsDialog({
               <div className="text-sm font-black text-violet-800 dark:text-violet-200">
                 {formatCurrency(total)}
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-800/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Informasi Customer</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 p-4 text-sm">
+              <InfoRow icon={User} label="Nama" value={groupCustomerName} span />
+              <BookingCustomerContact bookings={sortedSessions} />
             </div>
           </div>
 
@@ -1795,6 +1860,7 @@ function BookingDetailDrawer({
               ) : (
                 <InfoRow icon={User} label="Nama" value={booking.customerName} span />
               )}
+              <BookingCustomerContact bookings={[booking]} />
               <InfoRow icon={Building2} label="Fasilitas" value={booking.facilityName} span />
               <div className="col-span-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
