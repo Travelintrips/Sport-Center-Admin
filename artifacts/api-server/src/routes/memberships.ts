@@ -1364,8 +1364,6 @@ async function reportGymPayment(
     WHERE membership_id = ${membership.id} AND device_serial = 'TDBD234200545'
       AND status = 'verified' LIMIT 1`);
   pin = mapped.rows[0] ? String(mapped.rows[0].user_pin) : null;
-  const baseUrl = await getBaseUrl();
-  const reviewUrl = baseUrl ? baseUrl.replace(/\/$/,"") + "/admin/memberships?memberId=" + membership.id : null;
   await notifyGymMembershipWa({
     event, action, bookingId: booking.id, orderNumber: booking.orderNumber,
     membershipId: membership.id, paymentId: payment.id,
@@ -1374,7 +1372,7 @@ async function reportGymPayment(
     months: payment.months, periodStart:payment.periodStart,periodEnd:payment.periodEnd,
     previousPeriod:previousEnd ? previousEnd : undefined,
     amount:Number(payment.amount),paymentMethod:payment.paymentMethod,
-    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl ? reviewUrl : null,
+    paymentDate:payment.paymentDate,proofUrl:payment.paymentProofUrl || null,
   });
 }
 
@@ -1719,6 +1717,63 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
     }
     req.log.error({ err }, "Submit payment proof error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Contact-only update: never touch payment, membership entitlement, X904 or historic bookings.
+router.patch("/memberships/:id/contact", adminMiddleware, async (req, res) => {
+  try {
+    const role = String((req as any).user?.role ?? "");
+    if (!["owner", "super_admin", "admin"].includes(role)) {
+      res.status(403).json({ error: "Hanya admin berwenang yang boleh mengubah kontak member" });
+      return;
+    }
+    const id = Number(req.params.id);
+    const raw = String(req.body?.phone ?? "").trim();
+    const normalized = normalizedGymPhone(raw);
+    if (!Number.isSafeInteger(id) || id <= 0 || !/^628[0-9]{8,11}$/.test(normalized)) {
+      res.status(400).json({ error: "ID member atau nomor WhatsApp Indonesia tidak valid" });
+      return;
+    }
+    const result = await db.transaction(async (tx) => {
+      const [current] = await tx.select().from(gymMembershipsTable)
+        .where(eq(gymMembershipsTable.id, id)).for("update").limit(1);
+      if (!current) return null;
+      // Only synchronize the exactly corresponding customer identity.
+      // A same/similar name or shared telephone is NOT proof of customer identity.
+      const matchingCustomers = await tx.execute(sql`
+        SELECT id FROM sport_center.sport_customers
+        WHERE lower(trim(email)) = ${String(current.email ?? "").trim().toLowerCase()}
+          AND phone = ${String(current.phone ?? "")}
+        FOR UPDATE LIMIT 2
+      `);
+      if (matchingCustomers.rows.length > 1) throw new Error("AMBIGUOUS_CONTACT_IDENTITY");
+      if (matchingCustomers.rows.length === 1) {
+        await tx.execute(sql`UPDATE sport_center.sport_customers
+          SET phone = ${normalized}
+          WHERE id = ${Number(matchingCustomers.rows[0].id)}
+            AND phone = ${String(current.phone ?? "")}`);
+      }
+      const [updated] = await tx.update(gymMembershipsTable)
+        .set({ phone: normalized, updatedAt: new Date() })
+        .where(eq(gymMembershipsTable.id, id)).returning();
+      return updated;
+    });
+    if (!result) {
+      res.status(404).json({ error: "Membership tidak ditemukan" });
+      return;
+    }
+    // This operation changes contact information only, not historic invoices/bookings.
+    syncToPublic(result).catch((err) => req.log.error({ err }, "Gym contact public projection failed"));
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ...result, totalPrice: Number(result.totalPrice), displayPhone: normalized });
+  } catch (err) {
+    if (err instanceof Error && err.message === "AMBIGUOUS_CONTACT_IDENTITY") {
+      res.status(409).json({ error: "Ada lebih dari satu profil pelanggan cocok. Hubungi admin untuk verifikasi identitas." });
+      return;
+    }
+    req.log.error({ err }, "Gym membership contact update failed");
+    res.status(500).json({ error: "Gagal memperbarui kontak member" });
   }
 });
 
