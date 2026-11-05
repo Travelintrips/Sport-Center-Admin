@@ -620,13 +620,32 @@ router.get("/memberships/checkins", adminMiddleware, async (req, res) => {
         checkinDate: gymCheckinsTable.checkinDate,
         checkedInAt: gymCheckinsTable.checkedInAt,
         notes: gymCheckinsTable.notes,
+        x904EventId: gymCheckinsTable.x904EventId,
         memberName: gymMembershipsTable.name,
         memberPhone: gymMembershipsTable.phone,
       })
       .from(gymCheckinsTable)
       .leftJoin(gymMembershipsTable, eq(gymCheckinsTable.membershipId, gymMembershipsTable.id))
       .where(eq(gymCheckinsTable.checkinDate, date));
-    res.json(checkins);
+    // Authoritative X904 auto-checkin event linkage is stored in a separate
+    // table. Absence of x904_event_id in gym_checkins does NOT mean manual.
+    const sources = await db.execute(sql`
+      SELECT checkin_id, event_id
+      FROM sport_center.gym_x904_auto_checkin_sources
+      WHERE checkin_date = ${date}
+    `);
+    const eventByCheckin = new Map(
+      sources.rows.map(row => [Number(row.checkin_id), String(row.event_id)]),
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.json(checkins.map(checkin => {
+      const eventId = eventByCheckin.get(checkin.id) ?? checkin.x904EventId;
+      // Do not classify an unlinked auto-annotation as a manual scan.
+      const source = eventId ? "x904_auto"
+        : /^Auto check-in X904/i.test(String(checkin.notes ?? "")) ? "unknown"
+        : "sc_manual";
+      return { ...checkin, source };
+    }));
   } catch (err) {
     req.log.error({ err }, "List checkins error");
     res.status(500).json({ error: "Internal server error" });
