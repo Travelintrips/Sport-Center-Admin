@@ -969,7 +969,7 @@ export default function AdminCheckoutForm() {
       return;
     }
     if (isGymNonmember && x904IdentityType === "card" && x904IdentityValue.trim() &&
-        !isHistoricalGymNonmember && !/^[\\p{L}\\p{M}\\p{N} .'-]{2,100}$/u.test(x904VisitorName.trim().replace(/\\s+/g, " "))) {
+        !isHistoricalGymNonmember && !/^[\p{L}\p{M}\p{N} .'-]{2,100}$/u.test(x904VisitorName.trim().replace(/\s+/g, " "))) {
       toast({ title: "Isi nama orang yang memakai kartu", description: "Nama pengunjung wajib diisi, berbeda dari identitas kartu VIS.", variant: "destructive" });
       return;
     }
@@ -1060,7 +1060,7 @@ export default function AdminCheckoutForm() {
         source: "admin",
         ...(isGymNonmember && (!isHistoricalGymNonmember || x904IdentityValue.trim())
           ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase(),
-              ...(x904IdentityType === "card" ? { x904VisitorName: x904VisitorName.trim().replace(/\\s+/g, " ") } : {}) } : {}),
+              ...(x904IdentityType === "card" ? { x904VisitorName: x904VisitorName.trim().replace(/\s+/g, " ") } : {}) } : {}),
         adminPaymentChoice: paymentChoice,
         ...(bookingKind === "corporate" ? { suppressCustomerWhatsApp } : {}),
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
