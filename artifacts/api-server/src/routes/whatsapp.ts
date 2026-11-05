@@ -1370,7 +1370,10 @@ router.get("/wa/action/:token", async (req, res) => {
 
     res.json({
       action: tokenRow.action,
-      booking,
+      // Authless proof/check-in links must not expose legacy PIN/UID notes.
+      booking: booking.source === "gym_public_guest"
+        ? { ...booking, notes: "Identitas X904 ditinjau petugas." }
+        : booking,
       expiresAt: tokenRow.expiresAt,
       paymentOptions,
       supportWhatsapp,
