@@ -401,27 +401,52 @@ export default function GymX904() {
     enabled:tab==="users" || tab==="mapping" || tab==="audit",
     refetchInterval:30000,
   });
+  const {data:reconciliationData}=useQuery<{rows:Array<{user_pin:string;device_uid:number;device_role:number;match_count:number;membership_status:string|null;start_date:string|null;end_date:string|null;verified_mapping_status:string|null;mapped_membership_id:number|null;reconciliation_category:string}>}>({
+    queryKey:["gym-x904-cross-system-reconciliation"],
+    queryFn:async()=>{
+      const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
+      const response=await fetch(`${API}/admin/gym-x904/cross-system-reconciliation`,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
+      if(!response.ok)throw new Error("Rekonsiliasi X904 tidak tersedia");
+      return response.json();
+    },enabled:tab==="users",refetchInterval:30000,retry:1
+  });
+  const reconciliationFor=(u:LanUser)=>reconciliationData?.rows.find(r=>r.user_pin===u.user_pin&&Number(r.device_uid)===u.device_uid);
   const mappingRows=mappingData?.rows ?? [];
-  // Unmapped PINs must not be classified as nonmembers.
+  // Classification is display-only. Never use it to authorize machine access.
   const machineIdentity=(u:LanUser):"member"|"nonmember"|"unknown"=>{
+    if(u.device_role!==0)return "unknown";
     const mapped=mappingRows.find(m=>m.user_pin===u.user_pin);
-    if(mapped?.membership_id != null && mapped.status==="verified") return "member";
-    if(mapped?.membership_id != null) return "unknown";
-    if(/^VIS\\s*00[1-6]$/i.test(u.display_name.trim()) && u.device_role===0) return "nonmember";
+    const reconciled=reconciliationFor(u);
+    if(mapped?.membership_id!=null&&mapped.status==="verified")return "member";
+    if(reconciled?.mapped_membership_id!=null&&reconciled.verified_mapping_status==="verified")return "member";
+    if(mapped?.membership_id!=null||reconciled?.mapped_membership_id!=null)return "unknown";
+    if(/^VIS\s*00[1-6]$/i.test(u.display_name.trim()))return "nonmember";
+    // No name-matched membership in the database is only an indicative nonmember label.
+    if(reconciled&&Number(reconciled.match_count)===0)return "nonmember";
     return "unknown";
   };
   const machineMembershipStatus=(u:LanUser):string=>{
-    if(mappingError||mappingLoading||membersError||membersLoading) return "Belum terverifikasi";
+    if(u.device_role!==0)return "Akun perangkat / pengecualian";
     const mapped=mappingRows.find(m=>m.user_pin===u.user_pin);
-    if(!mapped || mapped.membership_id==null) return "Tidak ada mapping member";
-    if(mapped.status!=="verified") return "Mapping perlu verifikasi";
-    const membership=Array.isArray(memberships)?memberships.find(m=>Number(m.id)===mapped.membership_id):undefined;
-    if(!membership) return "Membership tidak ditemukan";
-    if(membership.status==="active") return "Member aktif";
-    if(membership.status==="expired") return "Member expired";
-    if(membership.status==="cancelled") return "Member dibatalkan";
-    return "Member "+String(membership.status??"tidak diketahui");
-  };  const machineAccessState=(u:LanUser):"allowed"|"suspended"|"pending"|"unknown"=>{
+    const reconciled=reconciliationFor(u);
+    if(mapped?.membership_id!=null&&mapped.status!=="verified")return "Mapping perlu verifikasi";
+    if(reconciled?.mapped_membership_id!=null&&reconciled.verified_mapping_status!=="verified")return "Mapping perlu verifikasi";
+    const membershipId=mapped?.membership_id??reconciled?.mapped_membership_id;
+    const membership=membershipId!=null&&Array.isArray(memberships)?memberships.find(m=>Number(m.id)===Number(membershipId)):undefined;
+    if(membership){
+      if(membership.status==="active")return "Member aktif";
+      if(membership.status==="expired")return "Member expired";
+      return "Member "+String(membership.status??"tidak diketahui");
+    }
+    if(reconciled){
+      if(Number(reconciled.match_count)>1)return "Nama cocok lebih dari satu member";
+      if(Number(reconciled.match_count)===1)return "Kandidat member: "+String(reconciled.membership_status??"perlu verifikasi");
+      if(Number(reconciled.match_count)===0)return "Tidak ditemukan membership cocok";
+    }
+    if(/^VIS\s*00[1-6]$/i.test(u.display_name.trim()))return "Kartu pengunjung";
+    return "Belum terverifikasi";
+  };
+  const machineAccessState=(u:LanUser):"allowed"|"suspended"|"pending"|"unknown"=>{
     if(pendingLedger?.commands.some(c=>c.user_pin===u.user_pin&&c.blocked)) return "pending";
     const m=machineFor(u);
     if(machineAccessError||!machineAccess?.available||!machineSnapshotFresh||!m||!m.identityMatched||m.device_uid!==u.device_uid) return "unknown";
@@ -667,7 +692,7 @@ export default function GymX904() {
           </label>
           <label className="flex flex-col gap-1 text-sm">Jenis pengguna
   <select aria-label="Filter jenis pengguna" className="rounded-lg border bg-background px-3 py-2" value={machineIdentityFilter} onChange={e=>setMachineIdentityFilter(e.target.value)}>
-    <option value="all">Semua jenis</option><option value="member">Member terverifikasi</option><option value="nonmember">Nonmember VIS teridentifikasi</option><option value="unknown">Belum teridentifikasi</option>
+    <option value="all">Semua jenis</option><option value="member">Member terverifikasi</option><option value="nonmember">Nonmember (indikatif)</option><option value="unknown">Belum teridentifikasi</option>
   </select>
 </label>
 <label className="flex flex-col gap-1 text-sm">Status akses
@@ -683,7 +708,7 @@ export default function GymX904() {
             <thead><tr className="border-b"><th className="p-2">PIN mesin</th><th className="p-2">Nama</th><th className="p-2">UID</th><th className="p-2">Peran perangkat</th><th className="p-2">Terakhir terbaca</th><th className="p-2">Jenis pengguna</th><th className="p-2">Status membership</th><th className="p-2">Status akses</th>{userCommandCapabilities?.allowed&&<th className="p-2">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0)) && (machineIdentityFilter==="all" || machineIdentity(u)===machineIdentityFilter) && (machineAccessFilter==="all" || machineAccessState(u)===machineAccessFilter)).map((u) => <tr key={u.user_pin} className="border-b">
               <td className="p-2">{u.user_pin}</td><td className="p-2">{u.display_name || "—"}</td><td className="p-2">{u.device_uid}</td>
-              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2">{machineIdentity(u)==="member"?"Member terverifikasi":machineIdentity(u)==="nonmember"?"Nonmember VIS teridentifikasi":"Belum teridentifikasi"}</td><td className="p-2">{machineMembershipStatus(u)}</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1 · akses diperbolehkan":m.device_group===2?"Grup 2 · akses ditahan":"Grup "+m.device_group+" · akses tidak diketahui")+" · akun "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
+              <td className="p-2">{u.device_role}</td><td className="p-2">{new Date(u.last_seen_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td><td className="p-2">{machineIdentity(u)==="member"?"Member terverifikasi":machineIdentity(u)==="nonmember"?"Nonmember (indikatif)":"Belum teridentifikasi"}</td><td className="p-2">{machineMembershipStatus(u)}</td><td className="p-2 text-muted-foreground">{(()=>{const m=machineFor(u);if(machineAccessError)return "Status mesin tidak tersedia";if(!machineAccess?.available)return "Belum ada snapshot SDK";if(!machineSnapshotFresh)return "Snapshot mesin kedaluwarsa";if(!m)return "Tidak ditemukan di mesin";if(!m.identityMatched)return "Identitas mesin tidak cocok";return (m.device_group===1?"Grup 1 · akses diperbolehkan":m.device_group===2?"Grup 2 · akses ditahan":"Grup "+m.device_group+" · akses tidak diketahui")+" · akun "+(m.enabled?"Enabled":"Disabled")+" (SDK)";})()}</td>
               {userCommandCapabilities?.allowed&&<td className="p-2"><div className="flex gap-2">
                 {(() => {const m=machineFor(u);const testUser=u.user_pin==="200"&&u.device_uid===337&&u.display_name==="TEST SUSPEND X904";const verified=!!m&&m.identityMatched&&m.device_uid===u.device_uid&&m.device_role===0&&u.device_role===0&&/^[A-Za-z0-9 ._-]{1,24}$/.test(u.display_name)&&machineSnapshotFresh;const op=verified&&m.device_group===1&&m.enabled?"SUSPEND_USER":verified&&m.device_group===2?"ACTIVATE_USER":null;const permitted=manualAccessAllEnabled||testUser;const outstanding=lockedMachinePin(u.user_pin);const reason=outstanding?"Perintah "+outstanding.command_type+" ("+outstanding.state+") belum dikonfirmasi snapshot baru. ID "+outstanding.command_id:!machineSnapshotFresh?"Snapshot mesin kedaluwarsa":!m?"PIN tidak ditemukan pada mesin":!m.identityMatched||m.device_uid!==u.device_uid?"Identitas mesin tidak cocok":u.device_role!==0||m.device_role!==0?"Akun administrator perangkat tidak dapat diubah":!/^[A-Za-z0-9 ._-]{2,24}$/.test(u.display_name)?"Nama mesin perlu dilengkapi sebelum mengubah akses":!op?"Status grup dan aktif/nonaktif mesin tidak konsisten":!permitted?"Kontrol manual semua pengguna belum diaktifkan pada server":!userCommandCapabilities.operations?.includes(op)?"Kontrol manual belum tersedia":"Ubah akses mesin";
                   return <button type="button" title={reason}
