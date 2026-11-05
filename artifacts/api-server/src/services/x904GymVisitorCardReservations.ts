@@ -22,7 +22,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
   orderNumber: string;
   officialBankReference: string;
   verifiedBy: string;
-  officialFundsChecked: true;
+  officialFundsChecked: boolean;
 }): Promise<{ cardCode: string; state: string; newReservation: boolean }> {
   const ref = String(input.officialBankReference ?? "").trim().toUpperCase();
   const actor = String(input.verifiedBy ?? "").trim();
@@ -138,8 +138,8 @@ export async function autoReserveVisAfterFundsVerified(input: {
 /** Reuse only after confirmed physical card return and safe X904 read-back. */
 export async function returnVerifiedVisCard(input: {
   orderNumber: string;
-  physicalCardReturned: true;
-  x904ReadbackChecked: true;
+  physicalCardReturned: boolean;
+  x904ReadbackChecked: boolean;
   returnedBy: string;
 }): Promise<{ cardCode: string; state: "returned" }> {
   if (input.physicalCardReturned !== true || input.x904ReadbackChecked !== true ||
