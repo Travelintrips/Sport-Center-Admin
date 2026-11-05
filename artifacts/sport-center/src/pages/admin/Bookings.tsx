@@ -2043,6 +2043,18 @@ function BookingDetailDrawer({
             </div>
           </div>
 
+          {typeof booking.notes === "string" && /Pemakai kartu VIS[0-9]{3}: [^|]+/.test(booking.notes) && (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 p-4">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Pemakai Kartu Pengunjung X904</div>
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                {booking.notes.match(/Pemakai kartu (VIS[0-9]{3}): ([^|]+)/)?.[2]?.trim()}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Kartu: {booking.notes.match(/Pemakai kartu (VIS[0-9]{3}): ([^|]+)/)?.[1]}
+                {" · "}Nama mesin dan nomor kartu tidak berubah
+              </div>
+            </div>
+          )}
           {booking.notes && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Catatan Customer</div>

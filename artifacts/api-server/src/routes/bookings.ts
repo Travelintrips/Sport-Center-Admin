@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
+import { normalizeX904VisitorName } from "../services/x904VisitorName";
 import { db, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
@@ -1590,6 +1591,7 @@ router.post("/bookings", async (req, res) => {
       isAdminRequest && bookingSource === "admin" && isOperationalBookingRole(loggedInRole) &&
       normalizedBookingDate < getTodayWIB();
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
+    let x904VisitorName: string | null = null;
     const hasX904Identity = req.body.x904IdentityType != null || req.body.x904IdentityValue != null;
     if (hasX904Identity) {
       if (!isWalkIn || !/gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")) ||
@@ -1602,6 +1604,17 @@ router.post("/bookings", async (req, res) => {
       const card = identityType === "card" ? resolveX904NonmemberCard(identityValue) : null;
       if ((identityType === "card" && !card) || (identityType === "pin" && !/^[0-9]{1,8}$/.test(identityValue))) {
         res.status(400).json({ error: "Kartu/PIN X904 tidak valid." }); return;
+      }
+      if (identityType === "card") {
+        x904VisitorName = normalizeX904VisitorName(req.body.x904VisitorName);
+        if (!isHistoricalGymNonmember && !x904VisitorName) {
+          res.status(400).json({ error: "Nama pengunjung pemakai kartu VIS wajib diisi (2–100 karakter)." });
+          return;
+        }
+        if (req.body.x904VisitorName != null && String(req.body.x904VisitorName).trim() && !x904VisitorName) {
+          res.status(400).json({ error: "Nama pengunjung tidak valid." });
+          return;
+        }
       }
       const userPin = card ? card.userPin : identityValue;
       const inventory = await db.execute(sql`SELECT user_pin,device_uid,display_name,device_role FROM sport_center.gym_x904_lan_users WHERE device_serial='TDBD234200545' AND user_pin=${userPin}`);
@@ -1857,11 +1870,15 @@ router.post("/bookings", async (req, res) => {
       basePrice: String(basePrice),
       activityType,
       numberOfPeople,
-      notes: isHistoricalGymNonmember && verifiedX904Identity
-        ? [String(notes ?? "").trim(),
-            `X904 historis (referensi saja, tanpa akses): ${verifiedX904Identity.identityLabel} / ${verifiedX904Identity.displayName}`]
-            .filter(Boolean).join(" | ")
-        : notes,
+      notes: [
+        String(notes ?? "").trim(),
+        ...(verifiedX904Identity?.identityType === "card" && x904VisitorName
+          ? [`Pemakai kartu ${verifiedX904Identity.identityLabel}: ${x904VisitorName}`]
+          : []),
+        ...(isHistoricalGymNonmember && verifiedX904Identity
+          ? [`X904 historis (referensi saja, tanpa akses): ${verifiedX904Identity.identityLabel} / ${verifiedX904Identity.displayName}`]
+          : []),
+      ].filter(Boolean).join(" | ") || null,
       groupRef: incomingGroupRef,
       // Company billing: auto-confirm KECUALI company punya requirePerBookingApproval = true
       // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
@@ -1891,10 +1908,10 @@ router.post("/bookings", async (req, res) => {
       if (!created) throw new Error("ADMIN_BOOKING_CREATE_FAILED");
       if (verifiedX904Identity && !isHistoricalGymNonmember) {
         await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
-          (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+          (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,visitor_name,booking_id,verification_state,access_state)
           VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
             ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
-            ${created.id},'verified','pending')`);
+            ${x904VisitorName},${created.id},'verified','pending')`);
       }
       return createdRows;
     });
