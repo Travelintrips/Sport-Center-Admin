@@ -141,8 +141,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             FOR UPDATE`);
           if (approved.rows.length !== 1 ||
               Number(approved.rows[0].device_uid) !== uid ||
-              String(approved.rows[0].display_name).trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") !==
-                expectedName.trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID")) return;
+              String(approved.rows[0].display_name).trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") !==
+                expectedName.trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID")) return;
           // Fail closed if any membership mapping exists, regardless of status.
           const owner = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
             WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
