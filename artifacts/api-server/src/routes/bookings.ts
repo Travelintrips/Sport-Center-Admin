@@ -1861,6 +1861,20 @@ router.post("/bookings", async (req, res) => {
     }
 
     const [booking] = await db.transaction(async (tx) => {
+      // Lock registry ownership for the booking transaction, so an approval
+      // revoked after preflight cannot create a paid access grant.
+      if (verifiedX904Identity?.identityType === "pin") {
+        const verified = await tx.execute(sql`SELECT 1
+          FROM sport_center.x904_verified_nonmember_identities
+          WHERE device_serial='TDBD234200545'
+            AND user_pin=${verifiedX904Identity.userPin}
+            AND device_uid=${verifiedX904Identity.deviceUid}
+            AND upper(regexp_replace(trim(display_name), '\\s+', ' ', 'g')) =
+                upper(regexp_replace(trim(${verifiedX904Identity.displayName}::text), '\\s+', ' ', 'g'))
+            AND verification_state='verified' AND revoked_at IS NULL
+          FOR SHARE`);
+        if (verified.rows.length !== 1) throw new Error("X904_NONMEMBER_REGISTRY_CHANGED");
+      }
       const createdRows = await tx.insert(bookingsTable).values({
       orderNumber,
       customerId: effectiveCustomerId,
