@@ -48,7 +48,7 @@ export function startX904NonmemberAccessWorker(): void {
 export function x904NonmemberScheduledStart(bookingDate: unknown, startTime: unknown): number | null {
   const date = String(bookingDate ?? "").trim();
   const time = String(startTime ?? "").trim();
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !/^\\d{2}:\\d{2}(?::\\d{2})?$/.test(time)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) return null;
   const scheduled = Date.parse(`${date}T${time.length === 5 ? time + ":00" : time}+07:00`);
   if (!Number.isFinite(scheduled)) return null;
   // Date.parse normalizes invalid dates; reject that normalization.
