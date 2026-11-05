@@ -302,7 +302,16 @@ export default function AdminCheckoutForm() {
   }, [isCompanyPayer, selectedCustomerId]);
   const verifiedCompanyCustomer = isCompanyPayer && companyCustomerDetailState === "ready"
     && companyCustomerDetail?.id === Number(selectedCustomerId) ? companyCustomerDetail : null;
-  const bookingCustomer = verifiedCompanyCustomer ?? selectedCustomer;
+  // Customer picker has the current phone even when the detail endpoint has
+  // not loaded yet or returns an older record with a blank phone. Preserve
+  // that value for display and booking, but NEVER bypass company verification.
+  const bookingCustomer = verifiedCompanyCustomer
+    ? {
+        ...selectedCustomer,
+        ...verifiedCompanyCustomer,
+        phone: verifiedCompanyCustomer.phone?.trim() || selectedCustomer?.phone?.trim() || null,
+      }
+    : selectedCustomer;
   const formatRupiah = (amount: number) => "Rp " + amount.toLocaleString("id-ID");
   const estimatedBase = Number(facility?.pricePerHour ?? 0) * (isWalkIn ? 1 : Number(duration));
   const apMember = selectedCustomer?.apMember ?? null;
@@ -343,8 +352,8 @@ export default function AdminCheckoutForm() {
   const bookingScheduleValid = multiPatterns.length > 0 || (repeatEnabled ? recurringScheduleValid : slotValid);
   const customerFormValid = isGuest
     ? Boolean(guestName.trim() && /^\+?[0-9]{9,15}$/.test(guestPhone.replace(/[\s()-]/g, "")))
-    : Boolean((isCompanyPayer ? verifiedCompanyCustomer : selectedCustomer)?.name &&
-      (isCompanyPayer ? verifiedCompanyCustomer : selectedCustomer)?.phone);
+    : Boolean((!isCompanyPayer || verifiedCompanyCustomer) &&
+      bookingCustomer?.name && bookingCustomer?.phone);
   const formPaymentValid = paymentChoice === "unpaid" ||
     (paymentChoice === "paid" && Boolean(paymentProof && bookingPaymentDate && bookingPaymentDate <= jakartaDateOnly() &&
       (paidMethod === "Transfer Bank" || paidMethod === "QRIS")));
@@ -1341,7 +1350,7 @@ export default function AdminCheckoutForm() {
             </div>}
             {!isGuest && selectedCustomer && <div className="space-y-2">
               <Label>Nomor Telepon / WhatsApp</Label>
-              <Input value={(isCompanyPayer ? verifiedCompanyCustomer?.phone : selectedCustomer.phone) ?? ""} readOnly />
+              <Input value={bookingCustomer?.phone ?? ""} readOnly />
               {isCompanyPayer && companyCustomerDetailState === "loading" && (
                 <p className="text-xs text-muted-foreground">Memverifikasi data akun perusahaan...</p>
               )}
