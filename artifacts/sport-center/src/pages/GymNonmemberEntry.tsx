@@ -41,7 +41,7 @@ export default function GymNonmemberEntry() {
         const available = items.filter((item): item is Facility => {
           if (!item || typeof item !== "object") return false;
           const value = item as Partial<Facility>;
-          return Number.isSafeInteger(value.id) && Number(value.id) > 0 &&
+          return typeof value.id === "number" && Number.isSafeInteger(value.id) && value.id > 0 &&
             typeof value.name === "string" && typeof value.category === "string" &&
             Number.isFinite(Number(value.pricePerHour)) && Number(value.pricePerHour) > 0 &&
             typeof value.openTime === "string" && typeof value.closeTime === "string";
