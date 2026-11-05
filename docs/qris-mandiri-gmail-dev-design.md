@@ -23,3 +23,25 @@ qris_reconciliation_audit: id, email_transaction_id, old_status, new_status, rea
 - Regression: existing manual proof upload, paid booking, DP, membership, group booking, WA, X904, duplicates, refunds.
 - E2E: Gmail ingest -> parse -> candidate -> manual review or uniquely verified match -> existing confirmation -> audit/WA exactly once.
 - Require real DEV database, integration tests, and operational read-back before any PROD proposal.
+
+
+## Runtime DEV configuration
+
+Required server-side environment variables (never expose these in the browser and never commit values):
+
+- `QRIS_GMAIL_DEV_INGEST_ENABLED=true`
+- `QRIS_GMAIL_CLIENT_ID_DEV`
+- `QRIS_GMAIL_CLIENT_SECRET_DEV`
+- `QRIS_GMAIL_REFRESH_TOKEN_DEV` — OAuth grant must be Gmail read-only.
+- `QRIS_GMAIL_MAILBOX_DEV=cahayasejatiteknologi@gmail.com`
+- `QRIS_GMAIL_ALLOWED_FROM` — exact sender address from the real Mandiri/YOKKE message header, not the display name.
+
+The source uses Gmail API read operations only. It does not mark messages read, label, archive, delete, send, or modify them.
+
+### Frontend status
+
+Booking detail may expose only a sanitized detection object: review status, transaction timestamp, and confidence. It must not expose payer name, PAN, raw email, Gmail message ID, or full provider reference. The banner text is intentionally **Pembayaran QRIS Terdeteksi / sedang diverifikasi**, never **Lunas**, until the existing canonical payment/reconciliation flow confirms the payment.
+
+### Deployment gate
+
+The Sport Center repository currently has no usable Sport Center DEV hosting target in this workflow. Runtime validation must therefore use an isolated local/VPS DEV process connected to `SUPABASE_DATABASE_URL_DEV`, or a dedicated DEV deployment when available. Do not point a development process at the PROD database.
