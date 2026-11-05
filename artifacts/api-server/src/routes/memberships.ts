@@ -1731,7 +1731,7 @@ router.patch("/memberships/:id/email", adminMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const email = String(req.body?.email ?? "").trim().toLowerCase();
     if (!Number.isSafeInteger(id) || id <= 0 || email.length > 254 ||
-        !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       res.status(400).json({ error: "Email atau ID membership tidak valid" });
       return;
     }
