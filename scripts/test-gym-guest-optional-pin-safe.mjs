@@ -17,7 +17,7 @@ test("name-derived identity is only a booking note, not a grant or machine comma
  const bookingRoute=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('router.get("/wa/status/:orderNumber"'));
  assert.match(bookingRoute,/requestedX904Pin != null/);
  assert.match(bookingRoute,/resolveGymGuestName\(bookingCustomerName\)/);
- assert.match(bookingRoute,/Verifikasi kepemilikan oleh petugas WAJIB/);
+ assert.match(bookingRoute,/verifikasi kepemilikan wajib/);
  assert.match(bookingRoute,/if \(!gymWalkIn \|\| x904IdentityType != null \|\| x904IdentityValue != null\)/);
  assert.match(bookingRoute,/if \(verifiedX904Identity\) \{/);
  assert.match(bookingRoute,/const customer = publicGymGuest \? null : await ensureCustomer/);

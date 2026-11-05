@@ -1138,9 +1138,7 @@ router.post("/wa/booking", async (req, res) => {
       source: publicGymGuest ? "gym_public_guest" : "whatsapp",
       notes: publicGymGuest
         ? (guestNameRoute?.route === "registered"
-          ? "Gym mandiri; identitas mesin cocok: PIN " + guestNameRoute.userPin +
-            ", UID " + guestNameRoute.deviceUid + ", Nama " + guestNameRoute.displayName +
-            ". Verifikasi kepemilikan oleh petugas WAJIB; belum ada hak akses X904."
+          ? "Gym mandiri; nama cocok dengan registry X904. Rincian PIN dan UID hanya tersedia pada panel admin; verifikasi kepemilikan wajib dan belum ada hak akses."
           : guestNameRoute?.route === "visitor_card"
             ? "Gym mandiri; nama tidak terdaftar di inventaris X904. Kartu VIS001–VIS006 menunggu pilihan dan penyerahan petugas; belum ada hak akses X904."
             : "Gym mandiri; nama ada tetapi memerlukan peninjauan identitas X904 oleh petugas; jangan menggunakan PIN/kartu milik pengguna lain.")
@@ -1284,7 +1282,9 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       netAmount: withholding.netAmount,
       status: booking.status,
       source: booking.source,
-      notes: booking.notes,
+      // Guest notes historically contained PIN requests. Never expose them
+      // through the unauthenticated order-status API, even for old bookings.
+      notes: booking.source === "gym_public_guest" ? "Identitas X904 ditinjau petugas." : booking.notes,
       paymentDeadline: booking.paymentDeadline,
       checkedInAt: booking.checkedInAt,
       completedAt: booking.completedAt,
@@ -1370,7 +1370,10 @@ router.get("/wa/action/:token", async (req, res) => {
 
     res.json({
       action: tokenRow.action,
-      booking,
+      // Authless proof/check-in links must not expose legacy PIN/UID notes.
+      booking: booking.source === "gym_public_guest"
+        ? { ...booking, notes: "Identitas X904 ditinjau petugas." }
+        : booking,
       expiresAt: tokenRow.expiresAt,
       paymentOptions,
       supportWhatsapp,
