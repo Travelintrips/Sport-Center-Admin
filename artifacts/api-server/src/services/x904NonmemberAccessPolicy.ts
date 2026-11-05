@@ -30,11 +30,12 @@ export function decideNonmemberX904Access(input: {
   now: Date;
 }): NonmemberAccessDecision {
   if (!input.verifiedNonmemberPin || !Number.isFinite(input.now.getTime())) return 'hold';
+  // Exempt users must never be activated or suspended by nonmember automation.
+  if (isX904AutoSuspendExempt(input.userPin, input.deviceRole)) return 'hold';
   if (!input.confirmedPaymentAt || !Number.isFinite(input.confirmedPaymentAt.getTime())) return 'hold';
   const start = input.confirmedPaymentAt.getTime();
   const active = input.paymentState === 'confirmed' &&
     input.now.getTime() >= start && input.now.getTime() < start + NONMEMBER_ACCESS_MS;
   if (active) return input.currentGroup === 2 ? 'activate' : input.currentGroup === 1 ? 'correct' : 'hold';
-  if (isX904AutoSuspendExempt(input.userPin,input.deviceRole)) return 'hold';
   return input.currentGroup === 1 ? 'suspend' : input.currentGroup === 2 ? 'correct' : 'hold';
 }
