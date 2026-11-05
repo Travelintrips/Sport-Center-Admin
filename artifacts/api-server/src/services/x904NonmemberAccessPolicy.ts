@@ -13,6 +13,15 @@ const WIB_DAY_MS = 24 * 60 * 60 * 1000;
 export const X904_GYM_OPEN_HOUR_WIB = 6;
 export const X904_GYM_CLOSE_HOUR_WIB = 23;
 
+/** Prevent a pending grant from becoming valid again on a later calendar day. */
+export function x904NonmemberSameWibDate(a: Date, b: Date): boolean {
+  const first = a.getTime();
+  const second = b.getTime();
+  return Number.isFinite(first) && Number.isFinite(second) &&
+    Math.floor((first + WIB_OFFSET_MS) / WIB_DAY_MS) ===
+    Math.floor((second + WIB_OFFSET_MS) / WIB_DAY_MS);
+}
+
 export function x904NonmemberOpeningHours(now: Date): boolean {
   const millis = now.getTime();
   if (!Number.isFinite(millis)) return false;
