@@ -1262,6 +1262,26 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       customerServiceWhatsapp: settingsTable.customerServiceWhatsapp,
     }).from(settingsTable).limit(1);
     const supportWhatsapp = cleanPhone(String(supportSettings?.customerServiceWhatsapp ?? "")) || null;
+    // A confirmed remote visitor can see the reserved VIS label on their
+    // existing ticket. Never publish PIN, UID, bank reference or phone details.
+    let visitorCard: { code: string; state: string } | null = null;
+    if (booking.source === "gym_public_guest" &&
+        ["confirmed", "completed"].includes(booking.status)) {
+      try {
+        const assignment = await db.execute(sql`SELECT card_code,state
+          FROM sport_center.gym_vis_card_reservations
+          WHERE booking_id=${booking.id} AND state IN ('reserved','collected')
+          LIMIT 1`);
+        if (assignment.rows.length === 1) {
+          const row = assignment.rows[0] as any;
+          visitorCard = { code: String(row.card_code), state: String(row.state) };
+        }
+      } catch (error) {
+        // During staged deployment, the migration may not exist yet.
+        // Keep the public status page available; never guess a card number.
+        console.warn("[gym-vis] reservation status unavailable", error);
+      }
+    }
     const withholding = calculateBookingWithholdingTax(booking);
     res.json({
       orderNumber: booking.orderNumber,
@@ -1282,6 +1302,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       netAmount: withholding.netAmount,
       status: booking.status,
       source: booking.source,
+      visitorCard,
       // Guest notes historically contained PIN requests. Never expose them
       // through the unauthenticated order-status API, even for old bookings.
       notes: booking.source === "gym_public_guest" ? "Identitas X904 ditinjau petugas." : booking.notes,
