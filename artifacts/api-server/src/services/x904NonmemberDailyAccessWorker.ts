@@ -131,6 +131,18 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         if (testPin !== undefined && testPin !== pin) continue;
         await store.transaction(async tx => {
           await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
+          // Recheck registry authorization under lock. A previously fetched
+          // verified identity may have been revoked or edited since the cycle
+          // began; never enqueue a suspend based on that stale authorization.
+          const approved = await tx.execute(sql`SELECT device_uid,display_name
+            FROM sport_center.x904_verified_nonmember_identities
+            WHERE device_serial=${DEVICE} AND user_pin=${pin}
+              AND verification_state='verified' AND revoked_at IS NULL
+            FOR UPDATE`);
+          if (approved.rows.length !== 1 ||
+              Number(approved.rows[0].device_uid) !== uid ||
+              String(approved.rows[0].display_name).trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") !==
+                expectedName.trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID")) return;
           // Fail closed if any membership mapping exists, regardless of status.
           const owner = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
             WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
