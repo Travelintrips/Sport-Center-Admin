@@ -116,13 +116,13 @@ describe("X904 booking registry actual HTTP handler (isolated no writes)", () =>
   });
 
   it.each(["200", "500"])("rejects unverified PIN %s on read-only identity GET with HTTP 409", async pin => {
-    const fixtureResult = mockFixture(pin, 0);
+    const fixtureResult = fixture({ pin, uid: pin === "200" ? 337 : 5, name: pin === "200" ? "TEST SUSPEND X904" : "X904_TEST_500", role: 0 });
     const response = await request.get("/api/wa/x904-identity").query({
       type: "pin", value: pin,
     });
     expect(response.status).toBe(409);
     expect(response.body.error).toMatch(/belum terverifikasi pada registry X904/);
-    expect(fixtureResult.seen.some(q => q.includes("x904_verified_nonmember_identities"))).toBe(true);
+    expect(fixtureResult.queries.some(q => q.includes("x904_verified_nonmember_identities"))).toBe(true);
   });
 
 });
