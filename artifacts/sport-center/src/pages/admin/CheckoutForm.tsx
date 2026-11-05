@@ -383,6 +383,31 @@ export default function AdminCheckoutForm() {
     ...(!isCompanyPayer && selectedCustomer?.accountType === "company"
       ? ["Ubah jenis pemesanan menjadi Corporate untuk pelanggan perusahaan."] : []),
   ];
+  // Explicit Corporate validation feedback. The final submit handler and backend
+  // retain all original requirements; the button only ceases to hide errors.
+  const corporateSubmitBlockers: string[] = !isCompanyPayer || multiPatterns.length > 0 ? [] : [
+    ...(!selectedCustomerId ? ["Pilih pelanggan perusahaan."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState === "loading" ? ["Memverifikasi akun perusahaan..."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState === "error" ? ["Verifikasi perusahaan gagal. Pilih ulang pelanggan."] : []),
+    ...(selectedCustomerId && companyCustomerDetailState !== "loading" && !verifiedCompanyCustomer
+      ? ["Akun perusahaan belum terverifikasi."] : []),
+    ...(selectedCustomerId && !bookingCustomer?.phone ? ["Nomor WhatsApp pelanggan belum tersedia."] : []),
+    ...(!selectedFacilityId ? ["Pilih fasilitas."] : []),
+    ...(selectedFacilityId && !activeFacilities.some((f: any) => String(f.id) === selectedFacilityId)
+      ? ["Fasilitas tidak aktif."] : []),
+    ...(isMultigunaFacility && !multigunaActivities.some(a => a.value === selectedActivityType)
+      ? ["Pilih olahraga Multiguna."] : []),
+    ...(!selectedDate ? ["Pilih tanggal booking."] : []),
+    ...(selectedDate && !isWalkIn && !startTime ? ["Pilih jam mulai."] : []),
+    ...(selectedDate && !isWalkIn && startTime && !bookingScheduleValid
+      ? [repeatEnabled
+        ? (repeatCheckState === "loading" ? "Memeriksa jadwal berulang..." : "Preview jadwal berulang belum valid.")
+        : slotState === "loading" ? "Memeriksa ketersediaan..."
+        : slotState === "error" ? "Gagal memeriksa ketersediaan slot."
+        : "Jam telah dipilih, tetapi slot belum dinyatakan tersedia oleh server. Periksa tanggal atau jam lain."]
+      : []),
+    ...(paymentChoice !== "unpaid" ? ["Pilih Belum Bayar untuk perusahaan."] : []),
+  ];
   const canSubmitBooking = Boolean(
     selectedCustomerId &&
     customerFormValid &&
@@ -863,6 +888,14 @@ export default function AdminCheckoutForm() {
 
     if (bookingKind === "membership") {
       setLocation("/admin/memberships");
+      return;
+    }
+    if (corporateSubmitBlockers.length > 0) {
+      toast({
+        title: "Periksa booking perusahaan",
+        description: corporateSubmitBlockers.join(" "),
+        variant: "destructive",
+      });
       return;
     }
     if (multiPatterns.length > 0 && multiScheduleBlockers.length > 0) {
@@ -1915,6 +1948,14 @@ export default function AdminCheckoutForm() {
 
           <CardFooter className="border-t pt-5">
             {!isMembership && <div className="w-full space-y-2">
+              {isCompanyPayer && multiPatterns.length === 0 && corporateSubmitBlockers.length > 0 && (
+                <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p className="font-semibold">Periksa persyaratan Booking Perusahaan:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    {corporateSubmitBlockers.map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                </div>
+              )}
               {multiPatterns.length > 0 && multiScheduleBlockers.length > 0 && (
                 <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   <p className="font-semibold">Periksa sebelum membuat booking:</p>
@@ -1924,7 +1965,7 @@ export default function AdminCheckoutForm() {
                 </div>
               )}
               <Button type="submit" className="w-full h-11 text-base font-bold"
-                disabled={isSubmitting || (multiPatterns.length === 0 && !canSubmitBooking)}>
+                disabled={isSubmitting || (!isCompanyPayer && multiPatterns.length === 0 && !canSubmitBooking)}>
               {isSubmitting
                 ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                 : isMembership ? "Buka Modul Membership" : isCompanyPayer ? "Buat Booking Perusahaan" : "Buat Booking"
