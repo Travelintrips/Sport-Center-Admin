@@ -912,6 +912,10 @@ router.post("/wa/booking", async (req, res) => {
     // Public self-service is an unbound reservation, NEVER a physical door grant.
     // The person may pay without registration; PIN/card assignment is a separate verified step.
     const publicGymGuest = req.body.publicGymGuest === true;
+    const requestedX904Pin = publicGymGuest ? String(req.body.requestedX904Pin ?? "").trim() : "";
+    if (publicGymGuest && requestedX904Pin && !/^[0-9]{1,8}$/.test(requestedX904Pin)) {
+      res.status(400).json({ error: "PIN X904 (opsional) hanya boleh berisi 1–8 angka." }); return;
+    }
     if (publicGymGuest) {
       const guestPhone = String(customerPhone ?? "").trim();
       if (!gymWalkIn || x904IdentityType != null || x904IdentityValue != null) {
@@ -1087,7 +1091,11 @@ router.post("/wa/booking", async (req, res) => {
       apDiscountAmount: "0",
       basePrice: String(totalPrice),
       source: publicGymGuest ? "gym_public_guest" : "whatsapp",
-      notes: publicGymGuest ? "Gym nonmember mandiri; identitas X904 menunggu verifikasi/penyerahan kartu" : (notes || null),
+      notes: publicGymGuest
+        ? (requestedX904Pin
+          ? "Gym mandiri; PIN X904 diajukan: " + requestedX904Pin + " (BELUM terverifikasi oleh petugas; tidak memberi hak akses)"
+          : "Gym nonmember mandiri; identitas X904 menunggu verifikasi/penyerahan kartu")
+        : (notes || null),
       paymentDeadline,
       status: "pending_payment",
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -1155,7 +1163,7 @@ router.post("/wa/booking", async (req, res) => {
       action: "wa_booking_created",
       entity: "booking",
       entityId: booking.id,
-      after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime },
+      after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime, x904PinRequested: Boolean(requestedX904Pin) },
     });
 
     res.status(201).json({
