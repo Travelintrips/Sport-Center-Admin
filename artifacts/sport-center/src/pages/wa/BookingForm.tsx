@@ -151,7 +151,7 @@ export default function WaBookingForm() {
   useEffect(() => {
     setX904VerifiedName("");
     setX904VerificationError("");
-    if (!dedicatedNonmember || !x904IdentityValue.trim()) return;
+    if (publicGymGuest || !dedicatedNonmember || !x904IdentityValue.trim()) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setX904Verifying(true);
@@ -169,7 +169,7 @@ export default function WaBookingForm() {
       }
     }, 400);
     return () => { window.clearTimeout(timeout); controller.abort(); setX904Verifying(false); };
-  }, [dedicatedNonmember, x904IdentityType, x904IdentityValue]);
+  }, [dedicatedNonmember, publicGymGuest, x904IdentityType, x904IdentityValue]);
 
   // Manual payment options are read from the public production settings.
   // This flow does not use the Paylabs/sandbox configuration.
@@ -469,7 +469,7 @@ export default function WaBookingForm() {
           durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
-          ...(publicGymGuest ? { publicGymGuest: true } : {}),
+          ...(publicGymGuest ? { publicGymGuest: true, requestedX904Pin: x904IdentityValue.trim() || undefined } : {}),
           ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
             ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         }),
@@ -552,7 +552,7 @@ export default function WaBookingForm() {
 
             {publicGymGuest && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
+                PIN yang dimasukkan belum merupakan hak akses. Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
                 untuk verifikasi identitas serta penyerahan kartu VIS / pemeriksaan PIN X904.
               </p>
             )}
@@ -654,6 +654,31 @@ export default function WaBookingForm() {
         )}
         <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
           <div className="space-y-6">
+          {publicGymGuest && (
+            <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+              <CardHeader className="border-b border-slate-100 pb-3">
+                <CardTitle className="text-base font-bold text-[#142441]">PIN Mesin X904 (Opsional)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 p-5">
+                <p className="text-sm text-slate-600">Sudah memiliki PIN Gym yang terdaftar? Masukkan untuk mempermudah petugas mencocokkan identitas. Pengunjung baru boleh membiarkan kosong dan menggunakan kartu pengunjung setelah diverifikasi petugas.</p>
+                <Label htmlFor="gym-guest-requested-pin" className="text-sm font-semibold">PIN X904 yang sudah dimiliki</Label>
+                <Input
+                  id="gym-guest-requested-pin"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  pattern="[0-9]{1,8}"
+                  maxLength={8}
+                  placeholder="1–8 angka (opsional)"
+                  value={x904IdentityValue}
+                  onChange={e => setX904IdentityValue(e.target.value.replace(/\D/g, ""))}
+                  className="h-11"
+                />
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                  PIN ini hanya permintaan pencocokan, bukan izin membuka pintu. Petugas wajib memverifikasi pemilik PIN dan dana pembayaran masuk. Akses hanya dapat aktif setelah konfirmasi resmi dan ACK/read-back mesin.
+                </p>
+              </CardContent>
+            </Card>
+          )}
           <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
             <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
               <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">Data Pemesan</CardTitle>
