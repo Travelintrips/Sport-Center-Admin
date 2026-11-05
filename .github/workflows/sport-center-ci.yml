@@ -135,6 +135,9 @@ jobs:
       - name: Verify concurrent public Gym guest booking lock
         run: node --test scripts/test-gym-guest-duplicate-lock.mjs
 
+      - name: Verify self-service facility choices keep Gym/X904 separate
+        run: node --test scripts/test-public-facility-selector.mjs
+
       - name: Verify public Gym self-booking without X904 access grants
         run: node --test scripts/test-gym-public-self-booking.mjs
 
