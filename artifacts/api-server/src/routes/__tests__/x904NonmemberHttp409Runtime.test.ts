@@ -3,95 +3,115 @@ import express from "express";
 import supertest from "supertest";
 import { db } from "@workspace/db";
 
-// Exercise the actual deployed WhatsApp booking router using an isolated,
-// in-memory query fixture. No Postgres writes, payment creation or X904 calls.
-// The booking hour is deliberately invalid, so even a broken registry check
-// must be stopped by operating-hours validation before any booking INSERT.
+// Real Express/WhatsApp booking route, isolated in-memory query responses.
+// The time 00:00 is outside Gym hours (06:00–23:00): no valid booking
+// can be created even if the registry check regresses.
 const { default: whatsappRouter } = await import("../whatsapp.js");
 const app = express();
 app.use(express.json());
 app.use("/api", whatsappRouter);
-
 const request = supertest(app);
-const sqlText = (query: unknown): string => {
-  if (query && typeof query === "object" && "queryChunks" in query) {
-    return JSON.stringify((query as any).queryChunks);
-  }
-  return String(query);
-};
+
+const sqlText = (query: unknown) =>
+  query && typeof query === "object" && "queryChunks" in query
+    ? JSON.stringify((query as any).queryChunks)
+    : String(query);
 
 const facility = {
-  id: 6,
-  name: "Gym / Fitness Center",
-  category: "Fitness",
-  bookingMode: "walk_in",
-  isActive: true,
-  openTime: "06:00",
-  closeTime: "23:00",
-  pricePerHour: "30000",
+  id: 6, name: "Gym / Fitness Center", category: "Fitness",
+  bookingMode: "walk_in", isActive: true, openTime: "06:00",
+  closeTime: "23:00", pricePerHour: "30000",
 };
-
-const basePayload = {
-  customerName: "NEGATIVE API TEST",
+const payload = {
+  customerName: "ISOLATED HTTP REGRESSION",
   customerPhone: "08000000000",
-  facilityId: 6,
-  bookingDate: "2026-11-06",
-  startTime: "00:00",
-  durationHours: 1,
-  x904IdentityType: "pin",
+  facilityId: 6, bookingDate: "2026-11-06",
+  startTime: "00:00", durationHours: 1,
 };
 
-function mockFixture(pin: string, role = 0) {
-  const selectSpy = jest.spyOn(db, "select").mockImplementation((() => ({
+function fixture(options: {
+  pin: string;
+  uid: number;
+  name: string;
+  role?: number;
+  approved?: boolean;
+}) {
+  const queries: string[] = [];
+  const reads = jest.spyOn(db, "select").mockImplementation((() => ({
     from: () => ({ where: () => ({ limit: async () => [facility] }) }),
   })) as any);
-  const seen: string[] = [];
-  const executeSpy = jest.spyOn(db, "execute").mockImplementation((async (query: unknown) => {
+  const executes = jest.spyOn(db, "execute").mockImplementation((async (query: unknown) => {
     const text = sqlText(query);
-    seen.push(text);
+    queries.push(text);
     if (text.includes("gym_x904_lan_users")) {
       return { rows: [{
-        user_pin: pin,
-        device_uid: pin === "200" ? 337 : pin === "500" ? 5 : 342,
-        display_name: pin === "200" ? "TEST SUSPEND X904" :
-          pin === "500" ? "X904_TEST_500" : "YUDA",
-        device_role: role,
+        user_pin: options.pin, device_uid: options.uid,
+        display_name: options.name, device_role: options.role ?? 0,
       }] } as any;
     }
-    if (text.includes("x904_verified_nonmember_identities")) return { rows: [] } as any;
-    throw new Error("Unexpected database query: fail closed");
+    if (text.includes("x904_verified_nonmember_identities")) {
+      return { rows: options.approved ? [{ "?column?": 1 }] : [] } as any;
+    }
+    if (text.includes("gym_x904_member_mapping") ||
+        text.includes("x904_nonmember_daily_access")) {
+      return { rows: [] } as any;
+    }
+    // The request must never reach booking writes, payment operations, or X904.
+    throw new Error("Unexpected database operation");
   }) as any);
-  return { seen, selectSpy, executeSpy };
+  const transaction = jest.spyOn(db, "transaction").mockImplementation((async () => {
+    throw new Error("Unexpected booking transaction");
+  }) as any);
+  return { queries, reads, executes, transaction };
 }
 
 afterEach(() => jest.restoreAllMocks());
 
-describe("actual WhatsApp booking HTTP registry rejection (no database writes)", () => {
-  it("returns 409 for unverified test PIN 200 before creating booking", async () => {
-    const { seen } = mockFixture("200");
+describe("X904 booking registry actual HTTP handler (isolated no writes)", () => {
+  it.each([
+    { pin: "200", uid: 337, name: "TEST SUSPEND X904" },
+    { pin: "500", uid: 5, name: "X904_TEST_500" },
+  ])("returns registry-specific HTTP 409 for unverified PIN $pin", async (identity) => {
+    const evidence = fixture(identity); // role 0: must reach registry check
     const response = await request.post("/api/wa/booking").send({
-      ...basePayload, x904IdentityValue: "200",
+      ...payload, x904IdentityType: "pin", x904IdentityValue: identity.pin,
     });
     expect(response.status).toBe(409);
-    expect(response.body.error).toMatch(/belum terverifikasi pada registry X904/);
-    expect(seen.some((sql) => sql.includes("gym_x904_lan_users"))).toBe(true);
-    expect(seen.some((sql) => sql.includes("x904_verified_nonmember_identities"))).toBe(true);
+    expect(response.body.error).toContain("belum terverifikasi pada registry X904");
+    expect(evidence.queries.some(q => q.includes("gym_x904_lan_users"))).toBe(true);
+    expect(evidence.queries.some(q => q.includes("x904_verified_nonmember_identities"))).toBe(true);
+    expect(evidence.transaction).not.toHaveBeenCalled();
   });
 
-  it("returns 409 for test PIN 500 without generating a booking", async () => {
-    const { seen } = mockFixture("500", 1);
+  it("rejects device role 1 before reaching registry", async () => {
+    const evidence = fixture({ pin: "500", uid: 5, name: "X904_TEST_500", role: 1 });
     const response = await request.post("/api/wa/booking").send({
-      ...basePayload, x904IdentityValue: "500",
+      ...payload, x904IdentityType: "pin", x904IdentityValue: "500",
     });
     expect(response.status).toBe(409);
-    expect(seen.some((sql) => sql.includes("gym_x904_lan_users"))).toBe(true);
+    expect(evidence.queries.some(q => q.includes("x904_verified_nonmember_identities"))).toBe(false);
+    expect(evidence.transaction).not.toHaveBeenCalled();
   });
 
-  it("does not create booking when unverified PIN attempts a future visit", async () => {
-    mockFixture("200");
+  it("allows verified YUDA past registry without booking outside hours", async () => {
+    const evidence = fixture({ pin: "8", uid: 342, name: "YUDA", approved: true });
     const response = await request.post("/api/wa/booking").send({
-      ...basePayload, x904IdentityValue: "200", bookingDate: "2026-11-07",
+      ...payload, x904IdentityType: "pin", x904IdentityValue: "8",
     });
-    expect(response.status).toBe(409);
+    expect(evidence.queries.some(q => q.includes("x904_verified_nonmember_identities"))).toBe(true);
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/jam operasional/i);
+    expect(evidence.transaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps VIS001 card path outside ordinary PIN registry gate", async () => {
+    const evidence = fixture({ pin: "78", uid: 338, name: "VIS 001" });
+    const response = await request.post("/api/wa/booking").send({
+      ...payload, x904IdentityType: "card", x904IdentityValue: "VIS001",
+    });
+    expect(evidence.queries.some(q => q.includes("x904_verified_nonmember_identities"))).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/jam operasional/i);
+    expect(evidence.transaction).not.toHaveBeenCalled();
   });
 });
