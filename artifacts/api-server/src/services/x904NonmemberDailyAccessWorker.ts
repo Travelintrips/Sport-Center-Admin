@@ -40,6 +40,23 @@ export function startX904NonmemberAccessWorker(): void {
   timer.unref();
 }
 
+/**
+ * Advance-paid Gym visits only become eligible on their booking day, at the
+ * facility's scheduled start. Accept the stored YYYY-MM-DD / HH:mm shape only.
+ * Fail closed on absent/corrupt dates; never open a door early.
+ */
+export function x904NonmemberScheduledStart(bookingDate: unknown, startTime: unknown): number | null {
+  const date = String(bookingDate ?? "").trim();
+  const time = String(startTime ?? "").trim();
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !/^\\d{2}:\\d{2}(?::\\d{2})?$/.test(time)) return null;
+  const scheduled = Date.parse(`${date}T${time.length === 5 ? time + ":00" : time}+07:00`);
+  if (!Number.isFinite(scheduled)) return null;
+  // Date.parse normalizes invalid dates; reject that normalization.
+  const rebuilt = new Date(scheduled + 7 * 3600000).toISOString().slice(0, 10);
+  if (rebuilt !== date) return null;
+  return scheduled;
+}
+
 /** Enqueue only. The existing VMSC group executor owns physical writes and ACK. */
 export async function processX904NonmemberDailyAccess(store: Store = db, now = new Date()): Promise<void> {
   if (process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true" ||
@@ -210,9 +227,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
-          p.status::text AS payment_status
+          p.status::text AS payment_status,
+          booking.booking_date AS booking_date, booking.start_time AS booking_start_time
         FROM sport_center.x904_nonmember_daily_access a
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+        LEFT JOIN sport_center.sport_bookings booking ON booking.id=a.booking_id
         WHERE a.access_id=${Number(row.access_id)} FOR UPDATE OF a`);
       if (locked.rows.length !== 1) return;
       const a = locked.rows[0] as any;
@@ -223,6 +242,14 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
+      const scheduledStart = x904NonmemberScheduledStart(a.booking_date, a.booking_start_time);
+      if (scheduledStart === null) {
+        console.warn("[x904-nonmember] booking schedule invalid; access held", JSON.stringify({accessId:Number(a.access_id)}));
+        return;
+      }
+      // A paid future reservation is not an authorization to use the door
+      // before its booking date/time. Existing activated grants can finish.
+      if (a.activated_at == null && now.getTime() < scheduledStart) return;
       // Do not apply the VIS card allowlist to verified paid nonmember PIN grants.
       // Membership ownership, exempt roles/PINs, device identity and payment
       // verification below remain mandatory for every PIN.
