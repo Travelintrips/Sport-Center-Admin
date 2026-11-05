@@ -1624,6 +1624,22 @@ router.post("/bookings", async (req, res) => {
           (card && (Number(row.device_uid) !== card.deviceUid || String(row.display_name ?? "").replace(/\s+/g, "").toUpperCase() !== card.displayName.replace(/\s+/g, "").toUpperCase()))) {
         res.status(409).json({ error: "Identitas X904 tidak cocok dengan inventaris mesin." }); return;
       }
+      // Ordinary PINs must be explicitly approved in the nonmember registry.
+      // A valid device inventory entry alone (including test PINs) is NOT
+      // authorization to create a paid 12-hour door entitlement.
+      if (identityType === "pin") {
+        const registry = await db.execute(sql`SELECT 1
+          FROM sport_center.x904_verified_nonmember_identities
+          WHERE device_serial='TDBD234200545' AND user_pin=${userPin}
+            AND device_uid=${Number(row.device_uid)}
+            AND upper(regexp_replace(trim(display_name), '\\s+', ' ', 'g')) =
+                upper(regexp_replace(trim(${String(row.display_name)}::text), '\\s+', ' ', 'g'))
+            AND verification_state='verified' AND revoked_at IS NULL LIMIT 1`);
+        if (registry.rows.length !== 1) {
+          res.status(409).json({ error: "PIN nonmember belum terverifikasi pada registry X904. Verifikasi identitas lewat admin sebelum membuat booking berbayar." });
+          return;
+        }
+      }
       // Fail closed before booking/payment for ordinary PINs owned by members or exempt roles.
       if (identityType === "pin") {
         const ownership = await db.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
