@@ -155,8 +155,25 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
     ? await resolveGymGuestName(booking.customerName).catch(() => null)
     : null;
 
+  let visCardReservation: { cardCode: string; state: string } | null = null;
+  if (booking.source === "gym_public_guest") {
+    try {
+      const reservations = await db.execute(sql`SELECT card_code,state
+        FROM sport_center.gym_vis_card_reservations
+        WHERE booking_id=${booking.id} LIMIT 1`);
+      if (reservations.rows.length === 1) {
+        visCardReservation = {
+          cardCode: String(reservations.rows[0].card_code),
+          state: String(reservations.rows[0].state),
+        };
+      }
+    } catch (error) {
+      console.warn("[gym-vis] admin reservation lookup unavailable", error);
+    }
+  }
   res.json({
     booking,
+    visCardReservation,
     x904IdentityMatch: x904IdentityMatch?.route === "registered"
       ? {
           route: "registered",
