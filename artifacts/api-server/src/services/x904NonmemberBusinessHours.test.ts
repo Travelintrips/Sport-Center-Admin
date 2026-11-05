@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   x904NonmemberOpeningHours,
   x904NonmemberEffectiveExpiry,
+  x904NonmemberSameWibDate,
   decideNonmemberX904Access,
 } from "./x904NonmemberAccessPolicy";
 
@@ -33,10 +34,20 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     expect(x904NonmemberOpeningHours(instant("2026-11-06T06:00:00"))).toBe(true);
   });
 
+  it("a pending grant from yesterday cannot reactivate on today's opening", () => {
+    expect(x904NonmemberSameWibDate(
+      instant("2026-11-05T22:59:59"), instant("2026-11-05T08:00:00"),
+    )).toBe(true);
+    expect(x904NonmemberSameWibDate(
+      instant("2026-11-06T06:00:00"), instant("2026-11-05T08:00:00"),
+    )).toBe(false);
+  });
+
   it("worker uses cutoff for activation, overlap and verified physical suspension", () => {
     const source = readFileSync(join(process.cwd(), "src/services/x904NonmemberDailyAccessWorker.ts"), "utf8");
     expect(source).toContain("x904NonmemberEffectiveExpiry(activeStart");
     expect(source).toContain("x904NonmemberOpeningHours(now)");
+    expect(source).toContain("x904NonmemberSameWibDate(now, new Date(scheduledStart))");
     expect(source).toContain("AND other.activated_at IS NOT NULL");
     expect(source).toContain("LEAST(other.expires_at");
     expect(source).toContain("expires_at=LEAST(");
