@@ -140,6 +140,7 @@ export default function AdminCheckoutForm() {
   const [selectedActivityType, setSelectedActivityType] = useState("");
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("card");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
+  const [x904VisitorName, setX904VisitorName] = useState("");
   const [x904NameSearch, setX904NameSearch] = useState("");
   const [x904MachineUsers, setX904MachineUsers] = useState<Array<{userPin:string;deviceUid:number;displayName:string}>>([]);
   const [x904NameLookupError, setX904NameLookupError] = useState("");
@@ -967,6 +968,11 @@ export default function AdminCheckoutForm() {
       toast({ title: "Nama dan nomor WhatsApp tamu wajib valid", variant: "destructive" });
       return;
     }
+    if (isGymNonmember && x904IdentityType === "card" && x904IdentityValue.trim() &&
+        !isHistoricalGymNonmember && !/^[\\p{L}\\p{M}\\p{N} .'-]{2,100}$/u.test(x904VisitorName.trim().replace(/\\s+/g, " "))) {
+      toast({ title: "Isi nama orang yang memakai kartu", description: "Nama pengunjung wajib diisi, berbeda dari identitas kartu VIS.", variant: "destructive" });
+      return;
+    }
     if (!selectedFacilityId) {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
       return;
@@ -1053,7 +1059,8 @@ export default function AdminCheckoutForm() {
         ...(corporate ? { companyCustomerId: Number(selectedCustomerId) } : {}),
         source: "admin",
         ...(isGymNonmember && (!isHistoricalGymNonmember || x904IdentityValue.trim())
-          ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
+          ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase(),
+              ...(x904IdentityType === "card" ? { x904VisitorName: x904VisitorName.trim().replace(/\\s+/g, " ") } : {}) } : {}),
         adminPaymentChoice: paymentChoice,
         ...(bookingKind === "corporate" ? { suppressCustomerWhatsApp } : {}),
         ...(isActiveApMember ? { customerType: "angkasa_pura", idCardNumber: apMember.idCardNumber } : {}),
@@ -1525,7 +1532,7 @@ export default function AdminCheckoutForm() {
               <Label>{isHistoricalGymNonmember
                 ? "Referensi identitas X904 historis (opsional)"
                 : "Identitas akses X904 (nonmember) *"}</Label>
-              <Select value={x904IdentityType} onValueChange={(value) => { setX904IdentityType(value as "pin" | "card"); setX904IdentityValue(""); }}>
+              <Select value={x904IdentityType} onValueChange={(value) => { setX904IdentityType(value as "pin" | "card"); setX904IdentityValue(""); setX904VisitorName(""); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="card">Kartu pengunjung</SelectItem><SelectItem value="pin">PIN mesin X904</SelectItem></SelectContent>
               </Select>
@@ -1553,6 +1560,16 @@ export default function AdminCheckoutForm() {
                   onChange={event => setX904IdentityValue(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
                   placeholder="Contoh: 8" />
               </div>}
+              {x904IdentityType === "card" && x904IdentityValue && (
+                <div className="space-y-2 rounded-md bg-muted/40 p-3">
+                  <Label htmlFor="x904-card-visitor-name">Nama pengunjung yang memakai kartu *</Label>
+                  <Input id="x904-card-visitor-name" aria-label="Nama pengunjung yang memakai kartu"
+                    value={x904VisitorName}
+                    onChange={(event) => setX904VisitorName(event.target.value)}
+                    maxLength={100} autoComplete="off" placeholder="Contoh: Budi Santoso" required={!isHistoricalGymNonmember} />
+                  <p className="text-xs text-muted-foreground">Identitas mesin tetap {x904IdentityValue}. Nama orang ini dicatat terpisah pada riwayat booking, bukan mengganti nama atau PIN kartu X904.</p>
+                </div>
+              )}
               {x904Verifying && <p className="text-xs">Memverifikasi identitas mesin...</p>}
               {x904VerifiedName && <p className="text-xs text-emerald-700">Terverifikasi: {x904VerifiedName}. Lengkapi data pemesan, tanggal, dan status pembayaran untuk melanjutkan.</p>}
               {x904VerificationError && <p className="text-xs text-destructive">{x904VerificationError}</p>}
