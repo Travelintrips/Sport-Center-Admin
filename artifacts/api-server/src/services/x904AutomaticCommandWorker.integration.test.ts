@@ -1,4 +1,3 @@
-jest.mock('@workspace/db',()=>({db:{execute:jest.fn(),transaction:jest.fn()}}));
 import {processX904AutomaticCommands} from './x904AutomaticCommandWorker';
 
 describe('X904 full automatic worker execution with isolated in-memory database adapter',()=>{
