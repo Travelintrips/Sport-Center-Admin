@@ -434,6 +434,23 @@ export default function AdminWaBookings() {
                   )}
                 </div>
 
+                {detail.booking.source === "gym_public_guest" && (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                    <p className="font-semibold">Hasil pencocokan identitas X904 (khusus petugas)</p>
+                    {detail.x904IdentityMatch?.route === "registered" ? (
+                      <div className="mt-2 space-y-1">
+                        <p>Nama mesin: <strong>{detail.x904IdentityMatch.displayName}</strong></p>
+                        <p>PIN mesin: <strong>{detail.x904IdentityMatch.userPin}</strong></p>
+                        <p>UID: <strong>{detail.x904IdentityMatch.deviceUid}</strong></p>
+                        <p className="mt-2 text-amber-800">Nama cocok, tetapi kepemilikan belum diverifikasi. Cocokkan identitas pengunjung, penerimaan dana, dan hak akses sebelum menautkan PIN.</p>
+                      </div>
+                    ) : detail.x904IdentityMatch?.route === "visitor_card" ? (
+                      <p className="mt-2">Nama belum terdaftar. Siapkan kartu VIS001–VIS006 yang tersedia setelah pemeriksaan petugas; jangan gunakan kartu yang masih dipinjam.</p>
+                    ) : (
+                      <p className="mt-2">Nama membutuhkan verifikasi manual. Jangan berikan PIN atau kartu pengunjung otomatis.</p>
+                    )}
+                  </div>
+                )}
                 {detail.booking.source === "gym_public_guest" && detail.booking.notes && (
                   <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
                     <p className="font-semibold text-[#142441]">Identitas X904 yang diajukan pengunjung</p>
