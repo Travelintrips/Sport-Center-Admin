@@ -715,8 +715,8 @@ export default function Home() {
                   className="h-13 px-8 text-base font-black shadow-xl shadow-primary/30 hover:shadow-primary/45 hover:-translate-y-0.5 transition-all rounded-full group"
                   asChild
                 >
-                  <Link href="/facilities">
-                    {t("Booking Sekarang", "Book Now")}
+                  <Link href="/booking/mandiri">
+                    {t("Booking Mandiri Tanpa Login", "Book Without Login")}
                     <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
                   </Link>
                 </Button>
@@ -1032,8 +1032,8 @@ export default function Home() {
               className="rounded-full font-bold shadow-md shadow-primary/20 shrink-0"
               asChild
             >
-              <Link href="/facilities">
-                {t("Booking Sekarang", "Book Now")}{" "}
+              <Link href="/booking/mandiri">
+                {t("Booking Mandiri Tanpa Login", "Book Without Login")}{" "}
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Link>
             </Button>
