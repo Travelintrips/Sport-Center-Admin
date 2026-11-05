@@ -1092,6 +1092,22 @@ router.post("/wa/booking", async (req, res) => {
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     const booking = await db.transaction(async (tx) => {
+      // The legacy VIS checkout shares a lock with the automatic VIS allocator.
+      // A remote reservation must never be silently reused by manual checkout.
+      if (verifiedX904Identity?.identityType === "card") {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
+        const registryReady = await tx.execute(sql`SELECT
+          to_regclass('sport_center.gym_vis_card_reservations') AS reservation_table`);
+        if (registryReady.rows[0]?.reservation_table) {
+          const held = await tx.execute(sql`SELECT 1
+            FROM sport_center.gym_vis_card_reservations
+            WHERE device_serial='TDBD234200545'
+              AND user_pin=${verifiedX904Identity.userPin}
+              AND state IN ('reserved','collected')
+            LIMIT 1`);
+          if (held.rows.length) throw new Error("X904_VIS_CARD_RESERVED");
+        }
+      }
       if (publicGymGuest) {
         // Serialize same-phone/day guest bookings BEFORE checking for duplicates.
         // Lock is scoped to this transaction and does not affect admin/member flows.
@@ -1229,6 +1245,10 @@ router.post("/wa/booking", async (req, res) => {
       } : null,
     });
   } catch (err) {
+    if (err instanceof Error && err.message === "X904_VIS_CARD_RESERVED") {
+      res.status(409).json({ error: "Kartu VIS sedang dialokasikan kepada pengunjung lain. Gunakan kartu lain yang tersedia." });
+      return;
+    }
     if (err instanceof Error && err.message === "GYM_PUBLIC_GUEST_DUPLICATE_BOOKING") {
       res.status(409).json({ error: "Sudah ada booking Gym untuk tanggal ini. Gunakan status booking sebelumnya, jangan membayar dua kali." });
       return;
