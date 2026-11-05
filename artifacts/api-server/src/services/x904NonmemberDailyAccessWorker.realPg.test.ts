@@ -17,7 +17,7 @@ beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
   await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text);
     CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
-    CREATE TABLE sport_center.sport_bookings(id int primary key);
+    CREATE TABLE sport_center.sport_bookings(id int primary key, booking_date text NOT NULL DEFAULT '2000-01-01', start_time text NOT NULL DEFAULT '06:00');
     CREATE TABLE sport_center.sport_payments(id int primary key,booking_id int references sport_center.sport_bookings(id),status text,confirmed_at timestamptz,paid_at timestamptz);
     CREATE TABLE sport_center.gym_x904_access_snapshots(snapshot_id bigserial primary key,device_serial text,observed_at timestamptz,user_count int,users jsonb);
     CREATE TABLE sport_center.x904_user_commands(
