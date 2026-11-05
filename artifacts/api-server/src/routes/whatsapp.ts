@@ -59,6 +59,7 @@ import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
 import { uploadProofWithFallback } from "./storage";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
+import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
 import {
   generateAiReply,
   logAiMessageReceived,
@@ -892,6 +893,45 @@ router.get("/wa/x904-identity", async (req, res) => {
   }
 });
 
+// POST /api/wa/gym-name-route — guide visitor vs enrolled Gym without exposing a PIN.
+// The result is informational only: anonymous names cannot activate a device.
+// Limit automated enumeration attempts per source address; the booking
+// independently recalculates the route even if this preview is skipped.
+const gymGuestNameAttempts = new Map<string, { hits: number; expires: number }>();
+router.post("/wa/gym-name-route", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const key = String(req.ip ?? "unknown");
+  const now = Date.now();
+  if (gymGuestNameAttempts.size > 20000) {
+    for (const [ip, state] of gymGuestNameAttempts) {
+      if (state.expires <= now) gymGuestNameAttempts.delete(ip);
+    }
+  }
+  const previous = gymGuestNameAttempts.get(key);
+  const state = previous && previous.expires > now ? previous : { hits: 0, expires: now + 15 * 60_000 };
+  state.hits++;
+  gymGuestNameAttempts.set(key, state);
+  if (state.hits > 8) { res.status(429).json({ error: "Pemeriksaan nama terlalu sering. Minta bantuan petugas." }); return; }
+  const name = String(req.body?.customerName ?? "").trim();
+  if (!/^[\p{L}\p{M}\p{N} .'-]{2,100}$/u.test(name)) {
+    res.status(400).json({ error: "Masukkan nama lengkap yang valid." }); return;
+  }
+  try {
+    const match = await resolveGymGuestName(name);
+    res.json({
+      route: match.route,
+      // Never send user_pin, UID, or complete machine identity on an anonymous endpoint.
+      message: match.route === "registered"
+        ? "Nama ditemukan sebagai nonmember terverifikasi di X904. Petugas tetap harus mencocokkan kepemilikan sebelum pintu aktif."
+        : match.route === "visitor_card"
+          ? "Nama belum terdaftar di X904. Anda akan diarahkan ke kartu pengunjung VIS; petugas akan menyerahkannya setelah verifikasi."
+          : "Nama membutuhkan pemeriksaan petugas. Jangan menggunakan PIN atau kartu milik orang lain.",
+    });
+  } catch {
+    res.status(503).json({ error: "Pencocokan X904 belum tersedia; pengunjung harus dibantu petugas." });
+  }
+});
+
 // POST /api/wa/booking — create booking from mini form
 router.post("/wa/booking", async (req, res) => {
   try {
@@ -912,9 +952,10 @@ router.post("/wa/booking", async (req, res) => {
     // Public self-service is an unbound reservation, NEVER a physical door grant.
     // The person may pay without registration; PIN/card assignment is a separate verified step.
     const publicGymGuest = req.body.publicGymGuest === true;
-    const requestedX904Pin = publicGymGuest ? String(req.body.requestedX904Pin ?? "").trim() : "";
-    if (publicGymGuest && requestedX904Pin && !/^[0-9]{1,8}$/.test(requestedX904Pin)) {
-      res.status(400).json({ error: "PIN X904 (opsional) hanya boleh berisi 1–8 angka." }); return;
+    // Never accept anonymous user-provided PIN selection. The route is derived
+    // from the exact stored device name on the server, not from public input.
+    if (publicGymGuest && req.body.requestedX904Pin != null) {
+      res.status(400).json({ error: "PIN X904 tidak boleh dipilih secara manual. Sistem mencocokkan nama pengunjung." }); return;
     }
     if (publicGymGuest) {
       const guestPhone = String(customerPhone ?? "").trim();
@@ -932,6 +973,10 @@ router.post("/wa/booking", async (req, res) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bookingDate)) || String(bookingDate) < todayWib) {
         res.status(400).json({ error: "Tanggal kunjungan harus hari ini atau tanggal mendatang." }); return;
       }
+    }
+    const guestNameRoute = publicGymGuest ? await resolveGymGuestName(bookingCustomerName) : null;
+    if (publicGymGuest && !guestNameRoute) {
+      res.status(503).json({ error: "Verifikasi identitas X904 belum tersedia." }); return;
     }
     if (gymWalkIn && !publicGymGuest && (!x904IdentityType || !String(x904IdentityValue ?? "").trim())) {
       res.status(400).json({ error: "Masukkan PIN X904 atau pilih kartu VIS001–VIS006 untuk akses Gym harian." });
@@ -1092,9 +1137,13 @@ router.post("/wa/booking", async (req, res) => {
       basePrice: String(totalPrice),
       source: publicGymGuest ? "gym_public_guest" : "whatsapp",
       notes: publicGymGuest
-        ? (requestedX904Pin
-          ? "Gym mandiri; PIN X904 diajukan: " + requestedX904Pin + " (BELUM terverifikasi oleh petugas; tidak memberi hak akses)"
-          : "Gym nonmember mandiri; identitas X904 menunggu verifikasi/penyerahan kartu")
+        ? (guestNameRoute?.route === "registered"
+          ? "Gym mandiri; identitas mesin cocok: PIN " + guestNameRoute.userPin +
+            ", UID " + guestNameRoute.deviceUid + ", Nama " + guestNameRoute.displayName +
+            ". Verifikasi kepemilikan oleh petugas WAJIB; belum ada hak akses X904."
+          : guestNameRoute?.route === "visitor_card"
+            ? "Gym mandiri; nama tidak terdaftar di inventaris X904. Kartu VIS001–VIS006 menunggu pilihan dan penyerahan petugas; belum ada hak akses X904."
+            : "Gym mandiri; nama ada tetapi memerlukan peninjauan identitas X904 oleh petugas; jangan menggunakan PIN/kartu milik pengguna lain.")
         : (notes || null),
       paymentDeadline,
       status: "pending_payment",
@@ -1163,7 +1212,7 @@ router.post("/wa/booking", async (req, res) => {
       action: "wa_booking_created",
       entity: "booking",
       entityId: booking.id,
-      after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime, x904PinRequested: Boolean(requestedX904Pin) },
+      after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime, x904Route: guestNameRoute?.route ?? null },
     });
 
     res.status(201).json({
@@ -1173,6 +1222,7 @@ router.post("/wa/booking", async (req, res) => {
       facilityName: facility.name,
       statusUrl,
       uploadProofUrl,
+      gymGuestIdentityRoute: guestNameRoute?.route ?? null,
       x904Identity: verifiedX904Identity ? {
         type: verifiedX904Identity.identityType,
         label: verifiedX904Identity.identityLabel,

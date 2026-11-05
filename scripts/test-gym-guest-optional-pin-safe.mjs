@@ -6,18 +6,18 @@ const form = read("artifacts/sport-center/src/pages/wa/BookingForm.tsx");
 const api = read("artifacts/api-server/src/routes/whatsapp.ts");
 const admin = read("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
 
-test("public Gym displays optional PIN X904 and never uses untrusted input for identity lookup",()=>{
- assert.match(form,/PIN Mesin X904 \(Opsional\)/);
- assert.match(form,/id="gym-guest-requested-pin"/);
+test("public Gym never allows arbitrary unverified PIN self-selection",()=>{
+ assert.match(form,/Pencocokan Identitas Gym X904/);
+ assert.doesNotMatch(form,/PIN Mesin X904 \(Opsional\)/);
  assert.match(form,/publicGymGuest \|\| !dedicatedNonmember \|\| !x904IdentityValue\.trim\(\)/);
- assert.match(form,/publicGymGuest: true, requestedX904Pin: x904IdentityValue\.trim\(\) \|\| undefined/);
- assert.match(form,/PIN ini hanya permintaan pencocokan, bukan izin membuka pintu/);
+ assert.match(form,/\/api\/wa\/gym-name-route/);
+ assert.doesNotMatch(form,/requestedX904Pin: x904IdentityValue/);
 });
-test("untrusted PIN is merely a booking note: no grant, payment or machine command",()=>{
+test("name-derived identity is only a booking note, not a grant or machine command",()=>{
  const bookingRoute=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('router.get("/wa/status/:orderNumber"'));
- assert.match(bookingRoute,/const requestedX904Pin = publicGymGuest/);
- assert.match(bookingRoute,/PIN X904 diajukan:/);
- assert.match(bookingRoute,/BELUM terverifikasi oleh petugas/);
+ assert.match(bookingRoute,/requestedX904Pin != null/);
+ assert.match(bookingRoute,/resolveGymGuestName\(bookingCustomerName\)/);
+ assert.match(bookingRoute,/Verifikasi kepemilikan oleh petugas WAJIB/);
  assert.match(bookingRoute,/if \(!gymWalkIn \|\| x904IdentityType != null \|\| x904IdentityValue != null\)/);
  assert.match(bookingRoute,/if \(verifiedX904Identity\) \{/);
  assert.match(bookingRoute,/const customer = publicGymGuest \? null : await ensureCustomer/);
