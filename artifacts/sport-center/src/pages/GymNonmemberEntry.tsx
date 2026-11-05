@@ -16,7 +16,7 @@ export default function GymNonmemberEntry() {
         if (!active) return;
         const facilities: Facility[] = Array.isArray(payload) ? payload : 
           (payload && typeof payload === "object" && "facilities" in payload && Array.isArray(payload.facilities) ? payload.facilities : []);
-        const gym = facilities.filter(f => f.bookingMode === "walk_in" && /gym|fitness/i.test(f.name + " " + f.category));
+        const gym = facilities.filter(f => /gym|fitness/i.test(f.name + " " + f.category));
         if (gym.length !== 1) {
           setError(gym.length ? "Ada lebih dari satu fasilitas Gym. Hubungi petugas untuk memilih fasilitas." : "Fasilitas Gym harian belum tersedia.");
           return;
