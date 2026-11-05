@@ -4,6 +4,37 @@ export function isX904AutoSuspendExempt(pin: string, deviceRole: number): boolea
   return deviceRole === 14 || X904_AUTO_SUSPEND_EXEMPT_PINS.has(pin);
 }
 export const NONMEMBER_ACCESS_MS = 12 * 60 * 60 * 1000;
+/** Fixed WIB clock, for the current Sport Center opening hours: 06:00–23:00.
+ * A 12-hour paid grant is a MAXIMUM, not permission to stay after closing.
+ * There is no automatic reopening of the same grant the following morning.
+ */
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+const WIB_DAY_MS = 24 * 60 * 60 * 1000;
+export const X904_GYM_OPEN_HOUR_WIB = 6;
+export const X904_GYM_CLOSE_HOUR_WIB = 23;
+
+export function x904NonmemberOpeningHours(now: Date): boolean {
+  const millis = now.getTime();
+  if (!Number.isFinite(millis)) return false;
+  const withinDay = ((millis + WIB_OFFSET_MS) % WIB_DAY_MS + WIB_DAY_MS) % WIB_DAY_MS;
+  return withinDay >= X904_GYM_OPEN_HOUR_WIB * 60 * 60 * 1000 &&
+    withinDay < X904_GYM_CLOSE_HOUR_WIB * 60 * 60 * 1000;
+}
+
+/** Return min(activation + 12h, 23:00 WIB on activation's local date).
+ * An earlier stored expiry (e.g. refund/older grant) remains authoritative.
+ */
+export function x904NonmemberEffectiveExpiry(activatedAt: Date, storedExpiresAt?: Date | null): Date | null {
+  const start = activatedAt.getTime();
+  if (!Number.isFinite(start)) return null;
+  const wibDateStartUtc = Math.floor((start + WIB_OFFSET_MS) / WIB_DAY_MS) * WIB_DAY_MS - WIB_OFFSET_MS;
+  const closingUtc = wibDateStartUtc + X904_GYM_CLOSE_HOUR_WIB * 60 * 60 * 1000;
+  const stored = storedExpiresAt?.getTime();
+  const end = Math.min(start + NONMEMBER_ACCESS_MS, closingUtc,
+    stored !== undefined && Number.isFinite(stored) ? stored : Number.POSITIVE_INFINITY);
+  return new Date(end);
+}
+
 export const X904_NONMEMBER_CARD_ALIASES = {
   VIS001: { userPin: '78', deviceUid: 338, displayName: 'VIS 001' },
   VIS002: { userPin: '90', deviceUid: 339, displayName: 'VIS 002' },
@@ -32,8 +63,10 @@ export function decideNonmemberX904Access(input: {
   if (!input.verifiedNonmemberPin || !Number.isFinite(input.now.getTime())) return 'hold';
   if (!input.confirmedPaymentAt || !Number.isFinite(input.confirmedPaymentAt.getTime())) return 'hold';
   const start = input.confirmedPaymentAt.getTime();
+  const end = x904NonmemberEffectiveExpiry(input.confirmedPaymentAt)?.getTime();
   const active = input.paymentState === 'confirmed' &&
-    input.now.getTime() >= start && input.now.getTime() < start + NONMEMBER_ACCESS_MS;
+    x904NonmemberOpeningHours(input.now) &&
+    end !== undefined && input.now.getTime() >= start && input.now.getTime() < end;
   if (active) return input.currentGroup === 2 ? 'activate' : input.currentGroup === 1 ? 'correct' : 'hold';
   if (isX904AutoSuspendExempt(input.userPin,input.deviceRole)) return 'hold';
   return input.currentGroup === 1 ? 'suspend' : input.currentGroup === 2 ? 'correct' : 'hold';
