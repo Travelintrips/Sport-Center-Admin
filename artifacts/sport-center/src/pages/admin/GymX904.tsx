@@ -32,6 +32,7 @@ interface Checkin {
   notes: string | null;
   memberName: string | null;
   memberPhone: string | null;
+  source: "x904_auto" | "sc_manual" | "unknown";
 }
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -48,6 +49,7 @@ const csvCell = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""'
 export default function GymX904() {
   const [date, setDate] = useState(localDate);
   const [search, setSearch] = useState("");
+  const [checkinSourceFilter, setCheckinSourceFilter] = useState<"all" | "x904_auto" | "sc_manual" | "unknown">("all");
   const [machineUserSearch, setMachineUserSearch] = useState("");
   const [machineRoleFilter, setMachineRoleFilter] = useState("all");
   const [machineIdentityFilter, setMachineIdentityFilter] = useState("all");
@@ -468,16 +470,20 @@ export default function GymX904() {
   ];
   const rows = Array.isArray(data) ? data : [];
   const filtered = useMemo(() => rows.filter((row) =>
+    (checkinSourceFilter === "all" || row.source === checkinSourceFilter) &&
     [row.memberName, row.memberPhone, row.membershipId].some((v) =>
       String(v ?? "").toLowerCase().includes(search.toLowerCase().trim())
     )
-  ), [rows, search]);
+  ), [rows, search, checkinSourceFilter]);
+  const checkinSourceLabel = (source: Checkin["source"]) =>
+    source === "x904_auto" ? "Otomatis X904"
+      : source === "sc_manual" ? "Manual SC" : "Belum terverifikasi";
   const activeMembers = Array.isArray(memberships) ? memberships.filter((m) => m.status === "active").length : null;
 
   const exportCsv = () => {
     const lines = [
       ["Tanggal", "Jam WIB", "ID Member", "Nama", "Telepon", "Sumber"].map(csvCell).join(","),
-      ...filtered.map((row) => [row.checkinDate, formatTime(row.checkedInAt), row.membershipId, row.memberName, row.memberPhone, "Check-in SC (bukan X904)"].map(csvCell).join(","))
+      ...filtered.map((row) => [row.checkinDate, formatTime(row.checkedInAt), row.membershipId, row.memberName, row.memberPhone, checkinSourceLabel(row.source)].map(csvCell).join(","))
     ];
     const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -586,7 +592,7 @@ export default function GymX904() {
       </section>}
       {(tab === "dashboard" || tab === "members") && <section className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="font-semibold flex items-center gap-2"><Activity className="h-5 w-5 text-primary" />Riwayat check-in Sport Center</h2><p className="text-xs text-muted-foreground">Sumber: endpoint membership SC, baca saja. Penyegaran otomatis setiap 30 detik.</p></div>
+          <div><h2 className="font-semibold flex items-center gap-2"><Activity className="h-5 w-5 text-primary" />Riwayat check-in Sport Center</h2><p className="text-xs text-muted-foreground">Sumber: riwayat SC + penghubung event X904 terverifikasi, baca saja. Penyegaran otomatis setiap 30 detik.</p></div>
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={isFetching} onClick={() => { void queryClient.invalidateQueries({ queryKey: ["gym-checkins", date] }); void refetch(); }} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"><RefreshCw size={15} />{isFetching ? "Memuat..." : "Refresh"}</button>
             <button type="button" disabled={isError || isLoading || filtered.length === 0} onClick={exportCsv} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"><Download size={15} />Ekspor CSV</button>
@@ -595,12 +601,27 @@ export default function GymX904() {
         <div className="flex flex-wrap gap-3">
           <label className="text-sm flex flex-col gap-1">Tanggal<input aria-label="Tanggal absensi" className="rounded-lg border bg-background px-3 py-2" type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value || localDate())} /></label>
           <label className="text-sm flex flex-col gap-1 flex-1 min-w-48">Cari nama, telepon, atau ID member<div className="flex items-center gap-2 rounded-lg border px-3"><Search size={16} className="text-muted-foreground" /><input className="w-full bg-transparent py-2 outline-none" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari absensi..." /></div></label>
+          <label className="text-sm flex flex-col gap-1">Sumber absensi
+            <select aria-label="Filter sumber absensi" className="rounded-lg border bg-background px-3 py-2"
+              value={checkinSourceFilter}
+              onChange={(e) => setCheckinSourceFilter(e.target.value as typeof checkinSourceFilter)}>
+              <option value="all">Semua sumber</option>
+              <option value="x904_auto">Otomatis X904</option>
+              <option value="sc_manual">Manual SC</option>
+              <option value="unknown">Belum terverifikasi</option>
+            </select>
+          </label>
         </div>
         {isError ? <p role="alert" className="text-sm text-red-700">Gagal mengambil data: {error instanceof Error ? error.message : "Silakan coba kembali"}. Tidak menampilkan angka nol untuk data yang gagal dimuat.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead><tr className="border-b text-muted-foreground"><th className="py-3 pr-4">Nama</th><th className="py-3 pr-4">ID Member</th><th className="py-3 pr-4">Telepon</th><th className="py-3 pr-4">Jam (WIB)</th><th className="py-3">Sumber</th></tr></thead>
-              <tbody>{filtered.map((row) => <tr key={row.id} className="border-b last:border-0"><td className="py-3 pr-4">{row.memberName || "—"}</td><td className="py-3 pr-4">{row.membershipId}</td><td className="py-3 pr-4">{row.memberPhone || "—"}</td><td className="py-3 pr-4">{formatTime(row.checkedInAt)}</td><td className="py-3">SC manual</td></tr>)}</tbody>
+              <tbody>{filtered.map((row) => <tr key={row.id} className="border-b last:border-0"><td className="py-3 pr-4">{row.memberName || "—"}</td><td className="py-3 pr-4">{row.membershipId}</td><td className="py-3 pr-4">{row.memberPhone || "—"}</td><td className="py-3 pr-4">{formatTime(row.checkedInAt)}</td><td className="py-3"><span className={row.source === "x904_auto"
+                ? "font-medium text-emerald-700 dark:text-emerald-400"
+                : row.source === "sc_manual" ? "text-blue-700 dark:text-blue-400"
+                : "text-amber-700 dark:text-amber-400"}>
+                {checkinSourceLabel(row.source)}
+              </span></td></tr>)}</tbody>
             </table>
             {!isLoading && !filtered.length && <p className="py-8 text-center text-sm text-muted-foreground">Tidak ada check-in SC yang cocok pada tanggal ini.</p>}
             {isLoading && <p className="py-8 text-center text-sm text-muted-foreground">Memuat data absensi...</p>}

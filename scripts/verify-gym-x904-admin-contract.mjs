@@ -22,7 +22,14 @@ assert.match(page, /href="\/admin\/memberships"/);
 assert.match(page, /\/memberships\/checkins\?date=/);
 assert.match(page, /getToken\(/);
 assert.match(page, /response\.ok/);
-assert.match(page, /Check-in SC \(bukan X904\)/);
+// The list and CSV must classify actual automatic X904 scans from linked
+// event evidence; the previous constant "SC manual" was incorrect.
+assert.match(page, /checkinSourceLabel\(row\.source\)/);
+assert.match(page, /Otomatis X904/);
+assert.match(page, /Manual SC/);
+assert.match(page, /Belum terverifikasi/);
+assert.match(page, /Filter sumber absensi/);
+assert.doesNotMatch(page, /Check-in SC \(bukan X904\)/);
 assert.doesNotMatch(page, /localStorage|GYM_DEVICE_API_KEY|solutioncloud\.co\.id/i);
 assert.match(app, /<Route path="\/admin\/memberships" component=\{AdminRouter\}/);
 assert.match(app, /<Route path="\/gym"/);
