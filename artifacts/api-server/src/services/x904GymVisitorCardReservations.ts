@@ -262,7 +262,7 @@ export async function returnVerifiedVisCard(input: {
   try {
     return await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
-      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id,r.reserved_at,r.collected_at,
+      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.device_uid,r.booking_id,r.reserved_at,r.collected_at,
           b.status::text AS booking_status
         FROM sport_center.gym_vis_card_reservations r
         JOIN sport_center.sport_bookings b ON b.id=r.booking_id
@@ -307,11 +307,12 @@ export async function returnVerifiedVisCard(input: {
               AND cmd.user_pin=${String(row.user_pin)}
               AND cmd.created_at>latest.observed_at
           )
-          -- If commands were issued after handover, the LAST command must
-          -- be a verified VMSC suspend receipt preceding this snapshot.
+          -- PROD VMSC stores a device-confirmed result on the command itself.
+          -- Do not depend on the DEV-only receipt table. Require actual
+          -- command completion + device read-back + last observed Group 2.
           AND NOT EXISTS (
             SELECT 1 FROM (
-              SELECT command_id,command_type,state,completed_at
+              SELECT command_id,command_type,state,completed_at,result
               FROM sport_center.x904_user_commands
               WHERE device_serial='TDBD234200545'
                 AND user_pin=${String(row.user_pin)}
@@ -322,12 +323,9 @@ export async function returnVerifiedVisCard(input: {
                OR last_command.state<>'completed'
                OR last_command.completed_at IS NULL
                OR last_command.completed_at>latest.observed_at
-               OR NOT EXISTS (
-                 SELECT 1 FROM sport_center.x904_vmsc_command_receipts receipt
-                 WHERE receipt.command_id=last_command.command_id
-                   AND receipt.verified=true
-                   AND receipt.callback_received_at<=latest.observed_at
-               )
+               OR coalesce(last_command.result->>'readBackConfirmed','false')<>'true'
+               OR coalesce(last_command.result->>'afterGroup','')<>'2'
+               OR coalesce(last_command.result->>'deviceUid','')<>${String(row.device_uid)}
           ) LIMIT 1`);
       if (!readback.rows.length) throw new VisReservationError(409,"x904_readback_missing",
         "Snapshot X904 terbaru belum membuktikan PIN tersuspend di Grup 2. Kartu tetap ditahan.");
