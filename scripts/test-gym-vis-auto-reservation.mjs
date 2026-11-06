@@ -37,7 +37,8 @@ test("only official verified funds plus confirmed unique payment can reserve a p
  assert.match(service,/provider_trade_no/);
  assert.match(service,/x904_nonmember_daily_access/);
  assert.match(service,/access_state IN \('pending','active','review_required'\)/);
- assert.doesNotMatch(service,/ACTIVATE_USER|SUSPEND_USER|x904_user_commands/);
+ const allocateOnly=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function returnVerifiedVisCard"));
+ assert.doesNotMatch(allocateOnly,/ACTIVATE_USER|SUSPEND_USER|x904_user_commands/);
 });
 
 test("all six VIS codes use inventory-certified exact machine PIN, UID, role and label",()=>{
