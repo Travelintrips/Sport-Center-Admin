@@ -78,6 +78,11 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_dev_copy_e2e:
+        description: "Test Add/Edit/Delete/Retry in temporary tab in the user-created DEV copy only"
+        required: false
+        type: boolean
+        default: false
       kasbon_copy_to_dev:
         description: "Explicit DEV-only full workbook copy; original never modified"
         required: false
@@ -155,6 +160,20 @@ jobs:
           trap 'rm -f "$secret_file"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/clone-sc-kasbon-dev-workbook.mjs
+
+      - name: Kasbon DEV-copy E2E (ephemeral tab only)
+        if: ${{ inputs.kasbon_dev_copy_e2e == true }}
+        shell: bash
+        env:
+          KASBON_DEV_E2E_APPROVED: 'true'
+          SC_KASBON_DEV_E2E_SPREADSHEET_ID: '14O49d-DmcbMS9C70O_aFOTLzgp9BkHuYRzGrrT0JHxA'
+        run: |
+          set -euo pipefail
+          umask 077
+          file=$(mktemp "$RUNNER_TEMP/kasbon-dev-e2e.XXXXXX")
+          trap 'rm -f "$file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node scripts/test-sc-kasbon-dev-copy-e2e.mjs
 
       - name: Read-only Kasbon POOL service account permission check
         if: ${{ inputs.kasbon_pool_permissions_readonly == true }}
