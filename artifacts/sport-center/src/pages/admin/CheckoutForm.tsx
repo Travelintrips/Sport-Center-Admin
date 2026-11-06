@@ -1331,7 +1331,7 @@ export default function AdminCheckoutForm() {
         </div>
       </div>
 
-      {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole()) && (
+      {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "") && (
         <Card className="mb-6 border-blue-200 shadow-sm">
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
