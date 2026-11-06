@@ -34,7 +34,6 @@ beforeAll(async () => {
       lease_token uuid,leased_until timestamptz);
     CREATE UNIQUE INDEX x904_one_active_test ON sport_center.x904_user_commands(device_serial,user_pin)
       WHERE state IN ('queued','claimed');`);
-  await run("CREATE TABLE sport_center.gym_vis_card_reservations (booking_id int primary key, payment_id int, device_serial text NOT NULL DEFAULT 'TDBD234200545',card_code text NOT NULL, user_pin text NOT NULL, device_uid int NOT NULL,state text NOT NULL DEFAULT 'reserved',collected_at timestamptz)");
   await run(migration);
   await run(activationClockMigration);
   await run(businessHoursMigration);
@@ -63,7 +62,8 @@ beforeAll(async () => {
       ('TDBD234200545','601',601,'TEST VERIFIED',0),
       ('TDBD234200545','602',602,'TEST REVOKED',0),
       ('TDBD234200545','603',603,'TEST RACE',0),
-      ('TDBD234200545','13',13,'VIS 003',0);`);
+      ('TDBD234200545','13',13,'VIS 003',0),
+      ('TDBD234200545','17',17,'VIS 004',0);`);
   await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
     INSERT INTO sport_center.sport_bookings(id) VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
@@ -368,7 +368,7 @@ test("real worker: new VIS003 cannot activate while reserved; activates only aft
     await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9223");
     const linked = (await run("SELECT access_id,payment_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9123")).rows[0];
     expect(Number(linked.payment_id)).toBe(9223);
-    await run("INSERT INTO sport_center.gym_vis_card_reservations (booking_id,payment_id,card_code,user_pin,device_uid,state) VALUES(9123,9223,'VIS003','13',13,'reserved')");
+    await run("INSERT INTO sport_center.gym_vis_card_reservations (booking_id,payment_id,card_code,user_pin,device_uid,state,funds_reference,funds_verified_by) VALUES(9123,9223,'VIS003','13',13,'reserved','CI-BANK-9123','CI_STAFF')");
     await addSnapshot(new Date(at.getTime()-1000),'13','VIS 003',2);
     await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+100));
     expect(await commandFor("ACTIVATE_USER",Number(linked.access_id))).toBeUndefined();
@@ -403,19 +403,19 @@ test("real VIS reservation service: admin-confirmed payment creates one held gra
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES (9423,9323,'confirmed',now(),30000,'ci://validated-proof')");
   const request={orderNumber:order,officialBankReference:"ADMINPAY-9423",verifiedBy:"CI_ADMIN",officialFundsChecked:true,confirmedPaymentId:9423};
   const reserved=await autoReserveVisAfterFundsVerified(request);
-  expect(reserved).toMatchObject({cardCode:"VIS003",state:"reserved",newReservation:true});
+  expect(reserved).toMatchObject({cardCode:"VIS004",state:"reserved",newReservation:true});
   const grants=await run("SELECT access_state,verification_state,identity_label,user_pin,device_uid,booking_id,payment_id,expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9323");
   expect(grants.rows).toHaveLength(1);
-  expect(grants.rows[0]).toMatchObject({access_state:"pending",verification_state:"pending",identity_label:"VIS003",user_pin:"13",device_uid:13,booking_id:9323,payment_id:9423});
-  expect((await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin='13'")).rows[0].n).toBe(0);
+  expect(grants.rows[0]).toMatchObject({access_state:"pending",verification_state:"pending",identity_label:"VIS004",user_pin:"17",device_uid:17,booking_id:9323,payment_id:9423});
+  expect((await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin='17'")).rows[0].n).toBe(0);
   const repeat=await autoReserveVisAfterFundsVerified(request);
-  expect(repeat).toMatchObject({cardCode:"VIS003",state:"reserved",newReservation:false});
+  expect(repeat).toMatchObject({cardCode:"VIS004",state:"reserved",newReservation:false});
   expect((await run("SELECT count(*)::int AS n FROM sport_center.gym_vis_card_reservations WHERE booking_id=9323")).rows[0].n).toBe(1);
   const collected=await collectReservedVisCard({orderNumber:order,physicalCardHandedOver:true,collectedBy:"CI_STAFF"});
-  expect(collected).toMatchObject({cardCode:"VIS003",state:"collected"});
+  expect(collected).toMatchObject({cardCode:"VIS004",state:"collected"});
   const released=await run("SELECT verification_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9323");
   expect(released.rows[0].verification_state).toBe("verified");
-  expect((await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin='13'")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin='17'")).rows[0].n).toBe(0);
   const replay=await collectReservedVisCard({orderNumber:order,physicalCardHandedOver:true,collectedBy:"CI_STAFF"});
   expect(replay.state).toBe("collected");
 });
