@@ -31,4 +31,5 @@ test("production Booking Detail banner is explicitly feature-gated", () => {
   assert.match(bookingDetailSource, /QRIS_GMAIL_PROD_BANNER_ENABLED/);
   assert.match(bookingDetailSource, /sport_center\.qris_email_transactions/);
   assert.match(bookingDetailSource, /process\.env\.NODE_ENV === "production"/);
+  assert.match(bookingDetailSource, /\? sql\.raw\("'reference_match_review'"\)/);
 });

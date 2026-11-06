@@ -223,6 +223,9 @@ async function getBookingWithPayment(id: number) {
   const qrisDetectionTable = process.env.NODE_ENV === "production"
     ? "sport_center.qris_email_transactions"
     : "sport_center.qris_email_transactions_dev";
+  const qrisDetectionStatuses = process.env.NODE_ENV === "production"
+    ? sql.raw("'reference_match_review'")
+    : sql.raw("'reference_match_review','ambiguous','review_required'");
 
   if (qrisDetectionEnabled && detailPaymentIds.length > 0) {
     try {
@@ -239,7 +242,7 @@ async function getBookingWithPayment(id: number) {
             id
           FROM ${sql.raw(qrisDetectionTable)}
           WHERE candidate_payment_ids && ARRAY[${sql.join(detailPaymentIds.map((paymentId) => sql`${paymentId}`), sql`, `)}]::integer[]
-            AND match_status IN ('reference_match_review','ambiguous','review_required')
+            AND match_status IN (${qrisDetectionStatuses})
         ) qris_email_candidates
         ORDER BY payment_id, id DESC
       `);
