@@ -39,6 +39,7 @@ describe("No-login ordinary PIN booking/payment isolation", () => {
     expect(scope).toContain("isOperationalBookingRole");
     expect(scope).toContain("identityChecked !== true");
     expect(scope).toContain('grant.payment_status !== "confirmed"');
+    expect(scope).toContain('["confirmed", "paid"].includes(String(grant.booking_status))');
     expect(scope).toContain("hour < 6 || hour >= 23");
     expect(scope).toContain("x904_verified_nonmember_identities");
     expect(scope).toContain("gym_x904_member_mapping");
