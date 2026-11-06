@@ -39,4 +39,14 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(api).toContain('verifiedX904Identity?.identityType === "card"');
     expect(form).toContain('guestIdentityRoute === "visitor_card"');
   });
+  test("public ordinary PIN checkout blocks mismatch before submission and does not reveal registry PIN", () => {
+    expect(form).toContain('guestIdentityRoute === "registered" && guestPinMatch !== true');
+    expect(form).toContain('guestPin.trim() && guestPinMatch === false');
+    expect(form).toContain('Pemeriksaan PIN X904 belum selesai');
+    expect(form).toContain('Nama dan PIN X904 tidak cocok. Periksa kembali sebelum membuat booking.');
+    expect(form).toContain('PIN X904 yang Anda masukkan');
+    expect(form).toContain('{guestPin}');
+    expect(form).toContain('publicGymGuest && guestPin.trim() && guestPinMatch === true');
+  });
+
 });
