@@ -314,5 +314,6 @@ jobs:
       - name: Test actual nonmember worker with collected VIS and cancelled booking
         env:
           X904_NONMEMBER_ISOLATED_PG_URL: postgresql://postgres:vis_ci_only@127.0.0.1:55444/x904_nonmember_safe2
+          SUPABASE_DATABASE_URL_DEV: postgresql://postgres:vis_ci_only@127.0.0.1:55444/x904_nonmember_safe2
           NODE_ENV: test
         run: pnpm --filter @workspace/api-server test:x904-nonmember-real-pg
