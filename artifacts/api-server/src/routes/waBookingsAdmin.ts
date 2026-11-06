@@ -162,20 +162,26 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
     accessState: string; verificationState: string; paymentStatus: string | null;
   } | null = null;
   if (booking.source === "gym_public_guest") {
-    const linked = await db.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
-        a.access_state,a.verification_state,p.status::text AS payment_status
-      FROM sport_center.x904_nonmember_daily_access a
-      LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
-      WHERE a.booking_id=${booking.id} AND a.identity_type='pin'
-        AND a.device_serial='TDBD234200545' LIMIT 1`);
-    if (linked.rows.length === 1) {
-      const row = linked.rows[0] as any;
-      x904PinGrant = {
-        accessId: Number(row.access_id), userPin: String(row.user_pin),
-        deviceUid: Number(row.device_uid), verifiedName: String(row.verified_name),
-        accessState: String(row.access_state), verificationState: String(row.verification_state),
-        paymentStatus: row.payment_status == null ? null : String(row.payment_status),
-      };
+    try {
+      const linked = await db.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
+          a.access_state,a.verification_state,p.status::text AS payment_status
+        FROM sport_center.x904_nonmember_daily_access a
+        LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+        WHERE a.booking_id=${booking.id} AND a.identity_type='pin'
+          AND a.device_serial='TDBD234200545' LIMIT 1`);
+      if (linked.rows.length === 1) {
+        const row = linked.rows[0] as any;
+        x904PinGrant = {
+          accessId: Number(row.access_id), userPin: String(row.user_pin),
+          deviceUid: Number(row.device_uid), verifiedName: String(row.verified_name),
+          accessState: String(row.access_state), verificationState: String(row.verification_state),
+          paymentStatus: row.payment_status == null ? null : String(row.payment_status),
+        };
+      }
+    } catch (error) {
+      // DEV may not yet have the staged grant schema. Do not break the
+      // existing guest / VIS booking detail screen or imply PIN approval.
+      console.warn("[x904-guest-pin] operator grant lookup unavailable", error);
     }
   }
 
