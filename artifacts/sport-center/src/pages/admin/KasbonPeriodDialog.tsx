@@ -7,7 +7,7 @@ import {Dialog,DialogContent,DialogHeader,DialogTitle} from "@/components/ui/dia
 import {useToast} from "@/hooks/use-toast";
 import {getToken} from "@/lib/auth";
 
-type CarryMode="zero"|"previous_total";
+type CarryMode="febri_andi_only";
 type Preview={period:string;sourcePeriod:string;employeeCount:number;
  destinationStart:number;destinationEnd:number;mode:string;writeEnabled:boolean;carryMode:CarryMode};
 const base=import.meta.env.VITE_API_BASE_URL??"/api";
@@ -23,7 +23,7 @@ export default function KasbonPeriodDialog(){
  const {toast}=useToast();
  const [open,setOpen]=useState(false);
  const [period,setPeriod]=useState("2026-12");
- const [carryMode,setCarryMode]=useState<CarryMode|null>(null);
+ const carryMode:CarryMode="febri_andi_only";
  const [preview,setPreview]=useState<Preview|null>(null);
  const [busy,setBusy]=useState(false);
  const [result,setResult]=useState("");
@@ -36,7 +36,7 @@ export default function KasbonPeriodDialog(){
   finally{setBusy(false);}
  };
  const create=async()=>{
-  if(!preview?.writeEnabled||busy||!carryMode)return;
+  if(!preview?.writeEnabled||busy)return;
   setBusy(true);
   try{
    const data=await request("/admin/sc-kasbon-periods/create",{period,carryMode});
@@ -56,13 +56,11 @@ export default function KasbonPeriodDialog(){
      <Label htmlFor="sc-period-month">Bulan dan Tahun</Label>
      <Input id="sc-period-month" type="month" value={period} onChange={e=>{setPeriod(e.target.value);reset();}}/>
     </div>
-    <fieldset className="space-y-2">
-     <legend className="text-sm font-medium">Saldo awal bulan baru</legend>
-     <label className="flex items-start gap-2 text-sm"><input type="radio" name="sc-carry" checked={carryMode==="previous_total"} onChange={()=>{setCarryMode("previous_total");reset();}}/>
-      <span>Bawa total periode sebelumnya ke saldo awal (termasuk kasbon yang belum disesuaikan).</span></label>
-     <label className="flex items-start gap-2 text-sm"><input type="radio" name="sc-carry" checked={carryMode==="zero"} onChange={()=>{setCarryMode("zero");reset();}}/>
-      <span>Mulai saldo awal Rp0. Kasbon bulan sebelumnya tidak ikut dibawa.</span></label>
-    </fieldset>
+    <div className="rounded-md border p-3 text-sm space-y-1">
+     <p className="font-medium">Aturan saldo awal otomatis</p>
+     <p>Hanya <strong>Kasbon Febri</strong> dan <strong>Kasbon Andi</strong> yang membawa total bulan sebelumnya.</p>
+     <p>Seluruh karyawan lain mulai dari <strong>Rp0</strong>, dan kolom tanggal bulan baru kosong.</p>
+    </div>
     {preview&&<div className="rounded-md border p-3 text-sm space-y-1">
       <p>Periode baru: <strong>{preview.period}</strong></p>
       <p>Template: {preview.sourcePeriod} · {preview.employeeCount} baris karyawan</p>
@@ -72,7 +70,7 @@ export default function KasbonPeriodDialog(){
     {result&&<p role="status" className="text-sm">{result}</p>}
     <div className="flex flex-wrap justify-end gap-2">
      <Button variant="outline" disabled={busy} onClick={()=>setOpen(false)}>Tutup</Button>
-     <Button variant="outline" disabled={busy||!period||!carryMode} onClick={()=>void runPreview()}>{busy?"Memeriksa...":"Periksa Periode"}</Button>
+     <Button variant="outline" disabled={busy||!period} onClick={()=>void runPreview()}>{busy?"Memeriksa...":"Periksa Periode"}</Button>
      <Button disabled={busy||!preview?.writeEnabled||preview.period!==period||preview.carryMode!==carryMode} onClick={()=>void create()}>{busy?"Memproses...":"Buat di DEV"}</Button>
     </div>
    </DialogContent>
