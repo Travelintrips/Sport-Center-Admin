@@ -29,6 +29,7 @@ import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
 import { isWithinGymGracePeriod, resolveGymRenewalStart } from "../services/gymMembershipEntitlement";
 import { x904PaymentConfirmedEventKey } from "../services/x904AutomationDecision";
+import { chooseThreeDigitX904Pin } from "../lib/x904NewMemberPin";
 
 const router = Router();
 
@@ -935,6 +936,68 @@ router.get("/memberships/:id/payments", adminMiddleware, async (req, res) => {
   }
 });
 
+
+// A staged CREATE_USER command is not a verified identity or paid membership.
+// VMSC ACK and an authenticated newer roster are required before payment.
+router.post("/memberships/admin-x904-create-user", adminMiddleware, async (req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor || !["owner","super_admin"].includes(actor.role))
+    return res.status(403).json({error:"Pembuatan user mesin memerlukan Owner/Super Admin."});
+  if(process.env.GYM_X904_GYM_ENROLLMENT_CREATE_ENABLED!=="true" ||
+     process.env.GYM_X904_USER_WRITE_ENABLED!=="true")
+    return res.status(503).json({error:"Pembuatan user X904 belum diaktifkan; worker CREATE_USER harus diuji terlebih dahulu."});
+  const mode=String(req.body?.mode??"");
+  const name=String(req.body?.name??"").trim();
+  const manualPin=String(req.body?.pin??"").trim();
+  if(!["manual","generate"].includes(mode)||!/^[A-Za-z0-9 ._-]{2,24}$/.test(name)||
+     (mode==="manual"&&!/^[1-9][0-9]{2}$/.test(manualPin)))
+    return res.status(400).json({error:"Masukkan nama valid dan PIN 3 digit (100–999)."});
+  try {
+    const result=await db.transaction(async tx=>{
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('X904_GYM_NEW_USER_3_DIGIT'))`);
+      const snapshot=await tx.execute(sql`SELECT s.last_snapshot_id,s.user_count
+        FROM sport_center.gym_x904_lan_state s
+        WHERE s.device_serial='TDBD234200545'
+          AND s.last_complete_at >= now() - interval '15 minutes'`);
+      if(snapshot.rows.length!==1||!snapshot.rows[0].last_snapshot_id)
+        throw new MembershipProofError(409,"Snapshot user mesin belum tersedia.");
+      const valid=await tx.execute(sql`SELECT count(*)::int AS n
+        FROM sport_center.gym_x904_lan_users u
+        WHERE u.device_serial='TDBD234200545'
+          AND u.last_seen_snapshot=${snapshot.rows[0].last_snapshot_id}`);
+      if(Number(valid.rows[0]?.n??0)<1 ||
+         Number(valid.rows[0]?.n??0)!==Number(snapshot.rows[0].user_count))
+        throw new MembershipProofError(409,"Snapshot roster belum lengkap. Muat ulang inventaris mesin dahulu.");
+      const occupied=await tx.execute(sql`SELECT pin FROM (
+        SELECT user_pin AS pin FROM sport_center.gym_x904_lan_users WHERE device_serial='TDBD234200545'
+        UNION SELECT user_pin FROM sport_center.gym_x904_member_mapping WHERE device_serial='TDBD234200545'
+        UNION SELECT user_pin FROM sport_center.x904_user_commands
+          WHERE device_serial='TDBD234200545' AND command_type='CREATE_USER'
+      ) used WHERE pin ~ '^[1-9][0-9]{2}$'`);
+      const reserved=new Set(occupied.rows.map((r:any)=>String(r.pin)));
+      const pin=chooseThreeDigitX904Pin(mode as "manual"|"generate",manualPin,
+        reserved,Math.floor(Math.random()*900));
+      if(!pin)
+        throw new MembershipProofError(409,"PIN sudah ada, ganti dengan yang baru atau Generate PIN.");
+      const command=await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
+        (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
+        VALUES ('TDBD234200545','CREATE_USER',${pin},
+          ${JSON.stringify({name,source:"gym_admin_new_member"})}::jsonb,
+          ${actor.userId},${randomUUID()})
+        RETURNING command_id`);
+      if(command.rows.length!==1)throw new Error("CREATE_USER_COMMAND_INSERT_FAILED");
+      return {pin,commandId:String(command.rows[0].command_id)};
+    });
+    return res.status(202).json({...result,state:"queued",verified:false,
+      message:"Tunggu ACK VMSC dan snapshot mesin baru sebelum pendaftaran dan pembayaran."});
+  } catch(err) {
+    if(err instanceof MembershipProofError)return res.status(err.status).json({error:err.message});
+    req.log.error({err},"X904 new user enqueue failure");
+    return res.status(503).json({error:"Gagal membuat antrean user X904."});
+  }
+});
+
 router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, res) => {
   try {
     const role = String((req as any).user?.role ?? "");
@@ -954,6 +1017,7 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
              m.status AS mapping_status,
              gm.status::text AS membership_status
       FROM sport_center.gym_x904_lan_users i
+      JOIN sport_center.gym_x904_lan_state last ON last.device_serial=i.device_serial AND last.last_snapshot_id=i.last_seen_snapshot
       LEFT JOIN sport_center.gym_x904_member_mapping m
         ON m.device_serial = i.device_serial AND m.user_pin = i.user_pin
       LEFT JOIN sport_center.sport_memberships gm ON gm.id = m.membership_id

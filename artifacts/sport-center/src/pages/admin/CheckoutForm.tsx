@@ -150,6 +150,12 @@ export default function AdminCheckoutForm() {
   const [x904NameSearch, setX904NameSearch] = useState("");
   const [x904MachineUsers, setX904MachineUsers] = useState<Array<{userPin:string;deviceUid:number;displayName:string}>>([]);
   const [x904NameLookupError, setX904NameLookupError] = useState("");
+  const [newX904PinMode, setNewX904PinMode] = useState<"manual"|"generate">("generate");
+  const [newX904ManualPin, setNewX904ManualPin] = useState("");
+  const [newX904CommandId, setNewX904CommandId] = useState("");
+  const [newX904ReservedPin, setNewX904ReservedPin] = useState("");
+  const [newX904Busy, setNewX904Busy] = useState(false);
+  const [newX904Notice, setNewX904Notice] = useState("");
   const [membershipX904Pin, setMembershipX904Pin] = useState("");
   const [membershipX904Search, setMembershipX904Search] = useState("");
   const [membershipX904Candidates, setMembershipX904Candidates] = useState<Array<{pin:string;uid:number;name:string;available:boolean;mappedMembershipId:number|null;membershipStatus:string|null}>>([]);
@@ -709,6 +715,69 @@ export default function AdminCheckoutForm() {
   const membershipCharge = 300000 * Number(memberMonths || 1);
   const renewalPeriodValid = memberAction !== "renew" ||
     Boolean(renewalStartDate && renewalEndDate && renewalStartDate <= renewalEndDate);
+
+  async function queueNewX904User() {
+    const name = (isGuest ? guestName : String(selectedCustomer?.name ?? "")).trim();
+    if (!/^[A-Za-z0-9 ._-]{2,24}$/.test(name)) {
+      setNewX904Notice("Isi nama pemesan terlebih dahulu (2–24 karakter sesuai batas mesin X904).");
+      return;
+    }
+    setNewX904Busy(true); setNewX904Notice("");
+    try {
+      const response=await fetch("/api/memberships/admin-x904-create-user", {
+        method:"POST",
+        headers:{Authorization:"Bearer "+(getToken()??""),"Content-Type":"application/json"},
+        body:JSON.stringify({mode:newX904PinMode, pin:newX904ManualPin, name}),
+      });
+      const data=await response.json().catch(()=>({}));
+      if (!response.ok) throw new Error(data.error || "Pembuatan user X904 gagal.");
+      setNewX904ReservedPin(String(data.pin));
+      setNewX904CommandId(String(data.commandId));
+      setMembershipX904Pin("");setMembershipX904Name("");
+      setMembershipX904SelectedUid(null);setMembershipX904IdentityConfirmed(false);
+      setNewX904Notice("PIN "+data.pin+" masuk antrean mesin. Belum boleh digunakan untuk pembayaran. Periksa ACK dan snapshot.");
+    } catch(error) {
+      setNewX904Notice(error instanceof Error?error.message:"Pembuatan user X904 gagal.");
+    } finally {setNewX904Busy(false);}
+  }
+
+  async function verifyNewX904User() {
+    if (!newX904CommandId || !newX904ReservedPin) return;
+    setNewX904Busy(true);setNewX904Notice("");
+    try {
+      const auth={Authorization:"Bearer "+(getToken()??"")};
+      const status=await fetch("/api/admin/gym-x904/user-command/"+encodeURIComponent(newX904CommandId),
+        {headers:auth,cache:"no-store"});
+      const details=await status.json().catch(()=>({}));
+      if(!status.ok) throw new Error(details.error||"Status command belum tersedia.");
+      const command=details.command;
+      if(command?.state!=="completed" || command?.result?.readBackConfirmed!==true){
+        setNewX904Notice("Perintah masih "+String(command?.state??"menunggu")+
+          ". Perlu ACK/read-back mesin resmi sebelum membuat membership.");
+        return;
+      }
+      const candidatesResponse=await fetch(
+        "/api/memberships/admin-x904-candidates?q="+encodeURIComponent(newX904ReservedPin),
+        {headers:auth,cache:"no-store"});
+      const data=await candidatesResponse.json().catch(()=>({}));
+      if(!candidatesResponse.ok)throw new Error(data.error||"Snapshot mesin belum dapat dibaca.");
+      const expectedName=(isGuest?guestName:String(selectedCustomer?.name??"")).trim();
+      const item=(Array.isArray(data.candidates)?data.candidates:[]).find((row:any)=>
+        row.pin===newX904ReservedPin && row.name===expectedName &&
+        row.available && Number.isSafeInteger(row.uid) && row.uid>0);
+      if(!item){setNewX904Notice("ACK ada, tetapi PIN/nama/UID belum ditemukan pada snapshot LAN terbaru. Muat ulang setelah sinkronisasi.");return;}
+      setMembershipX904Pin(item.pin);
+      setMembershipX904Name(item.name);
+      setMembershipX904SelectedUid(item.uid);
+      setMembershipX904Search(item.name+" · PIN "+item.pin);
+      setMembershipX904IdentityConfirmed(false);
+      setMembershipX904Error("");
+      setNewX904Notice("PIN "+item.pin+" sudah terverifikasi pada mesin. Centang konfirmasi identitas untuk melanjutkan.");
+    }catch(error){
+      setNewX904Notice(error instanceof Error?error.message:"Verifikasi user X904 belum selesai.");
+    }finally{setNewX904Busy(false);}
+  }
+
   const membershipReady = memberAction === "new"
     ? Boolean((isGuest ? guestName : selectedCustomer?.name)?.trim() && (isGuest ? guestPhone : selectedCustomer?.phone)?.trim()
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
@@ -1996,7 +2065,7 @@ export default function AdminCheckoutForm() {
             {isMembership && <div className="rounded-lg border p-4 space-y-3">
               <p className="font-semibold">Pengelolaan Member Gym</p>
               <Label>Tindakan Membership</Label>
-              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setMemberId("");setRenewalStartOverride("");setMembershipResult("");setMembershipPaymentTarget(null);setMembershipPaymentDone(false);setMembershipPaymentFile(null);}}>
+              <Select value={memberAction} onValueChange={(v) => {setMemberAction(v);setNewX904CommandId("");setNewX904ReservedPin("");setNewX904Notice("");setMemberId("");setRenewalStartOverride("");setMembershipResult("");setMembershipPaymentTarget(null);setMembershipPaymentDone(false);setMembershipPaymentFile(null);}}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">Daftar Member Baru</SelectItem>
@@ -2007,6 +2076,30 @@ export default function AdminCheckoutForm() {
               {memberAction === "new" ? <>
                 <p className="text-xs text-muted-foreground">Isi nama, WhatsApp dan email di atas. Fasilitas Gym otomatis; tidak ada tarif kunjungan Rp30.000.</p>
                 <div className="rounded-lg border p-3 space-y-2">
+                  <Label>Buat user X904 *</Label>
+                  <p className="text-xs text-muted-foreground">Pilih PIN manual 3 digit atau Generate PIN otomatis (100–999). Server menolak PIN yang sudah ada, pernah diantrekan, atau sudah dipetakan. Pendaftaran dan pembayaran belum diproses sampai user terverifikasi di mesin.</p>
+                  <div className="flex flex-wrap gap-4 text-sm" role="radiogroup" aria-label="Metode pembuatan PIN X904">
+                    <label className="flex items-center gap-2"><input type="radio" checked={newX904PinMode==="manual"} onChange={()=>setNewX904PinMode("manual")} disabled={Boolean(newX904CommandId)}/>Masukkan PIN</label>
+                    <label className="flex items-center gap-2"><input type="radio" checked={newX904PinMode==="generate"} onChange={()=>setNewX904PinMode("generate")} disabled={Boolean(newX904CommandId)}/>Generate PIN 3 digit</label>
+                  </div>
+                  {newX904PinMode==="manual" && <Input aria-label="PIN X904 baru 3 digit" inputMode="numeric" maxLength={3}
+                    value={newX904ManualPin} disabled={Boolean(newX904CommandId)}
+                    placeholder="Contoh: 318" onChange={e=>setNewX904ManualPin(e.target.value.replace(/[^0-9]/g,"").slice(0,3))}/>}
+                  {!newX904CommandId ? (
+                    <Button type="button" variant="outline" disabled={newX904Busy || (newX904PinMode==="manual" && !/^[1-9][0-9]{2}$/.test(newX904ManualPin))}
+                      onClick={()=>void queueNewX904User()}>{newX904Busy?"Memproses...":newX904PinMode==="generate"?"Generate PIN & Buat User X904":"Buat User X904 dengan PIN Ini"}</Button>
+                  ):(
+                    <div className="rounded-md border p-2 space-y-2">
+                      <p className="text-sm font-medium">PIN {newX904ReservedPin} · Menunggu verifikasi X904</p>
+                      <Button type="button" variant="outline" disabled={newX904Busy} onClick={()=>void verifyNewX904User()}>
+                        {newX904Busy?"Memeriksa...":"Periksa ACK & Snapshot Mesin"}
+                      </Button>
+                    </div>
+                  )}
+                  {newX904Notice && <p className="text-xs" role="status">{newX904Notice}</p>}
+                  <details className="rounded-md border p-2">
+                    <summary className="cursor-pointer text-xs font-medium">Gunakan PIN user yang sudah ada di mesin (alur lama)</summary>
+                    <div className="mt-2 space-y-2">
                   <Label htmlFor="membership-x904-search">Cari nama / PIN mesin X904 *</Label>
                   <Input id="membership-x904-search" autoComplete="off"
                     placeholder="Cari nama mesin atau PIN, mis. BUAN"
@@ -2061,6 +2154,8 @@ export default function AdminCheckoutForm() {
                       <span>Saya telah mencocokkan pemilik PIN dengan identitas pendaftar dan nama di mesin.</span>
                     </label>
                   )}
+                    </div>
+                  </details>
                   <p className="text-xs text-muted-foreground">PIN harus terdaftar pada X904 dan belum dipetakan ke membership lain. Pembayaran tidak otomatis membuktikan pintu sudah terbuka; tunggu ACK mesin.</p>
                 </div>
                 <Label>Paket membership</Label>
