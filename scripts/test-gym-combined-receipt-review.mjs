@@ -138,3 +138,14 @@ test("approved receipt reloads from server and shows Gym membership, not nonmemb
  assert.match(ui,/Member Gym baru/);
  assert.match(ui,/Perpanjangan member Gym/);
 });
+
+test("scoped dual-PIN X904 rollout stays allowlisted and serializes machine commands",()=>{
+ const worker=read("artifacts/api-server/src/services/x904AutomaticCommandWorker.ts");
+ assert.match(worker,/pins.length>2/);
+ assert.match(worker,/new Set\(pins\).size!==pins.length/);
+ assert.match(worker,/mp.user_pin IN \(\$\{scopedPinFilter\}\)/);
+ assert.match(worker,/if\(allVerified \|\| pins.length>1\)/);
+ assert.match(worker,/readBackConfirmed===true/);
+ assert.match(worker,/isX904AutoSuspendExempt/);
+ assert.doesNotMatch(worker,/GYM_X904_AUTOMATIC_SCOPE==="all_verified"\s*\|\|/);
+});
