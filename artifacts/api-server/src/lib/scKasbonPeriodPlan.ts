@@ -1,6 +1,6 @@
 /** Pure month section planner: no network, database, or Sheets mutations. */
 export const monthNames = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
-export type CarryMode = "zero" | "previous_total";
+export type CarryMode = "febri_andi_only";
 export type PeriodPlan = {
  period:string; sourcePeriod:string; sourceStart:number; sourceEnd:number;
  destinationStart:number; destinationEnd:number; employeeCount:number;
@@ -30,7 +30,7 @@ export function planNewPeriod(
  formatted:unknown[][],unformatted:unknown[][],period:string,carryMode:CarryMode
 ):PeriodPlan {
  const {year,month,monthLabel}=parsePeriod(period);
- if(carryMode!=="zero"&&carryMode!=="previous_total")throw Error("CARRY_MODE_REQUIRED");
+ if(carryMode!=="febri_andi_only")throw Error("CARRY_MODE_REQUIRED");
  const prevMonth=month===1?12:month-1,prevYear=month===1?year-1:year;
  const prevPeriod=`${prevYear}-${String(prevMonth).padStart(2,"0")}`;
  const max=Math.max(formatted.length,unformatted.length);
@@ -58,6 +58,12 @@ export function planNewPeriod(
  if(sections.some(s=>s.period===period))throw Error("PERIOD_ALREADY_EXISTS");
  const source=sections.filter(s=>s.period===prevPeriod);
  if(source.length!==1)throw Error("PREVIOUS_PERIOD_NOT_UNIQUE_OR_MISSING");
+ // Only the two authorized legacy balances are carried month to month.
+ // Require exactly one of each to avoid an accidentally omitted/duplicated carryover.
+ for (const name of ["kasbon febri", "kasbon andi"]) {
+  if (source[0].labels.filter(label=>canon(label)===name).length!==1)
+   throw Error("REQUIRED_CARRYOVER_EMPLOYEE_MISSING_OR_DUPLICATE");
+ }
  // An older layout beyond this source can be present, but never insert into
  // the middle of historical rows; only append after the final occupied cell.
  const occupied=formatted.reduce((last,values,index)=>values?.some(v=>v!==""&&v!=null)?index+1:last,0);
@@ -69,7 +75,7 @@ export function planNewPeriod(
   carryMode,columns:35};
 }
 export function buildPeriodCells(plan:PeriodPlan):Array<Array<{userEnteredValue?:{stringValue?:string;numberValue?:number;formulaValue?:string}}>> {
- const {period,destinationStart:top,employeeCount:count,sourceStart:src,carryMode}=plan;
+ const {period,destinationStart:top,employeeCount:count,sourceStart:src}=plan;
  const {year,month,monthLabel}=parsePeriod(period);
  const dateEnd=new Date(Date.UTC(year,month,0)).getUTCDate();
  const value=(x:string|number,formula=false)=>typeof x==="number"?{userEnteredValue:{numberValue:x}}:
@@ -87,7 +93,9 @@ export function buildPeriodCells(plan:PeriodPlan):Array<Array<{userEnteredValue?
   const newRow=top+2+i,sourceRow=src+2+i;
   rows[i+2][0]=value(i+1);rows[i+2][1]=value(plan.employeeLabels[i]);
   rows[i+2][2]=value(`=SUM(D${newRow}:AI${newRow})`,true);
-  rows[i+2][3]=carryMode==="previous_total"?value(`=C${sourceRow}`,true):value(0);
+  const carry = ["kasbon febri", "kasbon andi"].includes(canon(plan.employeeLabels[i]));
+  rows[i+2][3]=carry ? value(`=C${sourceRow}`,true) : value(0);
+  // Monthly transaction date cells E:AI remain intentionally empty for every employee.
  }
  const last=top+2+count,idx=2+count;
  rows[idx][1]=value("Total");

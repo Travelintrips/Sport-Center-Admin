@@ -1,3 +1,9 @@
+type CombinedGymReceipt = {
+  id:number;amount:number;method:string;paymentDate:string;status:string;
+  proofUrl:string;bankMutationId:number|null;allocationCount:number;allocationSum:number;
+  allocations:Array<{pin:string;name:string;kind:"new"|"renew";membershipId:number|null;amount:number;status:string}>;
+};
+
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useListFacilities, useListCustomers } from "@workspace/api-client-react";
@@ -196,6 +202,10 @@ export default function AdminCheckoutForm() {
   ]);
   const [combinedBusy, setCombinedBusy] = useState(false);
   const [combinedOutcome, setCombinedOutcome] = useState("");
+  const [combinedReceipts, setCombinedReceipts] = useState<CombinedGymReceipt[]>([]);
+  const [combinedReviewError, setCombinedReviewError] = useState("");
+  const [combinedReviewLoading, setCombinedReviewLoading] = useState(false);
+
 
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -703,6 +713,22 @@ export default function AdminCheckoutForm() {
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
       && membershipX904Name && membershipX904IdentityConfirmed && membershipX904Pin && membershipX904SelectedUid !== null && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && renewalPeriodValid && (memberAction !== "checkin" || matchedMember.status === "active"));
+  async function loadCombinedReceipts() {
+    if (!["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "")) return;
+    setCombinedReviewLoading(true);
+    setCombinedReviewError("");
+    try {
+      const response=await fetch("/api/memberships/admin-combined-receipts",{
+        headers:{Authorization:"Bearer "+(getToken()??"")},cache:"no-store",
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(data.error || "Gagal memuat pembayaran gabungan");
+      setCombinedReceipts(Array.isArray(data.receipts)?data.receipts:[]);
+    } catch(error) {
+      setCombinedReviewError(error instanceof Error?error.message:"Tidak dapat memuat daftar bukti");
+    } finally {setCombinedReviewLoading(false);}
+  }
+
   async function submitCombinedReceipt(event: React.FormEvent) {
     event.preventDefault();
     if (combinedBusy) return;
@@ -730,6 +756,7 @@ export default function AdminCheckoutForm() {
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.error || "Bukti gabungan belum dapat dicatat.");
       setCombinedOutcome(`Bukti #${result.receiptId} tercatat untuk ${combinedRows.length} penerima: ${formatRupiah(Number(result.amount))}. Nomor internal dibuat otomatis. Status menunggu verifikasi bank; membership belum lunas dan X904 belum aktif.`);
+      void loadCombinedReceipts();
     } catch(error) {
       setCombinedOutcome(error instanceof Error ? error.message : "Pencatatan bukti gabungan gagal.");
     } finally {setCombinedBusy(false);}
@@ -1339,6 +1366,38 @@ export default function AdminCheckoutForm() {
               </Button>
             </div>
           </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">Bukti gabungan tersimpan</p>
+              <Button type="button" variant="outline" size="sm" disabled={combinedReviewLoading}
+                onClick={()=>void loadCombinedReceipts()}>{combinedReviewLoading?"Memuat...":"Muat daftar bukti"}</Button>
+            </div>
+            {combinedReviewError && <p role="alert" className="text-xs text-destructive">{combinedReviewError}</p>}
+            {combinedReceipts.map(receipt=>(
+              <div key={receipt.id} className="space-y-2 rounded-lg border p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <strong>Bukti #{receipt.id} · {formatRupiah(receipt.amount)}</strong>
+                  <span className={receipt.status==="verified"?"text-green-700":"text-amber-700"}>
+                    {receipt.status==="awaiting_bank_verification"?"Menunggu verifikasi dana":receipt.status}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{receipt.method.toUpperCase()} · {receipt.paymentDate}</span>
+                  <a href={receipt.proofUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline">Lihat bukti foto</a>
+                </div>
+                {receipt.allocations.map((allocation,index)=>(
+                  <div key={index} className="flex flex-wrap justify-between gap-2 border-t pt-2">
+                    <span>{allocation.name} · PIN {allocation.pin} · {allocation.kind==="new"?"Member baru":"Perpanjangan"}</span>
+                    <strong>{formatRupiah(allocation.amount)}</strong>
+                  </div>
+                ))}
+                {receipt.allocationSum!==receipt.amount && <p role="alert" className="text-destructive">Jumlah alokasi tidak sesuai: periksa sebelum konfirmasi.</p>}
+                <p className="text-xs text-muted-foreground">
+                  Belum boleh dinyatakan lunas sampai dana diterima dan dicocokkan dengan catatan bank resmi. Penyimpanan foto tidak mengaktifkan X904.
+                </p>
+              </div>
+            ))}
+          </CardContent>
           {combinedOpen && <CardContent>
             <form onSubmit={submitCombinedReceipt} className="space-y-4">
               <p className="text-sm text-muted-foreground">

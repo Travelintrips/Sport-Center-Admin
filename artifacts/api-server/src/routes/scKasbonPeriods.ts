@@ -10,7 +10,7 @@ type RequestBody={period?:unknown;carryMode?:unknown};
 const parseBody=(body:RequestBody):{period:string;carryMode:CarryMode}=>{
  const period=typeof body?.period==="string"?body.period:"";
  parsePeriod(period);
- if(body?.carryMode!=="zero"&&body?.carryMode!=="previous_total")throw Error("CARRY_MODE_REQUIRED");
+ if(body?.carryMode!=="febri_andi_only")throw Error("CARRY_MODE_REQUIRED");
  return {period,carryMode:body.carryMode};
 };
 async function context(){
