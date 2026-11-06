@@ -70,6 +70,16 @@ test("staff cannot assign without official bank attestation; public ticket is ca
  assert.doesNotMatch(status,/visitorCard.*user_pin/);
 });
 
+test("repeat paid confirmation repairs pending booking before automatic VIS reservation",()=>{
+ const route=payments.slice(payments.indexOf('router.patch("/payments/:id"'));
+ const repair=route.indexOf('bookingForRepair.status = "confirmed"');
+ const allocate=route.indexOf('const visReservation = bookingForRepair');
+ assert.ok(repair >= 0 && allocate > repair,"VIS reservation must see updated booking status");
+ const paymentConfirmation=route.indexOf('const visReservation = status === "confirmed" && booking && payment');
+ assert.ok(paymentConfirmation > allocate,"ordinary confirmation still reserves VIS");
+ assert.match(route,/repairableBookingStatuses\.includes\(bookingForRepair\.status\)/);
+ assert.match(route,/before\.status === "confirmed"/);
+});
 test("one admin payment confirmation triggers idempotent physical VIS reservation and notification",()=>{
  assert.match(payments,/router\.patch\("\/payments\/:id", adminMiddleware/);
  assert.match(payments,/reserveVisitorCardAfterPaymentConfirmation/);
