@@ -1489,108 +1489,6 @@ export default function AdminCheckoutForm() {
         </div>
       </div>
 
-      {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "") && (
-        <Card className="mb-6 border-blue-200 shadow-sm">
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle className="text-base">Pembayaran Gabungan Membership Gym</CardTitle>
-              <Button type="button" variant="outline" onClick={()=>setCombinedOpen(!combinedOpen)}>
-                {combinedOpen ? "Tutup" : "Catat satu bukti untuk beberapa member"}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">Bukti gabungan tersimpan</p>
-              <Button type="button" variant="outline" size="sm" disabled={combinedReviewLoading}
-                onClick={()=>void loadCombinedReceipts()}>{combinedReviewLoading?"Memuat...":"Muat daftar bukti"}</Button>
-            </div>
-            {combinedReviewError && <p role="alert" className="text-xs text-destructive">{combinedReviewError}</p>}
-            {combinedReceipts.map(receipt=>(
-              <div key={receipt.id} className="space-y-2 rounded-lg border p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong>Bukti #{receipt.id} · {formatRupiah(receipt.amount)}</strong>
-                  <span className={receipt.status==="verified"?"text-green-700":"text-amber-700"}>
-                    {receipt.status==="awaiting_bank_verification"?"Menunggu persetujuan foto":receipt.status==="photo_approved"?"Membership diproses — disetujui dari foto (belum verifikasi bank)":receipt.status}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{receipt.method.toUpperCase()} · {receipt.paymentDate}</span>
-                  <a href={receipt.proofUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline">Lihat bukti foto</a>
-                </div>
-                {receipt.allocations.map((allocation,index)=>(
-                  <div key={index} className="flex flex-wrap justify-between gap-2 border-t pt-2">
-                    <span>{allocation.name} · PIN {allocation.pin} · {allocation.kind==="new"?"Member Gym baru":"Perpanjangan member Gym"}{allocation.status==="confirmed"?" · Terproses":""}</span>
-                    <strong>{formatRupiah(allocation.amount)}</strong>
-                  </div>
-                ))}
-                {receipt.allocationSum!==receipt.amount && <p role="alert" className="text-destructive">Jumlah alokasi tidak sesuai: periksa sebelum konfirmasi.</p>}
-                {["owner","super_admin","admin","finance"].includes(getCurrentRole()??"") &&
-                  receipt.status==="awaiting_bank_verification" && receipt.allocationSum===receipt.amount && (
-                  <Button type="button" size="sm" disabled={combinedApprovingId!=null}
-                    onClick={()=>void approveCombinedPhoto(receipt)}>
-                    {combinedApprovingId===receipt.id?"Memproses...":"Setujui Foto & Proses Membership"}
-                  </Button>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Persetujuan berdasarkan foto adalah keputusan admin, bukan konfirmasi settlement bank. Hanya setelah disetujui, sistem memproses membership dan mengantre aktivasi X904. Bukti sama tidak boleh dicatat sebagai penerimaan bank kedua.
-                </p>
-              </div>
-            ))}
-          </CardContent>
-          {combinedOpen && <CardContent>
-            <form onSubmit={submitCombinedReceipt} className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Satu bukti pembayaran untuk beberapa penerima. Setiap alokasi adalah paket 1 bulan Rp300.000.
-                Pencatatan ini belum mengonfirmasi dana, membuat mutasi bank, atau mengaktifkan PIN X904.
-              </p>
-              <p className="text-xs text-muted-foreground">Tidak perlu nomor referensi bank. Sistem membuat ID bukti internal otomatis dari foto yang diunggah; petugas tetap memverifikasi dana secara terpisah.</p>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1"><Label>Tanggal transaksi</Label>
-                  <Input type="date" value={combinedDate} max={jakartaDateOnly()} onChange={e=>setCombinedDate(e.target.value)} required /></div>
-                <div className="space-y-1"><Label>Metode</Label>
-                  <Select value={combinedMethod} onValueChange={setCombinedMethod}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="qris">QRIS Mandiri</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
-                  </Select></div>
-              </div>
-              <div className="space-y-3">
-                {combinedRows.map((row,index)=>(
-                  <div key={index} className="grid items-end gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                    <div className="space-y-1"><Label>PIN X904 penerima {index+1}</Label>
-                      <Input inputMode="numeric" value={row.pin} maxLength={8}
-                        onChange={e=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,pin:e.target.value.replace(/[^0-9]/g,"")}:x))}
-                        placeholder="PIN mesin" required /></div>
-                    <div className="space-y-1"><Label>Jenis</Label>
-                      <Select value={row.kind} onValueChange={value=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,kind:value as "new"|"renew",membershipId:""}:x))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
-                          <SelectItem value="new">Member baru</SelectItem><SelectItem value="renew">Perpanjangan</SelectItem>
-                        </SelectContent></Select></div>
-                    <div className="space-y-1"><Label>{row.kind==="renew"?"Membership ID":"Alokasi"}</Label>
-                      {row.kind==="renew"
-                        ? <Input value={row.membershipId} inputMode="numeric" placeholder="ID membership" required
-                            onChange={e=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,membershipId:e.target.value.replace(/[^0-9]/g,"")}:x))}/>
-                        : <Input value="Rp300.000 / 1 bulan" disabled />}</div>
-                    <Button type="button" variant="outline" disabled={combinedRows.length<=2}
-                      onClick={()=>setCombinedRows(current=>current.filter((_,i)=>i!==index))}>Hapus</Button>
-                  </div>
-                ))}
-                <Button type="button" variant="outline" disabled={combinedRows.length>=10}
-                  onClick={()=>setCombinedRows(current=>[...current,{pin:"",kind:"new",membershipId:""}])}>Tambah penerima</Button>
-              </div>
-              <div className="space-y-1"><Label>Satu bukti transfer / QRIS</Label>
-                <Input type="file" accept="image/*" required onChange={e=>setCombinedProof(e.target.files?.[0]??null)}/></div>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <strong>Total penerimaan: {formatRupiah(combinedRows.length * 300000)}</strong>
-                <Button type="submit" disabled={combinedBusy || !combinedProof}>
-                  {combinedBusy?"Menyimpan...":"Catat Bukti untuk Verifikasi Bank"}
-                </Button>
-              </div>
-              {combinedOutcome && <p role="status" className="rounded-md border p-3 text-sm">{combinedOutcome}</p>}
-            </form>
-          </CardContent>}
-        </Card>
-      )}
 
       {isMembership && membershipPaymentDone && completedGymBooking ? (
         <Card>
@@ -2551,6 +2449,112 @@ export default function AdminCheckoutForm() {
         )}
       </form>
       )}
+
+      {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "") && (
+        <Card className="mt-6 border-blue-200 shadow-sm">
+          <CardHeader className="p-0">
+            <button type="button" className="flex w-full items-center justify-between gap-3 rounded-t-lg p-5 text-left font-semibold hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-expanded={combinedOpen} aria-controls="gym-combined-payment-content"
+              onClick={()=>setCombinedOpen(open=>!open)}>
+              <span>Pembayaran Gabungan Membership Gym</span>
+              <span className="text-sm font-normal text-muted-foreground">{combinedOpen ? "Tutup" : "Buka"} {combinedOpen ? "▲" : "▼"}</span>
+            </button>
+          </CardHeader>
+          {combinedOpen && <div id="gym-combined-payment-content">
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">Bukti gabungan tersimpan</p>
+              <Button type="button" variant="outline" size="sm" disabled={combinedReviewLoading}
+                onClick={()=>void loadCombinedReceipts()}>{combinedReviewLoading?"Memuat...":"Muat daftar bukti"}</Button>
+            </div>
+            {combinedReviewError && <p role="alert" className="text-xs text-destructive">{combinedReviewError}</p>}
+            {combinedReceipts.map(receipt=>(
+              <div key={receipt.id} className="space-y-2 rounded-lg border p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <strong>Bukti #{receipt.id} · {formatRupiah(receipt.amount)}</strong>
+                  <span className={receipt.status==="verified"?"text-green-700":"text-amber-700"}>
+                    {receipt.status==="awaiting_bank_verification"?"Menunggu persetujuan foto":receipt.status==="photo_approved"?"Membership diproses — disetujui dari foto (belum verifikasi bank)":receipt.status}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{receipt.method.toUpperCase()} · {receipt.paymentDate}</span>
+                  <a href={receipt.proofUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline">Lihat bukti foto</a>
+                </div>
+                {receipt.allocations.map((allocation,index)=>(
+                  <div key={index} className="flex flex-wrap justify-between gap-2 border-t pt-2">
+                    <span>{allocation.name} · PIN {allocation.pin} · {allocation.kind==="new"?"Member Gym baru":"Perpanjangan member Gym"}{allocation.status==="confirmed"?" · Terproses":""}</span>
+                    <strong>{formatRupiah(allocation.amount)}</strong>
+                  </div>
+                ))}
+                {receipt.allocationSum!==receipt.amount && <p role="alert" className="text-destructive">Jumlah alokasi tidak sesuai: periksa sebelum konfirmasi.</p>}
+                {["owner","super_admin","admin","finance"].includes(getCurrentRole()??"") &&
+                  receipt.status==="awaiting_bank_verification" && receipt.allocationSum===receipt.amount && (
+                  <Button type="button" size="sm" disabled={combinedApprovingId!=null}
+                    onClick={()=>void approveCombinedPhoto(receipt)}>
+                    {combinedApprovingId===receipt.id?"Memproses...":"Setujui Foto & Proses Membership"}
+                  </Button>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Persetujuan berdasarkan foto adalah keputusan admin, bukan konfirmasi settlement bank. Hanya setelah disetujui, sistem memproses membership dan mengantre aktivasi X904. Bukti sama tidak boleh dicatat sebagai penerimaan bank kedua.
+                </p>
+              </div>
+            ))}
+          </CardContent>
+          <CardContent>
+            <form onSubmit={submitCombinedReceipt} className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Satu bukti pembayaran untuk beberapa penerima. Setiap alokasi adalah paket 1 bulan Rp300.000.
+                Pencatatan ini belum mengonfirmasi dana, membuat mutasi bank, atau mengaktifkan PIN X904.
+              </p>
+              <p className="text-xs text-muted-foreground">Tidak perlu nomor referensi bank. Sistem membuat ID bukti internal otomatis dari foto yang diunggah; petugas tetap memverifikasi dana secara terpisah.</p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1"><Label>Tanggal transaksi</Label>
+                  <Input type="date" value={combinedDate} max={jakartaDateOnly()} onChange={e=>setCombinedDate(e.target.value)} required /></div>
+                <div className="space-y-1"><Label>Metode</Label>
+                  <Select value={combinedMethod} onValueChange={setCombinedMethod}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="qris">QRIS Mandiri</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
+                  </Select></div>
+              </div>
+              <div className="space-y-3">
+                {combinedRows.map((row,index)=>(
+                  <div key={index} className="grid items-end gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                    <div className="space-y-1"><Label>PIN X904 penerima {index+1}</Label>
+                      <Input inputMode="numeric" value={row.pin} maxLength={8}
+                        onChange={e=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,pin:e.target.value.replace(/[^0-9]/g,"")}:x))}
+                        placeholder="PIN mesin" required /></div>
+                    <div className="space-y-1"><Label>Jenis</Label>
+                      <Select value={row.kind} onValueChange={value=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,kind:value as "new"|"renew",membershipId:""}:x))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                          <SelectItem value="new">Member baru</SelectItem><SelectItem value="renew">Perpanjangan</SelectItem>
+                        </SelectContent></Select></div>
+                    <div className="space-y-1"><Label>{row.kind==="renew"?"Membership ID":"Alokasi"}</Label>
+                      {row.kind==="renew"
+                        ? <Input value={row.membershipId} inputMode="numeric" placeholder="ID membership" required
+                            onChange={e=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,membershipId:e.target.value.replace(/[^0-9]/g,"")}:x))}/>
+                        : <Input value="Rp300.000 / 1 bulan" disabled />}</div>
+                    <Button type="button" variant="outline" disabled={combinedRows.length<=2}
+                      onClick={()=>setCombinedRows(current=>current.filter((_,i)=>i!==index))}>Hapus</Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" disabled={combinedRows.length>=10}
+                  onClick={()=>setCombinedRows(current=>[...current,{pin:"",kind:"new",membershipId:""}])}>Tambah penerima</Button>
+              </div>
+              <div className="space-y-1"><Label>Satu bukti transfer / QRIS</Label>
+                <Input type="file" accept="image/*" required onChange={e=>setCombinedProof(e.target.files?.[0]??null)}/></div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <strong>Total penerimaan: {formatRupiah(combinedRows.length * 300000)}</strong>
+                <Button type="submit" disabled={combinedBusy || !combinedProof}>
+                  {combinedBusy?"Menyimpan...":"Catat Bukti untuk Verifikasi Bank"}
+                </Button>
+              </div>
+              {combinedOutcome && <p role="status" className="rounded-md border p-3 text-sm">{combinedOutcome}</p>}
+            </form>
+          </CardContent>
+          </div>}
+        </Card>
+      )}
+
 
       <AlertDialog open={membershipConfirmOpen} onOpenChange={setMembershipConfirmOpen}>
         <AlertDialogContent>
