@@ -235,7 +235,7 @@ export async function collectReservedVisCard(input: {
   try {
     return await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
-      const found = await tx.execute(sql`SELECT r.id,r.card_code,r.state,b.status::text AS booking_status,
+      const found = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.booking_id,r.payment_id,r.user_pin,r.device_uid,b.status::text AS booking_status,
                p.status::text AS payment_status
         FROM sport_center.gym_vis_card_reservations r
         JOIN sport_center.sport_bookings b ON b.id=r.booking_id
