@@ -142,7 +142,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
           VALUES ('VIS001','78',338),('VIS002','90',339),('VIS003','13',13),
                  ('VIS004','17',17),('VIS005','11',11),('VIS006','15',15)
         )
-        SELECT c.code,c.pin,c.uid
+        SELECT c.code,c.pin,c.uid,u.display_name AS machine_name
         FROM cards c
         JOIN sport_center.gym_x904_lan_users u
           ON u.device_serial='TDBD234200545' AND u.user_pin=c.pin
@@ -170,6 +170,23 @@ export async function autoReserveVisAfterFundsVerified(input: {
         (booking_id,payment_id,card_code,user_pin,device_uid,funds_reference,funds_verified_by)
         VALUES (${Number(booking.id)},${Number(payment.id)},${String(card.code)},
           ${String(card.pin)},${Number(card.uid)},${ref},${actor})`);
+      // Create the paid grant in the SAME transaction, but do not authorize a
+      // machine command until a physical card handover is witnessed.
+      // 'pending' verification_state is deliberately excluded by the worker.
+      // expires_at holds the booking-day 23:00 WIB hard closing time; the
+      // worker starts the 12-hour clock from its authenticated ACTIVATE ACK.
+      const grant = await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
+        (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+         visitor_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state)
+        VALUES ('TDBD234200545','card',${String(card.code)},${String(card.pin)},
+          ${Number(card.uid)},${String(card.machine_name)},
+          ${String(booking.customer_name)},${Number(booking.id)},${Number(payment.id)},
+          ${payment.confirmed_at},
+          ((${String(booking.booking_date)}::date + time '23:00') AT TIME ZONE 'Asia/Jakarta'),
+          'pending','pending')
+        RETURNING access_id`);
+      if (grant.rows.length !== 1) throw new VisReservationError(409,"vis_grant_not_created",
+        "Hak akses VIS belum berhasil disiapkan. Reservasi kartu dibatalkan.");
       return { cardCode: String(card.code), state: "reserved", newReservation: true };
     });
   } catch (error) {
