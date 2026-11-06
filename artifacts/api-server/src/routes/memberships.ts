@@ -1133,7 +1133,7 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
           if(conflicts.length) throw new MembershipProofError(409,"Customer telah mempunyai membership aktif/tagihan.");
           const end=untilOneMonth(day);
           const [created]=await tx.insert(gymMembershipsTable).values({
-            name,email:customer.email,phone:customer.phone,startDate:day,endDate:end,
+            name,email:String(customer.email),phone:String(customer.phone),startDate:day,endDate:end,
             months:1,totalPrice:String(a.amount),status:"pending_payment",
             notes:`Bukti gabungan #${receiptId} - persetujuan foto admin; belum verifikasi bank`,
           }).returning();
