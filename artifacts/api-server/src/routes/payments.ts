@@ -1579,12 +1579,7 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
     if (noChange) {
       // Idempotent: mengulang nilai yang sama tidak boleh error dan tidak
       // boleh menyentuh apa pun.
-      const visReservation = bookingForRepair
-        ? await reserveVisitorCardAfterPaymentConfirmation(
-            bookingForRepair, before, getUserFromReq(req).userName || String((req as any).user?.email ?? "ADMIN"),
-          )
-        : null;
-      res.json({ ...before, amount: Number(before.amount), ...(visReservation ? { visReservation } : {}) });
+      res.json({ ...before, amount: Number(before.amount) });
       return;
     }
 
@@ -1839,7 +1834,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           ...getClientInfo(req),
         });
       }
-      res.json({ ...before, amount: Number(before.amount) });
+      const visReservation = bookingForRepair
+        ? await reserveVisitorCardAfterPaymentConfirmation(
+            bookingForRepair, before, getUserFromReq(req).userName || String((req as any).user?.email ?? "ADMIN"),
+          )
+        : null;
+      res.json({ ...before, amount: Number(before.amount), ...(visReservation ? { visReservation } : {}) });
       return;
     }
 
