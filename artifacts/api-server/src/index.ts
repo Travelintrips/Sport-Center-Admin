@@ -4,6 +4,7 @@ import { logger } from "./lib/logger";
 import { isIsolatedPaymentEventE2E } from "./lib/paymentEventE2EMode";
 import { startScheduler } from "./lib/scheduler";
 import { startBookingSheetsAutoWorker } from "./lib/bookingSheetsAutoWorker";
+import { startKasbonPoolAutoWorker } from "./lib/scKasbonPoolAutoWorker";
 import { startBookingSheetsPaymentEventWorker } from "./lib/bookingSheetsPaymentEventWorker";
 import { startX904AutomaticCommandWorker } from "./services/x904AutomaticCommandWorker";
 import { startX904NonmemberAccessWorker } from "./services/x904NonmemberDailyAccessWorker";
@@ -1357,6 +1358,8 @@ export async function initializeRuntime(): Promise<void> {
   if (!e2e) {
     startScheduler();
     startBookingSheetsAutoWorker();
+    // Disabled unless explicitly provisioned and approved after Sheet audit.
+    startKasbonPoolAutoWorker();
     // The X904 worker is inert unless separately enabled and allowlisted.
     startX904AutomaticCommandWorker();
     // Separate paid nonmember 12-hour access worker; inert unless explicitly enabled.
