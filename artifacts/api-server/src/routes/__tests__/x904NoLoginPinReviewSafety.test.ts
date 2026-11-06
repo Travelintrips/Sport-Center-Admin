@@ -10,7 +10,7 @@ describe("No-login ordinary PIN booking/payment isolation", () => {
   const guest = wa.slice(guestStart, bookingEnd);
 
   test("anonymous form cannot select a PIN; registered name yields server-resolved PIN", () => {
-    expect(guest).toContain("publicGymGuest && req.body.requestedX904Pin != null");
+    expect(guest).toContain("guestSubmittedPin !== guestNameRoute.userPin");
     expect(guest).toContain("publicGymGuest && guestNameRoute?.route === \"registered\"");
     expect(guest).toContain("guestNameRoute.userPin");
     expect(guest).toContain("guestNameRoute.deviceUid");

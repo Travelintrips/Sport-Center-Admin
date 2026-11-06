@@ -27,9 +27,11 @@ test("public preview reveals route but never machine PIN, UID or name",()=>{
  assert.doesNotMatch(preview,/res\.json\(\{[^}]*deviceUid/);
  assert.match(preview,/Never send user_pin, UID/);
 });
-test("booking itself derives routing from name, not public PIN selector and never grants X904",()=>{
+test("public PIN must match the registered name and never grants X904 by itself",()=>{
  const route=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('// GET /api/wa/status/:orderNumber'));
- assert.match(route,/requestedX904Pin != null/);
+ assert.match(route,/guestSubmittedPin/);
+ assert.match(route,/guestSubmittedPin !== guestNameRoute\.userPin/);
+ assert.match(route,/guestSubmittedPin && guestNameRoute\?\.route !== "registered"/);
  assert.match(route,/resolveGymGuestName\(bookingCustomerName\)/);
  assert.match(route,/guestNameRoute\?\.route === "registered"/);
  assert.match(route,/guestNameRoute\?\.route === "visitor_card"/);
@@ -47,6 +49,7 @@ test("UI guides known name and unknown name to proper staff followup without PIN
  assert.match(ui,/guestIdentityRoute === "staff_review"/);
  assert.match(ui,/petugas akan memilih kartu yang tersedia/i);
  assert.doesNotMatch(ui,/PIN Mesin X904 \(Opsional\)/);
- assert.doesNotMatch(ui,/requestedX904Pin: x904IdentityValue/);
+ assert.match(ui,/requestedX904Pin: guestPin\.trim\(\)/);
+ assert.match(ui,/id="guest-x904-pin"/);
  assert.match(admin,/Identitas X904 yang diajukan pengunjung/);
 });
