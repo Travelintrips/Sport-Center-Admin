@@ -159,6 +159,9 @@ jobs:
       - name: Verify automatic VIS reservation after official funds check
         run: node --test scripts/test-gym-vis-auto-reservation.mjs
 
+      - name: Verify combined Gym receipt remains pending and single-counted
+        run: node --test scripts/test-gym-combined-receipt-review.mjs
+
       - name: Verify Gym name match and visitor-card routing without public X904 grants
         run: node --test scripts/test-gym-guest-name-x904-route.mjs
 
