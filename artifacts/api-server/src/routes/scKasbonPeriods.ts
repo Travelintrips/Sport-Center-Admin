@@ -6,8 +6,14 @@ import {parsePeriod,planNewPeriod,buildPeriodCells,type CarryMode} from "../lib/
 const router=Router();
 let creating=false;
 const knownProd="17KtD8OSmyYo-d6jsOa6t7DMH76gjcJvdxdNSHPS_FP8";
-// Explicitly test-only destination. This route must never write to PROD.
 const verifiedDev="14O49d-DmcbMS9C70O_aFOTLzgp9BkHuYRzGrrT0JHxA";
+const expectedGid=1953055393;
+const environment=()=>{
+ const prod=process.env.APP_ENV==="production"&&process.env.NODE_ENV==="production";
+ const dev=process.env.APP_ENV==="development"&&process.env.NODE_ENV==="development";
+ if(!prod&&!dev)throw Error("ENVIRONMENT_UNVERIFIED");
+ return prod?"PROD":"DEV";
+};
 type RequestBody={period?:unknown;carryMode?:unknown};
 const parseBody=(body:RequestBody):{period:string;carryMode:CarryMode}=>{
  const period=typeof body?.period==="string"?body.period:"";
@@ -16,13 +22,13 @@ const parseBody=(body:RequestBody):{period:string;carryMode:CarryMode}=>{
  return {period,carryMode:body.carryMode};
 };
 async function context(){
- const prod=process.env.APP_ENV==="production"&&process.env.NODE_ENV==="production";
- const dev=process.env.APP_ENV==="development"&&process.env.NODE_ENV==="development";
- if(!prod&&!dev)throw Error("ENVIRONMENT_UNVERIFIED");
- // Even on the production admin website, period creation targets the isolated
- // user-approved DEV workbook. PROD workbook id is never accepted.
- const spreadsheetId: string=process.env.SC_KASBON_PERIOD_DEV_TEST_SPREADSHEET_ID?.trim() || verifiedDev;
- if(spreadsheetId!==verifiedDev)throw Error("DEV_TARGET_MUST_NOT_EQUAL_PROD");
+ const mode=environment();
+ // Environment selection is server-only; caller cannot submit an arbitrary ID.
+ const spreadsheetId=mode==="PROD"
+  ?process.env.SC_KASBON_POOL_SPREADSHEET_ID?.trim():verifiedDev;
+ if((mode==="PROD"&&spreadsheetId!==knownProd)||
+    (mode==="DEV"&&spreadsheetId!==verifiedDev))
+   throw Error("KASBON_SPREADSHEET_ENVIRONMENT_MISMATCH");
  const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
  if(!raw)throw Error("GOOGLE_SERVICE_ACCOUNT_MISSING");
  const credentials=JSON.parse(raw);
@@ -33,12 +39,12 @@ async function context(){
  const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
  const sheets=google.sheets({version:"v4",auth});
  const meta=await sheets.spreadsheets.get({spreadsheetId,fields:"sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)),merges,protectedRanges)"});
- const target=(meta.data.sheets??[]).filter(s=>s.properties?.title==="Kasbon POOL" && s.properties?.sheetId===1953055393);
+ const target=(meta.data.sheets??[]).filter(s=>s.properties?.title==="Kasbon POOL" && s.properties?.sheetId===expectedGid);
  if(target.length!==1)throw Error("TARGET_TAB_NOT_FOUND");
  const t=target[0];
  const sheetId=t.properties?.sheetId,rowCount=t.properties?.gridProperties?.rowCount??0;
  if(!Number.isInteger(sheetId)||rowCount<20||rowCount>20000)throw Error("SHEET_LAYOUT_UNSAFE");
- return {sheets,spreadsheetId,sheetId:sheetId!,rowCount,
+ return {sheets,spreadsheetId:spreadsheetId!,sheetId:sheetId!,rowCount,mode,
   merges:t.merges??[],protectedRanges:t.protectedRanges??[]};
 }
 async function preview(body:RequestBody){
@@ -60,21 +66,21 @@ async function preview(body:RequestBody){
 }
 router.post("/admin/sc-kasbon-periods/preview",adminMiddleware,async(req,res)=>{
  try{
-  const {plan}=await preview(req.body??{});
-  res.json({...plan,mode:"DEV_SHEETS_TEST",writeEnabled:true});
+  const {plan,ctx}=await preview(req.body??{});
+  res.json({...plan,mode:ctx.mode,writeEnabled:true});
  }catch(error){res.status(422).json({error:error instanceof Error?error.message:"PREVIEW_FAILED"});}
 });
 router.post("/admin/sc-kasbon-periods/create",adminMiddleware,async(req,res)=>{
- if(!((process.env.APP_ENV==="development" && process.env.NODE_ENV==="development") ||
-       (process.env.APP_ENV==="production" && process.env.NODE_ENV==="production"))){
-  res.status(403).json({error:"DEV_SHEETS_TEST_ENV_UNVERIFIED"});return;
+ try{environment();}catch{
+  res.status(403).json({error:"KASBON_PERIOD_ENV_UNVERIFIED"});return;
  }
  if(creating){res.status(409).json({error:"CREATION_ALREADY_RUNNING"});return;}
  creating=true;
  try{
   const {plan,ctx}=await preview(req.body??{});
-  if(ctx.spreadsheetId!==verifiedDev)
-   throw Error("DEV_ONLY_WRITE_TARGET_REQUIRED");
+  if((ctx.mode==="PROD"&&ctx.spreadsheetId!==knownProd)||
+     (ctx.mode==="DEV"&&ctx.spreadsheetId!==verifiedDev))
+   throw Error("PERIOD_WRITE_TARGET_MISMATCH");
   const top=plan.destinationStart-1,bottom=plan.destinationEnd;
   const rows=buildPeriodCells(plan);
   const requests:any[]=[];
@@ -105,11 +111,30 @@ router.post("/admin/sc-kasbon-periods/create",adminMiddleware,async(req,res)=>{
    valueRenderOption:"FORMULA"
   });
   const v=check.data.values??[];
-  if(String(v[0]?.[0]??"").trim()!==parsePeriod(plan.period).monthLabel ||
-   String(v[1]?.[1]??"").trim()!=="Keterangan" ||
-   String(v[plan.employeeCount+2]?.[1]??"").trim()!=="Total")
+  const equal=(a:unknown,b:unknown)=>String(a??"").trim()===String(b??"").trim();
+  if(!equal(v[0]?.[0],parsePeriod(plan.period).monthLabel) ||
+   !equal(v[1]?.[1],"Keterangan") ||
+   !equal(v[plan.employeeCount+2]?.[1],"Total"))
    throw Error("PERIOD_READBACK_MISMATCH");
-  res.json({created:true,period:plan.period,range:`A${plan.destinationStart}:AI${plan.destinationEnd}`,mode:"DEV_ONLY",readback:true});
+  let carryCount=0;
+  for(let i=0;i<plan.employeeCount;i++){
+   const row=plan.destinationStart+2+i;
+   const sourceRow=plan.sourceStart+2+i;
+   const values=v[i+2]??[];
+   const name=String(plan.employeeLabels[i]).trim().toLowerCase();
+   const carry=name==="kasbon febri"||name==="kasbon andi";
+   if(!equal(values[1],plan.employeeLabels[i]) ||
+      !equal(values[2],`=SUM(D${row}:AI${row})`) ||
+      !equal(values[3],carry?`=C${sourceRow}`:0) ||
+      values.slice(4,35).some(x=>x!=="" && x!==undefined && x!==null))
+    throw Error("PERIOD_EMPLOYEE_READBACK_MISMATCH");
+   if(carry)carryCount++;
+  }
+  if(carryCount!==2 ||
+    !equal(v[plan.employeeCount+2]?.[2],
+      `=SUM(C${plan.destinationStart+2}:C${plan.destinationEnd-1})`))
+    throw Error("PERIOD_TOTAL_READBACK_MISMATCH");
+  res.json({created:true,period:plan.period,range:`A${plan.destinationStart}:AI${plan.destinationEnd}`,mode:ctx.mode,readback:true});
  }catch(error){
   res.status(422).json({error:error instanceof Error?error.message:"CREATE_FAILED"});
  }finally{creating=false;}
