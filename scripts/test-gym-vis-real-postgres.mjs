@@ -191,3 +191,48 @@ test("fresh X904 group 2 snapshot rejects group 1, stale evidence and later comm
   assert.equal((await verify()).rows.length,1,"verified suspend receipt and later group-2 snapshot permit safe return");
 
 });
+
+test("isolated PostgreSQL: paid VIS stays held until matching physical handover",async()=>{
+  // Use the local vis_ci fixture only. These fields mirror the existing PROD
+  // table; the reservation itself is not a door command.
+  await db.query(`ALTER TABLE sport_center.x904_nonmember_daily_access
+    ADD COLUMN payment_id integer,
+    ADD COLUMN identity_type text,
+    ADD COLUMN identity_label text,
+    ADD COLUMN device_uid integer,
+    ADD COLUMN verification_state text,
+    ADD COLUMN activated_at timestamptz,
+    ADD COLUMN expires_at timestamptz`);
+  await insertReservation(5,5,"VIS005","11",11,"ADMINPAY-5");
+  await db.query(`INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,user_pin,booking_id,payment_id,identity_type,identity_label,
+     device_uid,verification_state,access_state,expires_at)
+    VALUES ($1,'11',5,5,'card','VIS005',11,'pending','pending',now()+interval '1 hour')`,[device]);
+  const canWorkerAct=()=>db.query(`SELECT count(*)::int AS n
+    FROM sport_center.x904_nonmember_daily_access a
+    JOIN sport_center.gym_vis_card_reservations r
+      ON r.booking_id=a.booking_id AND r.payment_id=a.payment_id
+     AND r.user_pin=a.user_pin AND r.device_uid=a.device_uid
+    WHERE a.booking_id=5 AND a.verification_state='verified'
+      AND r.state='collected' AND r.collected_at IS NOT NULL`);
+  assert.equal((await canWorkerAct()).rows[0].n,0,"paid reservation cannot open door");
+  const handover=async uid=>db.query(`UPDATE sport_center.x904_nonmember_daily_access
+     SET verification_state='verified'
+     WHERE device_serial=$1 AND booking_id=5 AND payment_id=5
+       AND identity_type='card' AND identity_label='VIS005'
+       AND user_pin='11' AND device_uid=$2
+       AND verification_state='pending' AND access_state='pending'
+       AND activated_at IS NULL AND expires_at>now()
+     RETURNING booking_id`,[device,uid]);
+  assert.equal((await handover(999)).rows.length,0,"wrong physical UID cannot unlock");
+  assert.equal((await handover(11)).rows.length,1,"verified handover can unlock held grant");
+  assert.equal((await canWorkerAct()).rows[0].n,0,"uncollected reservation still blocks worker");
+  await db.query(`UPDATE sport_center.gym_vis_card_reservations
+    SET state='collected',collected_at=now()
+    WHERE booking_id=5 AND state='reserved'`);
+  assert.equal((await canWorkerAct()).rows[0].n,1,"collected reservation and verified grant eligible");
+  assert.equal((await handover(11)).rows.length,0,"handover retry must be a no-op");
+  await db.query(`UPDATE sport_center.x904_nonmember_daily_access
+    SET verification_state='pending' WHERE booking_id=5`);
+  assert.equal((await canWorkerAct()).rows[0].n,0,"withdrawn verification blocks activation");
+});
