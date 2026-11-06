@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
+import { formatKasbonAmount, normalizeKasbonAmount, fromDatabaseKasbonAmount } from "./kasbonAmount";
 
 export type Employee = { employeeId: string; fullName: string };
 type Kasbon = { id: number; employeeId: string; kasbonDate: string; amount: string; notes: string; proofUrl: string | null };
@@ -60,7 +61,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Keterangan</th><th className="p-3">Bukti Transfer</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td>
-    <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:r.amount,notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
+    <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
   <Dialog open={toDelete!==null} onOpenChange={value=>{if(!value&&!remove.isPending)setToDelete(null);}}>
@@ -81,7 +82,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    <form className="space-y-4" onSubmit={e=>{e.preventDefault();save.mutate(form);}}>
     <div className="space-y-1"><Label>ID Kasbon</Label><Input readOnly className="bg-muted" value={editing===null?"Otomatis setelah disimpan":"KB-"+String(editing).padStart(5,"0")}/></div>
     <div className="space-y-1"><Label htmlFor="kb-date">Tanggal Kasbon</Label><Input id="kb-date" type="date" required value={form.kasbonDate} onChange={e=>setForm({...form,kasbonDate:e.target.value})}/></div>
-    <div className="space-y-1"><Label htmlFor="kb-amount">Nominal (Rp)</Label><Input id="kb-amount" type="number" min="1" step="1" required value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></div>
+    <div className="space-y-1"><Label htmlFor="kb-amount">Nominal (Rp)</Label><Input id="kb-amount" type="text" inputMode="numeric" autoComplete="off" required placeholder="Contoh: 1.000.000" value={formatKasbonAmount(form.amount)} onChange={e=>setForm({...form,amount:normalizeKasbonAmount(e.target.value)})}/></div>
     <div className="space-y-1"><Label htmlFor="kb-notes">Keterangan</Label><Textarea id="kb-notes" maxLength={2000} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></div>
     <div className="space-y-1"><Label htmlFor="kb-proof">Upload Bukti Transfer (opsional)</Label><Input id="kb-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={uploading} onChange={e=>{const f=e.target.files?.[0];if(f)void uploadProof(f);}}/><p className="text-xs text-muted-foreground">JPG, PNG, WebP, atau PDF; maksimal 10 MB.</p>{form.proofUrl&&<div className="flex items-center gap-3"><a className="text-sm text-primary underline" href={form.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti terunggah</a><Button type="button" size="sm" variant="outline" onClick={()=>setForm({...form,proofUrl:null})}>Hapus lampiran</Button></div>}</div>
     <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpen(false)}>Batal</Button><Button type="submit" disabled={save.isPending||uploading||!form.kasbonDate||Number(form.amount)<=0}>{save.isPending?"Menyimpan...":"Simpan"}</Button></div>
