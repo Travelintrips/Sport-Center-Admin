@@ -1178,7 +1178,7 @@ router.post("/wa/booking", async (req, res) => {
       source: publicGymGuest ? "gym_public_guest" : "whatsapp",
       notes: publicGymGuest
         ? (guestNameRoute?.route === "registered"
-          ? "Gym mandiri; PIN X904 tertaut dengan nama registry namun status review_required. Hak akses menunggu verifikasi petugas dan pembayaran resmi."
+          ? "Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required. Hak akses menunggu verifikasi petugas dan pembayaran resmi."
           : guestNameRoute?.route === "visitor_card"
             ? "Gym mandiri; nama tidak terdaftar di inventaris X904. Kartu VIS001–VIS006 menunggu pilihan dan penyerahan petugas; belum ada hak akses X904."
             : "Gym mandiri; nama ada tetapi memerlukan peninjauan identitas X904 oleh petugas; jangan menggunakan PIN/kartu milik pengguna lain.")
