@@ -5,6 +5,7 @@ const read=p=>readFileSync(new URL("../"+p,import.meta.url),"utf8");
 const migration=read("artifacts/api-server/migrations/20261106_gym_vis_card_reservations.sql");
 const service=read("artifacts/api-server/src/services/x904GymVisitorCardReservations.ts");
 const api=read("artifacts/api-server/src/routes/waBookingsAdmin.ts");
+const payments=read("artifacts/api-server/src/routes/payments.ts");
 const publicApi=read("artifacts/api-server/src/routes/whatsapp.ts");
 const ticket=read("artifacts/sport-center/src/pages/wa/BookingStatus.tsx");
 const admin=read("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
@@ -56,8 +57,8 @@ test("staff cannot assign without official bank attestation; public ticket is ca
  assert.match(api,/router\.post\("\/admin\/wa-bookings\/:orderNumber\/auto-allocate-vis", adminMiddleware/);
  assert.match(api,/officialFundsChecked: req\.body\?\.officialFundsChecked === true/);
  assert.match(api,/notifyGymVisitorCardReserved/);
- assert.match(admin,/Alokasikan Kartu VIS Otomatis/);
- assert.match(admin,/Saya sudah memeriksa dana benar-benar masuk/);
+ assert.doesNotMatch(admin,/Alokasikan Kartu VIS Otomatis|autoAllocateVisMutation|visBankReference|visFundsChecked/);
+ assert.match(admin,/sistem memproses alokasi kartu otomatis/);
  assert.match(publicApi,/visitorCard/);
  assert.match(ticket,/booking\.visitorCard\.code/);
  assert.match(ticket,/Kartu sudah dialokasikan otomatis/);
@@ -66,6 +67,24 @@ test("staff cannot assign without official bank attestation; public ticket is ca
  const status=publicApi.slice(publicApi.indexOf('router.get("/wa/status/:orderNumber"'),publicApi.indexOf('// GET /api/wa/action/:token'));
  assert.match(status,/SELECT card_code,state/);
  assert.doesNotMatch(status,/visitorCard.*user_pin/);
+});
+
+test("one admin payment confirmation triggers idempotent physical VIS reservation and notification",()=>{
+ assert.match(payments,/router\.patch\("\/payments\/:id", adminMiddleware/);
+ assert.match(payments,/reserveVisitorCardAfterPaymentConfirmation/);
+ assert.match(payments,/reserveVisAfterAdminPaymentConfirmation/);
+ assert.match(payments,/notifyGymVisitorCardReserved/);
+ assert.match(payments,/visReservation = status === "confirmed" && booking && payment/);
+ assert.match(payments,/booking\.source !== "gym_public_guest"/);
+ assert.match(payments,/payment\?\.paymentType === "dp"/);
+ assert.match(payments,/paymentId: Number\(payment\.id\)/);
+ assert.match(payments,/status: "needs_review"/);
+ assert.match(service,/ADMINPAY-/);
+ assert.match(service,/confirmedPaymentId: input\.paymentId/);
+ assert.match(service,/internalManualReference/);
+ const automatic=service.slice(service.indexOf("export async function reserveVisAfterAdminPaymentConfirmation"),service.indexOf("export async function collectReservedVisCard"));
+ assert.doesNotMatch(automatic,/ACTIVATE_USER|x904_user_commands|x904_nonmember_daily_access/);
+ assert.doesNotMatch(admin,/Alokasikan Kartu VIS Otomatis/);
 });
 
 test("legacy VIS checkouts cannot reuse reserved visitor cards",()=>{
