@@ -93,6 +93,11 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_salary_sheet_readonly:
+        description: "Audit salary November 2026 workbook rows and G values; no writes"
+        required: false
+        type: boolean
+        default: false
       kasbon_pool_permissions_readonly:
         description: "Read-only check of Kasbon POOL access and canEdit; never writes"
         required: false
@@ -192,6 +197,17 @@ jobs:
           trap 'rm -f "$file"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node --experimental-strip-types scripts/test-sc-kasbon-period-dev-e2e.mjs
+
+      - name: Audit new salary Sheets Kasbon G column (read-only)
+        if: ${{ inputs.kasbon_salary_sheet_readonly == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/salary-kasbon-key.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/audit-sc-kasbon-total-salary-sheet.mjs
 
       - name: Read-only Kasbon POOL service account permission check
         if: ${{ inputs.kasbon_pool_permissions_readonly == true }}
