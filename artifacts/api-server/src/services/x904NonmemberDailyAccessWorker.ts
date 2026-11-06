@@ -225,7 +225,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   for (const row of due.rows as any[]) {
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
-      const locked = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
+      const locked = await tx.execute(sql`SELECT a.access_id,a.booking_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
           p.status::text AS payment_status,
           booking.booking_date AS booking_date, booking.start_time AS booking_start_time,
@@ -248,7 +248,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
         const handover = await tx.execute(sql`SELECT 1
           FROM sport_center.gym_vis_card_reservations r
-          WHERE r.booking_id=${Number(row.access_id) > 0 ? Number(a.booking_id) : -1}
+          WHERE r.booking_id=${Number(a.booking_id)}
             AND r.payment_id=${Number(a.payment_id)}
             AND r.device_serial=${DEVICE}
             AND r.card_code=${String(a.identity_label)}
