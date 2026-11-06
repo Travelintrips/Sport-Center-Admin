@@ -139,3 +139,13 @@ test("physical handover is required before VIS can be returned or reused",()=>{
  assert.match(admin,/Tandai Kartu Sudah Diambil/);
  assert.match(admin,/detail\.visCardReservation\?\.state === "collected"/);
 });
+
+test("post-handover machine commands demand verified final suspend receipt",()=>{
+ const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
+ assert.match(release,/x904_vmsc_command_receipts/);
+ assert.match(release,/last_command\.command_type<>'SUSPEND_USER'/);
+ assert.match(release,/last_command\.state<>'completed'/);
+ assert.match(release,/receipt\.verified=true/);
+ assert.match(release,/receipt\.callback_received_at<=latest\.observed_at/);
+ assert.match(release,/created_at>=\$\{row\.collected_at\}/);
+});
