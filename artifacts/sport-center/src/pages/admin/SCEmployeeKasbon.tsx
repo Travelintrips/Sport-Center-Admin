@@ -31,6 +31,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
+ const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
   onSuccess:()=>{qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
@@ -59,7 +60,13 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <div><h2 className="text-xl font-bold">Histori Kasbon — {employee.fullName}</h2><p className="text-sm text-muted-foreground">ID Karyawan: {employee.employeeId} · Histori pencatatan kasbon</p></div></div>
    <div className="flex flex-wrap gap-2"><Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button></div>
   </div>
-  <Card><CardHeader><CardTitle>Histori Kasbon ({records.length})</CardTitle></CardHeader><CardContent>
+  <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+   <CardTitle>Histori Kasbon ({records.length})</CardTitle>
+   <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm" aria-label="Total Kasbon">
+    <span className="font-medium text-muted-foreground">Total Kasbon</span>
+    <span className="border-l pl-3 text-base font-semibold tabular-nums" aria-live="polite">{isLoading ? "Memuat..." : isError ? "—" : currency(totalKasbon)}</span>
+   </div>
+  </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
