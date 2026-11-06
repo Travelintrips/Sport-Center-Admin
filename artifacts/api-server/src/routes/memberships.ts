@@ -1056,8 +1056,9 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
     // them from a second connection inside a held transaction.
     const orderNumbers=await Promise.all(Array.from({length:10},()=>generateBookingOrderNumber()));
     const result=await db.transaction(async tx=>{
-      const rows=await tx.execute(sql`SELECT * FROM sport_center.gym_combined_receipts
-        WHERE id=${receiptId} FOR UPDATE`);
+      const rows=await tx.execute(sql`SELECT *,
+          to_char(payment_date,'YYYY-MM-DD') AS payment_date_text
+        FROM sport_center.gym_combined_receipts WHERE id=${receiptId} FOR UPDATE`);
       if(rows.rows.length!==1) throw new MembershipProofError(404,"Bukti gabungan tidak ditemukan.");
       const receipt=rows.rows[0] as any;
       const details=await tx.execute(sql`SELECT * FROM sport_center.gym_combined_receipt_allocations
@@ -1076,7 +1077,7 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
          details.rows.some((a:any)=>a.status!=="pending" || Number(a.amount)!==PRICE_PER_MONTH) ||
          details.rows.reduce((n:number,a:any)=>n+Number(a.amount),0)!==Number(receipt.amount))
         throw new MembershipProofError(409,"Alokasi pembayaran tidak valid atau sudah berubah.");
-      const paymentDate=String(receipt.payment_date).slice(0,10);
+      const paymentDate=String(receipt.payment_date_text);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate) || paymentDate>day)
         throw new MembershipProofError(409,"Tanggal bukti tidak valid.");
       const completed:Array<{membership:any;payment:any;booking:any;pin:string;name:string;action:string}>=[];
