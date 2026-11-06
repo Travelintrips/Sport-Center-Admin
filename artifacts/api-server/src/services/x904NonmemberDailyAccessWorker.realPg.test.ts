@@ -245,33 +245,28 @@ test("VIS006 rollout guard rejects invalid PIN and excludes all other PINs", asy
   delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
 });
 
-test('VIS006 review_required unpaid booking recovers automatically after fresh snapshot', async () => {
+test('VIS006 unpaid review_required is held without an unauthorized X904 suspend', async () => {
   process.env.GYM_X904_NONMEMBER_ONLY_PIN = '15';
   try {
-    // Prior negative test owns the same PIN; remove only that isolated fixture.
     await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008");
     await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9099)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9099)");
-    const access = (await run('SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9099')).rows[0].access_id;
-    // Stale snapshot previously moved this unpaid booking to review_required.
+    const access=(await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9099")).rows[0].access_id;
     await run("UPDATE sport_center.x904_nonmember_daily_access SET access_state='review_required' WHERE access_id="+access);
-    const start = new Date();
-    await addSnapshot(new Date(start.getTime()-1000),'15','VIS 006',1);
-    await processX904NonmemberDailyAccess(db as any,start);
-    const suspend = await commandFor('SUSPEND_USER',access);
-    expect(suspend?.payload).toMatchObject({source:'AUTO_NONMEMBER_GYM_12H',expectedUid:15});
-    const ackAt = new Date(start.getTime()+2000);
-    await ack(String(suspend.command_id),ackAt,'15','VIS 006',15,2);
-    await processX904NonmemberDailyAccess(db as any,new Date(ackAt.getTime()+2000));
-    const state = (await run('SELECT access_state,payment_id,activated_at FROM sport_center.x904_nonmember_daily_access WHERE access_id='+access)).rows[0];
-    expect(state).toMatchObject({access_state:'pending',payment_id:null,activated_at:null});
-  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+    const at=new Date();
+    await addSnapshot(new Date(at.getTime()-1000),'15','VIS 006',1);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect(await commandFor('SUSPEND_USER',access)).toBeUndefined();
+    expect(await commandFor('ACTIVATE_USER',access)).toBeUndefined();
+    const state=(await run("SELECT access_state,payment_id,activated_at FROM sport_center.x904_nonmember_daily_access WHERE access_id="+access)).rows[0];
+    expect(state).toMatchObject({access_state:'review_required',payment_id:null,activated_at:null});
+  } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
 });
 
 test('paid VIS006 review_required becomes expired after verified suspend and newer Group2 snapshot', async () => {
   process.env.GYM_X904_NONMEMBER_ONLY_PIN='15';
   try {
-    await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008");
+    await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id IN (9008,9099)");
     await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9100)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9100)");
     await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9200,9100,'pending')");
