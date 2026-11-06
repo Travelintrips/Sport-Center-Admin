@@ -546,7 +546,7 @@ router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware
         await logAudit({
           action: "gym_guest_vis_card_auto_reserved", entity: "booking", entityId: booking.id,
           userName: adminEmail,
-          after: { cardCode: assigned.cardCode, state: assigned.state, payment: "official_bank_attested" },
+          after: { cardCode: assigned.cardCode, state: assigned.state, payment: "manual_admin_confirmed", bankReference: String(req.body?.officialBankReference ?? "").trim().toUpperCase(), fundsConfirmedBy: adminEmail },
         });
         const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
         // Failure of WhatsApp dispatch must never duplicate the reservation.
