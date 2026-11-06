@@ -225,10 +225,13 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
   for (const row of due.rows as any[]) {
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
-      const locked = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
+      const locked = await tx.execute(sql`SELECT a.access_id,a.booking_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
           p.status::text AS payment_status,
-          booking.booking_date AS booking_date, booking.start_time AS booking_start_time
+          booking.booking_date AS booking_date, booking.start_time AS booking_start_time,
+          booking.source AS booking_source, booking.notes AS booking_notes,
+          booking.status::text AS booking_status,
+          a.identity_type AS identity_type, a.identity_label AS identity_label
         FROM sport_center.x904_nonmember_daily_access a
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
         LEFT JOIN sport_center.sport_bookings booking ON booking.id=a.booking_id
@@ -240,6 +243,30 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           !Number.isSafeInteger(Number(a.device_uid)) || Number(a.device_uid) <= 0 ||
           !String(a.verified_name ?? "").trim()) return;
 
+      // Only the new self-service VIS flow requires witnessed physical handover.
+      // Legacy verified-card/PIN grants retain their established behavior.
+      if (a.booking_source === "gym_public_guest" &&
+          String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
+        // A revoked booking must never initiate activation. Do not skip an
+        // already activated entitlement, though: it must still reach the
+        // regular SUSPEND_USER path and receive verified device read-back.
+        if ((a.booking_status !== "confirmed" || a.payment_status !== "confirmed") &&
+            a.activated_at == null) return;
+        const handover = await tx.execute(sql`SELECT 1
+          FROM sport_center.gym_vis_card_reservations r
+          WHERE r.booking_id=${Number(a.booking_id)}
+            AND r.payment_id=${Number(a.payment_id)}
+            AND r.device_serial=${DEVICE}
+            AND r.card_code=${String(a.identity_label)}
+            AND r.user_pin=${String(a.user_pin)}
+            AND r.device_uid=${Number(a.device_uid)}
+            AND r.state='collected' AND r.collected_at IS NOT NULL
+          LIMIT 1`);
+        if (handover.rows.length !== 1) return;
+        // A reservation may not be activated after its booking-day closing.
+        if (!a.activated_at && (!a.expires_at ||
+            now.getTime() >= new Date(String(a.expires_at)).getTime())) return;
+      }
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
       const scheduledStart = x904NonmemberScheduledStart(a.booking_date, a.booking_start_time);
@@ -288,7 +315,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const expiry = activeStart
         ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
         : null;
-      const shouldBeActive = a.payment_status === "confirmed" &&
+      const shouldBeActive = (a.booking_source !== "gym_public_guest" || a.booking_status === "confirmed") &&
+        a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
         // The clock starts on verified ACTIVATE ACK, not at advance payment.

@@ -27,7 +27,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
-import { autoReserveVisAfterFundsVerified, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
+import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { notifyGymVisitorCardReserved } from "../lib/notifications";
 
 const router = Router();
@@ -577,7 +577,7 @@ router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware
         await logAudit({
           action: "gym_guest_vis_card_auto_reserved", entity: "booking", entityId: booking.id,
           userName: adminEmail,
-          after: { cardCode: assigned.cardCode, state: assigned.state, payment: "official_bank_attested" },
+          after: { cardCode: assigned.cardCode, state: assigned.state, payment: "manual_admin_confirmed", bankReference: String(req.body?.officialBankReference ?? "").trim().toUpperCase(), fundsConfirmedBy: adminEmail },
         });
         const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
         // Failure of WhatsApp dispatch must never duplicate the reservation.
@@ -600,6 +600,30 @@ router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware
   }
 });
 
+router.post("/admin/wa-bookings/:orderNumber/collect-vis", adminMiddleware, async (req, res) => {
+  const actor = String((req as any).user?.email ?? "").trim();
+  if (!actor) { res.status(403).json({ error: "Identitas petugas tidak tersedia." }); return; }
+  try {
+    const outcome = await collectReservedVisCard({
+      orderNumber: String(req.params.orderNumber),
+      physicalCardHandedOver: req.body?.physicalCardHandedOver === true,
+      collectedBy: actor,
+    });
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
+    if (booking) await logAudit({
+      action: "gym_guest_vis_card_collected", entity: "booking", entityId: booking.id,
+      userName: actor, after: { cardCode: outcome.cardCode, state: outcome.state },
+    });
+    res.json({ success: true, ...outcome });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error: error.message, code: error.code }); return;
+    }
+    res.status(503).json({ error: "Serah-terima kartu VIS belum dapat dicatat." });
+  }
+});
+
 router.post("/admin/wa-bookings/:orderNumber/return-vis", adminMiddleware, async (req, res) => {
   const actor = String((req as any).user?.email ?? "").trim();
   if (!actor) { res.status(403).json({ error: "Identitas petugas tidak tersedia." }); return; }
@@ -614,7 +638,7 @@ router.post("/admin/wa-bookings/:orderNumber/return-vis", adminMiddleware, async
       .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
     if (booking) await logAudit({
       action: "gym_guest_vis_card_returned", entity: "booking", entityId: booking.id,
-      userName: actor, after: { cardCode: outcome.cardCode, returnState: outcome.state, x904ReadbackChecked: true },
+      userName: actor, after: { cardCode: outcome.cardCode, returnState: outcome.state, deviceSnapshotAt: outcome.deviceSnapshotAt },
     });
     res.json({ success: true, ...outcome });
   } catch (error) {

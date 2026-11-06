@@ -158,6 +158,8 @@ jobs:
 
       - name: Verify automatic VIS reservation after official funds check
         run: node --test scripts/test-gym-vis-auto-reservation.mjs
+      - name: Verify static QRIS diagnostic is read-only and reference-aware
+        run: node --test scripts/test-qris-static-bank-match-dev.mjs
 
       - name: Verify combined Gym receipt remains pending and single-counted
         run: node --test scripts/test-gym-combined-receipt-review.mjs
@@ -239,3 +241,79 @@ jobs:
           else
             echo "PASS: production bundle has no deprecated Node core punycode dependency"
           fi
+
+  # Real PostgreSQL fixture, completely isolated from CST-DEV and PROD.
+  vis-real-postgres:
+    name: VIS reservation — isolated PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: vis_ci_only
+          POSTGRES_DB: vis_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vis_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test real PostgreSQL VIS reservation constraints
+        env:
+          VIS_TEST_DATABASE_URL: postgresql://postgres:vis_ci_only@127.0.0.1:5432/vis_ci
+        run: node --test scripts/test-gym-vis-real-postgres.mjs
+
+  # Runs the actual nonmember worker against disposable local PostgreSQL, never X904.
+  vis-worker-real-postgres:
+    name: VIS handover — actual worker isolated PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: vis_ci_only
+          POSTGRES_DB: x904_nonmember_safe2
+        ports:
+          - 55444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d x904_nonmember_safe2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test actual nonmember worker with collected VIS and cancelled booking
+        env:
+          X904_NONMEMBER_ISOLATED_PG_URL: postgresql://postgres:vis_ci_only@127.0.0.1:55444/x904_nonmember_safe2
+          SUPABASE_DATABASE_URL_DEV: postgresql://postgres:vis_ci_only@127.0.0.1:55444/x904_nonmember_safe2
+          NODE_ENV: test
+        run: pnpm --filter @workspace/api-server test:x904-nonmember-real-pg

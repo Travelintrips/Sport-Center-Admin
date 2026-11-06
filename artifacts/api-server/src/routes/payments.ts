@@ -16,7 +16,8 @@ import { isSessionCurrent } from "../lib/roleAuthorization";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminBookingReport } from "../lib/notifications";
+import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminBookingReport, notifyGymVisitorCardReserved } from "../lib/notifications";
+import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
@@ -53,6 +54,48 @@ import {
   verifyProofOcrToken,
 } from "../lib/paymentProofOcr";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
+
+type VisAutoReservation = { status: "reserved" | "needs_review"; cardCode?: string; code?: string };
+/** One admin payment confirmation also reserves a VIS physical card for new Gym guests.
+ * Never fail or reverse an already committed payment if cards are unavailable.
+ * A held, unverified VIS grant may be created, but no X904 command is issued.
+ * A retry can safely repeat this action.
+ */
+async function reserveVisitorCardAfterPaymentConfirmation(
+  booking: any, payment: any, adminEmail: string,
+): Promise<VisAutoReservation | null> {
+  if (!booking || booking.source !== "gym_public_guest" ||
+      !String(booking.notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan") ||
+      payment?.paymentType === "dp") return null;
+  try {
+    const allocated = await reserveVisAfterAdminPaymentConfirmation({
+      orderNumber: String(booking.orderNumber),
+      paymentId: Number(payment.id),
+      confirmedBy: adminEmail || "ADMIN",
+    });
+    if (allocated.newReservation) {
+      await logAudit({
+        action: "gym_guest_vis_card_auto_reserved",
+        entity: "booking", entityId: booking.id, userName: adminEmail,
+        after: { cardCode: allocated.cardCode, state: allocated.state,
+          paymentId: payment.id, payment: "manual_admin_confirmed",
+          fundsReferenceType: "internal_payment_key_not_bank_receipt" },
+      }).catch(err => logger.error({ err, orderNumber: booking.orderNumber }, "[gym-vis] reservation audit failed"));
+      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+      notifyGymVisitorCardReserved({
+        bookingId: booking.id, orderNumber: booking.orderNumber,
+        customerName: booking.customerName, customerPhone: booking.customerPhone,
+        cardCode: allocated.cardCode, statusUrl,
+      }).catch(err => logger.error({ err, orderNumber: booking.orderNumber }, "[gym-vis] reservation notice failed"));
+    }
+    return { status: "reserved", cardCode: allocated.cardCode };
+  } catch (err) {
+    const code = err instanceof VisReservationError ? err.code : "reservation_unavailable";
+    logger.error({ err, orderNumber: booking.orderNumber, paymentId: payment?.id, code },
+      "[gym-vis] Payment confirmed, but automatic card reservation requires review");
+    return { status: "needs_review", code };
+  }
+}
 
 async function postPaymentAccountingProjection(payment: any, booking: any): Promise<void> {
   let dpp = extractBookingDpp(booking).dpp;
@@ -1770,14 +1813,19 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       // idempotent, but repair that narrowly-defined split state when an admin
       // retries the confirmation from the dashboard.
       if (bookingForRepair && repairableBookingStatuses.includes(bookingForRepair.status)) {
+        const previousBookingStatus = bookingForRepair.status;
         const repairedPaidAt = before.paidAt ?? before.confirmedAt ?? new Date();
         await db
           .update(bookingsTable)
           .set({ status: "confirmed", paidAt: repairedPaidAt, updatedAt: new Date() })
           .where(eq(bookingsTable.id, before.bookingId));
+        // The retry may immediately reserve a visitor card. Keep the
+        // in-memory booking aligned with the committed status repair instead
+        // of passing a stale pending_payment booking to the VIS validator.
+        bookingForRepair.status = "confirmed";
         await db.insert(bookingHistoryTable).values({
           bookingId: before.bookingId,
-          fromStatus: bookingForRepair.status,
+          fromStatus: previousBookingStatus,
           toStatus: "confirmed",
           changedByName: getUserFromReq(req).userName || "admin",
           note: "Status booking disinkronkan dengan pembayaran yang sudah dikonfirmasi",
@@ -1787,12 +1835,17 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           action: "RECONCILE_CONFIRMED_PAYMENT_BOOKING",
           entity: "payment",
           entityId: before.id,
-          before: { bookingStatus: bookingForRepair.status, paymentStatus: before.status },
+          before: { bookingStatus: previousBookingStatus, paymentStatus: before.status },
           after: { bookingStatus: "confirmed", paymentStatus: before.status },
           ...getClientInfo(req),
         });
       }
-      res.json({ ...before, amount: Number(before.amount) });
+      const visReservation = bookingForRepair
+        ? await reserveVisitorCardAfterPaymentConfirmation(
+            bookingForRepair, before, getUserFromReq(req).userName || String((req as any).user?.email ?? "ADMIN"),
+          )
+        : null;
+      res.json({ ...before, amount: Number(before.amount), ...(visReservation ? { visReservation } : {}) });
       return;
     }
 
@@ -2512,7 +2565,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       );
     }
 
-    res.json({ ...payment, amount: Number(payment.amount) });
+    const visReservation = status === "confirmed" && booking && payment
+      ? await reserveVisitorCardAfterPaymentConfirmation(
+          booking, payment, userInfo.userName || String((req as any).user?.email ?? "ADMIN"),
+        )
+      : null;
+    res.json({ ...payment, amount: Number(payment.amount),
+      ...(visReservation ? { visReservation } : {}) });
   } catch (err: any) {
     req.log.error({ err }, "Update payment error");
     if (res.headersSent) return;

@@ -136,8 +136,7 @@ export default function AdminWaBookings() {
   const [pinOwnershipChecked, setPinOwnershipChecked] = useState(false);
   const [pinFundsChecked, setPinFundsChecked] = useState(false);
   const [pinBankReference, setPinBankReference] = useState("");
-  const [visBankReference, setVisBankReference] = useState("");
-  const [visFundsChecked, setVisFundsChecked] = useState(false);
+  const [visCardHandedOver, setVisCardHandedOver] = useState(false);
   const [visCardReturned, setVisCardReturned] = useState(false);
   const [visReadbackChecked, setVisReadbackChecked] = useState(false);
 
@@ -214,20 +213,18 @@ export default function AdminWaBookings() {
     onError: (e: any) => toast({ title: "Verifikasi PIN ditolak", description: e.message, variant: "destructive" }),
   });
 
-  const autoAllocateVisMutation = useMutation({
+  const collectVisMutation = useMutation({
     mutationFn: (orderNumber: string) =>
-      mutate(`/admin/wa-bookings/${orderNumber}/auto-allocate-vis`, {
-        officialBankReference: visBankReference.trim(),
-        officialFundsChecked: visFundsChecked,
+      mutate(`/admin/wa-bookings/${orderNumber}/collect-vis`, {
+        physicalCardHandedOver: visCardHandedOver,
       }),
     onSuccess: (data: { cardCode: string }) => {
-      toast({ title: `Kartu ${data.cardCode} dialokasikan`,
-        description: "Nomor kartu tersedia di tiket pelanggan dan notifikasi WhatsApp." });
-      setVisBankReference("");
-      setVisFundsChecked(false);
+      toast({ title: `Kartu ${data.cardCode} sudah diserahkan`,
+        description: "Serah-terima fisik tercatat. Tindakan ini tidak mengaktifkan pintu X904." });
+      setVisCardHandedOver(false);
       invalidate();
     },
-    onError: (e: any) => toast({ title: "Alokasi kartu VIS ditolak", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Serah-terima VIS ditolak", description: e.message, variant: "destructive" }),
   });
 
   const returnVisMutation = useMutation({
@@ -552,8 +549,24 @@ export default function AdminWaBookings() {
                   </div>
                 )}
                 {detail.booking.source === "gym_public_guest" &&
-                  detail.visCardReservation &&
-                  ["reserved","collected"].includes(detail.visCardReservation.state) && (
+                  detail.visCardReservation?.state === "reserved" && (
+                  <section className="space-y-2 rounded-xl border border-blue-200 bg-white p-4 text-sm">
+                    <p className="font-bold">Serah-terima kartu VIS</p>
+                    <p className="text-xs">Hanya petugas yang melihat kartu fisik diserahkan kepada pengunjung boleh mencatat pengambilan.</p>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={visCardHandedOver}
+                        onChange={e => setVisCardHandedOver(e.target.checked)} />
+                      Kartu fisik sudah diserahkan langsung kepada pengunjung.
+                    </label>
+                    <Button type="button" variant="outline" className="w-full"
+                      disabled={!visCardHandedOver || collectVisMutation.isPending}
+                      onClick={() => collectVisMutation.mutate(detail.booking.orderNumber)}>
+                      Tandai Kartu Sudah Diambil
+                    </Button>
+                  </section>
+                )}
+                {detail.booking.source === "gym_public_guest" &&
+                  detail.visCardReservation?.state === "collected" && (
                   <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm">
                     <p className="font-bold">Pengembalian kartu VIS</p>
                     <label className="flex items-start gap-2 text-xs">
@@ -577,34 +590,19 @@ export default function AdminWaBookings() {
                   <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
                     <p className="font-bold">Kartu VIS telah dialokasikan otomatis</p>
                     <p className="mt-1 text-xl font-black">{detail.visCardReservation.cardCode}</p>
-                    <p className="mt-1">Status: {detail.visCardReservation.state}. Kartu fisik harus diserahkan petugas; ini belum mengaktifkan X904.</p>
+                    <p className="mt-1">Status: {detail.visCardReservation.state}. Status collected hanya dicatat setelah serah-terima fisik; alokasi maupun penyerahan tidak otomatis membuka pintu X904.</p>
                   </div>
                 )}
                 {detail.booking.source === "gym_public_guest" &&
                   detail.x904IdentityMatch?.route === "visitor_card" &&
                   detail.booking.status === "confirmed" && !detail.visCardReservation && (
-                  <section className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-slate-900">
-                    <p className="font-bold">Alokasi kartu VIS otomatis setelah dana resmi masuk</p>
-                    <p className="text-xs text-amber-900">
-                      Pastikan pembayaran sudah confirmed di Booking Admin dan cocokan transaksi pada mutasi bank resmi.
-                      Sistem akan memilih kartu VIS tersedia otomatis, tanpa memilih PIN atau kartu manual.
+                  <section className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-amber-900">
+                    <p className="font-bold">Kartu VIS belum tersedia</p>
+                    <p className="mt-1">
+                      Setelah admin mengonfirmasi pembayaran di Booking Admin, sistem memproses alokasi kartu otomatis.
+                      Bila kartu belum terlihat, periksa status reservasi dan log petugas; jangan konfirmasi pembayaran dua kali.
                     </p>
-                    <Input placeholder="Nomor referensi resmi mutasi bank"
-                      aria-label="Nomor referensi resmi mutasi bank"
-                      value={visBankReference}
-                      onChange={e => setVisBankReference(e.target.value.toUpperCase())} />
-                    <label className="flex items-start gap-2 text-xs leading-relaxed">
-                      <input type="checkbox" checked={visFundsChecked} onChange={e => setVisFundsChecked(e.target.checked)}
-                        className="mt-0.5" />
-                      Saya sudah memeriksa dana benar-benar masuk ke rekening resmi, bukan hanya berdasarkan screenshot/OCR.
-                    </label>
-                    <Button type="button" className="w-full"
-                      disabled={!visFundsChecked || visBankReference.trim().length < 6 ||
-                        autoAllocateVisMutation.isPending}
-                      onClick={() => autoAllocateVisMutation.mutate(detail.booking.orderNumber)}>
-                      Alokasikan Kartu VIS Otomatis
-                    </Button>
-                    <p className="text-xs text-slate-500">Tidak ada perintah pembukaan pintu X904 dari tindakan ini.</p>
+                    <p className="mt-1 text-xs">Konfirmasi pembayaran tidak membuka pintu X904.</p>
                   </section>
                 )}
                 {detail.booking.source === "gym_public_guest" && detail.booking.notes && (
