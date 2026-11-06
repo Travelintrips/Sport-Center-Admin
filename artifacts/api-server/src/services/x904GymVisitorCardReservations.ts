@@ -176,6 +176,42 @@ export async function autoReserveVisAfterFundsVerified(input: {
   }
 }
 
+/** Record a witnessed physical handover; this does NOT authorize the machine. */
+export async function collectReservedVisCard(input: {
+  orderNumber: string;
+  physicalCardHandedOver: boolean;
+  collectedBy: string;
+}): Promise<{ cardCode: string; state: "collected" }> {
+  if (input.physicalCardHandedOver !== true || !String(input.collectedBy ?? "").trim()) {
+    throw new VisReservationError(400, "vis_handover_required",
+      "Petugas wajib memastikan kartu fisik telah diserahkan sebelum mencatat pengambilan.");
+  }
+  try {
+    return await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
+      const found = await tx.execute(sql`SELECT r.id,r.card_code,r.state
+        FROM sport_center.gym_vis_card_reservations r
+        JOIN sport_center.sport_bookings b ON b.id=r.booking_id
+        WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
+      if (found.rows.length !== 1) throw new VisReservationError(404, "vis_not_reserved",
+        "Reservasi kartu VIS tidak ditemukan.");
+      const row = found.rows[0] as any;
+      if (row.state === "collected") return { cardCode: String(row.card_code), state: "collected" };
+      if (row.state !== "reserved") throw new VisReservationError(409,"vis_not_handover_ready",
+        "Kartu VIS tidak sedang menunggu penyerahan.");
+      await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
+        SET state='collected',collected_at=now()
+        WHERE id=${Number(row.id)} AND state='reserved'`);
+      return { cardCode: String(row.card_code), state: "collected" };
+    });
+  } catch (error) {
+    if (error instanceof VisReservationError) throw error;
+    console.error("[gym-vis] handover failed",error);
+    throw new VisReservationError(503, "vis_handover_unavailable",
+      "Penyerahan kartu belum berhasil dicatat; akses pintu tidak berubah.");
+  }
+}
+
 /** Reuse only after confirmed physical card return and safe X904 read-back. */
 export async function returnVerifiedVisCard(input: {
   orderNumber: string;
@@ -191,14 +227,14 @@ export async function returnVerifiedVisCard(input: {
   try {
     return await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
-      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id,r.reserved_at
+      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id,r.reserved_at,r.collected_at
         FROM sport_center.gym_vis_card_reservations r
         JOIN sport_center.sport_bookings b ON b.id=r.booking_id
         WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
       if (!result.rows.length) throw new VisReservationError(404,"no_reservation","Kartu VIS belum dialokasikan.");
       const row = result.rows[0] as any;
       if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned" };
-      if (!["reserved","collected"].includes(String(row.state)))
+      if (row.state !== "collected" || !row.collected_at)
         throw new VisReservationError(409,"invalid_return_state","Status kartu tidak dapat dikembalikan.");
       // Reject return if ANY booking still has a live/pending grant for this physical PIN.
       // Another booking can retain an entitlement even when this booking is finished.
@@ -215,7 +251,7 @@ export async function returnVerifiedVisCard(input: {
       const readback = await tx.execute(sql`WITH latest AS (
           SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
           WHERE device_serial='TDBD234200545'
-            AND observed_at >= ${row.reserved_at}
+            AND observed_at >= ${row.collected_at}
             AND observed_at >= now()-interval '10 minutes'
           ORDER BY observed_at DESC LIMIT 1
         ) SELECT observed_at FROM latest
@@ -236,7 +272,7 @@ export async function returnVerifiedVisCard(input: {
         "Snapshot X904 terbaru belum membuktikan PIN tersuspend di Grup 2. Kartu tetap ditahan.");
       await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
         SET state='returned',returned_at=now()
-        WHERE id=${Number(row.id)} AND state IN ('reserved','collected')`);
+        WHERE id=${Number(row.id)} AND state='collected'`);
       return { cardCode:String(row.card_code),state:"returned" };
     });
   } catch (error) {
