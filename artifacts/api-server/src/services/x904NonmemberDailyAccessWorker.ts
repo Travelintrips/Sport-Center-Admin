@@ -247,7 +247,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       // Legacy verified-card/PIN grants retain their established behavior.
       if (a.booking_source === "gym_public_guest" &&
           String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
-        if (a.booking_status !== "confirmed" || a.payment_status !== "confirmed") return;
+        // A revoked booking must never initiate activation. Do not skip an
+        // already activated entitlement, though: it must still reach the
+        // regular SUSPEND_USER path and receive verified device read-back.
+        if ((a.booking_status !== "confirmed" || a.payment_status !== "confirmed") &&
+            a.activated_at == null) return;
         const handover = await tx.execute(sql`SELECT 1
           FROM sport_center.gym_vis_card_reservations r
           WHERE r.booking_id=${Number(a.booking_id)}
@@ -311,7 +315,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const expiry = activeStart
         ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
         : null;
-      const shouldBeActive = a.payment_status === "confirmed" &&
+      const shouldBeActive = (a.booking_source !== "gym_public_guest" || a.booking_status === "confirmed") &&
+        a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
         // The clock starts on verified ACTIVATE ACK, not at advance payment.
