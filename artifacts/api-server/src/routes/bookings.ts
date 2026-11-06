@@ -216,7 +216,15 @@ async function getBookingWithPayment(id: number) {
     confidence: "high" | "low";
   }>();
   const detailPaymentIds = allPayments.map((item) => item.id);
-  if (process.env.NODE_ENV !== "production" && detailPaymentIds.length > 0) {
+  const qrisProdBannerEnabled =
+    process.env.NODE_ENV === "production"
+    && String(process.env.QRIS_GMAIL_PROD_BANNER_ENABLED ?? "").trim().toLowerCase() === "true";
+  const qrisDetectionEnabled = process.env.NODE_ENV !== "production" || qrisProdBannerEnabled;
+  const qrisDetectionTable = process.env.NODE_ENV === "production"
+    ? "sport_center.qris_email_transactions"
+    : "sport_center.qris_email_transactions_dev";
+
+  if (qrisDetectionEnabled && detailPaymentIds.length > 0) {
     try {
       const detectionResult = await db.execute(sql`
         SELECT DISTINCT ON (payment_id)
@@ -229,7 +237,7 @@ async function getBookingWithPayment(id: number) {
             match_status,
             transaction_at,
             id
-          FROM sport_center.qris_email_transactions_dev
+          FROM ${sql.raw(qrisDetectionTable)}
           WHERE candidate_payment_ids && ARRAY[${sql.join(detailPaymentIds.map((paymentId) => sql`${paymentId}`), sql`, `)}]::integer[]
             AND match_status IN ('reference_match_review','ambiguous','review_required')
         ) qris_email_candidates
@@ -251,7 +259,7 @@ async function getBookingWithPayment(id: number) {
         });
       }
     } catch {
-      // DEV-only enrichment. If the table is absent (including PROD), booking
+      // Detection enrichment is optional. If the table is absent or disabled, booking
       // detail must continue to work exactly as before.
     }
   }
