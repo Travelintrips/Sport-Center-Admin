@@ -724,7 +724,7 @@ export default function WaBookingForm() {
                   {guestIdentityRoute === "registered" && (
                     <div className="space-y-2">
                       <p><strong>PIN X904: Terdaftar</strong></p>
-                      <p className="text-xs">Nama ditemukan dan terhubung ke PIN nonmember yang telah diverifikasi pada registry mesin. Nomor PIN disimpan aman dan hanya terlihat pada panel petugas.</p>
+                      <p className="text-xs">Nama ditemukan pada registry nonmember X904. Masukkan PIN yang diberikan petugas; backend akan menolak booking bila nama dan PIN tidak sesuai. Nomor PIN dari registry tidak ditampilkan kepada pengunjung.</p>
                       <p className="text-xs font-medium text-amber-900">Status akses: menunggu verifikasi kepemilikan dan pembayaran resmi. Pintu belum aktif.</p>
                     </div>
                   )}
