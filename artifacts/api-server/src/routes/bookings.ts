@@ -1500,7 +1500,7 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
     const outcome = await db.transaction(async tx => {
       const found = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.verification_state,a.access_state,
-          b.source,b.booking_date,p.status::text AS payment_status
+          b.source,b.booking_date::text AS booking_date,p.status::text AS payment_status
         FROM sport_center.x904_nonmember_daily_access a
         JOIN sport_center.sport_bookings b ON b.id=a.booking_id
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
