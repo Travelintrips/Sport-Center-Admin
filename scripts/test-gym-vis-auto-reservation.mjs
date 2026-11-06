@@ -91,3 +91,11 @@ test("VIS return checks unresolved X904 grants across all bookings for the physi
  assert.match(returnMethod,/access_state IN \('pending','active','review_required'\)/);
  assert.doesNotMatch(returnMethod,/WHERE booking_id=\$\{Number\(row\.booking_id\)\}/);
 });
+
+test("canonical bank payment reference cannot be contradicted by staff input",()=>{
+ assert.match(service,/proof_url,confirmed_at,reference_number,provider_reference,provider_trade_no,merchant_trade_no/);
+ assert.match(service,/const recordedReferences = \[/);
+ assert.match(service,/recordedReferences\.length > 0 && !recordedReferences\.includes\(ref\)/);
+ assert.match(service,/bank_reference_mismatch/);
+ assert.match(service,/bank_reference_other_booking/);
+});
