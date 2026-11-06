@@ -127,6 +127,7 @@ export default function WaBookingForm() {
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
   const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "visitor_card" | "staff_review" | "unavailable">("idle");
+  const [guestPin, setGuestPin] = useState("");
 
   const [form, setForm] = useState({
     customerName: "",
