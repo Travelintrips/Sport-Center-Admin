@@ -209,6 +209,52 @@ async function getBookingWithPayment(id: number) {
     : [id];
   const allPayments = await db.select().from(paymentsTable)
     .where(inArray(paymentsTable.bookingId, groupBookingIds));
+
+  const qrisEmailDetectionByPaymentId = new Map<number, {
+    status: string;
+    transactionAt: string | null;
+    confidence: "high" | "low";
+  }>();
+  const detailPaymentIds = allPayments.map((item) => item.id);
+  if (process.env.NODE_ENV !== "production" && detailPaymentIds.length > 0) {
+    try {
+      const detectionResult = await db.execute(sql`
+        SELECT DISTINCT ON (payment_id)
+          payment_id,
+          match_status,
+          transaction_at
+        FROM (
+          SELECT
+            UNNEST(candidate_payment_ids) AS payment_id,
+            match_status,
+            transaction_at,
+            id
+          FROM sport_center.qris_email_transactions_dev
+          WHERE candidate_payment_ids && ARRAY[${sql.join(detailPaymentIds.map((paymentId) => sql`${paymentId}`), sql`, `)}]::integer[]
+            AND match_status IN ('reference_match_review','ambiguous','review_required')
+        ) qris_email_candidates
+        ORDER BY payment_id, id DESC
+      `);
+      const rows = ((detectionResult as any).rows ?? detectionResult) as Array<{
+        payment_id: unknown;
+        match_status: unknown;
+        transaction_at: unknown;
+      }>;
+      for (const row of rows) {
+        const paymentId = Number(row.payment_id);
+        if (!Number.isInteger(paymentId)) continue;
+        const status = String(row.match_status ?? "");
+        qrisEmailDetectionByPaymentId.set(paymentId, {
+          status,
+          transactionAt: row.transaction_at == null ? null : new Date(String(row.transaction_at)).toISOString(),
+          confidence: status === "reference_match_review" ? "high" : "low",
+        });
+      }
+    } catch {
+      // DEV-only enrichment. If the table is absent (including PROD), booking
+      // detail must continue to work exactly as before.
+    }
+  }
   // A booking can retain historical payment rows. Always resolve the
   // canonical display payment from the newest row first so an administrative
   // payment-date correction is not hidden by an older confirmed payment.
@@ -376,8 +422,16 @@ async function getBookingWithPayment(id: number) {
     netAmount: bookingWithholding.netAmount,
     downPayment: Number(booking.downPayment ?? 0),
     isDpPaid: booking.isDpPaid ?? false,
-    payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
-    payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    payment: payment ? {
+      ...payment,
+      amount: Number(payment.amount),
+      qrisEmailDetection: payment.id > 0 ? qrisEmailDetectionByPaymentId.get(payment.id) ?? null : null,
+    } : null,
+    payments: allPayments.map((p) => ({
+      ...p,
+      amount: Number(p.amount),
+      qrisEmailDetection: qrisEmailDetectionByPaymentId.get(p.id) ?? null,
+    })),
     paymentAllocations: allocations.map((allocation) => ({
       ...allocation,
       amount: Number(allocation.amount),

@@ -46,6 +46,7 @@ import { useLang } from "@/lib/i18n";
 import { getToken } from "@/lib/auth";
 import { calculateBookingWithholdingTax } from "@/lib/tax";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
+import { QrisEmailDetectionBanner } from "@/components/QrisEmailDetectionBanner";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 // QRIS lama masih tersimpan sebagai aset publik. Gunakan sebagai fallback ketika
@@ -1022,6 +1023,18 @@ export default function BookingDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 space-y-5">
+                {(() => {
+                  const directPayment = (booking as any).payment;
+                  const detection = directPayment?.qrisEmailDetection
+                    ?? (((booking as any).payments as any[] | undefined)?.find((item: any) => item?.qrisEmailDetection)?.qrisEmailDetection);
+                  return (
+                    <QrisEmailDetectionBanner
+                      detection={detection}
+                      paymentStatus={directPayment?.status}
+                      t={t}
+                    />
+                  );
+                })()}
                 {booking.status === "expired" && (
                   <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800">
                     <div className="font-semibold mb-1">
