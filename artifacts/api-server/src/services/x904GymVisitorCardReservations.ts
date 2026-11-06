@@ -251,6 +251,24 @@ export async function collectReservedVisCard(input: {
         throw new VisReservationError(409,"vis_payment_or_booking_changed",
           "Booking atau pembayaran sudah tidak terkonfirmasi. Jangan serahkan kartu VIS.");
       }
+      const linkedGrant = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+        SET verification_state='verified'
+        WHERE device_serial='TDBD234200545'
+          AND booking_id=${Number(row.booking_id)}
+          AND payment_id=${Number(row.payment_id)}
+          AND identity_type='card'
+          AND identity_label=${String(row.card_code)}
+          AND user_pin=${String(row.user_pin)}
+          AND device_uid=${Number(row.device_uid)}
+          AND verification_state='pending'
+          AND access_state='pending'
+          AND activated_at IS NULL
+          AND expires_at>now()
+        RETURNING access_id`);
+      if (linkedGrant.rows.length !== 1) {
+        throw new VisReservationError(409, "vis_grant_not_ready",
+          "Hak akses belum siap; serah-terima kartu tidak diproses.");
+      }
       await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
         SET state='collected',collected_at=now()
         WHERE id=${Number(row.id)} AND state='reserved'`);
