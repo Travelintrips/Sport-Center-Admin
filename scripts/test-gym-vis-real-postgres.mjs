@@ -74,7 +74,14 @@ test("returned card is reusable only after a state transition, but unresolved PI
     AND access_state IN ('pending','active','review_required')
   ) AS blocked`, [device]);
   assert.equal(resolved.rows[0].blocked,false);
-  await db.query("UPDATE sport_center.gym_vis_card_reservations SET state='returned' WHERE booking_id=1");
+  const reserved=await db.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=1");
+  assert.equal(reserved.rows[0].state,'reserved');
+  assert.equal(reserved.rows[0].collected_at,null);
+  await db.query("UPDATE sport_center.gym_vis_card_reservations SET state='collected',collected_at=now() WHERE booking_id=1");
+  const collected=await db.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=1");
+  assert.equal(collected.rows[0].state,'collected');
+  assert.ok(collected.rows[0].collected_at);
+  await db.query("UPDATE sport_center.gym_vis_card_reservations SET state='returned',returned_at=now() WHERE booking_id=1 AND state='collected'");
   await insertReservation(2,2,"VIS003","13",13,"BANK-CI-05");
 });
 
