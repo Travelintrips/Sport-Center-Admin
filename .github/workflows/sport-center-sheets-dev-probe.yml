@@ -93,6 +93,11 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_salary_nov_one_shot_insert:
+        description: "Explicit insert 7 Kasbon totals into November 2026 salary sheet G only"
+        required: false
+        type: boolean
+        default: false
       kasbon_salary_sheet_readonly:
         description: "Audit salary November 2026 workbook rows and G values; no writes"
         required: false
@@ -197,6 +202,19 @@ jobs:
           trap 'rm -f "$file"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node --experimental-strip-types scripts/test-sc-kasbon-period-dev-e2e.mjs
+
+      - name: One-shot insert Kasbon totals in November salary sheet G only
+        if: ${{ inputs.kasbon_salary_nov_one_shot_insert == true }}
+        shell: bash
+        env:
+          SC_KASBON_GAJI_NOV_2026_APPROVED: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/salary-nov-kasbon-key.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/insert-sc-kasbon-total-salary-nov-2026.mjs
 
       - name: Audit new salary Sheets Kasbon G column (read-only)
         if: ${{ inputs.kasbon_salary_sheet_readonly == true }}
