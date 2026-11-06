@@ -78,6 +78,10 @@ test("one admin payment confirmation triggers idempotent physical VIS reservatio
  assert.match(payments,/booking\.source !== "gym_public_guest"/);
  assert.match(payments,/payment\?\.paymentType === "dp"/);
  assert.match(payments,/paymentId: Number\(payment\.id\)/);
+ const confirmationRoute=payments.slice(payments.indexOf('router.patch("/payments/:id"'));
+ const metadataOnlyRoute=payments.slice(payments.indexOf('router.patch("/payments/:id/metadata"'),payments.indexOf('router.patch("/payments/:id"'));
+ assert.match(confirmationRoute,/const visReservation = bookingForRepair/);
+ assert.doesNotMatch(metadataOnlyRoute,/reserveVisitorCardAfterPaymentConfirmation\(/);
  assert.match(payments,/status: "needs_review"/);
  assert.match(service,/ADMINPAY-/);
  assert.match(service,/confirmedPaymentId: input\.paymentId/);
