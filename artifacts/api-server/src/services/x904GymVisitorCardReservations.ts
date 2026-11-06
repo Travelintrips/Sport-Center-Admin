@@ -108,10 +108,9 @@ export async function autoReserveVisAfterFundsVerified(input: {
       if (reused.rows.length) throw new VisReservationError(409,"bank_reference_reused",
         "Referensi bank sudah dipakai oleh booking lain.");
       // Do not reuse a reference already bound to a confirmed payment for
-      // another booking, including those outside the Gym visitor flow.
+      // another booking, even if that payment has not yet been confirmed.
       const otherPayment = await tx.execute(sql`SELECT 1 FROM sport_center.sport_payments
         WHERE booking_id<>${Number(booking.id)}
-          AND status::text='confirmed'
           AND (upper(btrim(coalesce(reference_number,'')))=${ref}
             OR upper(btrim(coalesce(provider_reference,'')))=${ref}
             OR upper(btrim(coalesce(provider_trade_no,'')))=${ref}
