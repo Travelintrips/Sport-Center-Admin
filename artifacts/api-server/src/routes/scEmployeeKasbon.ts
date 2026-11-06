@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { and, desc, eq } from "drizzle-orm";
-import { db, scEmployeesTable, scEmployeeKasbonTable } from "@workspace/db";
+import { db, scEmployeesTable, scEmployeeKasbonTable, auditLogsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 
@@ -56,5 +56,38 @@ router.patch("/admin/sc-employees/:employeeId/kasbon/:id", adminMiddleware, asyn
    await logAudit({...getUserFromReq(req),action:"SC_KASBON_UPDATED",entity:"sc_employee_kasbon",before:existing,after:row,...getClientInfo(req)});
    res.json(row);
  }catch{res.status(500).json({error:"Gagal mengubah kasbon"});}
+});
+// Delete exactly one record belonging to this employee. The audit write and
+// delete share one transaction so neither can silently succeed alone.
+router.delete("/admin/sc-employees/:employeeId/kasbon/:id", adminMiddleware, async (req, res) => {
+ const employeeId = String(req.params.employeeId || "").toUpperCase();
+ const rawId = String(req.params.id || "");
+ if (!employeePattern.test(employeeId) || !/^[1-9][0-9]*$/.test(rawId)) {
+   res.status(400).json({ error: "ID tidak valid" }); return;
+ }
+ const id = Number(rawId);
+ if (!Number.isSafeInteger(id)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+ try {
+   const deleted = await db.transaction(async (tx) => {
+     const [existing] = await tx.select().from(scEmployeeKasbonTable)
+       .where(and(eq(scEmployeeKasbonTable.employeeId, employeeId), eq(scEmployeeKasbonTable.id, id))).limit(1);
+     if (!existing) return null;
+     const [removed] = await tx.delete(scEmployeeKasbonTable)
+       .where(and(eq(scEmployeeKasbonTable.employeeId, employeeId), eq(scEmployeeKasbonTable.id, id))).returning();
+     if (!removed) return null;
+     const actor = getUserFromReq(req);
+     await tx.insert(auditLogsTable).values({
+       userId: actor.userId ?? null, userName: actor.userName ?? null, userRole: actor.userRole ?? null,
+       action: "SC_KASBON_DELETED", entity: "sc_employee_kasbon", entityId: removed.id,
+       before: removed, after: null, ...getClientInfo(req),
+     });
+     return removed;
+   });
+   if (!deleted) { res.status(404).json({ error: "Catatan kasbon tidak ditemukan untuk karyawan ini" }); return; }
+   res.json({ deleted: true, id: deleted.id, employeeId: deleted.employeeId });
+ } catch (error) {
+   console.error("[SC_KASBON_DELETE] Failed to delete with audit", error);
+   res.status(500).json({ error: "Gagal menghapus kasbon. Data tidak diubah bila audit gagal." });
+ }
 });
 export default router;
