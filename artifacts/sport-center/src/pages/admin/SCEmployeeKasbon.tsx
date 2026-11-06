@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import { formatKasbonAmount, normalizeKasbonAmount, fromDatabaseKasbonAmount } from "./kasbonAmount";
+import { calculateSisaGaji } from "./kasbonSalaryBalance";
 
-export type Employee = { employeeId: string; fullName: string };
+export type Employee = { employeeId: string; fullName: string; salary: string | null };
 type Kasbon = { id: number; employeeId: string; kasbonDate: string; amount: string; notes: string; proofUrl: string | null };
 type Form = { kasbonDate: string; amount: string; notes: string; proofUrl: string | null };
 const blank = (): Form => ({kasbonDate: new Date().toLocaleDateString("en-CA"),amount:"",notes:"",proofUrl:null});
@@ -29,6 +30,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [toDelete,setToDelete]=useState<Kasbon|null>(null);
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
+ const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
   onSuccess:()=>{qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Catatan kasbon berhasil disimpan"});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
@@ -59,8 +61,8 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   </div>
   <Card><CardHeader><CardTitle>Histori Kasbon ({records.length})</CardTitle></CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
-   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Keterangan</th><th className="p-3">Bukti Transfer</th><th className="p-3">Tindakan</th></tr></thead><tbody>
-    {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td>
+   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Keterangan</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Tindakan</th></tr></thead><tbody>
+    {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td>
     <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
