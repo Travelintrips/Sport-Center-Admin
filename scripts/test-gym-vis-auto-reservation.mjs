@@ -105,6 +105,7 @@ test("independent bank attestation is required before any VIS allocation",()=>{
  assert.match(service,/independent_bank_evidence_missing/);
  assert.match(service,/matched_payment_id=\$\{Number\(payment\.id\)\}/);
  assert.match(service,/credit_amount>=\$\{Number\(booking\.amount\)\}/);
+ assert.match(service,/provider_order_id/);
  assert.match(service,/status::text='auto_matched'/);
  assert.match(service,/source_app/);
  assert.match(service,/source_module/);
