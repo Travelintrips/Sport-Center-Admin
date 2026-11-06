@@ -995,6 +995,39 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 });
 
 
+// Admin review for a combined receipt: read-only and repeatable.
+ // No paid state or X904 entitlement may be changed by this endpoint.
+router.get("/memberships/admin-combined-receipts", adminMiddleware, async (req, res) => {
+  if (!authorizedGymPaymentRole(req)) {
+    res.status(403).json({error:"Hanya admin/finance berwenang yang boleh melihat bukti gabungan."});return;
+  }
+  try {
+    const receipts=await db.execute(sql`
+      SELECT r.id,r.amount,r.payment_method,r.payment_date,r.status,r.proof_url,
+             r.bank_mutation_id,r.created_at,
+             COALESCE(json_agg(json_build_object(
+               'pin',a.user_pin,'name',a.device_name,'kind',a.allocation_kind,
+               'membershipId',a.membership_id,'amount',a.amount,'status',a.status
+             ) ORDER BY a.id) FILTER (WHERE a.id IS NOT NULL),'[]'::json) AS allocations,
+             COUNT(a.id)::integer AS allocation_count,
+             COALESCE(SUM(a.amount),0) AS allocation_sum
+      FROM sport_center.gym_combined_receipts r
+      LEFT JOIN sport_center.gym_combined_receipt_allocations a ON a.receipt_id=r.id
+      GROUP BY r.id ORDER BY r.id DESC LIMIT 30`);
+    res.setHeader("Cache-Control","no-store");
+    res.json({receipts:receipts.rows.map((row:any)=>({
+      id:Number(row.id),amount:Number(row.amount),method:String(row.payment_method),
+      paymentDate:String(row.payment_date).slice(0,10),status:String(row.status),
+      proofUrl:String(row.proof_url),bankMutationId:row.bank_mutation_id==null?null:Number(row.bank_mutation_id),
+      allocationCount:Number(row.allocation_count),allocationSum:Number(row.allocation_sum),
+      allocations:row.allocations,
+    }))});
+  } catch(error) {
+    req.log.error({error},"Gym combined receipts admin review failed");
+    res.status(503).json({error:"Daftar bukti gabungan belum dapat dibaca."});
+  }
+});
+
 // Prevent reusing a shared receipt image in either old single-member paid flow.
 // The existence probe keeps old deployments working before the additive migration.
 async function assertProofNotCombinedReceipt(proofBytes: Buffer): Promise<void> {
