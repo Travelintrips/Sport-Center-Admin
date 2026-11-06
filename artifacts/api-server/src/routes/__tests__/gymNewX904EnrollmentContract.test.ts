@@ -41,7 +41,7 @@ describe("staged X904 member creation safeguards",()=>{
     expect(ui).toContain("row.pin===newX904ReservedPin && row.name===expectedName");
     expect(ui).toContain('setMembershipX904IdentityConfirmed(false)');
     expect(ui).toContain("Daftarkan Member & Konfirmasi Pembayaran");
-    expect(ui).toContain("Gunakan PIN user yang sudah ada di mesin (alur lama)");
+    expect(ui).toContain("Gunakan user X904 yang sudah ada (alur lama tetap tersedia)");
   });
 });
 
@@ -109,8 +109,8 @@ describe("VMSC protected CREATE_USER staged executor",()=>{
 
 describe("safe production default for X904 new-user UI",()=>{
   test("new PIN creation UI is pilot-gated and old existing-user picker defaults visible",()=>{
-    expect(ui).toContain('import.meta.env.VITE_GYM_X904_NEW_USER_PILOT === "true"');
+    expect(ui).toContain('import.meta.env.VITE_GYM_X904_NEW_USER_PILOT !== "true"');
     expect(ui).toContain('open={import.meta.env.VITE_GYM_X904_NEW_USER_PILOT !== "true"}');
-    expect(ui).toContain('Cari nama / PIN mesin X904 (alur berjalan)');
+    expect(ui).toContain('Gunakan user X904 yang sudah ada (alur lama tetap tersedia)');
   });
 });

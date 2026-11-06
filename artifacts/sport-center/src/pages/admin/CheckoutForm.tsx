@@ -154,6 +154,7 @@ export default function AdminCheckoutForm() {
   const [newX904ManualPin, setNewX904ManualPin] = useState("");
   const [newX904CommandId, setNewX904CommandId] = useState("");
   const [newX904ReservedPin, setNewX904ReservedPin] = useState("");
+  const [newX904PreviewPin, setNewX904PreviewPin] = useState("");
   const [newX904Busy, setNewX904Busy] = useState(false);
   const [newX904Notice, setNewX904Notice] = useState("");
   const [membershipX904Pin, setMembershipX904Pin] = useState("");
@@ -715,6 +716,26 @@ export default function AdminCheckoutForm() {
   const membershipCharge = 300000 * Number(memberMonths || 1);
   const renewalPeriodValid = memberAction !== "renew" ||
     Boolean(renewalStartDate && renewalEndDate && renewalStartDate <= renewalEndDate);
+
+  async function previewNewX904Pin() {
+    setNewX904Busy(true);
+    setNewX904PreviewPin("");
+    setNewX904Notice("");
+    try {
+      const query = new URLSearchParams({mode:newX904PinMode,pin:newX904ManualPin});
+      const response = await fetch("/api/memberships/admin-x904-pin-preview?"+query.toString(),{
+        method:"GET",headers:{Authorization:"Bearer "+(getToken()??"")},cache:"no-store",
+      });
+      const data = await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(data.error||"PIN tidak dapat diperiksa.");
+      if(data.previewOnly!==true || data.reserved!==false || data.availableInSnapshot!==true)
+        throw new Error("Hasil pemeriksaan PIN tidak valid.");
+      setNewX904PreviewPin(String(data.pin));
+      setNewX904Notice("PIN "+data.pin+" belum digunakan dalam snapshot. Ini hanya pratinjau, belum dipesan atau dibuat di mesin X904.");
+    } catch(error){
+      setNewX904Notice(error instanceof Error?error.message:"Pemeriksaan PIN gagal.");
+    } finally {setNewX904Busy(false);}
+  }
 
   async function queueNewX904User() {
     const name = (isGuest ? guestName : String(selectedCustomer?.name ?? "")).trim();
@@ -2093,17 +2114,27 @@ export default function AdminCheckoutForm() {
               {memberAction === "new" ? <>
                 <p className="text-xs text-muted-foreground">Isi nama, WhatsApp dan email di atas. Fasilitas Gym otomatis; tidak ada tarif kunjungan Rp30.000.</p>
                 <div className="rounded-lg border p-3 space-y-2">
-                  {import.meta.env.VITE_GYM_X904_NEW_USER_PILOT === "true" && <>
+                  <>
                   <Label>Buat user X904 *</Label>
                   <p className="text-xs text-muted-foreground">Pilih PIN manual 3 digit atau Generate PIN otomatis (100–999). Server menolak PIN yang sudah ada, pernah diantrekan, atau sudah dipetakan. Pendaftaran dan pembayaran belum diproses sampai user terverifikasi di mesin.</p>
                   <div className="flex flex-wrap gap-4 text-sm" role="radiogroup" aria-label="Metode pembuatan PIN X904">
-                    <label className="flex items-center gap-2"><input type="radio" checked={newX904PinMode==="manual"} onChange={()=>setNewX904PinMode("manual")} disabled={Boolean(newX904CommandId)}/>Masukkan PIN</label>
-                    <label className="flex items-center gap-2"><input type="radio" checked={newX904PinMode==="generate"} onChange={()=>setNewX904PinMode("generate")} disabled={Boolean(newX904CommandId)}/>Generate PIN 3 digit</label>
+                    <label className="flex items-center gap-2"><input type="radio" checked={newX904PinMode==="manual"} onChange={()=>{setNewX904PinMode("manual");setNewX904PreviewPin("");setNewX904Notice("");}} disabled={Boolean(newX904CommandId)}/>Masukkan PIN</label>
+                    <label className="flex items-center gap-2"><input type="radio" checked={newX904PinMode==="generate"} onChange={()=>{setNewX904PinMode("generate");setNewX904PreviewPin("");setNewX904Notice("");}} disabled={Boolean(newX904CommandId)}/>Generate PIN 3 digit</label>
                   </div>
                   {newX904PinMode==="manual" && <Input aria-label="PIN X904 baru 3 digit" inputMode="numeric" maxLength={3}
                     value={newX904ManualPin} disabled={Boolean(newX904CommandId)}
-                    placeholder="Contoh: 318" onChange={e=>setNewX904ManualPin(e.target.value.replace(/[^0-9]/g,"").slice(0,3))}/>}
-                  {!newX904CommandId ? (
+                    placeholder="Contoh: 318" onChange={e=>{setNewX904ManualPin(e.target.value.replace(/[^0-9]/g,"").slice(0,3));setNewX904PreviewPin("");setNewX904Notice("");}}/>}
+                  {import.meta.env.VITE_GYM_X904_NEW_USER_PILOT !== "true" ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-700">Mode pratinjau aman: hanya membaca inventaris X904. Belum membuat akun, PIN, membership, booking atau pembayaran.</p>
+                      <Button type="button" variant="outline"
+                        disabled={newX904Busy || (newX904PinMode==="manual" && !/^[1-9][0-9]{2}$/.test(newX904ManualPin))}
+                        onClick={()=>void previewNewX904Pin()}>
+                        {newX904Busy?"Memeriksa...":newX904PinMode==="generate"?"Pratinjau Generate PIN 3 Digit":"Periksa Ketersediaan PIN"}
+                      </Button>
+                      {newX904PreviewPin && <p className="text-sm">PIN pratinjau: <strong>{newX904PreviewPin}</strong> · belum dialokasikan</p>}
+                    </div>
+                  ) : !newX904CommandId ? (
                     <Button type="button" variant="outline" disabled={newX904Busy || (newX904PinMode==="manual" && !/^[1-9][0-9]{2}$/.test(newX904ManualPin))}
                       onClick={()=>void queueNewX904User()}>{newX904Busy?"Memproses...":newX904PinMode==="generate"?"Generate PIN & Buat User X904":"Buat User X904 dengan PIN Ini"}</Button>
                   ):(
@@ -2115,9 +2146,9 @@ export default function AdminCheckoutForm() {
                     </div>
                   )}
                   {newX904Notice && <p className="text-xs" role="status">{newX904Notice}</p>}
-                  </>}
+                  </>
                   <details open={import.meta.env.VITE_GYM_X904_NEW_USER_PILOT !== "true"} className="rounded-md border p-2">
-                    <summary className="cursor-pointer text-xs font-medium">{import.meta.env.VITE_GYM_X904_NEW_USER_PILOT === "true" ? "Gunakan PIN user yang sudah ada di mesin (alur lama)" : "Cari nama / PIN mesin X904 (alur berjalan)"}</summary>
+                    <summary className="cursor-pointer text-xs font-medium">Gunakan user X904 yang sudah ada (alur lama tetap tersedia)</summary>
                     <div className="mt-2 space-y-2">
                   <Label htmlFor="membership-x904-search">Cari nama / PIN mesin X904 *</Label>
                   <Input id="membership-x904-search" autoComplete="off"

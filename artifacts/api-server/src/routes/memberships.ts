@@ -939,6 +939,55 @@ router.get("/memberships/:id/payments", adminMiddleware, async (req, res) => {
 
 // A staged CREATE_USER command is not a verified identity or paid membership.
 // VMSC ACK and an authenticated newer roster are required before payment.
+// Read-only PIN preview. Never reserves a PIN, writes a command, or
+// changes user, membership, payment, bank, journal or access state.
+// The guarded CREATE_USER endpoint rechecks all collisions on submit.
+router.get("/memberships/admin-x904-pin-preview", adminMiddleware, async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  if(!["owner","super_admin","admin"].includes(String((req as any).user?.role??"")))
+    return res.status(403).json({error:"Hanya admin berwenang yang dapat memeriksa PIN X904."});
+  const mode=String(req.query.mode??"");
+  const manualPin=String(req.query.pin??"");
+  if(!["manual","generate"].includes(mode) ||
+     (mode==="manual"&&!/^[1-9][0-9]{2}$/.test(manualPin)))
+    return res.status(400).json({error:"PIN manual harus 3 digit (100–999)."});
+  try {
+    const snapshot=await db.execute(sql`SELECT last_snapshot_id,user_count,last_complete_at
+      FROM sport_center.gym_x904_lan_state
+      WHERE device_serial='TDBD234200545'
+        AND last_complete_at>=now()-interval '15 minutes'`);
+    if(snapshot.rows.length!==1 || !snapshot.rows[0].last_snapshot_id)
+      return res.status(409).json({error:"Snapshot mesin tidak tersedia atau kedaluwarsa. Segarkan roster."});
+    const count=await db.execute(sql`SELECT count(*)::int AS n
+      FROM sport_center.gym_x904_lan_users
+      WHERE device_serial='TDBD234200545'
+        AND last_seen_snapshot=${snapshot.rows[0].last_snapshot_id}`);
+    if(Number(count.rows[0]?.n??0)!==Number(snapshot.rows[0].user_count))
+      return res.status(409).json({error:"Snapshot roster tidak lengkap; tidak aman memeriksa PIN."});
+    const occupied=await db.execute(sql`SELECT pin FROM (
+      SELECT user_pin AS pin FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545'
+      UNION SELECT user_pin FROM sport_center.gym_x904_member_mapping
+        WHERE device_serial='TDBD234200545'
+      UNION SELECT user_pin FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND command_type='CREATE_USER'
+    ) used WHERE pin ~ '^[1-9][0-9]{2}$'`);
+    const reserved=new Set(occupied.rows.map((r:any)=>String(r.pin)));
+    const pin=chooseThreeDigitX904Pin(mode as "manual"|"generate",manualPin,
+      reserved,Math.floor(Math.random()*900));
+    if(!pin)
+      return res.status(409).json({error:mode==="manual"
+        ?"PIN sudah ada, ganti dengan yang baru atau Generate PIN."
+        :"Tidak tersedia PIN 3 digit pada inventaris saat ini."});
+    return res.json({pin,availableInSnapshot:true,reserved:false,
+      previewOnly:true,canCreateOnDevice:false,
+      message:"PIN belum digunakan menurut snapshot, tetapi belum dipesan atau dibuat pada mesin."});
+  } catch(error) {
+    req.log.error({error},"X904 PIN preview failed");
+    return res.status(503).json({error:"Pemeriksaan PIN belum berhasil."});
+  }
+});
+
 router.post("/memberships/admin-x904-create-user", adminMiddleware, async (req,res)=>{
   res.setHeader("Cache-Control","no-store");
   const actor=(req as any).user;
