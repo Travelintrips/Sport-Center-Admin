@@ -27,7 +27,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
-import { autoReserveVisAfterFundsVerified, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
+import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { notifyGymVisitorCardReserved } from "../lib/notifications";
 
 const router = Router();
@@ -566,6 +566,30 @@ router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware
     }
     console.error("[gym-vis] auto allocation action failed",error);
     res.status(503).json({error:"Alokasi VIS gagal dan tidak ada perintah akses pintu yang diterbitkan."});
+  }
+});
+
+router.post("/admin/wa-bookings/:orderNumber/collect-vis", adminMiddleware, async (req, res) => {
+  const actor = String((req as any).user?.email ?? "").trim();
+  if (!actor) { res.status(403).json({ error: "Identitas petugas tidak tersedia." }); return; }
+  try {
+    const outcome = await collectReservedVisCard({
+      orderNumber: String(req.params.orderNumber),
+      physicalCardHandedOver: req.body?.physicalCardHandedOver === true,
+      collectedBy: actor,
+    });
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
+    if (booking) await logAudit({
+      action: "gym_guest_vis_card_collected", entity: "booking", entityId: booking.id,
+      userName: actor, after: { cardCode: outcome.cardCode, state: outcome.state },
+    });
+    res.json({ success: true, ...outcome });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error: error.message, code: error.code }); return;
+    }
+    res.status(503).json({ error: "Serah-terima kartu VIS belum dapat dicatat." });
   }
 });
 
