@@ -85,20 +85,45 @@ try{
  ]}});
  scratchId=dup.data.replies?.[0]?.duplicateSheet?.properties?.sheetId;
  if(!Number.isInteger(scratchId))throw Error("DEV_SCRATCH_DUPLICATE_FAILED");
- const dec=await create("2026-12","previous_total");
- const decemberOpening=await cell("D"+(dec.destinationStart+2));
- if(decemberOpening!==`=C${dec.sourceStart+2}`)throw Error("CARRY_FORMULA_WRONG");
- const jan=await create("2027-01","zero");
- if(Number(await cell("D"+(jan.destinationStart+2),"UNFORMATTED_VALUE"))!==0)
-  throw Error("JANUARY_ZERO_OPENING_FAILED");
+ const mode="febri_andi_only";
+ const validateCarryover=async(plan)=>{
+  let carried=0,zeroed=0;
+  for(let i=0;i<plan.employeeCount;i++){
+   const row=plan.destinationStart+2+i;
+   const prev=plan.sourceStart+2+i;
+   const label=String(await cell("B"+row,"FORMATTED_VALUE")).trim().toLowerCase();
+   const carry=["kasbon febri","kasbon andi"].includes(label);
+   const opening=await cell("D"+row);
+   if(carry){
+    if(opening!==`=C${prev}`)throw Error("CARRYOVER_FORMULA_INCORRECT_"+label);
+    carried++;
+   }else{
+    if(Number(await cell("D"+row,"UNFORMATTED_VALUE"))!==0)
+     throw Error("OTHER_EMPLOYEE_OPENING_NOT_ZERO_"+label);
+    zeroed++;
+   }
+   if((await cell("E"+row,"FORMULA"))!=="")
+    throw Error("DATE_TRANSACTION_NOT_EMPTY_"+label);
+   if((await cell("AI"+row,"FORMULA"))!=="")
+    throw Error("LAST_DATE_TRANSACTION_NOT_EMPTY_"+label);
+   if((await cell("C"+row))!==`=SUM(D${row}:AI${row})`)
+    throw Error("EMPLOYEE_TOTAL_FORMULA_MISSING_"+label);
+  }
+  if(carried!==2 || zeroed!==plan.employeeCount-2)throw Error("UNEXPECTED_CARRYOVER_EMPLOYEE_COUNT");
+  return {carried,zeroed};
+ };
+ const dec=await create("2026-12",mode);
+ const december=await validateCarryover(dec);
+ const jan=await create("2027-01",mode);
+ const january=await validateCarryover(jan);
  const sheet=await api.spreadsheets.get({spreadsheetId:DEV,fields:"sheets(properties(sheetId,gridProperties(rowCount)))"});
  const rowCount=sheet.data.sheets?.find(s=>s.properties?.sheetId===scratchId)?.properties?.gridProperties?.rowCount??0;
  const {f,u}=await fetchRows(rowCount);
  let duplicateRejected=false;
- try{planNewPeriod(f,u,"2026-12","zero");}catch(e){duplicateRejected=String(e.message)==="PERIOD_ALREADY_EXISTS";}
+ try{planNewPeriod(f,u,"2026-12",mode);}catch(e){duplicateRejected=String(e.message)==="PERIOD_ALREADY_EXISTS";}
  if(!duplicateRejected)throw Error("DUPLICATE_PERIOD_WAS_NOT_REJECTED");
  console.log(JSON.stringify({result:"PASS",workbook:"DEV_ONLY",decemberRows:[dec.destinationStart,dec.destinationEnd],
-  januaryRows:[jan.destinationStart,jan.destinationEnd],decemberCarry:true,januaryZero:true,
+  januaryRows:[jan.destinationStart,jan.destinationEnd],decemberCarry:december,januaryCarry:january,otherEmployeesStartZero:true,datesEmpty:true,
   formulaReadback:true,duplicateRejected:true,sourceOriginalUntouched:true}));
 }finally{
  if(Number.isInteger(scratchId)){
