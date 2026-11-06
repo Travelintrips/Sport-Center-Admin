@@ -132,8 +132,6 @@ export default function AdminWaBookings() {
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
-  const [visBankReference, setVisBankReference] = useState("");
-  const [visFundsChecked, setVisFundsChecked] = useState(false);
   const [visCardHandedOver, setVisCardHandedOver] = useState(false);
   const [visCardReturned, setVisCardReturned] = useState(false);
   const [visReadbackChecked, setVisReadbackChecked] = useState(false);
@@ -185,22 +183,6 @@ export default function AdminWaBookings() {
       invalidate();
     },
     onError: (e: any) => toast({ title: "Gagal reject", description: e.message, variant: "destructive" }),
-  });
-
-  const autoAllocateVisMutation = useMutation({
-    mutationFn: (orderNumber: string) =>
-      mutate(`/admin/wa-bookings/${orderNumber}/auto-allocate-vis`, {
-        officialBankReference: visBankReference.trim(),
-        officialFundsChecked: visFundsChecked,
-      }),
-    onSuccess: (data: { cardCode: string }) => {
-      toast({ title: `Kartu ${data.cardCode} dialokasikan`,
-        description: "Nomor kartu tersedia di tiket pelanggan dan notifikasi WhatsApp." });
-      setVisBankReference("");
-      setVisFundsChecked(false);
-      invalidate();
-    },
-    onError: (e: any) => toast({ title: "Alokasi kartu VIS ditolak", description: e.message, variant: "destructive" }),
   });
 
   const collectVisMutation = useMutation({
@@ -550,28 +532,13 @@ export default function AdminWaBookings() {
                 {detail.booking.source === "gym_public_guest" &&
                   detail.x904IdentityMatch?.route === "visitor_card" &&
                   detail.booking.status === "confirmed" && !detail.visCardReservation && (
-                  <section className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-slate-900">
-                    <p className="font-bold">Alokasi kartu VIS otomatis setelah dana resmi masuk</p>
-                    <p className="text-xs text-amber-900">
-                      Pastikan pembayaran sudah confirmed di Booking Admin dan cocokan transaksi pada mutasi bank resmi.
-                      Sistem akan memilih kartu VIS tersedia otomatis, tanpa memilih PIN atau kartu manual.
+                  <section className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-amber-900">
+                    <p className="font-bold">Kartu VIS belum tersedia</p>
+                    <p className="mt-1">
+                      Setelah admin mengonfirmasi pembayaran di Booking Admin, sistem memproses alokasi kartu otomatis.
+                      Bila kartu belum terlihat, periksa status reservasi dan log petugas; jangan konfirmasi pembayaran dua kali.
                     </p>
-                    <Input placeholder="Nomor referensi resmi mutasi bank"
-                      aria-label="Nomor referensi resmi mutasi bank"
-                      value={visBankReference}
-                      onChange={e => setVisBankReference(e.target.value.toUpperCase())} />
-                    <label className="flex items-start gap-2 text-xs leading-relaxed">
-                      <input type="checkbox" checked={visFundsChecked} onChange={e => setVisFundsChecked(e.target.checked)}
-                        className="mt-0.5" />
-                      Saya sudah memeriksa dana benar-benar masuk ke rekening resmi, bukan hanya berdasarkan screenshot/OCR.
-                    </label>
-                    <Button type="button" className="w-full"
-                      disabled={!visFundsChecked || visBankReference.trim().length < 6 ||
-                        autoAllocateVisMutation.isPending}
-                      onClick={() => autoAllocateVisMutation.mutate(detail.booking.orderNumber)}>
-                      Alokasikan Kartu VIS Otomatis
-                    </Button>
-                    <p className="text-xs text-slate-500">Tidak ada perintah pembukaan pintu X904 dari tindakan ini.</p>
+                    <p className="mt-1 text-xs">Konfirmasi pembayaran tidak membuka pintu X904.</p>
                   </section>
                 )}
                 {detail.booking.source === "gym_public_guest" && detail.booking.notes && (
