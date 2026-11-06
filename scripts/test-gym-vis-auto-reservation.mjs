@@ -6,6 +6,7 @@ const migration=read("artifacts/api-server/migrations/20261106_gym_vis_card_rese
 const service=read("artifacts/api-server/src/services/x904GymVisitorCardReservations.ts");
 const api=read("artifacts/api-server/src/routes/waBookingsAdmin.ts");
 const payments=read("artifacts/api-server/src/routes/payments.ts");
+const grantWorker=read("artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts");
 const publicApi=read("artifacts/api-server/src/routes/whatsapp.ts");
 const ticket=read("artifacts/sport-center/src/pages/wa/BookingStatus.tsx");
 const admin=read("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
@@ -89,6 +90,43 @@ test("one admin payment confirmation triggers idempotent physical VIS reservatio
  const automatic=service.slice(service.indexOf("export async function reserveVisAfterAdminPaymentConfirmation"),service.indexOf("export async function collectReservedVisCard"));
  assert.doesNotMatch(automatic,/ACTIVATE_USER|x904_user_commands|x904_nonmember_daily_access/);
  assert.doesNotMatch(admin,/Alokasikan Kartu VIS Otomatis/);
+});
+
+test("paid VIS creates a held nonmember grant atomically; physical handover is the only unlock",()=>{
+ const reserve=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function reserveVisAfterAdminPaymentConfirmation"));
+ assert.match(reserve,/INSERT INTO sport_center\.gym_vis_card_reservations/);
+ assert.match(reserve,/INSERT INTO sport_center\.x904_nonmember_daily_access/);
+ assert.match(reserve,/verification_state,access_state/);
+ assert.match(reserve,/'pending','pending'/);
+ assert.match(reserve,/AT TIME ZONE 'Asia\/Jakarta'/);
+ assert.match(reserve,/RETURNING access_id/);
+ assert.match(reserve,/machine_name/);
+ const handover=service.slice(service.indexOf("export async function collectReservedVisCard"),service.indexOf("export async function returnVerifiedVisCard"));
+ assert.match(handover,/physicalCardHandedOver !== true/);
+ assert.match(handover,/UPDATE sport_center\.x904_nonmember_daily_access/);
+ assert.match(handover,/verification_state='verified'/);
+ assert.match(handover,/verification_state='pending'/);
+ assert.match(handover,/access_state='pending'/);
+ assert.match(handover,/payment_id=/);
+ assert.match(handover,/device_uid=/);
+ assert.match(handover,/expires_at>now\(\)/);
+ assert.match(handover,/vis_grant_not_ready/);
+});
+
+test("VIS activation worker requires collected reservation, leaves ordinary PINs and legacy cards alone",()=>{
+ assert.match(grantWorker,/a\.booking_source === "gym_public_guest"/);
+ assert.match(grantWorker,/Kartu VIS001–VIS006 menunggu pilihan/);
+ assert.match(grantWorker,/gym_vis_card_reservations/);
+ assert.match(grantWorker,/r\.state='collected'/);
+ assert.match(grantWorker,/r\.collected_at IS NOT NULL/);
+ assert.match(grantWorker,/r\.booking_id=/);
+ assert.match(grantWorker,/r\.payment_id=/);
+ assert.match(grantWorker,/r\.device_uid=/);
+ assert.match(grantWorker,/if \(handover\.rows\.length !== 1\) return/);
+ assert.match(grantWorker,/now\.getTime\(\) >= new Date\(String\(a\.expires_at\)\)\.getTime\(\)/);
+ assert.match(grantWorker,/GYM_X904_NONMEMBER_ACCESS_ENABLED/);
+ assert.match(grantWorker,/GYM_X904_USER_WRITE_ENABLED/);
+ assert.match(grantWorker,/x904NonmemberOpeningHours/);
 });
 
 test("legacy VIS checkouts cannot reuse reserved visitor cards",()=>{
