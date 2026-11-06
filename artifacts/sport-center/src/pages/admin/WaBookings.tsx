@@ -134,6 +134,8 @@ export default function AdminWaBookings() {
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
   const [pinOwnershipChecked, setPinOwnershipChecked] = useState(false);
+  const [pinFundsChecked, setPinFundsChecked] = useState(false);
+  const [pinBankReference, setPinBankReference] = useState("");
   const [visBankReference, setVisBankReference] = useState("");
   const [visFundsChecked, setVisFundsChecked] = useState(false);
   const [visCardReturned, setVisCardReturned] = useState(false);
@@ -190,10 +192,16 @@ export default function AdminWaBookings() {
 
   const approveGuestPinMutation = useMutation({
     mutationFn: (bookingId: number) =>
-      mutate(`/bookings/${bookingId}/x904-guest-pin-approve`, { identityChecked: true }),
+      mutate(`/bookings/${bookingId}/x904-guest-pin-approve`, {
+        identityChecked: true,
+        officialFundsChecked: true,
+        officialBankReference: pinBankReference.trim().toUpperCase(),
+      }),
     onSuccess: () => {
       toast({ title: "PIN nonmember disahkan", description: "Aktivasi menunggu worker dan ACK X904. Pastikan dana resmi telah dikonfirmasi." });
       setPinOwnershipChecked(false);
+      setPinFundsChecked(false);
+      setPinBankReference("");
       invalidate();
     },
     onError: (e: any) => toast({ title: "Verifikasi PIN ditolak", description: e.message, variant: "destructive" }),
@@ -497,7 +505,17 @@ export default function AdminWaBookings() {
                             onChange={e => setPinOwnershipChecked(e.target.checked)} />
                           Saya telah memeriksa langsung identitas pengunjung dan cocok dengan PIN, UID, serta nama mesin X904.
                         </label>
-                        <Button type="button" className="w-full" disabled={!pinOwnershipChecked ||
+                        <Input placeholder="Referensi resmi transaksi bank / QRIS"
+                          aria-label="Nomor referensi pembayaran resmi untuk PIN nonmember"
+                          value={pinBankReference}
+                          onChange={e => setPinBankReference(e.target.value.toUpperCase())} />
+                        <label className="flex items-start gap-2 text-xs">
+                          <input type="checkbox" checked={pinFundsChecked}
+                            onChange={e => setPinFundsChecked(e.target.checked)} />
+                          Saya sudah memastikan dana resmi diterima dan cocok dengan transaksi ini, bukan hanya screenshot/OCR.
+                        </label>
+                        <Button type="button" className="w-full" disabled={!pinOwnershipChecked || !pinFundsChecked ||
+                          pinBankReference.trim().length < 6 ||
                           detail.x904PinGrant.paymentStatus !== "confirmed" || approveGuestPinMutation.isPending}
                           onClick={() => approveGuestPinMutation.mutate(Number(detail.booking.id))}>
                           Sahkan PIN Nonmember (Setelah Pembayaran Resmi)
