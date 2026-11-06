@@ -87,6 +87,23 @@ export async function autoReserveVisAfterFundsVerified(input: {
         throw new VisReservationError(409, "bank_reference_mismatch",
           "Referensi resmi tidak cocok dengan referensi pembayaran yang tercatat. Perlu rekonsiliasi.");
       }
+      // Do not treat a staff checkbox, screenshot or manually imported bank
+      // mutation as independent proof of payment. Require a linked incoming
+      // bank credit with recorded ingestion provenance.
+      const bankEvidence = await tx.execute(sql`SELECT id
+        FROM sport_center.bank_mutations
+        WHERE matched_payment_id=${Number(payment.id)}
+          AND status::text='auto_matched'
+          AND upper(btrim(direction))='IN'
+          AND credit_amount>=${Number(booking.amount)}
+          AND nullif(btrim(coalesce(source_app,'')),'') IS NOT NULL
+          AND nullif(btrim(coalesce(source_module,'')),'') IS NOT NULL
+          AND lower(btrim(coalesce(provider_name,''))) NOT IN ('','manual')
+        LIMIT 2 FOR UPDATE`);
+      if (bankEvidence.rows.length !== 1) {
+        throw new VisReservationError(409, "independent_bank_evidence_missing",
+          "Rekonsiliasi mutasi bank independen belum tersedia untuk pembayaran ini. Kartu VIS tetap ditahan.");
+      }
       const prior = await tx.execute(sql`SELECT card_code,state,funds_reference
         FROM sport_center.gym_vis_card_reservations
         WHERE booking_id=${Number(booking.id)} FOR UPDATE`);
@@ -173,7 +190,7 @@ export async function returnVerifiedVisCard(input: {
   try {
     return await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
-      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id
+      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id,r.reserved_at
         FROM sport_center.gym_vis_card_reservations r
         JOIN sport_center.sport_bookings b ON b.id=r.booking_id
         WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
@@ -192,6 +209,30 @@ export async function returnVerifiedVisCard(input: {
         LIMIT 1`);
       if (grant.rows.length) throw new VisReservationError(409,"access_still_pending",
         "Masih ada hak akses X904 belum selesai. Verifikasi suspend/read-back terlebih dahulu.");
+      // Require device-observed post-reservation evidence: a fresh snapshot
+      // proves the PIN is in suspended group 2, not just an admin checkbox.
+      const readback = await tx.execute(sql`WITH latest AS (
+          SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
+          WHERE device_serial='TDBD234200545'
+            AND observed_at >= ${row.reserved_at}
+            AND observed_at >= now()-interval '10 minutes'
+          ORDER BY observed_at DESC LIMIT 1
+        ) SELECT observed_at FROM latest
+        WHERE jsonb_typeof(users)='array'
+          AND (SELECT count(*) FROM jsonb_array_elements(users) u
+               WHERE u->>'pin'=${String(row.user_pin)})=1
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements(users) u
+               WHERE u->>'pin'=${String(row.user_pin)}
+                 AND u->>'group'='2' AND u->>'role'='0')
+          AND NOT EXISTS (
+            SELECT 1 FROM sport_center.x904_user_commands cmd
+            WHERE cmd.device_serial='TDBD234200545'
+              AND cmd.user_pin=${String(row.user_pin)}
+              AND cmd.created_at>latest.observed_at
+              AND cmd.state NOT IN ('cancelled','failed')
+          ) LIMIT 1`);
+      if (!readback.rows.length) throw new VisReservationError(409,"x904_readback_missing",
+        "Snapshot X904 terbaru belum membuktikan PIN tersuspend di Grup 2. Kartu tetap ditahan.");
       await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
         SET state='returned',returned_at=now()
         WHERE id=${Number(row.id)} AND state IN ('reserved','collected')`);
