@@ -952,12 +952,21 @@ router.get("/memberships/admin-x904-pin-preview", adminMiddleware, async(req,res
      (mode==="manual"&&!/^[1-9][0-9]{2}$/.test(manualPin)))
     return res.status(400).json({error:"PIN manual harus 3 digit (100–999)."});
   try {
-    const snapshot=await db.execute(sql`SELECT last_snapshot_id,user_count,last_complete_at
+    // Preview is read-only: accept a completed, reasonably recent snapshot
+    // even if periodic LAN evidence is delayed. Mutation paths remain strict.
+    const snapshot=await db.execute(sql`SELECT last_snapshot_id,user_count,last_complete_at,
+        EXTRACT(EPOCH FROM (now()-last_complete_at)) AS snapshot_age_seconds
       FROM sport_center.gym_x904_lan_state
       WHERE device_serial='TDBD234200545'
-        AND last_complete_at>=now()-interval '15 minutes'`);
+        AND last_complete_at IS NOT NULL
+        AND last_complete_at<=now()
+        AND last_complete_at>=now()-interval '6 hours'`);
     if(snapshot.rows.length!==1 || !snapshot.rows[0].last_snapshot_id)
-      return res.status(409).json({error:"Snapshot mesin tidak tersedia atau kedaluwarsa. Segarkan roster."});
+      return res.status(409).json({error:"Snapshot X904 belum tersedia dalam 6 jam terakhir. Periksa sinkronisasi inventaris."});
+    const ageSec=Number(snapshot.rows[0].snapshot_age_seconds);
+    if(!Number.isFinite(ageSec) || ageSec<0 || ageSec>6*60*60)
+      return res.status(409).json({error:"Waktu snapshot X904 tidak valid; pratinjau ditahan."});
+    const snapshotStale=ageSec>15*60;
     const count=await db.execute(sql`SELECT count(*)::int AS n
       FROM sport_center.gym_x904_lan_users
       WHERE device_serial='TDBD234200545'
@@ -981,7 +990,11 @@ router.get("/memberships/admin-x904-pin-preview", adminMiddleware, async(req,res
         :"Tidak tersedia PIN 3 digit pada inventaris saat ini."});
     return res.json({pin,availableInSnapshot:true,reserved:false,
       previewOnly:true,canCreateOnDevice:false,
-      message:"PIN belum digunakan menurut snapshot, tetapi belum dipesan atau dibuat pada mesin."});
+      snapshotAgeMinutes:Math.ceil(ageSec/60),
+      snapshotStale,
+      message:snapshotStale
+        ?"PIN hanya kandidat dari snapshot lama. Wajib sinkronisasi inventaris sebelum pembuatan user."
+        :"PIN belum digunakan menurut snapshot, tetapi belum dipesan atau dibuat pada mesin."});
   } catch(error) {
     req.log.error({error},"X904 PIN preview failed");
     return res.status(503).json({error:"Pemeriksaan PIN belum berhasil."});

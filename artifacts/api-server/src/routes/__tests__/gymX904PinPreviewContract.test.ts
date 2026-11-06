@@ -15,7 +15,10 @@ describe("read-only X904 new PIN preview and legacy booking preservation",()=>{
    expect(preview).toContain("previewOnly:true");
    expect(preview).toContain("reserved:false");
    expect(preview).toContain("canCreateOnDevice:false");
-   expect(preview).toContain("last_complete_at>=now()-interval '15 minutes'");
+   expect(preview).toContain("last_complete_at>=now()-interval '6 hours'");
+   expect(preview).toContain("snapshotStale");
+   expect(preview).toContain("snapshotAgeMinutes");
+   expect(preview).toContain("snapshot_age_seconds");
    expect(preview).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b\s+(INTO|sport_center)/i);
    expect(preview).not.toContain("CREATE_USER',");
  });
@@ -31,6 +34,18 @@ describe("read-only X904 new PIN preview and legacy booking preservation",()=>{
  it("does not present a preview as allocated or paid",()=>{
    expect(ui).toContain("belum dialokasikan");
    expect(ui).toContain("belum dipesan atau dibuat");
+   expect(ui).toContain("data.snapshotStale===true");
+   expect(ui).toContain("belum real-time");
    expect(route).toContain("PIN sudah ada, ganti dengan yang baru atau Generate PIN.");
  });
+});
+
+describe("preview stale snapshot does not relax mutation protections",()=>{
+  const creation=route.split('router.post("/memberships/admin-x904-create-user"')[1]
+    ?.split('router.get("/memberships/admin-x904-create-user/')[0]??"";
+  it("preserves the 15-minute roster requirement for writes",()=>{
+    expect(creation).toContain("last_complete_at >= now() - interval '15 minutes'");
+    expect(creation).toContain("GYM_X904_USER_WRITE_ENABLED");
+    expect(creation).toContain("GYM_X904_GYM_ENROLLMENT_CREATE_ENABLED");
+  });
 });

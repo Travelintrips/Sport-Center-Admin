@@ -730,8 +730,12 @@ export default function AdminCheckoutForm() {
       if(!response.ok) throw new Error(data.error||"PIN tidak dapat diperiksa.");
       if(data.previewOnly!==true || data.reserved!==false || data.availableInSnapshot!==true)
         throw new Error("Hasil pemeriksaan PIN tidak valid.");
+      if(!/^[1-9][0-9]{2}$/.test(String(data.pin??"")))
+        throw new Error("PIN hasil pratinjau tidak valid.");
       setNewX904PreviewPin(String(data.pin));
-      setNewX904Notice("PIN "+data.pin+" belum digunakan dalam snapshot. Ini hanya pratinjau, belum dipesan atau dibuat di mesin X904.");
+      setNewX904Notice(data.snapshotStale===true
+        ? "PIN "+data.pin+" kandidat dari snapshot "+Number(data.snapshotAgeMinutes)+" menit lalu (belum real-time). Sinkronisasi mesin wajib sebelum membuat user. PIN belum dipesan atau dibuat."
+        : "PIN "+data.pin+" belum digunakan dalam snapshot terbaru. Ini hanya pratinjau, belum dipesan atau dibuat di mesin X904.");
     } catch(error){
       setNewX904Notice(error instanceof Error?error.message:"Pemeriksaan PIN gagal.");
     } finally {setNewX904Busy(false);}
