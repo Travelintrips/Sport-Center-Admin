@@ -96,6 +96,10 @@ test("VIS return checks unresolved X904 grants across all bookings for the physi
 test("canonical bank payment reference cannot be contradicted by staff input",()=>{
  assert.match(service,/proof_url,confirmed_at,reference_number,provider_reference,provider_trade_no,merchant_trade_no/);
  assert.match(service,/const recordedReferences = \[/);
+ const canonical=service.slice(service.indexOf("const recordedReferences = ["),service.indexOf("].map((value: unknown)",service.indexOf("const recordedReferences = [")));
+ assert.match(canonical,/payment.reference_number/);
+ assert.match(canonical,/payment.provider_trade_no/);
+ assert.doesNotMatch(canonical,/payment.provider_reference|payment.merchant_trade_no/);
  assert.match(service,/recordedReferences\.length > 0 && !recordedReferences\.includes\(ref\)/);
  assert.match(service,/bank_reference_mismatch/);
  assert.match(service,/bank_reference_other_booking/);
