@@ -1,7 +1,7 @@
 -- No-login PIN guests are NOT authenticated by their device display name.
 -- Preserve review_required after canonical payment confirmation until a
 -- logged-in staff member independently attests PIN ownership.
--- This change is scoped to source='gym_public_guest'; other (including VIS)
+-- This change is scoped to source='gym_public_guest' AND identity_type='pin'; other (including VIS)
 -- payment flows keep their previous trigger behavior.
 BEGIN;
 
@@ -20,8 +20,12 @@ BEGIN
   END IF;
 
   IF NEW.status::text = 'confirmed' AND changed THEN
+    -- PIN only. A VIS grant belonging to gym_public_guest retains the
+    -- existing VIS payment and allocation behavior maintained elsewhere.
     SELECT EXISTS(SELECT 1 FROM sport_center.sport_bookings b
-      WHERE b.id = NEW.booking_id AND b.source='gym_public_guest')
+      JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=b.id
+      WHERE b.id = NEW.booking_id AND b.source='gym_public_guest'
+        AND a.identity_type='pin')
       INTO is_guest;
 
     UPDATE sport_center.x904_nonmember_daily_access a
