@@ -995,6 +995,20 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 });
 
 
+// Prevent reusing a shared receipt image in either old single-member paid flow.
+// The existence probe keeps old deployments working before the additive migration.
+async function assertProofNotCombinedReceipt(proofBytes: Buffer): Promise<void> {
+  const table = await db.execute(sql`SELECT to_regclass('sport_center.gym_combined_receipts') AS available`);
+  if (!table.rows[0]?.available) return;
+  const digest = createHash("sha256").update(proofBytes).digest("hex");
+  const used = await db.execute(sql`SELECT id FROM sport_center.gym_combined_receipts
+    WHERE proof_sha256=${digest} LIMIT 1`);
+  if (used.rows.length) {
+    throw new MembershipProofError(409,
+      "Bukti ini sudah tercatat sebagai pembayaran gabungan. Gunakan alur gabungan, jangan konfirmasi sebagai dua penerimaan.");
+  }
+}
+
 // A shared transfer is ONE bank receipt with multiple pending allocations.
 // No membership activation, canonical payment, accounting journal, or X904 command is created here.
 router.post("/memberships/admin-combined-receipt", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
@@ -1191,6 +1205,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     if (!proof || !mime || !extensions[mime]) {
       res.status(400).json({ error: "Unggah bukti pembayaran berupa gambar" }); return;
     }
+    await assertProofNotCombinedReceipt(proof.buffer);
 
     // Do not create a customer/login with a predictable default password.
     // A customer record without credentials is safe to invite later.
@@ -1729,6 +1744,7 @@ router.post("/memberships/:id/admin-payment-proof-upload", adminMiddleware, memb
     if (!req.file || !["image/jpeg","image/png","image/webp","image/heic","image/heif"].includes(req.file.mimetype.toLowerCase())) {
       res.status(400).json({error:"Bukti pembayaran wajib berupa gambar yang didukung"}); return;
     }
+    await assertProofNotCombinedReceipt(req.file.buffer);
     const [pending] = await db.select().from(membershipPaymentsTable).where(
       and(eq(membershipPaymentsTable.membershipId,id),eq(membershipPaymentsTable.status,"pending_payment"))
     ).orderBy(desc(membershipPaymentsTable.id)).limit(1);
