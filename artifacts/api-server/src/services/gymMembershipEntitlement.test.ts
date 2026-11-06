@@ -1,5 +1,5 @@
 
-import { resolveGymEntitlement } from "./gymMembershipEntitlement";
+import { resolveGymEntitlement, canRecordTrustedGymX904Checkin } from "./gymMembershipEntitlement";
 
 const base = {
   today: "2026-10-23",
@@ -57,5 +57,40 @@ describe("GYM membership payment entitlement", () => {
   });
   it("requires review for malformed payment dates", () => {
     expect(resolveGymEntitlement({ ...base, payments: [{ id: 5, periodStart: "2026-10-40", periodEnd: "2026-10-31", status: "confirmed", amount: 300000 }] })).toBe("review_required");
+  });
+});
+
+describe("Trusted X904 physical scan check-in during existing membership grace", () => {
+  const paid = [{ id: 71, periodStart: "2026-10-03", periodEnd: "2026-11-03", status: "confirmed", amount: 300000 }];
+  const shidqi = { today: "2026-11-06", membershipStart: "2026-10-03",
+    membershipEnd: "2026-11-03", membershipStatus: "active",
+    paymentSourcesComplete: true, payments: paid };
+  it("allows the already-paid SHIDQI membership to check in during seven-day grace", () => {
+    expect(canRecordTrustedGymX904Checkin(shidqi)).toBe(true);
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, today: "2026-11-10" })).toBe(true);
+  });
+  it("does not allow a check-in on day eight without renewal", () => {
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, today: "2026-11-11" })).toBe(false);
+  });
+  it("does not allow pending-only or zero-value membership evidence", () => {
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, payments: [{ ...paid[0], status: "waiting_confirmation" }] })).toBe(false);
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, payments: [{ ...paid[0], amount: 0 }] })).toBe(false);
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, payments: [] })).toBe(false);
+  });
+  it("does not mistake a paid period for another month for this membership grace", () => {
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, payments: [{ ...paid[0], periodEnd: "2026-10-29" }] })).toBe(false);
+  });
+  it("does not bypass expired, suspended, cancelled or unverified finance states", () => {
+    for (const membershipStatus of ["expired", "suspended", "cancelled", "waiting_confirmation"]) {
+      expect(canRecordTrustedGymX904Checkin({ ...shidqi, membershipStatus })).toBe(false);
+    }
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, paymentSourcesComplete: false })).toBe(false);
+  });
+  it("preserves currently paid member access before expiry", () => {
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, today: "2026-10-29" })).toBe(true);
+  });
+  it("does not let an unconfirmed future renewal override paid grace", () => {
+    expect(canRecordTrustedGymX904Checkin({ ...shidqi, payments: [...paid,
+      { id: 72, periodStart: "2026-11-04", periodEnd: "2026-12-04", status: "waiting_confirmation", amount: 300000 }] })).toBe(true);
   });
 });
