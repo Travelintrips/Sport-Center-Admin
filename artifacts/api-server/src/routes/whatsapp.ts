@@ -1141,9 +1141,18 @@ router.post("/wa/booking", async (req, res) => {
           hashtext('gym_public_guest_pin'),
           hashtext(${verifiedX904Identity.userPin})
         )`);
-        const busy = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
-          WHERE device_serial='TDBD234200545' AND user_pin=${verifiedX904Identity.userPin}
-            AND access_state IN ('pending','active','review_required') LIMIT 1`);
+        const busy = await tx.execute(sql`SELECT 1
+          FROM sport_center.x904_nonmember_daily_access a
+          JOIN sport_center.sport_bookings prior ON prior.id=a.booking_id
+          WHERE a.device_serial='TDBD234200545'
+            AND a.user_pin=${verifiedX904Identity.userPin}
+            AND (
+              a.access_state IN ('pending','active')
+              OR (a.access_state='review_required'
+                AND prior.booking_date=${String(bookingDate)}
+                AND prior.status NOT IN ('cancelled','expired','rejected','refunded','completed'))
+            )
+          LIMIT 1`);
         if (busy.rows.length) throw new Error("X904_NONMEMBER_PIN_BUSY");
       }
       // Lock registry ownership for the booking transaction, so an approval
