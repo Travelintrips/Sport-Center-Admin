@@ -122,3 +122,19 @@ test("photo approval audit actor comes from validated userId session, not missin
  assert.doesNotMatch(handler,/\.user\?\.id \?\?/);
  assert.doesNotMatch(handler,/\.user\?\.email \?\?/);
 });
+
+test("confirmed membership events outrank historical expiry backlog without bypassing ACK",()=>{
+ const worker=read("artifacts/api-server/src/services/x904AutomaticCommandWorker.ts");
+ assert.match(worker,/e.reason='PAYMENT_CONFIRMED' AND e.payment_id IS NOT NULL THEN 0 ELSE 1/);
+ assert.match(worker,/ORDER BY CASE/);
+ assert.match(worker,/LIMIT 20/);
+ assert.match(worker,/readBackConfirmed===true/);
+ assert.match(worker,/state IN \('queued','claimed'\)/);
+});
+test("approved receipt reloads from server and shows Gym membership, not nonmember",()=>{
+ const ui=read("artifacts/sport-center/src/pages/admin/CheckoutForm.tsx");
+ assert.match(ui,/void loadCombinedReceipts\(\)/);
+ assert.match(ui,/Membership diproses — disetujui dari foto/);
+ assert.match(ui,/Member Gym baru/);
+ assert.match(ui,/Perpanjangan member Gym/);
+});
