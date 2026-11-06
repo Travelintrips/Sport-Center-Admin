@@ -23,6 +23,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
   officialBankReference: string;
   verifiedBy: string;
   officialFundsChecked: boolean;
+  confirmedPaymentId?: number;
 }): Promise<{ cardCode: string; state: string; newReservation: boolean }> {
   const ref = String(input.officialBankReference ?? "").trim().toUpperCase();
   const actor = String(input.verifiedBy ?? "").trim();
@@ -70,6 +71,19 @@ export async function autoReserveVisAfterFundsVerified(input: {
       if (payResult.rows.length !== 1) throw new VisReservationError(409, "payment_ambiguous",
         "Pembayaran belum confirmed atau ada pembayaran ganda yang perlu rekonsiliasi.");
       const payment = payResult.rows[0] as any;
+      if (input.confirmedPaymentId !== undefined &&
+          Number(payment.id) !== Number(input.confirmedPaymentId)) {
+        throw new VisReservationError(409, "payment_confirmation_changed",
+          "Pembayaran yang dikonfirmasi admin tidak sama dengan pembayaran booking saat alokasi VIS.");
+      }
+      // Internal idempotency key for manual confirmation (NOT a bank receipt).
+      // It is accepted only when the confirming endpoint passes this payment id.
+      const internalManualReference = input.confirmedPaymentId !== undefined &&
+        ref === `ADMINPAY-${Number(payment.id)}`;
+      if (ref.startsWith("ADMINPAY-") && !internalManualReference) {
+        throw new VisReservationError(400, "internal_reference_forbidden",
+          "Referensi internal hanya dapat dibuat oleh konfirmasi pembayaran admin.");
+      }
       if (!payment.confirmed_at || !String(payment.proof_url ?? "").trim() ||
           !Number.isFinite(Number(payment.amount)) ||
           Number(payment.amount) < Number(booking.amount)) {
@@ -86,7 +100,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
       const recordedReferences = [
         payment.reference_number, payment.provider_trade_no,
       ].map((value: unknown) => String(value ?? "").trim().toUpperCase()).filter(Boolean);
-      if (recordedReferences.length > 0 && !recordedReferences.includes(ref)) {
+      if (!internalManualReference && recordedReferences.length > 0 && !recordedReferences.includes(ref)) {
         throw new VisReservationError(409, "bank_reference_mismatch",
           "Referensi resmi tidak cocok dengan referensi pembayaran yang tercatat. Perlu rekonsiliasi.");
       }
@@ -165,6 +179,30 @@ export async function autoReserveVisAfterFundsVerified(input: {
     throw new VisReservationError(503,"vis_reservation_failed",
       "Kartu belum berhasil dialokasikan. Tidak ada akses pintu yang diaktifkan.");
   }
+}
+
+/**
+ * Called by Booking Admin after its existing payment+booking confirmation.
+ * One admin click: the backend reserves a physical card idempotently.
+ * ADMINPAY-<id> is a payment-scoped database key, NOT a bank transaction proof.
+ * No X904 activation or door command is issued.
+ */
+export async function reserveVisAfterAdminPaymentConfirmation(input: {
+  orderNumber: string;
+  paymentId: number;
+  confirmedBy: string;
+}): Promise<{ cardCode: string; state: string; newReservation: boolean }> {
+  if (!Number.isSafeInteger(input.paymentId) || input.paymentId <= 0) {
+    throw new VisReservationError(400, "invalid_confirmed_payment",
+      "ID pembayaran yang dikonfirmasi admin tidak sah.");
+  }
+  return autoReserveVisAfterFundsVerified({
+    orderNumber: input.orderNumber,
+    officialBankReference: `ADMINPAY-${input.paymentId}`,
+    officialFundsChecked: true,
+    verifiedBy: input.confirmedBy,
+    confirmedPaymentId: input.paymentId,
+  });
 }
 
 /** Record a witnessed physical handover; this does NOT authorize the machine. */
