@@ -36,6 +36,11 @@ router.get("/admin/bookings/:id/qris-email-detection", adminMiddleware, async (r
       ? "sport_center.qris_email_transactions"
       : "sport_center.qris_email_transactions_dev";
 
+    const paymentIdSql = sql.join(
+      paymentIds.map((paymentId) => sql`${paymentId}`),
+      sql`, `,
+    );
+
     const result = await db.execute(sql`
       SELECT payment_id, match_status, transaction_at
       FROM (
@@ -45,12 +50,10 @@ router.get("/admin/bookings/:id/qris-email-detection", adminMiddleware, async (r
           transaction_at,
           id
         FROM ${sql.raw(tableName)}
-        WHERE candidate_payment_ids && ARRAY[${sql.join(
-          paymentIds.map((paymentId) => sql`${paymentId}`),
-          sql`, `,
-        )}]::integer[]
+        WHERE candidate_payment_ids && ARRAY[${paymentIdSql}]::integer[]
           AND match_status IN ('reference_match_review','ambiguous','review_required')
       ) admin_qris_candidates
+      WHERE payment_id IN (${paymentIdSql})
       ORDER BY
         CASE match_status
           WHEN 'reference_match_review' THEN 0
