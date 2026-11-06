@@ -43,7 +43,8 @@ router.post("/admin/qris-email/dev/sync", adminMiddleware, async (req, res) => {
     res.json({
       scanned: messages.length,
       inserted: results.filter((result) => result.inserted).length,
-      duplicateOrExisting: results.filter((result) => !result.inserted).length,
+      reconciled: results.filter((result) => result.reconciled).length,
+      duplicateOrExisting: results.filter((result) => !result.inserted && !result.reconciled).length,
       autoConfirmed: 0,
       results,
     });

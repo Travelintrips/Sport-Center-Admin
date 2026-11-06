@@ -23,6 +23,7 @@ function fingerprint(message: MandiriGmailMessage): string {
 export type QrisEmailIngestResult = {
   gmailMessageId: string;
   inserted: boolean;
+  reconciled: boolean;
   decision: string;
   reason: string;
   candidatePaymentIds: number[];
@@ -41,6 +42,7 @@ export async function ingestMandiriQrisGmailMessage(
     return {
       gmailMessageId: message.id,
       inserted: false,
+      reconciled: false,
       decision: decision.decision,
       reason: decision.reason,
       candidatePaymentIds: [],
@@ -113,9 +115,30 @@ export async function ingestMandiriQrisGmailMessage(
     RETURNING id
   `);
 
+  const inserted = rows<{ id: unknown }>(insert).length > 0;
+  let reconciled = false;
+
+  if (!inserted) {
+    const update = await db.execute(sql`
+      UPDATE sport_center.qris_email_transactions_dev
+      SET
+        match_status = ${matchStatus},
+        candidate_payment_ids = ${match.candidatePaymentIds}::integer[],
+        updated_at = NOW()
+      WHERE gmail_message_id = ${message.id}
+        AND (
+          match_status IS DISTINCT FROM ${matchStatus}
+          OR candidate_payment_ids IS DISTINCT FROM ${match.candidatePaymentIds}::integer[]
+        )
+      RETURNING id
+    `);
+    reconciled = rows<{ id: unknown }>(update).length > 0;
+  }
+
   return {
     gmailMessageId: message.id,
-    inserted: rows<{ id: unknown }>(insert).length > 0,
+    inserted,
+    reconciled,
     decision: match.decision,
     reason: match.reason,
     candidatePaymentIds: match.candidatePaymentIds,
