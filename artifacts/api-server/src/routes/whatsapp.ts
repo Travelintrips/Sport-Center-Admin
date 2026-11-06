@@ -913,6 +913,10 @@ router.post("/wa/gym-name-route", async (req, res) => {
   gymGuestNameAttempts.set(key, state);
   if (state.hits > 8) { res.status(429).json({ error: "Pemeriksaan nama terlalu sering. Minta bantuan petugas." }); return; }
   const name = String(req.body?.customerName ?? "").trim();
+  const submittedPin = String(req.body?.requestedX904Pin ?? "").trim();
+  if (submittedPin && !/^[0-9]{1,8}$/.test(submittedPin)) {
+    res.status(400).json({ error: "PIN X904 harus berisi 1 sampai 8 angka." }); return;
+  }
   if (!/^[\p{L}\p{M}\p{N} .'-]{2,100}$/u.test(name)) {
     res.status(400).json({ error: "Masukkan nama lengkap yang valid." }); return;
   }
@@ -920,6 +924,10 @@ router.post("/wa/gym-name-route", async (req, res) => {
     const match = await resolveGymGuestName(name);
     res.json({
       route: match.route,
+      // The PIN is compared only on the server. Never return the stored PIN, UID or machine identity.
+      pinMatch: submittedPin && match.route === "registered"
+        ? submittedPin === match.userPin
+        : null,
       // Never send user_pin, UID, or complete machine identity on an anonymous endpoint.
       message: match.route === "registered"
         ? "Nama ditemukan sebagai nonmember terverifikasi di X904. Petugas tetap harus mencocokkan kepemilikan sebelum pintu aktif."
