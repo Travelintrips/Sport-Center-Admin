@@ -1040,8 +1040,13 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
   }
   const receiptId=Number(req.params.id);
   if (!Number.isSafeInteger(receiptId) || receiptId<=0) {res.status(400).json({error:"ID bukti tidak valid."});return;}
-  const actor=String((req as any).user?.id ?? (req as any).user?.email ?? "").trim();
-  if(!actor) {res.status(403).json({error:"Identitas admin tidak tersedia."});return;}
+  // authMiddleware attaches { userId, role, tenantId } from a validated session.
+  // Never infer identity from optional client-supplied id/email fields.
+  const authenticatedUserId = Number((req as any).user?.userId);
+  if (!Number.isSafeInteger(authenticatedUserId) || authenticatedUserId <= 0) {
+    res.status(403).json({error:"Identitas admin tidak tersedia."});return;
+  }
+  const actor=`sport_center_user:${authenticatedUserId}`;
   try {
     const day=jakartaDateOnly();
     const untilOneMonth=(start:string):string=>{
