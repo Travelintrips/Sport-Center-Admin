@@ -465,6 +465,14 @@ export default function WaBookingForm() {
       setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
       return;
     }
+    if (publicGymGuest && guestIdentityRoute === "registered" && !guestPin.trim()) {
+      setError("Masukkan PIN X904 milik Anda untuk mencocokkan dengan nama terdaftar.");
+      return;
+    }
+    if (publicGymGuest && guestPin.trim() && !/^[0-9]{1,8}$/.test(guestPin.trim())) {
+      setError("PIN X904 harus berisi 1 sampai 8 angka.");
+      return;
+    }
     if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
       return;
@@ -499,7 +507,10 @@ export default function WaBookingForm() {
           durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
-          ...(publicGymGuest ? { publicGymGuest: true } : {}),
+          ...(publicGymGuest ? {
+            publicGymGuest: true,
+            ...(guestPin.trim() ? { requestedX904Pin: guestPin.trim() } : {}),
+          } : {}),
           ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
             ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         }),
