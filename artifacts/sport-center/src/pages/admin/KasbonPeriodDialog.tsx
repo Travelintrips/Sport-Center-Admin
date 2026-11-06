@@ -40,7 +40,7 @@ export default function KasbonPeriodDialog(){
   setBusy(true);
   try{
    const data=await request("/admin/sc-kasbon-periods/create",{period,carryMode});
-   setResult("Periode "+data.period+" berhasil dibuat di workbook DEV, verifikasi baca ulang PASS.");
+   setResult("Periode "+data.period+" dibuat di Google Sheets DEV dan telah dibaca ulang.");
    setPreview(null);
    toast({title:"Periode DEV berhasil dibuat"});
   }catch(e){toast({title:"Pembuatan periode belum berhasil",description:(e as Error).message,variant:"destructive"});}
@@ -65,13 +65,13 @@ export default function KasbonPeriodDialog(){
       <p>Periode baru: <strong>{preview.period}</strong></p>
       <p>Template: {preview.sourcePeriod} · {preview.employeeCount} baris karyawan</p>
       <p>Posisi baru: baris {preview.destinationStart}–{preview.destinationEnd}</p>
-      <p className="text-muted-foreground">{preview.writeEnabled?"Pembuatan pada salinan DEV dapat diuji.":"Pratinjau saja; pembuatan periode masih dibatasi sampai uji DEV PASS."}</p>
+      <p className="text-muted-foreground">{preview.writeEnabled?"Tujuan pengujian: Google Sheets DEV saja, bukan PROD.":"Pratinjau saja, penulisan ke DEV belum tersedia."}</p>
      </div>}
     {result&&<p role="status" className="text-sm">{result}</p>}
     <div className="flex flex-wrap justify-end gap-2">
      <Button variant="outline" disabled={busy} onClick={()=>setOpen(false)}>Tutup</Button>
      <Button variant="outline" disabled={busy||!period} onClick={()=>void runPreview()}>{busy?"Memeriksa...":"Periksa Periode"}</Button>
-     <Button disabled={busy||!preview?.writeEnabled||preview.period!==period||preview.carryMode!==carryMode} onClick={()=>void create()}>{busy?"Memproses...":"Buat di DEV"}</Button>
+     <Button disabled={busy||!preview?.writeEnabled||preview.period!==period||preview.carryMode!==carryMode} onClick={()=>void create()}>{busy?"Memproses...":"Buat di Sheets DEV"}</Button>
     </div>
    </DialogContent>
   </Dialog>
