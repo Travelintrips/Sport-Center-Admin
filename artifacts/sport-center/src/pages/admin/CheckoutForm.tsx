@@ -187,7 +187,6 @@ export default function AdminCheckoutForm() {
   const [completedGymBooking, setCompletedGymBooking] = useState<CompletedGymBooking | null>(null);
   // One externally received transfer, multiple member allocations; never auto-confirm.
   const [combinedOpen, setCombinedOpen] = useState(false);
-  const [combinedReference, setCombinedReference] = useState("");
   const [combinedDate, setCombinedDate] = useState(jakartaDateOnly);
   const [combinedMethod, setCombinedMethod] = useState("qris");
   const [combinedProof, setCombinedProof] = useState<File | null>(null);
@@ -716,7 +715,6 @@ export default function AdminCheckoutForm() {
     setCombinedOutcome("");
     try {
       const payload = new FormData();
-      payload.append("reference",combinedReference.trim());
       payload.append("paymentMethod",combinedMethod);
       payload.append("paymentDate",combinedDate);
       payload.append("amount",String(combinedRows.length * 300000));
@@ -731,7 +729,7 @@ export default function AdminCheckoutForm() {
       });
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.error || "Bukti gabungan belum dapat dicatat.");
-      setCombinedOutcome(`Bukti #${result.receiptId} tercatat untuk ${combinedRows.length} penerima: ${formatRupiah(Number(result.amount))}. Status menunggu verifikasi bank; membership belum lunas dan X904 belum aktif.`);
+      setCombinedOutcome(`Bukti #${result.receiptId} tercatat untuk ${combinedRows.length} penerima: ${formatRupiah(Number(result.amount))}. Nomor internal dibuat otomatis. Status menunggu verifikasi bank; membership belum lunas dan X904 belum aktif.`);
     } catch(error) {
       setCombinedOutcome(error instanceof Error ? error.message : "Pencatatan bukti gabungan gagal.");
     } finally {setCombinedBusy(false);}
@@ -1347,9 +1345,8 @@ export default function AdminCheckoutForm() {
                 Satu bukti pembayaran untuk beberapa penerima. Setiap alokasi adalah paket 1 bulan Rp300.000.
                 Pencatatan ini belum mengonfirmasi dana, membuat mutasi bank, atau mengaktifkan PIN X904.
               </p>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-1"><Label>Referensi transaksi bank</Label>
-                  <Input value={combinedReference} onChange={e=>setCombinedReference(e.target.value)} required minLength={6} placeholder="Referensi dari mutasi/QRIS" /></div>
+              <p className="text-xs text-muted-foreground">Tidak perlu nomor referensi bank. Sistem membuat ID bukti internal otomatis dari foto yang diunggah; petugas tetap memverifikasi dana secara terpisah.</p>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1"><Label>Tanggal transaksi</Label>
                   <Input type="date" value={combinedDate} max={jakartaDateOnly()} onChange={e=>setCombinedDate(e.target.value)} required /></div>
                 <div className="space-y-1"><Label>Metode</Label>
@@ -1386,7 +1383,7 @@ export default function AdminCheckoutForm() {
                 <Input type="file" accept="image/*" required onChange={e=>setCombinedProof(e.target.files?.[0]??null)}/></div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <strong>Total penerimaan: {formatRupiah(combinedRows.length * 300000)}</strong>
-                <Button type="submit" disabled={combinedBusy || !combinedProof || !combinedReference.trim()}>
+                <Button type="submit" disabled={combinedBusy || !combinedProof}>
                   {combinedBusy?"Menyimpan...":"Catat Bukti untuk Verifikasi Bank"}
                 </Button>
               </div>
