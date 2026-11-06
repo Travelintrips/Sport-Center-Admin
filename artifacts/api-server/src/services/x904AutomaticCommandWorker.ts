@@ -27,9 +27,14 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
   // Existing production configuration remains single-PIN until approved.
   const allVerified=process.env.GYM_X904_AUTOMATIC_SCOPE==="all_verified";
   const pins=(process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS??"").split(",").map(x=>x.trim()).filter(Boolean);
-  if(!allVerified && (pins.length!==1 || !/^[0-9]{1,8}$/.test(pins[0])))return;
+  // Allow a deliberately scoped two-PIN rollout without enabling all_verified.
+  // Keep backward-compatible single-PIN deployments; reject duplicates and broad allowlists.
+  if(!allVerified && (pins.length<1 || pins.length>2 ||
+      pins.some(pin=>!/^[0-9]{1,8}$/.test(pin)) ||
+      new Set(pins).size!==pins.length))return;
+  const scopedPinFilter=sql.join(pins.map(pin=>sql`${pin}`),sql`,`);
   // Only one outstanding automatic machine mutation at a time.
-  if(allVerified) {
+  if(allVerified || pins.length>1) {
     const outstanding=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
       WHERE device_serial='TDBD234200545'
         AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
@@ -57,7 +62,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
       ${allVerified ? sql`` : sql`AND EXISTS (
         SELECT 1 FROM sport_center.gym_x904_member_mapping mp
         WHERE mp.membership_id=e.membership_id AND mp.status='verified'
-          AND mp.device_serial='TDBD234200545' AND mp.user_pin=${pins[0]}
+          AND mp.device_serial='TDBD234200545' AND mp.user_pin IN (${scopedPinFilter})
       )`}
     -- A fixed window of old DAILY_EXPIRY events may remain in review/hold
     -- indefinitely, starving newly confirmed paid memberships.
@@ -108,7 +113,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
         JOIN sport_center.gym_x904_member_mapping mp ON mp.membership_id=m.id AND mp.status='verified'
         JOIN sport_center.gym_x904_lan_users u ON u.device_serial=mp.device_serial AND u.user_pin=mp.user_pin
         WHERE m.id=${membershipId} AND mp.device_serial='TDBD234200545'
-          ${allVerified ? sql`` : sql`AND mp.user_pin=${pins[0]}`}`);
+          ${allVerified ? sql`` : sql`AND mp.user_pin IN (${scopedPinFilter})`}`);
       if(candidates.rows.length!==1)return;
       const m=candidates.rows[0];
       const pin=String(m.user_pin);
@@ -198,7 +203,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
       // Next worker cycle resolves the event against its actual machine command.
 
     });
-    if(allVerified) {
+    if(allVerified || pins.length>1) {
       // Never create a second machine command while the first awaits VMSC.
       const queued=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
         WHERE device_serial='TDBD234200545' AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
