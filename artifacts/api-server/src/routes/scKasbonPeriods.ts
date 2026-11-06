@@ -6,6 +6,8 @@ import {parsePeriod,planNewPeriod,buildPeriodCells,type CarryMode} from "../lib/
 const router=Router();
 let creating=false;
 const knownProd="17KtD8OSmyYo-d6jsOa6t7DMH76gjcJvdxdNSHPS_FP8";
+// Explicitly test-only destination. This route must never write to PROD.
+const verifiedDev="14O49d-DmcbMS9C70O_aFOTLzgp9BkHuYRzGrrT0JHxA";
 type RequestBody={period?:unknown;carryMode?:unknown};
 const parseBody=(body:RequestBody):{period:string;carryMode:CarryMode}=>{
  const period=typeof body?.period==="string"?body.period:"";
@@ -17,19 +19,21 @@ async function context(){
  const prod=process.env.APP_ENV==="production"&&process.env.NODE_ENV==="production";
  const dev=process.env.APP_ENV==="development"&&process.env.NODE_ENV==="development";
  if(!prod&&!dev)throw Error("ENVIRONMENT_UNVERIFIED");
- const spreadsheetId=prod?process.env.SC_KASBON_POOL_SPREADSHEET_ID?.trim()
-  :process.env.SC_KASBON_PERIOD_DEV_SPREADSHEET_ID?.trim();
- if(!spreadsheetId||(prod && spreadsheetId!==knownProd)||(!prod && spreadsheetId===knownProd))
-  throw Error("SHEET_ENVIRONMENT_MISMATCH");
+ // Even on the production admin website, period creation targets the isolated
+ // user-approved DEV workbook. PROD workbook id is never accepted.
+ const spreadsheetId: string=process.env.SC_KASBON_PERIOD_DEV_TEST_SPREADSHEET_ID?.trim() || verifiedDev;
+ if(spreadsheetId!==verifiedDev)throw Error("DEV_TARGET_MUST_NOT_EQUAL_PROD");
  const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
  if(!raw)throw Error("GOOGLE_SERVICE_ACCOUNT_MISSING");
  const credentials=JSON.parse(raw);
+ if(credentials.client_email!=="sport-center@sport-center-506306.iam.gserviceaccount.com")
+  throw Error("KASBON_SERVICE_ACCOUNT_MISMATCH");
  if(typeof credentials.private_key==="string")
   credentials.private_key=credentials.private_key.replace(/\\n/g,"\n");
- const auth=new google.auth.GoogleAuth({credentials,scopes:[prod?"https://www.googleapis.com/auth/spreadsheets.readonly":"https://www.googleapis.com/auth/spreadsheets"]});
+ const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
  const sheets=google.sheets({version:"v4",auth});
  const meta=await sheets.spreadsheets.get({spreadsheetId,fields:"sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)),merges,protectedRanges)"});
- const target=(meta.data.sheets??[]).filter(s=>s.properties?.title==="Kasbon POOL");
+ const target=(meta.data.sheets??[]).filter(s=>s.properties?.title==="Kasbon POOL" && s.properties?.sheetId===1953055393);
  if(target.length!==1)throw Error("TARGET_TAB_NOT_FOUND");
  const t=target[0];
  const sheetId=t.properties?.sheetId,rowCount=t.properties?.gridProperties?.rowCount??0;
@@ -57,20 +61,20 @@ async function preview(body:RequestBody){
 router.post("/admin/sc-kasbon-periods/preview",adminMiddleware,async(req,res)=>{
  try{
   const {plan}=await preview(req.body??{});
-  res.json({...plan,mode:process.env.APP_ENV==="production"?"PROD_READ_ONLY":"DEV_PREVIEW",
-   writeEnabled:process.env.APP_ENV==="development"&&process.env.NODE_ENV==="development"&&
-    process.env.SC_KASBON_PERIOD_CREATION_ENABLED==="true"});
+  res.json({...plan,mode:"DEV_SHEETS_TEST",writeEnabled:true});
  }catch(error){res.status(422).json({error:error instanceof Error?error.message:"PREVIEW_FAILED"});}
 });
 router.post("/admin/sc-kasbon-periods/create",adminMiddleware,async(req,res)=>{
- if(process.env.SC_KASBON_PERIOD_CREATION_ENABLED!=="true" ||
-   process.env.APP_ENV!=="development" || process.env.NODE_ENV!=="development"){
-  res.status(403).json({error:"PERIOD_CREATION_DEV_ONLY_DISABLED"});return;
+ if(!((process.env.APP_ENV==="development" && process.env.NODE_ENV==="development") ||
+       (process.env.APP_ENV==="production" && process.env.NODE_ENV==="production"))){
+  res.status(403).json({error:"DEV_SHEETS_TEST_ENV_UNVERIFIED"});return;
  }
  if(creating){res.status(409).json({error:"CREATION_ALREADY_RUNNING"});return;}
  creating=true;
  try{
   const {plan,ctx}=await preview(req.body??{});
+  if(ctx.spreadsheetId!==verifiedDev)
+   throw Error("DEV_ONLY_WRITE_TARGET_REQUIRED");
   const top=plan.destinationStart-1,bottom=plan.destinationEnd;
   const rows=buildPeriodCells(plan);
   const requests:any[]=[];
