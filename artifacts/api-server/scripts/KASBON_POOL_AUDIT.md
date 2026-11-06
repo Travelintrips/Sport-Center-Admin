@@ -43,3 +43,17 @@ values, and never calls any mutation API.
 
 This PR is an audit/preflight tool, NOT a live sync worker; no Google Sheets
 production write should be enabled by its merge alone.
+
+## Live read-only audit (6 Nov 2026, exported XLSX via HTTP GET)
+
+- Exact named tab `Kasbon POOL` exists; workbook has 13 tabs.
+- 2026-11 month starts row 1041, header 1042, transactions 1043–1057, subtotal row 1058.
+- C1058 formula `SUM(C1043:C1056)` returns Rp56.871.000 (matches sum C1043:C1057 today).
+- D1058 formula `SUM(D1043:D1055)` returns Rp46.300.000 (matches today; range excludes two rows).
+- I1045 Rp1.500.000 (Mustopa), I1047 Rp1.500.000 (Robby), I1056 Rp1.000.000 (sonic).
+- I1058 is a hardcoded Rp3.000.000, but the daily entries sum Rp4.000.000. **RISK: mismatch Rp1.000.000**.
+- Of the transaction-row C totals, only Roly row 1043 currently has a formula; others are manually stored numbers.
+- Two labels differ from Sport Center employee master: Mustopa vs Mustofa, sonic vs Dede Saefulah / Sonik. Tri has no November row.
+- Do not write until these ambiguities are reconciled and a controlled copy of the sheet passes E2E.
+- Read-only reusable check: `SC_KASBON_POOL_SPREADSHEET_ID=<id> python3 artifacts/api-server/scripts/auditKasbonPoolXlsx.py`
+- Any read-only export availability may depend on workbook sharing settings. Review the sharing permissions for sensitive financial information.
