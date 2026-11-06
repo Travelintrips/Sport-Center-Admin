@@ -99,6 +99,9 @@ test("canonical bank payment reference cannot be contradicted by staff input",()
  assert.match(service,/recordedReferences\.length > 0 && !recordedReferences\.includes\(ref\)/);
  assert.match(service,/bank_reference_mismatch/);
  assert.match(service,/bank_reference_other_booking/);
+ const otherPaymentCheck=service.slice(service.indexOf("const otherPayment ="),service.indexOf("if (otherPayment.rows.length)"));
+ assert.match(otherPaymentCheck,/booking_id<>/);
+ assert.doesNotMatch(otherPaymentCheck,/status::text=\x27confirmed\x27/);
 });
 
 test("manual admin verification is required, but bank API is not required for static Mandiri QRIS",()=>{
