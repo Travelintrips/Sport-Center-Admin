@@ -11,7 +11,7 @@ const url = process.env.X904_NONMEMBER_ISOLATED_PG_URL;
 if (!url || !/^postgres(?:ql)?:\/\/[^@/]+@127\.0\.0\.1:5544[45]\/x904_nonmember(?:_safe[0-9]?)?(?:\?|$)/.test(url)) throw new Error("NONMEMBER_ISOLATED_DATABASE_REQUIRED");
 const pool = new pg.Pool({ connectionString: url, max: 2 });
 const db = drizzle(pool);
-const run = (query: string) => pool.query(query);
+const run = (query: string, params?: unknown[]) => pool.query(query, params);
 const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY","GYM_X904_NONMEMBER_ONLY_PIN","GYM_X904_NONMEMBER_ALLOWED_PINS"] as const;
 const oldEnv = envKeys.map(key => process.env[key]);
 const migration = readFileSync("migrations/20261031_x904_nonmember_daily_access.sql","utf8");
