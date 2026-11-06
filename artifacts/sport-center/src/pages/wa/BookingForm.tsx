@@ -692,7 +692,11 @@ export default function WaBookingForm() {
                 <p className="text-sm text-slate-600">Isi nama lengkap pada bagian Data Pemesan di bawah. Sistem akan memeriksa nama yang sama persis pada mesin X904. Pengunjung tidak perlu memilih PIN sendiri.</p>
                 <div role="status" aria-live="polite" className="rounded-xl border border-orange-100 bg-orange-50 p-3 text-sm text-slate-800">
                   {guestIdentityRoute === "registered" && (
-                    <p><strong>Nama ditemukan di mesin X904.</strong> Identitas PIN akan dicocokkan petugas dengan pemilik yang sah sebelum akses diberikan.</p>
+                    <div className="space-y-2">
+                      <p><strong>PIN X904: Terdaftar</strong></p>
+                      <p className="text-xs">Nama ditemukan dan terhubung ke PIN nonmember yang telah diverifikasi pada registry mesin. Nomor PIN disimpan aman dan hanya terlihat pada panel petugas.</p>
+                      <p className="text-xs font-medium text-amber-900">Status akses: menunggu verifikasi kepemilikan dan pembayaran resmi. Pintu belum aktif.</p>
+                    </div>
                   )}
                   {guestIdentityRoute === "visitor_card" && (
                     <p><strong>Nama belum terdaftar.</strong> Anda diarahkan ke kartu pengunjung VIS001–VIS006. Petugas akan memilih kartu yang tersedia setelah verifikasi pembayaran dan identitas.</p>
