@@ -87,29 +87,32 @@ try{
  if(!Number.isInteger(scratchId))throw Error("DEV_SCRATCH_DUPLICATE_FAILED");
  const mode="febri_andi_only";
  const validateCarryover=async(plan)=>{
+  // One range read for all employee rows. Avoid 5 reads × 15 employees
+  // exceeding the 60-read/min/user Google Sheets API quota.
+  const first=plan.destinationStart+2,last=plan.destinationEnd-1;
+  const response=await api.spreadsheets.values.get({spreadsheetId:DEV,
+   range:q+`!B${first}:AI${last}`,valueRenderOption:"FORMULA"});
+  const values=response.data.values??[];
   let carried=0,zeroed=0;
   for(let i=0;i<plan.employeeCount;i++){
-   const row=plan.destinationStart+2+i;
-   const prev=plan.sourceStart+2+i;
-   const label=String(await cell("B"+row,"FORMATTED_VALUE")).trim().toLowerCase();
+   const row=first+i,prev=plan.sourceStart+2+i;
+   const cells=values[i]??[];
+   const label=String(cells[0]??"").trim().toLowerCase();
    const carry=["kasbon febri","kasbon andi"].includes(label);
-   const opening=await cell("D"+row);
+   const opening=String(cells[2]??""); // D relative to B
    if(carry){
     if(opening!==`=C${prev}`)throw Error("CARRYOVER_FORMULA_INCORRECT_"+label);
     carried++;
    }else{
-    if(Number(await cell("D"+row,"UNFORMATTED_VALUE"))!==0)
-     throw Error("OTHER_EMPLOYEE_OPENING_NOT_ZERO_"+label);
+    if(opening===""||Number(opening)!==0)throw Error("OTHER_EMPLOYEE_OPENING_NOT_ZERO_"+label);
     zeroed++;
    }
-   if((await cell("E"+row,"FORMULA"))!=="")
-    throw Error("DATE_TRANSACTION_NOT_EMPTY_"+label);
-   if((await cell("AI"+row,"FORMULA"))!=="")
-    throw Error("LAST_DATE_TRANSACTION_NOT_EMPTY_"+label);
-   if((await cell("C"+row))!==`=SUM(D${row}:AI${row})`)
+   if(String(cells[3]??"")!=="")throw Error("DATE_TRANSACTION_NOT_EMPTY_"+label);
+   if(String(cells[33]??"")!=="")throw Error("LAST_DATE_TRANSACTION_NOT_EMPTY_"+label);
+   if(String(cells[1]??"")!==`=SUM(D${row}:AI${row})`)
     throw Error("EMPLOYEE_TOTAL_FORMULA_MISSING_"+label);
   }
-  if(carried!==2 || zeroed!==plan.employeeCount-2)throw Error("UNEXPECTED_CARRYOVER_EMPLOYEE_COUNT");
+  if(carried!==2||zeroed!==plan.employeeCount-2)throw Error("UNEXPECTED_CARRYOVER_EMPLOYEE_COUNT");
   return {carried,zeroed};
  };
  const dec=await create("2026-12",mode);
