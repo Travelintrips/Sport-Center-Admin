@@ -46,6 +46,7 @@ import { useLang } from "@/lib/i18n";
 import { getToken } from "@/lib/auth";
 import { calculateBookingWithholdingTax } from "@/lib/tax";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
+import { QrisEmailDetectionBanner } from "@/components/QrisEmailDetectionBanner";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 // QRIS lama masih tersimpan sebagai aset publik. Gunakan sebagai fallback ketika
@@ -1026,46 +1027,12 @@ export default function BookingDetail() {
                   const directPayment = (booking as any).payment;
                   const detection = directPayment?.qrisEmailDetection
                     ?? (((booking as any).payments as any[] | undefined)?.find((item: any) => item?.qrisEmailDetection)?.qrisEmailDetection);
-                  if (!detection || directPayment?.status === "confirmed") return null;
-                  const highConfidence = detection.confidence === "high";
                   return (
-                    <div className={`flex items-start gap-3 p-3.5 rounded-xl border ${
-                      highConfidence
-                        ? "border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800"
-                        : "border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800"
-                    }`}>
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                        highConfidence
-                          ? "bg-blue-100 dark:bg-blue-900/40"
-                          : "bg-amber-100 dark:bg-amber-900/40"
-                      }`}>
-                        <Clock size={16} className={highConfidence ? "text-blue-600 dark:text-blue-300" : "text-amber-600 dark:text-amber-300"} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className={`font-semibold text-sm ${
-                          highConfidence
-                            ? "text-blue-800 dark:text-blue-200"
-                            : "text-amber-800 dark:text-amber-200"
-                        }`}>
-                          {t("Pembayaran QRIS Terdeteksi", "QRIS Payment Detected")}
-                        </div>
-                        <div className={`text-xs mt-0.5 ${
-                          highConfidence
-                            ? "text-blue-600 dark:text-blue-400"
-                            : "text-amber-600 dark:text-amber-400"
-                        }`}>
-                          {highConfidence
-                            ? t(
-                                "Notifikasi transaksi Mandiri sudah cocok dengan referensi dan nominal. Sistem sedang menunggu verifikasi rekonsiliasi sebelum booking dikonfirmasi.",
-                                "The Mandiri transaction notification matches the reference and amount. Reconciliation verification is still required before confirming the booking.",
-                              )
-                            : t(
-                                "Notifikasi transaksi Mandiri ditemukan, tetapi kecocokannya belum unik. Pembayaran sedang diverifikasi dan booking belum dinyatakan lunas.",
-                                "A Mandiri transaction notification was found, but the match is not unique yet. The payment is under review and the booking is not marked paid.",
-                              )}
-                        </div>
-                      </div>
-                    </div>
+                    <QrisEmailDetectionBanner
+                      detection={detection}
+                      paymentStatus={directPayment?.status}
+                      t={t}
+                    />
                   );
                 })()}
                 {booking.status === "expired" && (
