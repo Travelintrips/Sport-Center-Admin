@@ -99,3 +99,29 @@ test("canonical bank payment reference cannot be contradicted by staff input",()
  assert.match(service,/bank_reference_mismatch/);
  assert.match(service,/bank_reference_other_booking/);
 });
+
+test("independent bank attestation is required before any VIS allocation",()=>{
+ assert.match(service,/independent_bank_evidence_missing/);
+ assert.match(service,/matched_payment_id=\$\{Number\(payment\.id\)\}/);
+ assert.match(service,/credit_amount>=\$\{Number\(booking\.amount\)\}/);
+ assert.match(service,/status::text='auto_matched'/);
+ assert.match(service,/source_app/);
+ assert.match(service,/source_module/);
+ assert.match(service,/provider_name/);
+ assert.match(service,/NOT IN \('','manual'\)/);
+ assert.match(service,/bankEvidence\.rows\.length !== 1/);
+});
+
+test("VIS release requires fresh actual device snapshot with suspended group and no later commands",()=>{
+ const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
+ assert.match(release,/gym_x904_access_snapshots/);
+ assert.match(release,/observed_at >= now\(\)-interval '10 minutes'/);
+ assert.match(release,/observed_at >= \$\{row\.reserved_at\}/);
+ assert.match(release,/jsonb_array_elements\(users\)/);
+ assert.match(release,/u->>'group'='2'/);
+ assert.match(release,/u->>'role'='0'/);
+ assert.match(release,/x904_user_commands/);
+ assert.match(release,/cmd\.created_at>latest\.observed_at/);
+ assert.match(release,/x904_readback_missing/);
+ assert.match(release,/access_state IN \('pending','active','review_required'\)/);
+});
