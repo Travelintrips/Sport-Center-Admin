@@ -1025,15 +1025,17 @@ router.post("/memberships/admin-combined-receipt", adminMiddleware, membershipPr
     if (!proof || !extensions[mime]) {
       res.status(400).json({ error: "Bukti transfer gabungan wajib berupa gambar." }); return;
     }
-    const reference = String(req.body?.reference ?? "").trim().toUpperCase();
+    // The internal receipt ID is deterministic for the uploaded bytes.
+    // This is NOT a bank reference and does NOT confirm receipt of funds.
+    const digest = createHash("sha256").update(proof.buffer).digest("hex");
+    const reference = "SC-GYM-PROOF-" + digest.toUpperCase();
     const method = String(req.body?.paymentMethod ?? "").trim().toLowerCase();
     const date = normalizePaymentDate(req.body?.paymentDate);
     const amount = Number(req.body?.amount);
-    if (!/^[A-Z0-9._:\/-]{6,100}$/.test(reference) ||
-        !["qris","transfer"].includes(method) ||
+    if (!["qris","transfer"].includes(method) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
         !Number.isSafeInteger(amount) || amount <= 0) {
-      res.status(400).json({ error: "Referensi bank, metode, tanggal, dan nominal wajib valid." }); return;
+      res.status(400).json({ error: "Metode, tanggal, dan nominal pembayaran wajib valid." }); return;
     }
     const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Jakarta",
       year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
@@ -1072,13 +1074,12 @@ router.post("/memberships/admin-combined-receipt", adminMiddleware, membershipPr
     if (items.reduce((n,item)=>n+item.amount,0) !== amount) {
       res.status(409).json({ error:"Jumlah alokasi tidak sama dengan satu penerimaan bank." }); return;
     }
-    const digest = createHash("sha256").update(proof.buffer).digest("hex");
     const receipt = await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"gym_combined:" + reference}))`);
       const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_combined_receipts
         WHERE reference=${reference} OR proof_sha256=${digest} LIMIT 1`);
       if (existing.rows.length) {
-        throw new MembershipProofError(409,"Referensi atau bukti ini sudah tercatat. Jangan membuat penerimaan kedua.");
+        throw new MembershipProofError(409,"Foto bukti ini sudah tercatat. Jangan membuat penerimaan kedua.");
       }
       const verified: Array<{pin:string; uid:number; name:string; kind:"new"|"renew"; membershipId:number|null; amount:number}> = [];
       for (const item of items) {
@@ -1146,7 +1147,7 @@ router.post("/memberships/admin-combined-receipt", adminMiddleware, membershipPr
       return {id:receiptId,allocations:verified.map(x=>({name:x.name,userPin:x.pin,kind:x.kind,amount:x.amount}))};
     });
     res.status(201).json({
-      receiptId:receipt.id, reference, amount, allocations:receipt.allocations,
+      receiptId:receipt.id, internalReference:reference, amount, allocations:receipt.allocations,
       status:"awaiting_bank_verification",
       message:"Satu bukti diterima untuk pemeriksaan bank. Belum ada membership lunas, mutasi bank, jurnal atau aktivasi X904.",
     });
