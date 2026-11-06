@@ -60,3 +60,20 @@ test("photo-only combined intake generates internal reference, never trusts a us
  assert.match(ui,/Tidak perlu nomor referensi bank/);
  assert.match(ui,/disabled=\{combinedBusy \|\| !combinedProof\}/);
 });
+
+test("admin receipt review is read-only and lists allocations without granting access",()=>{
+ const begin=api.indexOf('router.get("/memberships/admin-combined-receipts"');
+ const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const review=api.slice(begin,end);
+ assert.ok(begin>0&&end>begin);
+ assert.match(review,/adminMiddleware/);
+ assert.match(review,/authorizedGymPaymentRole\(req\)/);
+ assert.match(review,/allocation_sum/);
+ assert.match(review,/Cache-Control","no-store"/);
+ assert.doesNotMatch(review,/UPDATE |DELETE |INSERT INTO |ACTIVATE_USER|finalizeAdminGymPayment/);
+ const ui=read("artifacts/sport-center/src/pages/admin/CheckoutForm.tsx");
+ assert.match(ui,/Bukti gabungan tersimpan/);
+ assert.match(ui,/loadCombinedReceipts\(\)/);
+ assert.match(ui,/receipt.allocationSum!==receipt.amount/);
+ assert.match(ui,/Belum boleh dinyatakan lunas sampai dana diterima/);
+});
