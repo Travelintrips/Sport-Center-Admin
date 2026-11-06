@@ -50,3 +50,13 @@ test("individual paid flows cannot reuse the same combined bank proof",()=>{
  const upload=api.slice(api.indexOf('router.post("/memberships/:id/admin-payment-proof-upload"'),api.indexOf('// Admin retry for an already-uploaded proof'));
  assert.match(upload,/await assertProofNotCombinedReceipt\(req.file.buffer\)/);
 });
+
+test("photo-only combined intake generates internal reference, never trusts a user bank reference",()=>{
+ assert.match(route,/const reference = "SC-GYM-PROOF-" \+ digest.toUpperCase\(\)/);
+ assert.doesNotMatch(route,/req.body\?\.reference/);
+ assert.match(route,/internalReference:reference/);
+ const ui=read("artifacts/sport-center/src/pages/admin/CheckoutForm.tsx");
+ assert.doesNotMatch(ui,/combinedReference|payload.append\("reference"/);
+ assert.match(ui,/Tidak perlu nomor referensi bank/);
+ assert.match(ui,/disabled=\{combinedBusy \|\| !combinedProof\}/);
+});
