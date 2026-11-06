@@ -78,6 +78,11 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_copy_to_dev:
+        description: "Explicit DEV-only full workbook copy; original never modified"
+        required: false
+        type: boolean
+        default: false
       kasbon_pool_permissions_readonly:
         description: "Read-only check of Kasbon POOL access and canEdit; never writes"
         required: false
@@ -137,6 +142,19 @@ jobs:
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           if [ ! -s "$secret_file" ]; then echo '::error::Google Sheets service account secret is empty'; exit 1; fi
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/check-payment-events-dev-sheet.mjs
+
+      - name: Copy existing Kasbon POOL workbook into private DEV workbook
+        if: ${{ inputs.kasbon_copy_to_dev == true }}
+        shell: bash
+        env:
+          KASBON_COPY_DEV_APPROVED: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/kasbon-copy-key.XXXXXX")
+          trap 'rm -f "$secret_file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/clone-sc-kasbon-dev-workbook.mjs
 
       - name: Read-only Kasbon POOL service account permission check
         if: ${{ inputs.kasbon_pool_permissions_readonly == true }}
