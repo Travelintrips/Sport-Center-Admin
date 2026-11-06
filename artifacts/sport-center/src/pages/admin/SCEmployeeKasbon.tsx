@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, ExternalLink } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,11 +25,21 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const {toast}=useToast(), qc=useQueryClient();
  const [open,setOpen]=useState(false), [editing,setEditing]=useState<number|null>(null), [form,setForm]=useState<Form>(blank);
  const [uploading,setUploading]=useState(false);
+ const [toDelete,setToDelete]=useState<Kasbon|null>(null);
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
   onSuccess:()=>{qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Catatan kasbon berhasil disimpan"});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
+ const remove = useMutation({
+  mutationFn: (record: Kasbon) => api(endpoint(employee.employeeId)+"/"+record.id,"DELETE"),
+  onSuccess: () => {
+   qc.invalidateQueries({queryKey:key});
+   setToDelete(null);
+   toast({title:"Catatan kasbon berhasil dihapus"});
+  },
+  onError: (e:Error) => toast({title:"Gagal menghapus kasbon",description:e.message,variant:"destructive"}),
+ });
  const uploadProof=async (file:File)=>{
   if(file.size>10*1024*1024 || !["image/jpeg","image/png","image/webp","application/pdf"].includes(file.type)){toast({title:"Gunakan JPG, PNG, WebP, atau PDF maksimal 10 MB",variant:"destructive"});return;}
   setUploading(true);
@@ -50,9 +60,23 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Keterangan</th><th className="p-3">Bukti Transfer</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td>
-    <td className="p-3"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:r.amount,notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button></td></tr>)}
+    <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:r.amount,notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
+  <Dialog open={toDelete!==null} onOpenChange={value=>{if(!value&&!remove.isPending)setToDelete(null);}}>
+   <DialogContent className="max-w-md">
+    <DialogHeader><DialogTitle>Hapus catatan kasbon?</DialogTitle></DialogHeader>
+    <div className="space-y-2 text-sm">
+     <p>Hapus <strong>KB-{String(toDelete?.id??0).padStart(5,"0")}</strong> milik <strong>{employee.fullName}</strong> ({employee.employeeId})?</p>
+     <p>Tanggal: {toDelete?.kasbonDate} · Nominal: {toDelete?currency(toDelete.amount):"-"}</p>
+     <p className="text-muted-foreground">Catatan ini akan dihapus dari histori. Tindakan dicatat dalam audit log dan tidak dapat dibatalkan.</p>
+    </div>
+    <div className="flex justify-end gap-2">
+     <Button variant="outline" disabled={remove.isPending} onClick={()=>setToDelete(null)}>Batal</Button>
+     <Button variant="destructive" disabled={!toDelete||remove.isPending} onClick={()=>{if(toDelete)remove.mutate(toDelete);}}><Trash2 className="mr-2 h-4 w-4"/>{remove.isPending?"Menghapus...":"Ya, Hapus"}</Button>
+    </div>
+   </DialogContent>
+  </Dialog>
   <Dialog open={open} onOpenChange={v=>{if(!save.isPending&&!uploading)setOpen(v);}}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>{editing===null?"Tambah Kasbon":"Edit Kasbon"} — {employee.fullName}</DialogTitle></DialogHeader>
    <form className="space-y-4" onSubmit={e=>{e.preventDefault();save.mutate(form);}}>
     <div className="space-y-1"><Label>ID Kasbon</Label><Input readOnly className="bg-muted" value={editing===null?"Otomatis setelah disimpan":"KB-"+String(editing).padStart(5,"0")}/></div>
