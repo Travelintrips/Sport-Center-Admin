@@ -101,17 +101,21 @@ test("canonical bank payment reference cannot be contradicted by staff input",()
  assert.match(service,/bank_reference_other_booking/);
 });
 
-test("independent bank attestation is required before any VIS allocation",()=>{
- assert.match(service,/independent_bank_evidence_missing/);
- assert.match(service,/matched_payment_id=\$\{Number\(payment\.id\)\}/);
- assert.match(service,/credit_amount>=\$\{Number\(booking\.amount\)\}/);
- assert.match(service,/provider_order_id/);
- assert.match(service,/status::text='auto_matched'/);
- assert.match(service,/source_app/);
- assert.match(service,/source_module/);
- assert.match(service,/provider_name/);
- assert.match(service,/NOT IN \('','manual'\)/);
- assert.match(service,/bankEvidence\.rows\.length !== 1/);
+test("manual admin verification is required, but bank API is not required for static Mandiri QRIS",()=>{
+ const alloc=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function collectReservedVisCard"));
+ assert.match(alloc,/input\.officialFundsChecked !== true/);
+ assert.match(alloc,/booking\.status !== "confirmed"/);
+ assert.match(alloc,/status::text='confirmed'/);
+ assert.match(alloc,/payment\.confirmed_at/);
+ assert.match(alloc,/payment\.proof_url/);
+ assert.match(alloc,/bank_reference_mismatch/);
+ assert.match(alloc,/bank_reference_reused/);
+ assert.match(alloc,/bank_reference_other_booking/);
+ assert.doesNotMatch(alloc,/independent_bank_evidence_missing|bankEvidence\.rows|source_app|source_module/);
+ assert.match(api,/payment: "manual_admin_confirmed"/);
+ assert.match(api,/fundsConfirmedBy: adminEmail/);
+ assert.match(api,/bankReference:/);
+ assert.doesNotMatch(api,/payment: "official_bank_attested"/);
 });
 
 test("VIS release requires fresh actual device snapshot with suspended group and no later commands",()=>{
