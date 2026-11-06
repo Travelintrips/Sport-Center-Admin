@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import { formatKasbonAmount, normalizeKasbonAmount, fromDatabaseKasbonAmount } from "./kasbonAmount";
 import { calculateSisaGaji } from "./kasbonSalaryBalance";
+import KasbonPeriodDialog from "./KasbonPeriodDialog";
 
 export type Employee = { employeeId: string; fullName: string; salary: string | null };
 type Kasbon = { id: number; employeeId: string; kasbonDate: string; amount: string; notes: string; proofUrl: string | null };
@@ -57,7 +58,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   <div className="flex flex-wrap items-center justify-between gap-3">
    <div className="flex items-start gap-3"><Button variant="outline" size="icon" aria-label="Kembali ke daftar karyawan" onClick={onBack}><ArrowLeft className="h-4 w-4"/></Button>
     <div><h2 className="text-xl font-bold">Master Kasbon — {employee.fullName}</h2><p className="text-sm text-muted-foreground">ID Karyawan: {employee.employeeId} · Histori pencatatan kasbon</p></div></div>
-   <Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button>
+   <div className="flex flex-wrap gap-2"><KasbonPeriodDialog/><Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button></div>
   </div>
   <Card><CardHeader><CardTitle>Histori Kasbon ({records.length})</CardTitle></CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:

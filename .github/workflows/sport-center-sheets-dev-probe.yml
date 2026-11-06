@@ -83,6 +83,8 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_period_dev_e2e:
+        description: "Test December and January creation in disposable DEV tab"
       kasbon_copy_to_dev:
         description: "Explicit DEV-only full workbook copy; original never modified"
         required: false
@@ -174,6 +176,19 @@ jobs:
           trap 'rm -f "$file"' EXIT
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node scripts/test-sc-kasbon-dev-copy-e2e.mjs
+      - name: Kasbon DEV month rollover E2E (ephemeral tab)
+        if: ${{ inputs.kasbon_period_dev_e2e == true }}
+        shell: bash
+        env:
+          KASBON_PERIOD_DEV_E2E_APPROVED: 'true'
+          KASBON_PERIOD_DEV_SHEET_ID: '14O49d-DmcbMS9C70O_aFOTLzgp9BkHuYRzGrrT0JHxA'
+        run: |
+          set -euo pipefail
+          umask 077
+          file=$(mktemp "$RUNNER_TEMP/sc-period-dev.XXXXXX")
+          trap 'rm -f "$file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node --experimental-strip-types scripts/test-sc-kasbon-period-dev-e2e.mjs
 
       - name: Read-only Kasbon POOL service account permission check
         if: ${{ inputs.kasbon_pool_permissions_readonly == true }}
