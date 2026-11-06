@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import { Pencil, Plus, Search, Users } from "lucide-react";
 import SCEmployeeKasbon from "./SCEmployeeKasbon";
+import KasbonPeriodDialog from "./KasbonPeriodDialog";
 import { formatKasbonAmount, normalizeKasbonAmount, fromDatabaseKasbonAmount } from "./kasbonAmount";
 
 type Employee = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string | null; salary: string | null };
@@ -101,6 +102,15 @@ export default function SCEmployees() {
           </table>{!filtered.length && <p className="py-6 text-center text-muted-foreground">Belum ada karyawan yang sesuai.</p>}</div>
         )}
       </CardContent></Card>
+      <Card aria-label="Pengelolaan periode kasbon">
+        <CardHeader>
+          <CardTitle>Periode Kasbon</CardTitle>
+          <p className="text-sm text-muted-foreground">Buat periode bulanan untuk seluruh karyawan, tanpa membuka Google Sheets. Tidak terkait dengan kasbon karyawan tertentu.</p>
+        </CardHeader>
+        <CardContent>
+          <KasbonPeriodDialog />
+        </CardContent>
+      </Card>
       <Dialog open={open} onOpenChange={(value) => { if (!save.isPending) setOpen(value); }}>
         <DialogContent className="max-w-lg"><DialogHeader><DialogTitle>{editing ? "Edit Karyawan SC" : "Tambah Karyawan SC"}</DialogTitle></DialogHeader>
           <form onSubmit={submit} className="space-y-4">
