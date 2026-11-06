@@ -161,6 +161,9 @@ jobs:
       - name: Verify static QRIS diagnostic is read-only and reference-aware
         run: node --test scripts/test-qris-static-bank-match-dev.mjs
 
+      - name: Verify combined Gym receipt remains pending and single-counted
+        run: node --test scripts/test-gym-combined-receipt-review.mjs
+
       - name: Verify Gym name match and visitor-card routing without public X904 grants
         run: node --test scripts/test-gym-guest-name-x904-route.mjs
 
@@ -199,6 +202,9 @@ jobs:
             exit 1
           }
           Write-Output 'X904_DURABLE_WORKER_POWERSHELL_PARSE_PASS'
+
+      - name: Verify QRIS Gmail PROD detection safety contract
+        run: node --test scripts/qris-mandiri/qris-prod-runtime-contract.test.mjs
 
       - name: Typecheck
         run: pnpm typecheck

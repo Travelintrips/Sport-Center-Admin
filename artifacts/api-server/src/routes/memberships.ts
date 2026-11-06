@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "node:path";
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   db,
   usersTable,
@@ -995,6 +995,171 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 });
 
 
+// Prevent reusing a shared receipt image in either old single-member paid flow.
+// The existence probe keeps old deployments working before the additive migration.
+async function assertProofNotCombinedReceipt(proofBytes: Buffer): Promise<void> {
+  const table = await db.execute(sql`SELECT to_regclass('sport_center.gym_combined_receipts') AS available`);
+  if (!table.rows[0]?.available) return;
+  const digest = createHash("sha256").update(proofBytes).digest("hex");
+  const used = await db.execute(sql`SELECT id FROM sport_center.gym_combined_receipts
+    WHERE proof_sha256=${digest} LIMIT 1`);
+  if (used.rows.length) {
+    throw new MembershipProofError(409,
+      "Bukti ini sudah tercatat sebagai pembayaran gabungan. Gunakan alur gabungan, jangan konfirmasi sebagai dua penerimaan.");
+  }
+}
+
+// A shared transfer is ONE bank receipt with multiple pending allocations.
+// No membership activation, canonical payment, accounting journal, or X904 command is created here.
+router.post("/memberships/admin-combined-receipt", adminMiddleware, membershipProofUpload.single("proof"), async (req, res) => {
+  try {
+    if (!authorizedGymPaymentRole(req)) {
+      res.status(403).json({ error: "Pencatatan gabungan memerlukan admin/finance berwenang." }); return;
+    }
+    const proof = req.file;
+    const mime = String(proof?.mimetype ?? "").toLowerCase();
+    const extensions: Record<string,string> = {
+      "image/jpeg":".jpg", "image/png":".png", "image/webp":".webp",
+      "image/heic":".heic", "image/heif":".heif",
+    };
+    if (!proof || !extensions[mime]) {
+      res.status(400).json({ error: "Bukti transfer gabungan wajib berupa gambar." }); return;
+    }
+    // The internal receipt ID is deterministic for the uploaded bytes.
+    // This is NOT a bank reference and does NOT confirm receipt of funds.
+    const digest = createHash("sha256").update(proof.buffer).digest("hex");
+    const reference = "SC-GYM-PROOF-" + digest.toUpperCase();
+    const method = String(req.body?.paymentMethod ?? "").trim().toLowerCase();
+    const date = normalizePaymentDate(req.body?.paymentDate);
+    const amount = Number(req.body?.amount);
+    if (!["qris","transfer"].includes(method) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        !Number.isSafeInteger(amount) || amount <= 0) {
+      res.status(400).json({ error: "Metode, tanggal, dan nominal pembayaran wajib valid." }); return;
+    }
+    const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Jakarta",
+      year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+    if (date > todayWib) {
+      res.status(400).json({ error: "Tanggal pembayaran tidak boleh di masa depan." }); return;
+    }
+    let rawItems: unknown;
+    try { rawItems = JSON.parse(String(req.body?.allocations ?? "null")); }
+    catch { res.status(400).json({ error: "Alokasi bukan JSON yang valid." }); return; }
+    if (!Array.isArray(rawItems) || rawItems.length < 2 || rawItems.length > 10) {
+      res.status(400).json({ error: "Satu bukti gabungan harus mempunyai 2 sampai 10 penerima." }); return;
+    }
+    type IntakeItem = { pin:string; kind:"new"|"renew"; membershipId:number|null; amount:number };
+    const items: IntakeItem[] = [];
+    const uniquePins = new Set<string>();
+    for (const raw of rawItems) {
+      if (!raw || typeof raw !== "object") {
+        res.status(400).json({ error:"Format penerima tidak valid." }); return;
+      }
+      const item = raw as Record<string,unknown>;
+      const pin = String(item.userPin ?? "").trim();
+      const kind = String(item.kind ?? "");
+      const membershipId = item.membershipId == null || item.membershipId === ""
+        ? null : Number(item.membershipId);
+      const allocated = Number(item.amount);
+      if (!/^[0-9]{1,8}$/.test(pin) || uniquePins.has(pin) ||
+          !["new","renew"].includes(kind) ||
+          !Number.isSafeInteger(allocated) || allocated !== PRICE_PER_MONTH ||
+          (kind === "renew" && (!Number.isSafeInteger(membershipId) || Number(membershipId) <= 0)) ||
+          (kind === "new" && membershipId != null)) {
+        res.status(400).json({ error:"PIN unik, jenis membership, dan alokasi Rp300.000 per bulan wajib valid." }); return;
+      }
+      uniquePins.add(pin);
+      items.push({ pin, kind:kind as "new"|"renew", membershipId, amount:allocated });
+    }
+    if (items.reduce((n,item)=>n+item.amount,0) !== amount) {
+      res.status(409).json({ error:"Jumlah alokasi tidak sama dengan satu penerimaan bank." }); return;
+    }
+    const receipt = await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"gym_combined:" + reference}))`);
+      const existing = await tx.execute(sql`SELECT id FROM sport_center.gym_combined_receipts
+        WHERE reference=${reference} OR proof_sha256=${digest} LIMIT 1`);
+      if (existing.rows.length) {
+        throw new MembershipProofError(409,"Foto bukti ini sudah tercatat. Jangan membuat penerimaan kedua.");
+      }
+      const verified: Array<{pin:string; uid:number; name:string; kind:"new"|"renew"; membershipId:number|null; amount:number}> = [];
+      for (const item of items) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"TDBD234200545:" + item.pin}))`);
+        const device = await tx.execute(sql`SELECT user_pin,device_uid,display_name,device_role
+          FROM sport_center.gym_x904_lan_users
+          WHERE device_serial='TDBD234200545' AND user_pin=${item.pin}`);
+        if (device.rows.length !== 1 || Number(device.rows[0].device_role) !== 0 ||
+            !Number.isSafeInteger(Number(device.rows[0].device_uid)) ||
+            Number(device.rows[0].device_uid) <= 0) {
+          throw new MembershipProofError(409,"Ada PIN yang tidak unik atau bukan pengguna biasa di X904.");
+        }
+        const uid = Number(device.rows[0].device_uid);
+        const name = String(device.rows[0].display_name ?? "").trim();
+        const map = await tx.execute(sql`SELECT membership_id FROM sport_center.gym_x904_member_mapping
+          WHERE device_serial='TDBD234200545' AND user_pin=${item.pin} LIMIT 1`);
+        if (item.kind === "new") {
+          if (map.rows.length && map.rows[0].membership_id != null) {
+            throw new MembershipProofError(409,"PIN calon member baru sudah mempunyai mapping membership.");
+          }
+          const approved = await tx.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities
+            WHERE device_serial='TDBD234200545' AND user_pin=${item.pin} AND device_uid=${uid}
+              AND verification_state='verified' AND revoked_at IS NULL
+              AND upper(trim(display_name))=upper(trim(${name}::text)) LIMIT 1`);
+          if (approved.rows.length !== 1) {
+            throw new MembershipProofError(409,"PIN nonmember baru belum diverifikasi di registry X904.");
+          }
+        } else {
+          if (map.rows.length !== 1 ||
+              Number(map.rows[0].membership_id) !== item.membershipId) {
+            throw new MembershipProofError(409,"PIN tidak terhubung ke membership yang hendak diperpanjang.");
+          }
+          const member = await tx.execute(sql`SELECT id,name,status FROM sport_center.sport_memberships
+            WHERE id=${item.membershipId} FOR SHARE`);
+          if (member.rows.length !== 1 ||
+              String(member.rows[0].name).trim().toUpperCase() !== name.toUpperCase()) {
+            throw new MembershipProofError(409,"Nama membership tidak cocok dengan pemilik PIN X904.");
+          }
+        }
+        const other = await tx.execute(sql`SELECT 1
+          FROM sport_center.gym_combined_receipt_allocations a
+          JOIN sport_center.gym_combined_receipts r ON r.id=a.receipt_id
+          WHERE a.device_serial='TDBD234200545' AND a.user_pin=${item.pin}
+            AND a.status IN ('pending','linked') AND r.status='awaiting_bank_verification' LIMIT 1`);
+        if (other.rows.length) {
+          throw new MembershipProofError(409,"PIN sudah tercantum pada penerimaan gabungan yang belum selesai.");
+        }
+        verified.push({pin:item.pin,uid,name,kind:item.kind,membershipId:item.membershipId,amount:item.amount});
+      }
+      // Upload after validation; a storage failure prevents an incomplete receipt row.
+      const proofUrl = await uploadFile(BUCKETS.proof,
+        `gym-combined-${randomUUID()}${extensions[mime]}`, proof.buffer, mime);
+      const inserted = await tx.execute(sql`INSERT INTO sport_center.gym_combined_receipts
+        (reference,proof_sha256,proof_url,amount,payment_method,payment_date,status)
+        VALUES (${reference},${digest},${proofUrl},${amount},${method},${date}::date,'awaiting_bank_verification')
+        RETURNING id`);
+      if (inserted.rows.length !== 1) throw new Error("COMBINED_RECEIPT_CREATE_FAILED");
+      const receiptId = Number(inserted.rows[0].id);
+      for (const item of verified) {
+        await tx.execute(sql`INSERT INTO sport_center.gym_combined_receipt_allocations
+          (receipt_id,user_pin,device_uid,device_name,membership_id,allocation_kind,amount,status)
+          VALUES (${receiptId},${item.pin},${item.uid},${item.name},
+            ${item.membershipId},${item.kind},${item.amount},'pending')`);
+      }
+      return {id:receiptId,allocations:verified.map(x=>({name:x.name,userPin:x.pin,kind:x.kind,amount:x.amount}))};
+    });
+    res.status(201).json({
+      receiptId:receipt.id, internalReference:reference, amount, allocations:receipt.allocations,
+      status:"awaiting_bank_verification",
+      message:"Satu bukti diterima untuk pemeriksaan bank. Belum ada membership lunas, mutasi bank, jurnal atau aktivasi X904.",
+    });
+  } catch (error) {
+    if (error instanceof MembershipProofError) {
+      res.status(error.status).json({error:error.message});return;
+    }
+    req.log.error({error},"Combined Gym receipt intake failed");
+    res.status(503).json({error:"Pencatatan gabungan belum tersedia. Tidak ada konfirmasi membership yang dilakukan."});
+  }
+});
+
 // Admin-only, single-request registration for an already-paid Gym member.
 // All customer, membership, payment, booking and X904 entitlement writes are
 // transactional. An uploaded proof is never treated as payment verification.
@@ -1041,6 +1206,7 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
     if (!proof || !mime || !extensions[mime]) {
       res.status(400).json({ error: "Unggah bukti pembayaran berupa gambar" }); return;
     }
+    await assertProofNotCombinedReceipt(proof.buffer);
 
     // Do not create a customer/login with a predictable default password.
     // A customer record without credentials is safe to invite later.
@@ -1579,6 +1745,7 @@ router.post("/memberships/:id/admin-payment-proof-upload", adminMiddleware, memb
     if (!req.file || !["image/jpeg","image/png","image/webp","image/heic","image/heif"].includes(req.file.mimetype.toLowerCase())) {
       res.status(400).json({error:"Bukti pembayaran wajib berupa gambar yang didukung"}); return;
     }
+    await assertProofNotCombinedReceipt(req.file.buffer);
     const [pending] = await db.select().from(membershipPaymentsTable).where(
       and(eq(membershipPaymentsTable.membershipId,id),eq(membershipPaymentsTable.status,"pending_payment"))
     ).orderBy(desc(membershipPaymentsTable.id)).limit(1);

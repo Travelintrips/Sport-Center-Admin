@@ -209,6 +209,63 @@ async function getBookingWithPayment(id: number) {
     : [id];
   const allPayments = await db.select().from(paymentsTable)
     .where(inArray(paymentsTable.bookingId, groupBookingIds));
+
+  const qrisEmailDetectionByPaymentId = new Map<number, {
+    status: string;
+    transactionAt: string | null;
+    confidence: "high" | "low";
+  }>();
+  const detailPaymentIds = allPayments.map((item) => item.id);
+  const qrisProdBannerEnabled =
+    process.env.NODE_ENV === "production"
+    && String(process.env.QRIS_GMAIL_PROD_BANNER_ENABLED ?? "").trim().toLowerCase() === "true";
+  const qrisDetectionEnabled = process.env.NODE_ENV !== "production" || qrisProdBannerEnabled;
+  const qrisDetectionTable = process.env.NODE_ENV === "production"
+    ? "sport_center.qris_email_transactions"
+    : "sport_center.qris_email_transactions_dev";
+  const qrisDetectionStatuses = process.env.NODE_ENV === "production"
+    ? sql.raw("'reference_match_review'")
+    : sql.raw("'reference_match_review','ambiguous','review_required'");
+
+  if (qrisDetectionEnabled && detailPaymentIds.length > 0) {
+    try {
+      const detectionResult = await db.execute(sql`
+        SELECT DISTINCT ON (payment_id)
+          payment_id,
+          match_status,
+          transaction_at
+        FROM (
+          SELECT
+            UNNEST(candidate_payment_ids) AS payment_id,
+            match_status,
+            transaction_at,
+            id
+          FROM ${sql.raw(qrisDetectionTable)}
+          WHERE candidate_payment_ids && ARRAY[${sql.join(detailPaymentIds.map((paymentId) => sql`${paymentId}`), sql`, `)}]::integer[]
+            AND match_status IN (${qrisDetectionStatuses})
+        ) qris_email_candidates
+        ORDER BY payment_id, id DESC
+      `);
+      const rows = ((detectionResult as any).rows ?? detectionResult) as Array<{
+        payment_id: unknown;
+        match_status: unknown;
+        transaction_at: unknown;
+      }>;
+      for (const row of rows) {
+        const paymentId = Number(row.payment_id);
+        if (!Number.isInteger(paymentId)) continue;
+        const status = String(row.match_status ?? "");
+        qrisEmailDetectionByPaymentId.set(paymentId, {
+          status,
+          transactionAt: row.transaction_at == null ? null : new Date(String(row.transaction_at)).toISOString(),
+          confidence: status === "reference_match_review" ? "high" : "low",
+        });
+      }
+    } catch {
+      // Detection enrichment is optional. If the table is absent or disabled, booking
+      // detail must continue to work exactly as before.
+    }
+  }
   // A booking can retain historical payment rows. Always resolve the
   // canonical display payment from the newest row first so an administrative
   // payment-date correction is not hidden by an older confirmed payment.
@@ -376,8 +433,16 @@ async function getBookingWithPayment(id: number) {
     netAmount: bookingWithholding.netAmount,
     downPayment: Number(booking.downPayment ?? 0),
     isDpPaid: booking.isDpPaid ?? false,
-    payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
-    payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    payment: payment ? {
+      ...payment,
+      amount: Number(payment.amount),
+      qrisEmailDetection: payment.id > 0 ? qrisEmailDetectionByPaymentId.get(payment.id) ?? null : null,
+    } : null,
+    payments: allPayments.map((p) => ({
+      ...p,
+      amount: Number(p.amount),
+      qrisEmailDetection: qrisEmailDetectionByPaymentId.get(p.id) ?? null,
+    })),
     paymentAllocations: allocations.map((allocation) => ({
       ...allocation,
       amount: Number(allocation.amount),
@@ -1413,6 +1478,113 @@ function getRequestRole(req: { headers: { authorization?: string } }): string | 
   if (!authHeader?.startsWith("Bearer ")) return null;
   return verifyToken(authHeader.slice(7))?.role ?? null;
 }
+
+// Staff-only handoff for a NO-LOGIN ordinary PIN booking. Never accepts a
+// client-selected PIN, UID, or payment assertion. This is a deliberate
+// in-person identity attestation, not automatic approval from a name match.
+router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
+  try {
+    const rawToken = String(req.headers.authorization ?? "");
+    const principal = rawToken.startsWith("Bearer ") ? verifyToken(rawToken.slice(7)) : null;
+    if (!principal?.userId || !isOperationalBookingRole(principal.role)) {
+      res.status(403).json({ error: "Hanya petugas booking terautentikasi yang boleh mengesahkan PIN." }); return;
+    }
+    const officialBankReference = String(req.body?.officialBankReference ?? "").trim().toUpperCase();
+    if (req.body?.identityChecked !== true ||
+        req.body?.officialFundsChecked !== true ||
+        !/^[A-Z0-9][A-Z0-9 ._/-]{5,79}$/.test(officialBankReference)) {
+      res.status(400).json({ error: "Petugas wajib memeriksa identitas fisik, dana resmi, dan mencatat referensi transaksi bank (minimal 6 karakter)." }); return;
+    }
+    const bookingId = Number(req.params.bookingId);
+    if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
+      res.status(400).json({ error: "Booking tidak valid." }); return;
+    }
+    const now = new Date();
+    const wib = new Intl.DateTimeFormat("en-CA", {
+      timeZone:"Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", hourCycle:"h23",
+    }).formatToParts(now);
+    const parts = Object.fromEntries(wib.map(p => [p.type, p.value]));
+    const currentDate = `${parts.year}-${parts.month}-${parts.day}`;
+    const hour = Number(parts.hour);
+    if (!Number.isFinite(hour) || hour < 6 || hour >= 23) {
+      res.status(409).json({ error: "Aktivasi PIN Gym hanya pada jam operasional 06.00–23.00 WIB." }); return;
+    }
+
+    const outcome = await db.transaction(async tx => {
+      const found = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
+          a.payment_id,a.verification_state,a.access_state,
+          b.source,b.status::text AS booking_status,b.booking_date::text AS booking_date,p.status::text AS payment_status
+        FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+        LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
+        WHERE a.booking_id=${bookingId} AND a.identity_type='pin'
+          AND a.device_serial='TDBD234200545'
+        FOR UPDATE OF a`);
+      if (found.rows.length !== 1) return "not_found";
+      const grant = found.rows[0] as any;
+      if (grant.source !== "gym_public_guest" ||
+          String(grant.booking_date).slice(0, 10) !== currentDate ||
+          grant.payment_status !== "confirmed" || !grant.payment_id ||
+          !["confirmed", "paid"].includes(String(grant.booking_status)) ||
+          grant.verification_state !== "review_required" ||
+          grant.access_state !== "review_required") return "not_ready";
+      const pin = String(grant.user_pin);
+      if (["12","79","237"].includes(pin)) return "exempt";
+      const inventory = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
+          AND device_uid=${Number(grant.device_uid)} AND device_role=0
+          AND upper(regexp_replace(trim(display_name),'[[:space:]]+',' ','g'))=
+              upper(regexp_replace(trim(${String(grant.verified_name)}::text),'[[:space:]]+',' ','g'))`);
+      const approved = await tx.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
+          AND device_uid=${Number(grant.device_uid)}
+          AND upper(regexp_replace(trim(display_name),'[[:space:]]+',' ','g'))=
+              upper(regexp_replace(trim(${String(grant.verified_name)}::text),'[[:space:]]+',' ','g'))
+          AND verification_state='verified' AND revoked_at IS NULL
+        FOR SHARE`);
+      const member = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
+        WHERE device_serial='TDBD234200545' AND user_pin=${pin} LIMIT 1`);
+      if (inventory.rows.length !== 1 || approved.rows.length !== 1 || member.rows.length !== 0) return "identity_changed";
+      const activeElsewhere = await tx.execute(sql`SELECT 1
+        FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.sport_bookings prior ON prior.id=a.booking_id
+        WHERE a.device_serial='TDBD234200545'
+          AND a.user_pin=${pin} AND a.access_id<>${Number(grant.access_id)}
+          AND (
+            a.access_state IN ('pending','active')
+            OR (a.access_state='review_required'
+              AND prior.booking_date=${currentDate}
+              AND prior.status NOT IN ('cancelled','expired','rejected','refunded','completed'))
+          )
+        LIMIT 1`);
+      if (activeElsewhere.rows.length) return "pin_busy";
+      await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+        SET verification_state='verified',access_state='pending'
+        WHERE access_id=${Number(grant.access_id)}
+          AND verification_state='review_required' AND access_state='review_required'`);
+      return "approved";
+    });
+    if (outcome !== "approved") {
+      res.status(outcome === "not_found" ? 404 : 409).json({
+        error: outcome === "not_found" ? "Booking PIN tanpa login tidak ditemukan." :
+          "Verifikasi tidak dapat disahkan: identitas, pembayaran, tanggal, atau status akses tidak memenuhi syarat.",
+        code: outcome,
+      });
+      return;
+    }
+    await logAudit({
+      action: "x904_guest_pin_staff_attestation",
+      entity: "booking",
+      entityId: bookingId,
+      after: { identityChecked: true, officialFundsChecked: true, officialBankReference, verifiedBy: principal.userId, accessState: "pending" },
+    });
+    res.json({ success: true, accessState: "pending", message: "PIN disahkan petugas. Aktivasi menunggu worker dan ACK X904." });
+  } catch (error) {
+    console.error("[x904-guest-pin-approve]", error);
+    res.status(500).json({ error: "Gagal mengesahkan akses PIN nonmember." });
+  }
+});
 
 router.post("/bookings", async (req, res) => {
   // Declared outside try so the catch block can release the advisory lock on error

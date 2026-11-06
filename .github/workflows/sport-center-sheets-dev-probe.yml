@@ -78,6 +78,26 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_dev_copy_e2e:
+        description: "Test Add/Edit/Delete/Retry in temporary tab in the user-created DEV copy only"
+        required: false
+        type: boolean
+        default: false
+      kasbon_period_dev_e2e:
+        description: "Test December and January creation in disposable DEV tab"
+        required: false
+        type: boolean
+        default: false
+      kasbon_copy_to_dev:
+        description: "Explicit DEV-only full workbook copy; original never modified"
+        required: false
+        type: boolean
+        default: false
+      kasbon_pool_permissions_readonly:
+        description: "Read-only check of Kasbon POOL access and canEdit; never writes"
+        required: false
+        type: boolean
+        default: false
       synthetic_write_replay:
         description: "Explicit DEV-only synthetic Google Sheets append/replay"
         required: false
@@ -132,6 +152,57 @@ jobs:
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           if [ ! -s "$secret_file" ]; then echo '::error::Google Sheets service account secret is empty'; exit 1; fi
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/check-payment-events-dev-sheet.mjs
+
+      - name: Copy existing Kasbon POOL workbook into private DEV workbook
+        if: ${{ inputs.kasbon_copy_to_dev == true }}
+        shell: bash
+        env:
+          KASBON_COPY_DEV_APPROVED: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_file=$(mktemp "$RUNNER_TEMP/kasbon-copy-key.XXXXXX")
+          trap 'rm -f "$secret_file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/clone-sc-kasbon-dev-workbook.mjs
+
+      - name: Kasbon DEV-copy E2E (ephemeral tab only)
+        if: ${{ inputs.kasbon_dev_copy_e2e == true }}
+        shell: bash
+        env:
+          KASBON_DEV_E2E_APPROVED: 'true'
+          SC_KASBON_DEV_E2E_SPREADSHEET_ID: '14O49d-DmcbMS9C70O_aFOTLzgp9BkHuYRzGrrT0JHxA'
+        run: |
+          set -euo pipefail
+          umask 077
+          file=$(mktemp "$RUNNER_TEMP/kasbon-dev-e2e.XXXXXX")
+          trap 'rm -f "$file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node scripts/test-sc-kasbon-dev-copy-e2e.mjs
+      - name: Kasbon DEV month rollover E2E (ephemeral tab)
+        if: ${{ inputs.kasbon_period_dev_e2e == true }}
+        shell: bash
+        env:
+          KASBON_PERIOD_DEV_E2E_APPROVED: 'true'
+          KASBON_PERIOD_DEV_SHEET_ID: '14O49d-DmcbMS9C70O_aFOTLzgp9BkHuYRzGrrT0JHxA'
+        run: |
+          set -euo pipefail
+          umask 077
+          file=$(mktemp "$RUNNER_TEMP/sc-period-dev.XXXXXX")
+          trap 'rm -f "$file"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$file" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$file")" node --experimental-strip-types scripts/test-sc-kasbon-period-dev-e2e.mjs
+
+      - name: Read-only Kasbon POOL service account permission check
+        if: ${{ inputs.kasbon_pool_permissions_readonly == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/kasbon-permission.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-sc-kasbon-pool-permission.mjs
 
       - name: Prepare empty production payment event tab only (explicit opt-in)
         if: ${{ inputs.prepare_prod_payment_tab == true }}

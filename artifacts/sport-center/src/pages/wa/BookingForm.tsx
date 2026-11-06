@@ -127,6 +127,8 @@ export default function WaBookingForm() {
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
   const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "visitor_card" | "staff_review" | "unavailable">("idle");
+  const [guestPin, setGuestPin] = useState("");
+  const [guestPinMatch, setGuestPinMatch] = useState<boolean | null>(null);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -172,11 +174,12 @@ export default function WaBookingForm() {
     return () => { window.clearTimeout(timeout); controller.abort(); setX904Verifying(false); };
   }, [dedicatedNonmember, publicGymGuest, x904IdentityType, x904IdentityValue]);
 
-  // Name-only check guides the customer; it does NOT supply or authorize a PIN.
-  // The booking API independently recalculates the result to reject stale data.
+  // The public preview compares owner-entered name + PIN, but never grants access.
+  // The booking API independently repeats this check to reject stale/mismatched data.
   useEffect(() => {
     if (!publicGymGuest) return;
     setGuestIdentityRoute("idle");
+    setGuestPinMatch(null);
     const name = form.customerName.trim();
     if (name.length < 2) return;
     const controller = new AbortController();
@@ -185,20 +188,21 @@ export default function WaBookingForm() {
       try {
         const response = await fetch("/api/wa/gym-name-route", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customerName: name }), signal: controller.signal,
+          body: JSON.stringify({ customerName: name, ...(guestPin.trim() ? { requestedX904Pin: guestPin.trim() } : {}) }), signal: controller.signal,
         });
         if (!response.ok) throw new Error("name_lookup_unavailable");
         const outcome = await response.json();
         if (!controller.signal.aborted) {
           setGuestIdentityRoute(["registered","visitor_card","staff_review"].includes(outcome.route)
             ? outcome.route : "unavailable");
+          setGuestPinMatch(typeof outcome.pinMatch === "boolean" ? outcome.pinMatch : null);
         }
       } catch {
         if (!controller.signal.aborted) setGuestIdentityRoute("unavailable");
       }
-    }, 650);
+    }, 900);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [publicGymGuest, form.customerName]);
+  }, [publicGymGuest, form.customerName, guestPin]);
 
   // Manual payment options are read from the public production settings.
   // This flow does not use the Paylabs/sandbox configuration.
@@ -464,6 +468,14 @@ export default function WaBookingForm() {
       setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
       return;
     }
+    if (publicGymGuest && guestIdentityRoute === "registered" && !guestPin.trim()) {
+      setError("Masukkan PIN X904 milik Anda untuk mencocokkan dengan nama terdaftar.");
+      return;
+    }
+    if (publicGymGuest && guestPin.trim() && !/^[0-9]{1,8}$/.test(guestPin.trim())) {
+      setError("PIN X904 harus berisi 1 sampai 8 angka.");
+      return;
+    }
     if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
       return;
@@ -498,7 +510,10 @@ export default function WaBookingForm() {
           durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
-          ...(publicGymGuest ? { publicGymGuest: true } : {}),
+          ...(publicGymGuest ? {
+            publicGymGuest: true,
+            ...(guestPin.trim() ? { requestedX904Pin: guestPin.trim() } : {}),
+          } : {}),
           ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
             ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         }),
@@ -677,8 +692,8 @@ export default function WaBookingForm() {
         {publicGymGuest && (
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
             <strong>Booking mandiri tanpa login.</strong> Isi nama asli dan nomor WhatsApp, pilih QRIS atau transfer, lalu unggah bukti.
-            Pembayaran harus diverifikasi sebelum akses diberikan. PIN/kartu X904 tidak dapat dipilih dari website publik;
-            petugas akan mencocokkan identitas dan menyerahkan kartu jika diperlukan.
+            Pembayaran harus dikonfirmasi petugas sebelum akses diberikan. Jika sudah terdaftar di mesin X904, masukkan PIN milik Anda untuk dicocokkan dengan nama lengkap.
+            Jika belum memiliki PIN, petugas akan memeriksa identitas dan mengatur kartu VIS jika diperlukan. Pengisian PIN tidak langsung mengaktifkan akses pintu.
           </div>
         )}
         <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
@@ -689,18 +704,43 @@ export default function WaBookingForm() {
                 <CardTitle className="text-base font-bold text-[#142441]">Pencocokan Identitas Gym X904</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 p-5">
-                <p className="text-sm text-slate-600">Isi nama lengkap pada bagian Data Pemesan di bawah. Sistem akan memeriksa nama yang sama persis pada mesin X904. Pengunjung tidak perlu memilih PIN sendiri.</p>
+                <p className="text-sm text-slate-600">Sudah memiliki PIN X904? Masukkan PIN milik Anda serta nama lengkap yang terdaftar. Sistem memeriksa kecocokannya; akses tetap menunggu pembayaran resmi dan petugas.</p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="guest-x904-pin" className="text-sm font-bold text-[#142441]">PIN Mesin X904 (untuk nonmember terdaftar)</Label>
+                  <Input id="guest-x904-pin" type="text" inputMode="numeric" autoComplete="off" maxLength={8}
+                    placeholder="Masukkan PIN mesin Anda" value={guestPin}
+                    onChange={(event) => setGuestPin(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))} />
+                  <p className="text-xs text-slate-500">Wajib jika Anda sudah terdaftar di X904. Belum punya PIN? Biarkan kosong dan hubungi petugas untuk pemeriksaan.</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">PIN Mesin X904</p>
+                  <p className="mt-1 text-sm font-semibold text-[#142441]">
+                    {guestIdentityRoute === "registered" && guestPinMatch === true ? "Nama dan PIN cocok — menunggu verifikasi petugas" :
+                      guestIdentityRoute === "registered" && guestPinMatch === false ? "Nama dan PIN tidak cocok" :
+                      guestIdentityRoute === "registered" ? "Nama terdaftar — masukkan PIN untuk dicocokkan" :
+                      guestIdentityRoute === "checking" ? "Sedang diperiksa..." :
+                      guestIdentityRoute === "visitor_card" ? "Belum terdaftar" :
+                      guestIdentityRoute === "staff_review" && guestPinMatch === true ? "Nama dan PIN cocok di mesin — perlu verifikasi petugas" :
+                      guestIdentityRoute === "staff_review" ? "Memerlukan pemeriksaan petugas" :
+                      guestIdentityRoute === "unavailable" ? "Sementara tidak tersedia" :
+                      "Isi nama untuk pemeriksaan otomatis"}
+                  </p>
+                </div>
                 <div role="status" aria-live="polite" className="rounded-xl border border-orange-100 bg-orange-50 p-3 text-sm text-slate-800">
                   {guestIdentityRoute === "registered" && (
-                    <p><strong>Nama ditemukan di mesin X904.</strong> Identitas PIN akan dicocokkan petugas dengan pemilik yang sah sebelum akses diberikan.</p>
+                    <div className="space-y-2">
+                      <p><strong>{guestPinMatch === true ? "Nama dan PIN X904 cocok" : guestPinMatch === false ? "Nama dan PIN X904 tidak cocok" : "Nama terdaftar di registry nonmember X904"}</strong></p>
+                      <p className="text-xs">{guestPinMatch === true ? "Pencocokan nama dan PIN berhasil. Petugas masih harus memverifikasi kepemilikan dan pembayaran resmi." : guestPinMatch === false ? "Periksa kembali PIN Anda. Booking akan ditolak jika nama dan PIN tidak sesuai." : "Masukkan PIN milik Anda untuk mencocokkannya dengan nama yang terdaftar. PIN dari registry tidak ditampilkan ke publik."}</p>
+                      <p className="text-xs font-medium text-amber-900">Status akses: menunggu verifikasi kepemilikan dan pembayaran resmi. Pintu belum aktif.</p>
+                    </div>
                   )}
                   {guestIdentityRoute === "visitor_card" && (
                     <p><strong>Nama belum terdaftar.</strong> Anda diarahkan ke kartu pengunjung VIS001–VIS006. Petugas akan memilih kartu yang tersedia setelah verifikasi pembayaran dan identitas.</p>
                   )}
                   {guestIdentityRoute === "staff_review" && (
-                    <p><strong>Perlu pemeriksaan petugas.</strong> Identitas mesin ditemukan tetapi belum dapat digunakan sebagai nonmember otomatis. Jangan memakai PIN pengguna lain.</p>
+                    <p><strong>{guestPinMatch === true ? "Nama dan PIN cocok pada inventaris mesin X904." : "Identitas X904 ditemukan, tetapi belum diverifikasi sebagai nonmember."}</strong> Petugas perlu memeriksa status registry, kepemilikan PIN, dan pengecualian akses. Memasukkan PIN saja tidak mengaktifkan pintu.</p>
                   )}
-                  {guestIdentityRoute === "checking" && <p>Mencocokkan nama dengan daftar X904...</p>}
+                  {guestIdentityRoute === "checking" && <p>Mencocokkan nama dan PIN dengan daftar X904...</p>}
                   {guestIdentityRoute === "unavailable" && <p>Pencocokan belum tersedia. Petugas akan memeriksa identitas pada saat kunjungan.</p>}
                   {guestIdentityRoute === "idle" && <p>Masukkan nama pengunjung untuk memilih alur PIN terdaftar atau kartu VIS secara otomatis.</p>}
                 </div>

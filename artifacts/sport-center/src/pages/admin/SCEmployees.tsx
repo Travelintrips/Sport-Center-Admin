@@ -10,10 +10,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import { Pencil, Plus, Search, Users } from "lucide-react";
+import SCEmployeeKasbon from "./SCEmployeeKasbon";
+import KasbonPeriodDialog from "./KasbonPeriodDialog";
+import { formatKasbonAmount, normalizeKasbonAmount, fromDatabaseKasbonAmount } from "./kasbonAmount";
 
-type Employee = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string | null };
-type Form = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string };
-const emptyForm: Form = { employeeId: "", fullName: "", whatsappNumber: "", isActive: true, notes: "" };
+type Employee = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string | null; salary: string | null };
+type Form = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string; salary: string };
+const emptyForm: Form = { employeeId: "", fullName: "", whatsappNumber: "", isActive: true, notes: "", salary: "" };
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 async function request(path: string, method = "GET", body?: unknown) {
   const response = await fetch(API + path, {
@@ -28,6 +31,7 @@ export default function SCEmployees() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -38,11 +42,11 @@ export default function SCEmployees() {
   const save = useMutation({
     mutationFn: (value: Form) => editing
       ? request("/admin/sc-employees/" + encodeURIComponent(editing), "PATCH", {
-        fullName: value.fullName, whatsappNumber: value.whatsappNumber, isActive: value.isActive, notes: value.notes,
+        fullName: value.fullName, whatsappNumber: value.whatsappNumber, isActive: value.isActive, notes: value.notes, salary: value.salary === "" ? null : value.salary,
       })
       : request("/admin/sc-employees", "POST", {
         fullName: value.fullName, whatsappNumber: value.whatsappNumber,
-        isActive: value.isActive, notes: value.notes,
+        isActive: value.isActive, notes: value.notes, salary: value.salary === "" ? null : value.salary,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-sc-employees"] });
@@ -65,7 +69,7 @@ export default function SCEmployees() {
   );
   const edit = (employee: Employee) => {
     setEditing(employee.employeeId);
-    setForm({ employeeId: employee.employeeId, fullName: employee.fullName, whatsappNumber: employee.whatsappNumber, isActive: employee.isActive, notes: employee.notes ?? "" });
+    setForm({ employeeId: employee.employeeId, fullName: employee.fullName, whatsappNumber: employee.whatsappNumber, isActive: employee.isActive, notes: employee.notes ?? "", salary: employee.salary === null ? "" : fromDatabaseKasbonAmount(employee.salary) });
     setOpen(true);
   };
   const submit = (event: React.FormEvent) => {
@@ -73,6 +77,7 @@ export default function SCEmployees() {
     if (!form.fullName.trim() || !form.whatsappNumber.trim()) return;
     save.mutate(form);
   };
+  if (selectedEmployee) return <div className="space-y-6 p-4 md:p-6"><SCEmployeeKasbon employee={selectedEmployee} onBack={() => setSelectedEmployee(null)}/></div>;
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -87,16 +92,25 @@ export default function SCEmployees() {
         </div>
         {isLoading ? <p>Memuat data karyawan...</p> : isError ? <p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p> : (
           <div className="overflow-x-auto"><table className="w-full text-left text-sm">
-            <thead><tr className="border-b"><th className="p-3">ID Karyawan</th><th className="p-3">Nama Lengkap</th><th className="p-3">Nomor WhatsApp</th><th className="p-3">Status</th><th className="p-3">Keterangan</th><th className="p-3">Tindakan</th></tr></thead>
+            <thead><tr className="border-b"><th className="p-3">ID Karyawan</th><th className="p-3">Nama Lengkap</th><th className="p-3">Nomor WhatsApp</th><th className="p-3">Status</th><th className="p-3">Tindakan</th><th className="p-3">Gaji</th></tr></thead>
             <tbody>{filtered.map((employee) => <tr key={employee.employeeId} className="border-b">
-              <td className="p-3 font-medium">{employee.employeeId}</td><td className="p-3">{employee.fullName}</td><td className="p-3">{employee.whatsappNumber}</td>
+              <td className="p-3 font-medium">{employee.employeeId}</td><td className="p-3"><button type="button" className="font-medium text-primary underline-offset-4 hover:underline focus-visible:underline" aria-label={"Buka histori kasbon " + employee.fullName} onClick={() => setSelectedEmployee(employee)}>{employee.fullName}</button></td><td className="p-3">{employee.whatsappNumber}</td>
               <td className="p-3"><Badge variant={employee.isActive ? "default" : "secondary"}>{employee.isActive ? "Aktif" : "Nonaktif"}</Badge></td>
-              <td className="max-w-xs whitespace-pre-wrap p-3">{employee.notes || "-"}</td>
-              <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => edit(employee)}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" disabled={toggle.isPending} onClick={() => toggle.mutate(employee)}>{employee.isActive ? "Nonaktifkan" : "Aktifkan"}</Button></div></td>
+
+              <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => edit(employee)}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" disabled={toggle.isPending} onClick={() => toggle.mutate(employee)}>{employee.isActive ? "Nonaktifkan" : "Aktifkan"}</Button></div></td><td className="p-3 whitespace-nowrap font-medium">{employee.salary === null ? "—" : new Intl.NumberFormat("id-ID", {style:"currency",currency:"IDR",maximumFractionDigits:0}).format(Number(employee.salary))}</td>
             </tr>)}</tbody>
           </table>{!filtered.length && <p className="py-6 text-center text-muted-foreground">Belum ada karyawan yang sesuai.</p>}</div>
         )}
       </CardContent></Card>
+      <Card aria-label="Pengelolaan periode kasbon">
+        <CardHeader>
+          <CardTitle>Periode Kasbon</CardTitle>
+          <p className="text-sm text-muted-foreground">Buat periode bulanan untuk seluruh karyawan, tanpa membuka Google Sheets. Tidak terkait dengan kasbon karyawan tertentu.</p>
+        </CardHeader>
+        <CardContent>
+          <KasbonPeriodDialog />
+        </CardContent>
+      </Card>
       <Dialog open={open} onOpenChange={(value) => { if (!save.isPending) setOpen(value); }}>
         <DialogContent className="max-w-lg"><DialogHeader><DialogTitle>{editing ? "Edit Karyawan SC" : "Tambah Karyawan SC"}</DialogTitle></DialogHeader>
           <form onSubmit={submit} className="space-y-4">
@@ -104,6 +118,7 @@ export default function SCEmployees() {
             <div className="space-y-1"><Label htmlFor="sc-name">Nama Lengkap</Label><Input id="sc-name" required maxLength={150} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })}/></div>
             <div className="space-y-1"><Label htmlFor="sc-phone">Nomor WhatsApp</Label><Input id="sc-phone" required type="tel" value={form.whatsappNumber} onChange={(e) => setForm({ ...form, whatsappNumber: e.target.value })} placeholder="081234567890"/></div>
             <div className="space-y-1"><Label htmlFor="sc-status">Status</Label><select id="sc-status" className="block w-full rounded-md border bg-background p-2" value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></div>
+            <div className="space-y-1"><Label htmlFor="sc-salary">Gaji (Rp)</Label><Input id="sc-salary" type="text" inputMode="numeric" autoComplete="off" placeholder="Contoh: 3.500.000" value={formatKasbonAmount(form.salary)} onChange={(e) => setForm({ ...form, salary: normalizeKasbonAmount(e.target.value).slice(0,13) })}/><p className="text-xs text-muted-foreground">Nominal gaji karyawan dalam rupiah. Kosong berarti belum diisi, bukan Rp0.</p></div>
             <div className="space-y-1"><Label htmlFor="sc-notes">Keterangan</Label><Textarea id="sc-notes" maxLength={2000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}/></div>
             <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpen(false)}>Batal</Button><Button type="submit" disabled={save.isPending || !form.fullName.trim() || !form.whatsappNumber.trim()}>{save.isPending ? "Menyimpan..." : "Simpan"}</Button></div>
           </form>

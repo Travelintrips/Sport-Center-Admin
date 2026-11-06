@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,7 @@ type WaBooking = {
 };
 
 type DetailData = {
+  x904PinGrant?: { accessId: number; userPin: string; deviceUid: number; verifiedName: string; accessState: string; verificationState: string; paymentStatus: string | null } | null;
   booking: Record<string, any>;
   facility: Record<string, any> | null;
   session: Record<string, any> | null;
@@ -132,9 +133,19 @@ export default function AdminWaBookings() {
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
+  const [pinOwnershipChecked, setPinOwnershipChecked] = useState(false);
+  const [pinFundsChecked, setPinFundsChecked] = useState(false);
+  const [pinBankReference, setPinBankReference] = useState("");
   const [visCardHandedOver, setVisCardHandedOver] = useState(false);
   const [visCardReturned, setVisCardReturned] = useState(false);
   const [visReadbackChecked, setVisReadbackChecked] = useState(false);
+
+  // Never carry a physical-identity/payment attestation between bookings.
+  useEffect(() => {
+    setPinOwnershipChecked(false);
+    setPinFundsChecked(false);
+    setPinBankReference("");
+  }, [selectedOrder]);
 
   const queryKey = ["wa-bookings", activeTab, sourceFilter, search];
 
@@ -183,6 +194,23 @@ export default function AdminWaBookings() {
       invalidate();
     },
     onError: (e: any) => toast({ title: "Gagal reject", description: e.message, variant: "destructive" }),
+  });
+
+  const approveGuestPinMutation = useMutation({
+    mutationFn: (bookingId: number) =>
+      mutate(`/bookings/${bookingId}/x904-guest-pin-approve`, {
+        identityChecked: true,
+        officialFundsChecked: true,
+        officialBankReference: pinBankReference.trim().toUpperCase(),
+      }),
+    onSuccess: () => {
+      toast({ title: "PIN nonmember disahkan", description: "Aktivasi menunggu worker dan ACK X904. Pastikan dana resmi telah dikonfirmasi." });
+      setPinOwnershipChecked(false);
+      setPinFundsChecked(false);
+      setPinBankReference("");
+      invalidate();
+    },
+    onError: (e: any) => toast({ title: "Verifikasi PIN ditolak", description: e.message, variant: "destructive" }),
   });
 
   const collectVisMutation = useMutation({
@@ -467,6 +495,42 @@ export default function AdminWaBookings() {
                   )}
                 </div>
 
+                {detail.booking.source === "gym_public_guest" && detail.x904PinGrant && (
+                  <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-slate-900 space-y-3">
+                    <p className="font-bold">Pengesahan PIN biasa — booking tanpa login</p>
+                    <p>Nama X904: <strong>{detail.x904PinGrant.verifiedName}</strong> · PIN: <strong>{detail.x904PinGrant.userPin}</strong> · UID: {detail.x904PinGrant.deviceUid}</p>
+                    <p>Pembayaran resmi: <strong>{detail.x904PinGrant.paymentStatus ?? "belum ada"}</strong> · Akses: <strong>{detail.x904PinGrant.accessState}</strong></p>
+                    {detail.x904PinGrant.verificationState === "review_required" &&
+                      detail.x904PinGrant.accessState === "review_required" ? (
+                      <>
+                        <p className="text-xs text-amber-900">Pemeriksaan nama saja tidak membuktikan pemilik PIN. Periksa identitas fisik pengunjung dan pastikan pembayaran benar-benar confirmed di sistem; bukti upload/OCR saja tidak cukup.</p>
+                        <label className="flex items-start gap-2 text-xs">
+                          <input type="checkbox" checked={pinOwnershipChecked}
+                            onChange={e => setPinOwnershipChecked(e.target.checked)} />
+                          Saya telah memeriksa langsung identitas pengunjung dan cocok dengan PIN, UID, serta nama mesin X904.
+                        </label>
+                        <Input placeholder="Referensi resmi transaksi bank / QRIS"
+                          aria-label="Nomor referensi pembayaran resmi untuk PIN nonmember"
+                          value={pinBankReference}
+                          onChange={e => setPinBankReference(e.target.value.toUpperCase())} />
+                        <label className="flex items-start gap-2 text-xs">
+                          <input type="checkbox" checked={pinFundsChecked}
+                            onChange={e => setPinFundsChecked(e.target.checked)} />
+                          Saya sudah memastikan dana resmi diterima dan cocok dengan transaksi ini, bukan hanya screenshot/OCR.
+                        </label>
+                        <Button type="button" className="w-full" disabled={!pinOwnershipChecked || !pinFundsChecked ||
+                          pinBankReference.trim().length < 6 ||
+                          detail.x904PinGrant.paymentStatus !== "confirmed" || approveGuestPinMutation.isPending}
+                          onClick={() => approveGuestPinMutation.mutate(Number(detail.booking.id))}>
+                          Sahkan PIN Nonmember (Setelah Pembayaran Resmi)
+                        </Button>
+                        <p className="text-xs text-slate-500">Persetujuan ini tidak langsung membuka pintu. Worker akan memverifikasi jadwal, pembayaran, dan ACK X904.</p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-600">Pengesahan PIN sudah diproses atau memerlukan pemeriksaan status lanjutan. Jangan mengesahkan ulang.</p>
+                    )}
+                  </section>
+                )}
                 {detail.booking.source === "gym_public_guest" && (
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
                     <p className="font-semibold">Hasil pencocokan identitas X904 (khusus petugas)</p>
