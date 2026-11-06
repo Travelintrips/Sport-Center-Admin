@@ -63,7 +63,7 @@ test("photo-only combined intake generates internal reference, never trusts a us
 
 test("admin receipt review is read-only and lists allocations without granting access",()=>{
  const begin=api.indexOf('router.get("/memberships/admin-combined-receipts"');
- const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const end=api.indexOf('// Explicit admin attestation based on the saved photo',begin);
  const review=api.slice(begin,end);
  assert.ok(begin>0&&end>begin);
  assert.match(review,/adminMiddleware/);
@@ -75,5 +75,50 @@ test("admin receipt review is read-only and lists allocations without granting a
  assert.match(ui,/Bukti gabungan tersimpan/);
  assert.match(ui,/loadCombinedReceipts\(\)/);
  assert.match(ui,/receipt.allocationSum!==receipt.amount/);
- assert.match(ui,/Belum boleh dinyatakan lunas sampai dana diterima/);
+ assert.match(ui,/Persetujuan berdasarkan foto adalah keputusan admin/);
+});
+
+test("photo-approval is atomic, admin-only, audited and must not mint a second bank mutation",()=>{
+ const begin=api.indexOf('router.post("/memberships/admin-combined-receipts/:id/approve-photo"');
+ const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const endpoint=api.slice(begin,end);
+ assert.ok(begin>0&&end>begin);
+ assert.match(endpoint,/adminMiddleware/);
+ assert.match(endpoint,/acknowledgeNotBankVerified/);
+ assert.match(endpoint,/await db.transaction\(async tx=>/);
+ assert.match(endpoint,/FOR UPDATE/);
+ assert.match(endpoint,/photo_approved/);
+ assert.match(endpoint,/gym_combined_photo_approval_audit/);
+ assert.match(endpoint,/x904_automatic_entitlement_events/);
+ assert.match(endpoint,/gym_combined_receipt_allocations/);
+ assert.match(endpoint,/alreadyApproved:!result.fresh/);
+ assert.match(endpoint,/settlementProviderCode:"admin_photo_approval_not_bank_verified"/);
+ assert.doesNotMatch(endpoint,/pushMembershipPaymentAsBankMutation\(/);
+ assert.doesNotMatch(endpoint,/INSERT INTO sport_center.bank_mutations/);
+});
+test("admin photo approval requires explicit action and stored receipt, not re-upload",()=>{
+ const ui=read("artifacts/sport-center/src/pages/admin/CheckoutForm.tsx");
+ assert.match(ui,/approveCombinedPhoto\(receipt/);
+ assert.match(ui,/Setujui Foto & Proses Membership/);
+ assert.match(ui,/confirmPhoto:true,acknowledgeNotBankVerified:true/);
+ assert.match(ui,/receipt.status==="awaiting_bank_verification"/);
+ assert.match(ui,/acknowledgeNotBankVerified:true/);
+});
+
+test("combined receipt GET route precedes dynamic membership detail GET",()=>{
+ const review=api.indexOf('router.get("/memberships/admin-combined-receipts"');
+ const detail=api.indexOf('router.get("/memberships/:id", adminMiddleware');
+ assert.ok(review>=0 && detail>=0 && review<detail,
+ "Review route must be registered before /memberships/:id to avoid a 500 for nonnumeric id");
+});
+
+test("photo approval audit actor comes from validated userId session, not missing id/email",()=>{
+ const begin=api.indexOf('router.post("/memberships/admin-combined-receipts/:id/approve-photo"');
+ const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const handler=api.slice(begin,end);
+ assert.match(handler,/\.user\?\.userId/);
+ assert.match(handler,/Number\.isSafeInteger\(authenticatedUserId\)/);
+ assert.match(handler,/sport_center_user:/);
+ assert.doesNotMatch(handler,/\.user\?\.id \?\?/);
+ assert.doesNotMatch(handler,/\.user\?\.email \?\?/);
 });

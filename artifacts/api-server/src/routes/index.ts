@@ -76,6 +76,7 @@ import gymX904EventsRouter from "./gymX904Events";
 import gymX904LanRouter from "./gymX904Lan";
 import gymX904AttestedRouter from "./gymX904Attested";
 import qrisEmailDevRouter from "./qrisEmailDev";
+import qrisAdminDetectionRouter from "./qrisAdminDetection";
 
 const router: IRouter = Router();
 
@@ -155,5 +156,6 @@ router.use(gymX904EventsRouter);
 router.use(gymX904LanRouter);
 router.use(gymX904AttestedRouter);
 router.use(qrisEmailDevRouter);
+router.use(qrisAdminDetectionRouter);
 
 export default router;
