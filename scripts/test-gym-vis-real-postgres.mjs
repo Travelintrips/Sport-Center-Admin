@@ -87,3 +87,63 @@ test("public roles have no direct write rights and RLS enabled", async () => {
   assert.equal(rows[0].anon_insert,false);
   assert.equal(rows[0].auth_update,false);
 });
+
+test("incoming bank record must match payment, amount, canonical reference and ingestion provenance", async () => {
+  await db.query(`CREATE TABLE sport_center.bank_mutations (
+    id integer PRIMARY KEY, matched_payment_id integer,
+    status text, direction text, credit_amount numeric,
+    source_app text, source_module text, provider_name text, provider_order_id text
+  )`);
+  const match = () => db.query(`SELECT id FROM sport_center.bank_mutations
+    WHERE matched_payment_id=$1 AND status::text='auto_matched'
+      AND upper(btrim(direction))='IN' AND credit_amount >= $2
+      AND upper(btrim(coalesce(provider_order_id,'')))=$3
+      AND nullif(btrim(coalesce(source_app,'')),'') IS NOT NULL
+      AND nullif(btrim(coalesce(source_module,'')),'') IS NOT NULL
+      AND lower(btrim(coalesce(provider_name,''))) NOT IN ('','manual')
+    LIMIT 2 FOR UPDATE`,[4,100,"BANK-CI-06"]);
+  await db.query("INSERT INTO sport_center.bank_mutations VALUES (1,4,'auto_matched','IN',100,NULL,NULL,'manual','BANK-CI-06')");
+  assert.equal((await match()).rows.length,0,"manual import must not attest funds");
+  await db.query("INSERT INTO sport_center.bank_mutations VALUES (2,5,'auto_matched','IN',100,'bank_api','ingest','mandiri_direct','BANK-CI-06')");
+  assert.equal((await match()).rows.length,0,"other booking payment must not attest funds");
+  await db.query("UPDATE sport_center.bank_mutations SET matched_payment_id=4,credit_amount=90 WHERE id=2");
+  assert.equal((await match()).rows.length,0,"short payment must not attest funds");
+  await db.query("UPDATE sport_center.bank_mutations SET credit_amount=100,provider_order_id='DIFFERENT' WHERE id=2");
+  assert.equal((await match()).rows.length,0,"different bank reference must not attest funds");
+  await db.query("UPDATE sport_center.bank_mutations SET provider_order_id='BANK-CI-06' WHERE id=2");
+  assert.equal((await match()).rows.length,1,"only independently sourced matched bank record may pass");
+});
+
+test("fresh X904 group 2 snapshot rejects group 1, stale evidence and later commands", async () => {
+  await db.query(`CREATE TABLE sport_center.gym_x904_access_snapshots (
+    observed_at timestamptz NOT NULL,device_serial text NOT NULL,users jsonb NOT NULL
+  )`);
+  await db.query(`CREATE TABLE sport_center.x904_user_commands (
+    device_serial text NOT NULL,user_pin text NOT NULL,
+    created_at timestamptz NOT NULL,state text NOT NULL
+  )`);
+  const verify=()=>db.query(`WITH latest AS (
+    SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
+    WHERE device_serial=$1
+      AND observed_at>=now()-interval '5 minutes'
+      AND observed_at>=now()-interval '10 minutes'
+    ORDER BY observed_at DESC LIMIT 1
+  ) SELECT observed_at FROM latest
+    WHERE jsonb_typeof(users)='array'
+    AND (SELECT count(*) FROM jsonb_array_elements(users) u WHERE u->>'pin'='13')=1
+    AND EXISTS(SELECT 1 FROM jsonb_array_elements(users) u
+      WHERE u->>'pin'='13' AND u->>'group'='2' AND u->>'role'='0')
+    AND NOT EXISTS (SELECT 1 FROM sport_center.x904_user_commands cmd
+      WHERE cmd.device_serial=$1 AND cmd.user_pin='13'
+      AND cmd.created_at>latest.observed_at
+      AND cmd.state NOT IN ('cancelled','failed'))`,[device]);
+  assert.equal((await verify()).rows.length,0,"missing snapshot is not readback");
+  await db.query("INSERT INTO sport_center.gym_x904_access_snapshots VALUES (now()-interval '20 minutes',$1,$2::jsonb)",[device,JSON.stringify([{pin:"13",group:2,role:0}])]);
+  assert.equal((await verify()).rows.length,0,"stale snapshot is not readback");
+  await db.query("INSERT INTO sport_center.gym_x904_access_snapshots VALUES (now()-interval '1 minute',$1,$2::jsonb)",[device,JSON.stringify([{pin:"13",group:1,role:0}])]);
+  assert.equal((await verify()).rows.length,0,"active group is not safe readback");
+  await db.query("INSERT INTO sport_center.gym_x904_access_snapshots VALUES (now(),$1,$2::jsonb)",[device,JSON.stringify([{pin:"13",group:2,role:0}])]);
+  assert.equal((await verify()).rows.length,1,"fresh snapshot with suspended PIN may pass");
+  await db.query("INSERT INTO sport_center.x904_user_commands VALUES ($1,'13',now()+interval '1 second','pending')",[device]);
+  assert.equal((await verify()).rows.length,0,"later activation command voids readback");
+});
