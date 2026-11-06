@@ -689,8 +689,8 @@ export default function WaBookingForm() {
         {publicGymGuest && (
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
             <strong>Booking mandiri tanpa login.</strong> Isi nama asli dan nomor WhatsApp, pilih QRIS atau transfer, lalu unggah bukti.
-            Pembayaran harus diverifikasi sebelum akses diberikan. PIN/kartu X904 tidak dapat dipilih dari website publik;
-            petugas akan mencocokkan identitas dan menyerahkan kartu jika diperlukan.
+            Pembayaran harus dikonfirmasi petugas sebelum akses diberikan. Jika sudah terdaftar di mesin X904, masukkan PIN milik Anda untuk dicocokkan dengan nama lengkap.
+            Jika belum memiliki PIN, petugas akan memeriksa identitas dan mengatur kartu VIS jika diperlukan. Pengisian PIN tidak langsung mengaktifkan akses pintu.
           </div>
         )}
         <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
