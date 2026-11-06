@@ -20,7 +20,7 @@ test("match exact name uniquely; reject member, VIP PIN, card identities and unk
 });
 test("public preview reveals route but never machine PIN, UID or name",()=>{
  const preview=api.slice(api.indexOf('router.post("/wa/gym-name-route"'),api.indexOf('// POST /api/wa/booking —'));
- assert.match(preview,/resolveGymGuestName\(name\)/);
+ assert.match(preview,/resolveGymGuestName\(name, submittedPin\)/);
  assert.match(preview,/res\.status\(429\)/);
  assert.match(preview,/route: match\.route/);
  assert.doesNotMatch(preview,/res\.json\(\{[^}]*userPin/);
@@ -58,7 +58,7 @@ test("public name and PIN preview compares on server without returning machine P
  const preview=api.slice(api.indexOf('router.post("/wa/gym-name-route"'),api.indexOf('// POST /api/wa/booking —'));
  assert.match(preview,/requestedX904Pin/);
  assert.match(preview,/pinMatch: submittedPin/);
- assert.match(preview,/submittedPin === match.userPin/);
+ assert.match(preview,/match.inventoryPinMatch/);
  assert.match(ui,/form.customerName, guestPin/);
  assert.match(ui,/guestPinMatch === true/);
  assert.match(ui,/guestPinMatch === false/);
