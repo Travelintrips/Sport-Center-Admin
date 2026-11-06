@@ -185,6 +185,19 @@ export default function AdminCheckoutForm() {
   const [membershipPaymentBusy, setMembershipPaymentBusy] = useState(false);
   const [membershipPaymentDone, setMembershipPaymentDone] = useState(false);
   const [completedGymBooking, setCompletedGymBooking] = useState<CompletedGymBooking | null>(null);
+  // One externally received transfer, multiple member allocations; never auto-confirm.
+  const [combinedOpen, setCombinedOpen] = useState(false);
+  const [combinedReference, setCombinedReference] = useState("");
+  const [combinedDate, setCombinedDate] = useState(jakartaDateOnly);
+  const [combinedMethod, setCombinedMethod] = useState("qris");
+  const [combinedProof, setCombinedProof] = useState<File | null>(null);
+  const [combinedRows, setCombinedRows] = useState<Array<{pin:string;kind:"new"|"renew";membershipId:string}>>([
+    {pin:"",kind:"new",membershipId:""},
+    {pin:"",kind:"renew",membershipId:""},
+  ]);
+  const [combinedBusy, setCombinedBusy] = useState(false);
+  const [combinedOutcome, setCombinedOutcome] = useState("");
+
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<string | null>(null);
@@ -691,6 +704,39 @@ export default function AdminCheckoutForm() {
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
       && membershipX904Name && membershipX904IdentityConfirmed && membershipX904Pin && membershipX904SelectedUid !== null && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && renewalPeriodValid && (memberAction !== "checkin" || matchedMember.status === "active"));
+  async function submitCombinedReceipt(event: React.FormEvent) {
+    event.preventDefault();
+    if (combinedBusy) return;
+    if (!combinedProof || combinedRows.length < 2 || combinedRows.some(row => !/^[0-9]{1,8}$/.test(row.pin) ||
+        (row.kind === "renew" && !/^[1-9][0-9]*$/.test(row.membershipId)))) {
+      setCombinedOutcome("Lengkapi bukti, dua PIN terdaftar, dan ID membership untuk perpanjangan.");
+      return;
+    }
+    setCombinedBusy(true);
+    setCombinedOutcome("");
+    try {
+      const payload = new FormData();
+      payload.append("reference",combinedReference.trim());
+      payload.append("paymentMethod",combinedMethod);
+      payload.append("paymentDate",combinedDate);
+      payload.append("amount",String(combinedRows.length * 300000));
+      payload.append("allocations",JSON.stringify(combinedRows.map(row=>({
+        userPin:row.pin, kind:row.kind,
+        membershipId:row.kind === "renew" ? Number(row.membershipId) : null,
+        amount:300000,
+      }))));
+      payload.append("proof",combinedProof);
+      const response=await fetch("/api/memberships/admin-combined-receipt",{
+        method:"POST",headers:{Authorization:"Bearer "+(getToken()??"")},body:payload,
+      });
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(result.error || "Bukti gabungan belum dapat dicatat.");
+      setCombinedOutcome(`Bukti #${result.receiptId} tercatat untuk ${combinedRows.length} penerima: ${formatRupiah(Number(result.amount))}. Status menunggu verifikasi bank; membership belum lunas dan X904 belum aktif.`);
+    } catch(error) {
+      setCombinedOutcome(error instanceof Error ? error.message : "Pencatatan bukti gabungan gagal.");
+    } finally {setCombinedBusy(false);}
+  }
+
   async function submitMembership() {
     if (!membershipReady || isSubmitting) return;
     // Authorized admin registration: one request, one DB transaction, one payment.
@@ -1284,6 +1330,71 @@ export default function AdminCheckoutForm() {
           </div>
         </div>
       </div>
+
+      {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole()) && (
+        <Card className="mb-6 border-blue-200 shadow-sm">
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle className="text-base">Pembayaran Gabungan Membership Gym</CardTitle>
+              <Button type="button" variant="outline" onClick={()=>setCombinedOpen(!combinedOpen)}>
+                {combinedOpen ? "Tutup" : "Catat satu bukti untuk beberapa member"}
+              </Button>
+            </div>
+          </CardHeader>
+          {combinedOpen && <CardContent>
+            <form onSubmit={submitCombinedReceipt} className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Satu bukti pembayaran untuk beberapa penerima. Setiap alokasi adalah paket 1 bulan Rp300.000.
+                Pencatatan ini belum mengonfirmasi dana, membuat mutasi bank, atau mengaktifkan PIN X904.
+              </p>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-1"><Label>Referensi transaksi bank</Label>
+                  <Input value={combinedReference} onChange={e=>setCombinedReference(e.target.value)} required minLength={6} placeholder="Referensi dari mutasi/QRIS" /></div>
+                <div className="space-y-1"><Label>Tanggal transaksi</Label>
+                  <Input type="date" value={combinedDate} max={jakartaDateOnly()} onChange={e=>setCombinedDate(e.target.value)} required /></div>
+                <div className="space-y-1"><Label>Metode</Label>
+                  <Select value={combinedMethod} onValueChange={setCombinedMethod}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="qris">QRIS Mandiri</SelectItem><SelectItem value="transfer">Transfer Bank</SelectItem></SelectContent>
+                  </Select></div>
+              </div>
+              <div className="space-y-3">
+                {combinedRows.map((row,index)=>(
+                  <div key={index} className="grid items-end gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                    <div className="space-y-1"><Label>PIN X904 penerima {index+1}</Label>
+                      <Input inputMode="numeric" value={row.pin} maxLength={8}
+                        onChange={e=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,pin:e.target.value.replace(/[^0-9]/g,"")}:x))}
+                        placeholder="PIN mesin" required /></div>
+                    <div className="space-y-1"><Label>Jenis</Label>
+                      <Select value={row.kind} onValueChange={value=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,kind:value as "new"|"renew",membershipId:""}:x))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                          <SelectItem value="new">Member baru</SelectItem><SelectItem value="renew">Perpanjangan</SelectItem>
+                        </SelectContent></Select></div>
+                    <div className="space-y-1"><Label>{row.kind==="renew"?"Membership ID":"Alokasi"}</Label>
+                      {row.kind==="renew"
+                        ? <Input value={row.membershipId} inputMode="numeric" placeholder="ID membership" required
+                            onChange={e=>setCombinedRows(current=>current.map((x,i)=>i===index?{...x,membershipId:e.target.value.replace(/[^0-9]/g,"")}:x))}/>
+                        : <Input value="Rp300.000 / 1 bulan" disabled />}</div>
+                    <Button type="button" variant="outline" disabled={combinedRows.length<=2}
+                      onClick={()=>setCombinedRows(current=>current.filter((_,i)=>i!==index))}>Hapus</Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" disabled={combinedRows.length>=10}
+                  onClick={()=>setCombinedRows(current=>[...current,{pin:"",kind:"new",membershipId:""}])}>Tambah penerima</Button>
+              </div>
+              <div className="space-y-1"><Label>Satu bukti transfer / QRIS</Label>
+                <Input type="file" accept="image/*" required onChange={e=>setCombinedProof(e.target.files?.[0]??null)}/></div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <strong>Total penerimaan: {formatRupiah(combinedRows.length * 300000)}</strong>
+                <Button type="submit" disabled={combinedBusy || !combinedProof || !combinedReference.trim()}>
+                  {combinedBusy?"Menyimpan...":"Catat Bukti untuk Verifikasi Bank"}
+                </Button>
+              </div>
+              {combinedOutcome && <p role="status" className="rounded-md border p-3 text-sm">{combinedOutcome}</p>}
+            </form>
+          </CardContent>}
+        </Card>
+      )}
 
       {isMembership && membershipPaymentDone && completedGymBooking ? (
         <Card>
