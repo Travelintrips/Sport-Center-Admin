@@ -85,6 +85,9 @@ on:
         default: false
       kasbon_period_dev_e2e:
         description: "Test December and January creation in disposable DEV tab"
+        required: false
+        type: boolean
+        default: false
       kasbon_copy_to_dev:
         description: "Explicit DEV-only full workbook copy; original never modified"
         required: false
