@@ -983,6 +983,18 @@ router.post("/wa/booking", async (req, res) => {
       return;
     }
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
+    // Anonymous booking may link only a server-resolved, registry-approved PIN.
+    // This is NOT proof of ownership: review_required prevents any machine grant
+    // until a logged-in operator checks identity and official payment.
+    // Never accept a PIN or UID from an anonymous request.
+    if (publicGymGuest && guestNameRoute?.route === "registered" &&
+        guestNameRoute.userPin && guestNameRoute.deviceUid && guestNameRoute.displayName) {
+      verifiedX904Identity = {
+        identityType: "pin", identityLabel: `PIN:${guestNameRoute.userPin}`,
+        userPin: guestNameRoute.userPin, deviceUid: guestNameRoute.deviceUid,
+        displayName: guestNameRoute.displayName,
+      };
+    }
     if (x904IdentityType != null || x904IdentityValue != null) {
       if (!gymWalkIn || !["pin", "card"].includes(String(x904IdentityType))) {
         res.status(400).json({ error: "Identitas X904 hanya berlaku untuk booking Gym." });
@@ -1122,6 +1134,18 @@ router.post("/wa/booking", async (req, res) => {
           LIMIT 1`);
         if (existing.rows.length > 0) throw new Error("GYM_PUBLIC_GUEST_DUPLICATE_BOOKING");
       }
+      // Reserve the server-resolved PIN against simultaneous guest checkouts.
+      // Other phone numbers must not create parallel pending grants to one PIN.
+      if (publicGymGuest && verifiedX904Identity?.identityType === "pin") {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(
+          hashtext('gym_public_guest_pin'),
+          hashtext(${verifiedX904Identity.userPin})
+        )`);
+        const busy = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
+          WHERE device_serial='TDBD234200545' AND user_pin=${verifiedX904Identity.userPin}
+            AND access_state IN ('pending','active','review_required') LIMIT 1`);
+        if (busy.rows.length) throw new Error("X904_NONMEMBER_PIN_BUSY");
+      }
       // Lock registry ownership for the booking transaction, so an approval
       // revoked after preflight cannot create a paid access grant.
       if (verifiedX904Identity?.identityType === "pin") {
@@ -1154,7 +1178,7 @@ router.post("/wa/booking", async (req, res) => {
       source: publicGymGuest ? "gym_public_guest" : "whatsapp",
       notes: publicGymGuest
         ? (guestNameRoute?.route === "registered"
-          ? "Gym mandiri; nama cocok dengan registry X904. Rincian PIN dan UID hanya tersedia pada panel admin; verifikasi kepemilikan wajib dan belum ada hak akses."
+          ? "Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required; verifikasi kepemilikan wajib oleh petugas. Hak akses menunggu pembayaran resmi."
           : guestNameRoute?.route === "visitor_card"
             ? "Gym mandiri; nama tidak terdaftar di inventaris X904. Kartu VIS001–VIS006 menunggu pilihan dan penyerahan petugas; belum ada hak akses X904."
             : "Gym mandiri; nama ada tetapi memerlukan peninjauan identitas X904 oleh petugas; jangan menggunakan PIN/kartu milik pengguna lain.")
@@ -1175,7 +1199,9 @@ router.post("/wa/booking", async (req, res) => {
           (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
           VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
             ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
-            ${created.id},'verified','pending')`);
+            ${created.id},
+            ${publicGymGuest ? "review_required" : "verified"},
+            ${publicGymGuest ? "review_required" : "pending"})`);
       }
       await tx.insert(bookingHistoryTable).values({
         bookingId: created.id, fromStatus: null, toStatus: "pending_payment",
@@ -1237,7 +1263,8 @@ router.post("/wa/booking", async (req, res) => {
       statusUrl,
       uploadProofUrl,
       gymGuestIdentityRoute: guestNameRoute?.route ?? null,
-      x904Identity: verifiedX904Identity ? {
+      // Never leak linked PIN/UID via an anonymous no-login response.
+      x904Identity: !publicGymGuest && verifiedX904Identity ? {
         type: verifiedX904Identity.identityType,
         label: verifiedX904Identity.identityLabel,
         displayName: verifiedX904Identity.displayName,
@@ -1248,6 +1275,12 @@ router.post("/wa/booking", async (req, res) => {
     if (err instanceof Error && err.message === "X904_VIS_CARD_RESERVED") {
       res.status(409).json({ error: "Kartu VIS sedang dialokasikan kepada pengunjung lain. Gunakan kartu lain yang tersedia." });
       return;
+    }
+    if (err instanceof Error && err.message === "X904_NONMEMBER_PIN_BUSY") {
+      res.status(409).json({ error: "PIN terverifikasi masih memiliki booking atau akses yang sedang diproses. Selesaikan transaksi sebelumnya." }); return;
+    }
+    if (err instanceof Error && err.message === "X904_NONMEMBER_REGISTRY_CHANGED") {
+      res.status(409).json({ error: "Verifikasi PIN berubah selama booking. Coba lagi setelah identitas diperiksa." }); return;
     }
     if (err instanceof Error && err.message === "GYM_PUBLIC_GUEST_DUPLICATE_BOOKING") {
       res.status(409).json({ error: "Sudah ada booking Gym untuk tanggal ini. Gunakan status booking sebelumnya, jangan membayar dua kali." });
