@@ -35,7 +35,7 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
   });
 
   test("VIS card path stays outside owner PIN matching", () => {
-    expect(api).toContain('guestNameRoute?.route !== "registered" && guestSubmittedPin');
+    expect(api).toContain('guestSubmittedPin && guestNameRoute?.route !== "registered"');
     expect(api).toContain('verifiedX904Identity?.identityType === "card"');
     expect(form).toContain('guestIdentityRoute === "visitor_card"');
   });
