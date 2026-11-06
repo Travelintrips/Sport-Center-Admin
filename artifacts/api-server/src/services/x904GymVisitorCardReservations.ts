@@ -96,6 +96,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
           AND status::text='auto_matched'
           AND upper(btrim(direction))='IN'
           AND credit_amount>=${Number(booking.amount)}
+          AND upper(btrim(coalesce(provider_order_id,'')))=${ref}
           AND nullif(btrim(coalesce(source_app,'')),'') IS NOT NULL
           AND nullif(btrim(coalesce(source_module,'')),'') IS NOT NULL
           AND lower(btrim(coalesce(provider_name,''))) NOT IN ('','manual')
