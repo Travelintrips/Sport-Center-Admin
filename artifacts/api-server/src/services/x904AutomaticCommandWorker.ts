@@ -20,12 +20,16 @@ export function startX904AutomaticCommandWorker(): void {
   interval.unref();
 }
 
-/** Only explicitly allowlisted machine identities may receive automated commands. */
+/** Each command is restricted to a verified machine-to-membership identity and paid entitlement. */
 export async function processX904AutomaticCommands(store: Pick<typeof db,'execute'|'transaction'> = db): Promise<void> {
   if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
-  // Roll out to verified members only under a separate explicit opt-in.
-  // Existing production configuration remains single-PIN until approved.
-  const allVerified=process.env.GYM_X904_AUTOMATIC_SCOPE==="all_verified";
+  // "verified_paid_members" is an explicit general rollout after the scoped pilot.
+  // This does NOT grant access to every X904 user: mapping, membership,
+  // confirmed paid period, one booking, UID/name/role and snapshot still gate
+  // each command, while a confirmed ACK/read-back gates completion.
+  // Preserve the existing "all_verified" opt-in for compatibility.
+  const scope=process.env.GYM_X904_AUTOMATIC_SCOPE;
+  const allVerified=scope==="verified_paid_members" || scope==="all_verified";
   const pins=(process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS??"").split(",").map(x=>x.trim()).filter(Boolean);
   // Allow a deliberately scoped two-PIN rollout without enabling all_verified.
   // Keep backward-compatible single-PIN deployments; reject duplicates and broad allowlists.
@@ -59,6 +63,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
   const events=await store.execute(sql`SELECT e.event_id,e.membership_id,e.event_key
     FROM sport_center.x904_automatic_entitlement_events e
     WHERE e.state='pending'
+      AND e.reason IN ('PAYMENT_CONFIRMED','DAILY_EXPIRY')
       ${allVerified ? sql`` : sql`AND EXISTS (
         SELECT 1 FROM sport_center.gym_x904_member_mapping mp
         WHERE mp.membership_id=e.membership_id AND mp.status='verified'
@@ -73,10 +78,21 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
   for(const ev of events.rows){
     await store.transaction(async tx=>{
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904201)`);
-      const event=await tx.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
-        WHERE event_id=${Number(ev.event_id)} AND state='pending' FOR UPDATE`);
+      const event=await tx.execute(sql`SELECT event_id,membership_id,event_key,reason,payment_id FROM sport_center.x904_automatic_entitlement_events
+        WHERE event_id=${Number(ev.event_id)} AND state='pending'
+          AND reason IN ('PAYMENT_CONFIRMED','DAILY_EXPIRY') FOR UPDATE`);
       if(event.rows.length!==1)return;
       const membershipId=Number(event.rows[0].membership_id);
+      // A PAYMENT_CONFIRMED event must refer to its own confirmed payment.
+      // A stale/misaligned event may never unlock or suspend another identity.
+      if(String(event.rows[0].reason)==="PAYMENT_CONFIRMED"){
+        const paymentId=Number(event.rows[0].payment_id);
+        if(!Number.isSafeInteger(paymentId)||paymentId<=0)return;
+        const eventPayment=await tx.execute(sql`SELECT 1 FROM sport_center.sport_membership_payments
+          WHERE id=${paymentId} AND membership_id=${membershipId} AND status='confirmed'
+            AND amount>0`);
+        if(eventPayment.rows.length!==1)return;
+      }
       // A queued command is not completion. Only a confirmed machine read-back
       // may close the event; hold failures for explicit investigation.
       const sent=await tx.execute(sql`SELECT state,result,created_at,completed_at,count(*) OVER()::int AS attempt_count FROM sport_center.x904_user_commands
