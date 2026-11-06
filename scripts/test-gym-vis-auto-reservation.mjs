@@ -133,6 +133,8 @@ test("physical handover is required before VIS can be returned or reused",()=>{
  const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
  assert.match(handover,/physicalCardHandedOver !== true/);
  assert.match(handover,/state='collected',collected_at=now\(\)/);
+ assert.match(handover,/row\.booking_status !== "confirmed" \|\| row\.payment_status !== "confirmed"/);
+ assert.match(handover,/vis_payment_or_booking_changed/);
  assert.match(release,/row\.state !== "collected" \|\| !row\.collected_at/);
  assert.match(release,/observed_at >= \$\{row\.collected_at\}/);
  assert.match(api,/\/admin\/wa-bookings\/:orderNumber\/collect-vis/);
