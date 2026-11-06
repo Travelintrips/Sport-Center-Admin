@@ -90,3 +90,25 @@ export function resolvePaidX904Automation(input: Parameters<typeof resolveGymEnt
   if (decision === "active" && !covered) return "review_required";
   return decision;
 }
+
+/**
+ * Attendance policy for an independently attested physical X904 scan.
+ * Grace preserves attendance for an already-confirmed membership period;
+ * it does NOT activate a suspended PIN, create an entitlement, or turn a
+ * pending/unpaid period into paid coverage.
+ */
+export function canRecordTrustedGymX904Checkin(input: Parameters<typeof resolveGymEntitlement>[0]): boolean {
+  const { today, membershipStart, membershipEnd, membershipStatus, payments, paymentSourcesComplete } = input;
+  if (!paymentSourcesComplete || membershipStatus !== "active" ||
+      !validDay(today) || !validDay(membershipStart) || !validDay(membershipEnd) ||
+      membershipStart > today || membershipStart > membershipEnd) return false;
+  if (payments.some(p => !validDay(p.periodStart) || !validDay(p.periodEnd) ||
+      p.periodStart > p.periodEnd || !Number.isFinite(p.amount))) return false;
+  if (payments.some(p => p.status === "confirmed" && p.amount > 0 &&
+      p.periodStart <= today && today <= p.periodEnd)) return true;
+  // Grace is limited to the seven full WIB days after a previously paid
+  // period that actually covers the current membership expiration date.
+  if (today <= membershipEnd || !isWithinGymGracePeriod(membershipEnd, today)) return false;
+  return payments.some(p => p.status === "confirmed" && p.amount > 0 &&
+    p.periodStart <= membershipEnd && p.periodEnd >= membershipEnd);
+}

@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { canRecordTrustedGymX904Checkin } from "./gymMembershipEntitlement";
 
 /** X904 automatic attendance is gated at ingress; only trusted, verified, current-day ADMS events qualify. */
 export type X904EventInput = { eventId: string; deviceSerial: string; userPin: string };
@@ -71,15 +72,29 @@ export async function processX904Event(event: X904EventInput,
       if (!timestampTrusted || !/^\d{4}-\d{2}-\d{2}$/.test(day) || day !== todayWib) {
         // Out-of-day or malformed device events need manual review.
       } else if (m?.status === "active") {
-        // The latest membership row may already describe the NEXT renewal.
-        // Payment periods, not mutable membership dates, authorize this scan day.
-        // Active status alone is not proof that the current month's fee was paid.
-        // Fail closed if there is no confirmed payment covering the scan date.
-        const paid = await tx.execute(sql`SELECT id FROM sport_center.sport_membership_payments
-          WHERE membership_id=${membershipId} AND status='confirmed'
-            AND period_start<=${day} AND period_end>=${day} LIMIT 1`);
-        if (paid.rows.length === 0) {
-          // Unpaid or pending membership is a review case, not free admission.
+        // Reuse the shared seven-day membership policy for trusted physical scans,
+        // while requiring a *previously confirmed* payment covering expiry.
+        // Unlike device activation, grace may preserve check-in for existing access.
+        // Do not synthesize missing evidence or a historical event.
+        const paymentRows = await tx.execute(sql`SELECT id,period_start,period_end,status,amount
+          FROM sport_center.sport_membership_payments WHERE membership_id=${membershipId}`);
+        const eligible = canRecordTrustedGymX904Checkin({
+          today: day,
+          membershipStart: String(m.start_date),
+          membershipEnd: String(m.end_date),
+          membershipStatus: String(m.status),
+          paymentSourcesComplete: true,
+          payments: paymentRows.rows.map(p => ({
+            id: Number(p.id),
+            periodStart: String(p.period_start).slice(0, 10),
+            periodEnd: String(p.period_end).slice(0, 10),
+            status: String(p.status),
+            amount: Number(p.amount),
+          })),
+        });
+        if (!eligible) {
+          // Review only: no confirmed payment covering today or confirmed expiry
+          // grace, inconsistent dates, or payment-source integrity failure.
         } else {
         // A member row lock serializes concurrent X904 events for this membership.
         // Existing manual check-ins are also respected; historical duplicate dates remain untouched.
