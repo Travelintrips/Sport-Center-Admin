@@ -38,7 +38,8 @@ beforeAll(async () => {
   await run(activationClockMigration);
   await run(businessHoursMigration);
   // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
-  await run("DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF; END $;");
+  await run("CREATE ROLE anon");
+  await run("CREATE ROLE authenticated");
   // Registry is isolated to this disposable PostgreSQL test database.
   await run(readFileSync("sql/x904_verified_nonmember_identities.sql", "utf8"));
   await run(`CREATE TABLE sport_center.gym_x904_lan_users(
