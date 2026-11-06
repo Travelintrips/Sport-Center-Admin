@@ -13,11 +13,12 @@ test("public Gym never allows arbitrary unverified PIN self-selection",()=>{
  assert.match(form,/\/api\/wa\/gym-name-route/);
  assert.doesNotMatch(form,/requestedX904Pin: x904IdentityValue/);
 });
-test("name-derived PIN creates only an internal review-required grant, never a machine command",()=>{
+test("typed PIN and registered name create review-only grant, never a machine command",()=>{
  const bookingRoute=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('router.get("/wa/status/:orderNumber"'));
- assert.match(bookingRoute,/requestedX904Pin != null/);
+ assert.match(bookingRoute,/guestSubmittedPin/);
+ assert.match(bookingRoute,/guestSubmittedPin !== guestNameRoute\.userPin/);
  assert.match(bookingRoute,/resolveGymGuestName\(bookingCustomerName\)/);
- assert.match(bookingRoute,/verifikasi kepemilikan wajib/);
+ assert.match(bookingRoute,/status review_required/);
  assert.match(bookingRoute,/if \(!gymWalkIn \|\| x904IdentityType != null \|\| x904IdentityValue != null\)/);
  assert.match(bookingRoute,/if \(verifiedX904Identity\) \{/);
  assert.match(bookingRoute,/guestNameRoute\.userPin/);
