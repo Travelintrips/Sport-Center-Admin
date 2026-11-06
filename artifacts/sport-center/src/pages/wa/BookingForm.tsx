@@ -690,7 +690,14 @@ export default function WaBookingForm() {
                 <CardTitle className="text-base font-bold text-[#142441]">Pencocokan Identitas Gym X904</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 p-5">
-                <p className="text-sm text-slate-600">Masukkan nama lengkap di Data Pemesan. Sistem mencocokkan identitas dan PIN X904 terdaftar secara otomatis; nomor PIN tidak diumumkan lewat halaman publik.</p>
+                <p className="text-sm text-slate-600">Sudah memiliki PIN X904? Masukkan PIN milik Anda serta nama lengkap yang terdaftar. Sistem memeriksa kecocokannya; akses tetap menunggu pembayaran resmi dan petugas.</p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="guest-x904-pin" className="text-sm font-bold text-[#142441]">PIN Mesin X904 (untuk nonmember terdaftar)</Label>
+                  <Input id="guest-x904-pin" type="text" inputMode="numeric" autoComplete="off" maxLength={8}
+                    placeholder="Masukkan PIN mesin Anda" value={guestPin}
+                    onChange={(event) => setGuestPin(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))} />
+                  <p className="text-xs text-slate-500">Wajib jika Anda sudah terdaftar di X904. Belum punya PIN? Biarkan kosong dan hubungi petugas untuk pemeriksaan.</p>
+                </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">PIN Mesin X904</p>
                   <p className="mt-1 text-sm font-semibold text-[#142441]">
