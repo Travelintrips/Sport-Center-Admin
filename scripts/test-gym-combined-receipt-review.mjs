@@ -40,3 +40,13 @@ test("never creates bank mutation, journal, confirmed membership, or door entitl
  assert.match(schema,/bank_mutation_id integer REFERENCES/);
  assert.match(schema,/status <> 'verified' OR/);
 });
+
+test("individual paid flows cannot reuse the same combined bank proof",()=>{
+ assert.match(api,/async function assertProofNotCombinedReceipt\(proofBytes: Buffer\)/);
+ assert.match(api,/SELECT to_regclass\('sport_center.gym_combined_receipts'\)/);
+ assert.match(api,/WHERE proof_sha256=\$\{digest\} LIMIT 1/);
+ const register=api.slice(api.indexOf('router.post("/memberships/admin-register-paid"'),api.indexOf('router.post("/memberships"',api.indexOf('router.post("/memberships/admin-register-paid"')));
+ assert.match(register,/await assertProofNotCombinedReceipt\(proof.buffer\)/);
+ const upload=api.slice(api.indexOf('router.post("/memberships/:id/admin-payment-proof-upload"'),api.indexOf('// Admin retry for an already-uploaded proof'));
+ assert.match(upload,/await assertProofNotCombinedReceipt\(req.file.buffer\)/);
+});
