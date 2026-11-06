@@ -266,6 +266,28 @@ export async function returnVerifiedVisCard(input: {
             WHERE cmd.device_serial='TDBD234200545'
               AND cmd.user_pin=${String(row.user_pin)}
               AND cmd.created_at>latest.observed_at
+          )
+          -- If commands were issued after handover, the LAST command must
+          -- be a verified VMSC suspend receipt preceding this snapshot.
+          AND NOT EXISTS (
+            SELECT 1 FROM (
+              SELECT command_id,command_type,state,completed_at
+              FROM sport_center.x904_user_commands
+              WHERE device_serial='TDBD234200545'
+                AND user_pin=${String(row.user_pin)}
+                AND created_at>=${row.collected_at}
+              ORDER BY created_at DESC,command_id DESC LIMIT 1
+            ) last_command
+            WHERE last_command.command_type<>'SUSPEND_USER'
+               OR last_command.state<>'completed'
+               OR last_command.completed_at IS NULL
+               OR last_command.completed_at>latest.observed_at
+               OR NOT EXISTS (
+                 SELECT 1 FROM sport_center.x904_vmsc_command_receipts receipt
+                 WHERE receipt.command_id=last_command.command_id
+                   AND receipt.verified=true
+                   AND receipt.callback_received_at<=latest.observed_at
+               )
           ) LIMIT 1`);
       if (!readback.rows.length) throw new VisReservationError(409,"x904_readback_missing",
         "Snapshot X904 terbaru belum membuktikan PIN tersuspend di Grup 2. Kartu tetap ditahan.");
