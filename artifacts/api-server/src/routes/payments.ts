@@ -58,7 +58,8 @@ import { readPaymentProofOcr } from "../lib/paymentOcr";
 type VisAutoReservation = { status: "reserved" | "needs_review"; cardCode?: string; code?: string };
 /** One admin payment confirmation also reserves a VIS physical card for new Gym guests.
  * Never fail or reverse an already committed payment if cards are unavailable.
- * No X904 commands or grants are created. A retry can safely repeat this action.
+ * A held, unverified VIS grant may be created, but no X904 command is issued.
+ * A retry can safely repeat this action.
  */
 async function reserveVisitorCardAfterPaymentConfirmation(
   booking: any, payment: any, adminEmail: string,
@@ -1817,6 +1818,10 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           .update(bookingsTable)
           .set({ status: "confirmed", paidAt: repairedPaidAt, updatedAt: new Date() })
           .where(eq(bookingsTable.id, before.bookingId));
+        // The retry may immediately reserve a visitor card. Keep the
+        // in-memory booking aligned with the committed status repair instead
+        // of passing a stale pending_payment booking to the VIS validator.
+        bookingForRepair.status = "confirmed";
         await db.insert(bookingHistoryTable).values({
           bookingId: before.bookingId,
           fromStatus: bookingForRepair.status,
