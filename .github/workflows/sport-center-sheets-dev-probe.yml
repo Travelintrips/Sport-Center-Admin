@@ -78,6 +78,11 @@ on:
         required: false
         type: boolean
         default: false
+      kasbon_pool_permissions_readonly:
+        description: "Read-only check of Kasbon POOL access and canEdit; never writes"
+        required: false
+        type: boolean
+        default: false
       synthetic_write_replay:
         description: "Explicit DEV-only synthetic Google Sheets append/replay"
         required: false
@@ -132,6 +137,17 @@ jobs:
           gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$secret_file" 1>/dev/null
           if [ ! -s "$secret_file" ]; then echo '::error::Google Sheets service account secret is empty'; exit 1; fi
           GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$secret_file")" node scripts/check-payment-events-dev-sheet.mjs
+
+      - name: Read-only Kasbon POOL service account permission check
+        if: ${{ inputs.kasbon_pool_permissions_readonly == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          f=$(mktemp "$RUNNER_TEMP/kasbon-permission.XXXXXX")
+          trap 'rm -f "$f"' EXIT
+          gcloud secrets versions access 1 --secret=GOOGLE_SERVICE_ACCOUNT_JSON --project="$GCP_PROJECT_ID" --out-file="$f" 1>/dev/null
+          GOOGLE_SERVICE_ACCOUNT_JSON="$(cat "$f")" node scripts/check-sc-kasbon-pool-permission.mjs
 
       - name: Prepare empty production payment event tab only (explicit opt-in)
         if: ${{ inputs.prepare_prod_payment_tab == true }}
