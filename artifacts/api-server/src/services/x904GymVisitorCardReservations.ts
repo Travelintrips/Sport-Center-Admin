@@ -105,8 +105,10 @@ export async function autoReserveVisAfterFundsVerified(input: {
       const otherPayment = await tx.execute(sql`SELECT 1 FROM sport_center.sport_payments
         WHERE booking_id<>${Number(booking.id)}
           AND status::text='confirmed'
-          AND (reference_number=${ref} OR provider_reference=${ref}
-            OR provider_trade_no=${ref} OR merchant_trade_no=${ref})
+          AND (upper(btrim(coalesce(reference_number,'')))=${ref}
+            OR upper(btrim(coalesce(provider_reference,'')))=${ref}
+            OR upper(btrim(coalesce(provider_trade_no,'')))=${ref}
+            OR upper(btrim(coalesce(merchant_trade_no,'')))=${ref})
         LIMIT 1`);
       if (otherPayment.rows.length) throw new VisReservationError(409,"bank_reference_other_booking",
         "Referensi bank sudah digunakan dalam pembayaran booking lain.");
