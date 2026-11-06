@@ -1457,7 +1457,15 @@ function BookingDetailDrawer({
       ["ambiguous", "review_required"].includes(String(payment?.qrisEmailDetection?.status ?? "")),
     ) ??
     null;
-  const qrisEmailDetection = qrisDetectionPayment?.qrisEmailDetection ?? null;
+  const adminQrisEmailDetection = booking.adminQrisEmailDetection ?? null;
+  const qrisEmailDetection =
+    adminQrisEmailDetection ??
+    qrisDetectionPayment?.qrisEmailDetection ??
+    null;
+  const qrisEmailPaymentStatus =
+    adminQrisEmailDetection?.paymentStatus ??
+    qrisDetectionPayment?.status ??
+    null;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [cancellationNoteError, setCancellationNoteError] = useState("");
   const [cancellationReason, setCancellationReason] = useState("");
@@ -1771,7 +1779,7 @@ function BookingDetailDrawer({
 
           <AdminQrisDetectionBanner
             detection={qrisEmailDetection}
-            paymentStatus={qrisDetectionPayment?.status}
+            paymentStatus={qrisEmailPaymentStatus}
           />
 
           {/* Invoice-level proof is evidence, not a payment confirmation. */}
@@ -3366,12 +3374,28 @@ export default function AdminBookings() {
     })
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
+        const detail = await response.json();
+        let adminQrisEmailDetection = null;
+        try {
+          const qrisResponse = await fetch("/api/admin/bookings/" + id + "/qris-email-detection", {
+            signal: controller.signal,
+            headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+          });
+          if (qrisResponse.ok) {
+            const qrisPayload = await qrisResponse.json();
+            adminQrisEmailDetection = qrisPayload?.detection ?? null;
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            console.error("Failed to refresh admin QRIS detection", error);
+          }
+        }
+        return { detail, adminQrisEmailDetection };
       })
-      .then((detail) => {
+      .then(({ detail, adminQrisEmailDetection }) => {
         if (!controller.signal.aborted) {
           setSelectedBooking((current: any) =>
-            current?.id === id ? { ...current, ...detail } : current
+            current?.id === id ? { ...current, ...detail, adminQrisEmailDetection } : current
           );
         }
       })
