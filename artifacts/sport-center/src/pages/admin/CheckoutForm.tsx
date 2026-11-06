@@ -205,6 +205,7 @@ export default function AdminCheckoutForm() {
   const [combinedReceipts, setCombinedReceipts] = useState<CombinedGymReceipt[]>([]);
   const [combinedReviewError, setCombinedReviewError] = useState("");
   const [combinedReviewLoading, setCombinedReviewLoading] = useState(false);
+  const [combinedApprovingId, setCombinedApprovingId] = useState<number|null>(null);
 
 
   const [notes, setNotes] = useState("");
@@ -727,6 +728,27 @@ export default function AdminCheckoutForm() {
     } catch(error) {
       setCombinedReviewError(error instanceof Error?error.message:"Tidak dapat memuat daftar bukti");
     } finally {setCombinedReviewLoading(false);}
+  }
+
+  async function approveCombinedPhoto(receipt: CombinedGymReceipt) {
+    if (combinedApprovingId!=null || receipt.status!=="awaiting_bank_verification" ||
+        receipt.allocationCount!==receipt.allocations.length || receipt.allocationSum!==receipt.amount) return;
+    if (!window.confirm(`Saya telah memeriksa foto Bukti #${receipt.id} untuk ${receipt.allocations.length} anggota, total ${formatRupiah(receipt.amount)}. Setujui pembayaran BERDASARKAN FOTO (bukan verifikasi bank), proses membership, dan antrikan aktivasi X904?`)) return;
+    setCombinedApprovingId(receipt.id);
+    setCombinedReviewError("");
+    try {
+      const resp=await fetch(`/api/memberships/admin-combined-receipts/${receipt.id}/approve-photo`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json",Authorization:"Bearer "+(getToken()??"")},
+        body:JSON.stringify({confirmPhoto:true,acknowledgeNotBankVerified:true}),
+      });
+      const data=await resp.json().catch(()=>({}));
+      if(!resp.ok) throw new Error(data.error||"Persetujuan foto gagal. Tidak ada transaksi yang diulang.");
+      setCombinedOutcome(`Bukti #${receipt.id} disetujui berdasarkan foto untuk ${data.allocations?.length??0} membership. Menunggu ACK mesin X904, bukan verifikasi bank.`);
+      await loadCombinedReceipts();
+    } catch(error) {
+      setCombinedReviewError(error instanceof Error?error.message:"Gagal menyetujui bukti gabungan.");
+    } finally {setCombinedApprovingId(null);}
   }
 
   async function submitCombinedReceipt(event: React.FormEvent) {
@@ -1378,7 +1400,7 @@ export default function AdminCheckoutForm() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <strong>Bukti #{receipt.id} · {formatRupiah(receipt.amount)}</strong>
                   <span className={receipt.status==="verified"?"text-green-700":"text-amber-700"}>
-                    {receipt.status==="awaiting_bank_verification"?"Menunggu verifikasi dana":receipt.status}
+                    {receipt.status==="awaiting_bank_verification"?"Menunggu persetujuan foto":receipt.status==="photo_approved"?"Disetujui dari foto (belum diverifikasi bank)":receipt.status}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -1392,8 +1414,15 @@ export default function AdminCheckoutForm() {
                   </div>
                 ))}
                 {receipt.allocationSum!==receipt.amount && <p role="alert" className="text-destructive">Jumlah alokasi tidak sesuai: periksa sebelum konfirmasi.</p>}
+                {["owner","super_admin","admin","finance"].includes(getCurrentRole()??"") &&
+                  receipt.status==="awaiting_bank_verification" && receipt.allocationSum===receipt.amount && (
+                  <Button type="button" size="sm" disabled={combinedApprovingId!=null}
+                    onClick={()=>void approveCombinedPhoto(receipt)}>
+                    {combinedApprovingId===receipt.id?"Memproses...":"Setujui Foto & Proses Membership"}
+                  </Button>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  Belum boleh dinyatakan lunas sampai dana diterima dan dicocokkan dengan catatan bank resmi. Penyimpanan foto tidak mengaktifkan X904.
+                  Persetujuan berdasarkan foto adalah keputusan admin, bukan konfirmasi settlement bank. Hanya setelah disetujui, sistem memproses membership dan mengantre aktivasi X904. Bukti sama tidak boleh dicatat sebagai penerimaan bank kedua.
                 </p>
               </div>
             ))}
