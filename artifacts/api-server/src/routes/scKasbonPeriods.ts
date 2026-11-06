@@ -14,18 +14,19 @@ const parseBody=(body:RequestBody):{period:string;carryMode:CarryMode}=>{
  return {period,carryMode:body.carryMode};
 };
 async function context(){
- // This is explicitly a DEV-copy-only feature until E2E and concurrency pass.
- // Even if someone enables an env on Hostinger PROD, this route cannot write PROD.
- if(process.env.APP_ENV!=="development"||process.env.NODE_ENV!=="development")
-  throw Error("DEV_COPY_ONLY");
- const spreadsheetId=process.env.SC_KASBON_PERIOD_DEV_SPREADSHEET_ID?.trim();
- if(!spreadsheetId||spreadsheetId===knownProd)throw Error("DEV_WORKBOOK_NOT_CONFIGURED");
+ const prod=process.env.APP_ENV==="production"&&process.env.NODE_ENV==="production";
+ const dev=process.env.APP_ENV==="development"&&process.env.NODE_ENV==="development";
+ if(!prod&&!dev)throw Error("ENVIRONMENT_UNVERIFIED");
+ const spreadsheetId=prod?process.env.SC_KASBON_POOL_SPREADSHEET_ID?.trim()
+  :process.env.SC_KASBON_PERIOD_DEV_SPREADSHEET_ID?.trim();
+ if(!spreadsheetId||(prod && spreadsheetId!==knownProd)||(!prod && spreadsheetId===knownProd))
+  throw Error("SHEET_ENVIRONMENT_MISMATCH");
  const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
  if(!raw)throw Error("GOOGLE_SERVICE_ACCOUNT_MISSING");
  const credentials=JSON.parse(raw);
  if(typeof credentials.private_key==="string")
   credentials.private_key=credentials.private_key.replace(/\\n/g,"\n");
- const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
+ const auth=new google.auth.GoogleAuth({credentials,scopes:[prod?"https://www.googleapis.com/auth/spreadsheets.readonly":"https://www.googleapis.com/auth/spreadsheets"]});
  const sheets=google.sheets({version:"v4",auth});
  const meta=await sheets.spreadsheets.get({spreadsheetId,fields:"sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)),merges,protectedRanges)"});
  const target=(meta.data.sheets??[]).filter(s=>s.properties?.title==="Kasbon POOL");
@@ -56,7 +57,9 @@ async function preview(body:RequestBody){
 router.post("/admin/sc-kasbon-periods/preview",adminMiddleware,async(req,res)=>{
  try{
   const {plan}=await preview(req.body??{});
-  res.json({...plan,mode:"DEV_PREVIEW",writeEnabled:process.env.SC_KASBON_PERIOD_CREATION_ENABLED==="true"});
+  res.json({...plan,mode:process.env.APP_ENV==="production"?"PROD_READ_ONLY":"DEV_PREVIEW",
+   writeEnabled:process.env.APP_ENV==="development"&&process.env.NODE_ENV==="development"&&
+    process.env.SC_KASBON_PERIOD_CREATION_ENABLED==="true"});
  }catch(error){res.status(422).json({error:error instanceof Error?error.message:"PREVIEW_FAILED"});}
 });
 router.post("/admin/sc-kasbon-periods/create",adminMiddleware,async(req,res)=>{
@@ -83,6 +86,14 @@ router.post("/admin/sc-kasbon-periods/create",adminMiddleware,async(req,res)=>{
    start:{sheetId:ctx.sheetId,rowIndex:top,columnIndex:0},
    rows:rows.map(r=>({values:r})),
    fields:"userEnteredValue"
+  }});
+  // Ensure the 31st is formatted as a date even when the source template
+  // is November (which has only 30 dates in its header).
+  requests.push({repeatCell:{
+   range:{sheetId:ctx.sheetId,startRowIndex:top+1,endRowIndex:top+2,
+     startColumnIndex:4,endColumnIndex:35},
+   cell:{userEnteredFormat:{numberFormat:{type:"DATE",pattern:"m-d-yyyy"}}},
+   fields:"userEnteredFormat.numberFormat"
   }});
   await ctx.sheets.spreadsheets.batchUpdate({spreadsheetId:ctx.spreadsheetId,requestBody:{requests}});
   const check=await ctx.sheets.spreadsheets.values.get({

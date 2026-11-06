@@ -26,7 +26,23 @@ assert.equal(cells[4][2].userEnteredValue.formulaValue,"=SUM(C1050:C1051)");
 assert.equal(cells[4][34].userEnteredValue.formulaValue,"=SUM(AI1050:AI1051)");
 const zero=buildPeriodCells(planNewPeriod(formatted,unformatted,"2026-12","zero"));
 assert.equal(zero[2][3].userEnteredValue.numberValue,0);
-assert.throws(()=>planNewPeriod(formatted,unformatted,"2027-01","zero"),/PREVIOUS_PERIOD/);
+// Model the fully created December section, then validate January rollover.
+const decemberFormatted=formatted.map(r=>r.slice());
+const decemberUnformatted=unformatted.map(r=>r.slice());
+const put2=(rows,r,c,v)=>{while(rows.length<r)rows.push([]);rows[r-1][c-1]=v;};
+put2(decemberFormatted,plan.destinationStart,1,"Desember");
+put2(decemberFormatted,plan.destinationStart+1,1,"Tanggal");
+put2(decemberFormatted,plan.destinationStart+1,2,"Keterangan");
+put2(decemberUnformatted,plan.destinationStart+1,5,(Date.UTC(2026,11,1)-Date.UTC(1899,11,30))/86400000);
+put2(decemberFormatted,plan.destinationStart+2,2,"Kasbon Robby");
+put2(decemberFormatted,plan.destinationStart+3,2,"sonic");
+put2(decemberFormatted,plan.destinationEnd,2,"Total");
+const january=planNewPeriod(decemberFormatted,decemberUnformatted,"2027-01","zero");
+assert.equal(january.sourcePeriod,"2026-12");
+assert.equal(january.sourceStart,plan.destinationStart);
+assert.equal(buildPeriodCells(january)[0][0].userEnteredValue.stringValue,"Januari");
+assert.equal(buildPeriodCells(january)[1][4].userEnteredValue.numberValue,
+ (Date.UTC(2027,0,1)-Date.UTC(1899,11,30))/86400000);
 assert.throws(()=>planNewPeriod(formatted,unformatted,"2026-10","zero"),/PREVIOUS_PERIOD/);
 const duplicate=formatted.map(r=>r.slice());
 put(duplicate,1042,5,"11-1-2026");
