@@ -227,7 +227,8 @@ export async function returnVerifiedVisCard(input: {
   try {
     return await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
-      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id,r.reserved_at,r.collected_at
+      const result = await tx.execute(sql`SELECT r.id,r.card_code,r.state,r.user_pin,r.booking_id,r.reserved_at,r.collected_at,
+          b.status::text AS booking_status
         FROM sport_center.gym_vis_card_reservations r
         JOIN sport_center.sport_bookings b ON b.id=r.booking_id
         WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
@@ -236,6 +237,10 @@ export async function returnVerifiedVisCard(input: {
       if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned" };
       if (row.state !== "collected" || !row.collected_at)
         throw new VisReservationError(409,"invalid_return_state","Status kartu tidak dapat dikembalikan.");
+      if (!["completed","cancelled","refunded","expired","rejected"].includes(String(row.booking_status))) {
+        throw new VisReservationError(409,"booking_still_open",
+          "Booking masih berjalan. Selesaikan atau batalkan booking sebelum kartu dibebaskan.");
+      }
       // Reject return if ANY booking still has a live/pending grant for this physical PIN.
       // Another booking can retain an entitlement even when this booking is finished.
       const grant = await tx.execute(sql`SELECT 1
