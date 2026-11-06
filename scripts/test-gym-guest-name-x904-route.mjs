@@ -20,7 +20,7 @@ test("match exact name uniquely; reject member, VIP PIN, card identities and unk
 });
 test("public preview reveals route but never machine PIN, UID or name",()=>{
  const preview=api.slice(api.indexOf('router.post("/wa/gym-name-route"'),api.indexOf('// POST /api/wa/booking —'));
- assert.match(preview,/resolveGymGuestName\(name\)/);
+ assert.match(preview,/resolveGymGuestName\(name, submittedPin\)/);
  assert.match(preview,/res\.status\(429\)/);
  assert.match(preview,/route: match\.route/);
  assert.doesNotMatch(preview,/res\.json\(\{[^}]*userPin/);
@@ -52,4 +52,21 @@ test("UI guides known name and unknown name to proper staff followup without PIN
  assert.match(ui,/requestedX904Pin: guestPin\.trim\(\)/);
  assert.match(ui,/id="guest-x904-pin"/);
  assert.match(admin,/Identitas X904 yang diajukan pengunjung/);
+});
+
+test("public name and PIN preview compares on server without returning machine PIN",()=>{
+ const preview=api.slice(api.indexOf('router.post("/wa/gym-name-route"'),api.indexOf('// POST /api/wa/booking —'));
+ assert.match(preview,/requestedX904Pin/);
+ assert.match(preview,/pinMatch: submittedPin/);
+ assert.match(preview,/match.inventoryPinMatch/);
+ assert.match(ui,/form.customerName, guestPin/);
+ assert.match(ui,/guestPinMatch === true/);
+ assert.match(ui,/guestPinMatch === false/);
+ assert.match(ui,/Identitas X904 ditemukan, tetapi belum diverifikasi sebagai nonmember/);
+});
+test("unverified nonmember inventory match is informational and never grants access",()=>{
+ assert.match(service,/inventoryPinMatch = submittedPin \? submittedPin === pin : null/);
+ assert.match(service,/route: "staff_review", userPin: null, deviceUid: null, displayName: null, inventoryPinMatch/);
+ assert.match(ui,/Nama dan PIN cocok di mesin — perlu verifikasi petugas/);
+ assert.match(api,/resolveGymGuestName\(name, submittedPin\)/);
 });
