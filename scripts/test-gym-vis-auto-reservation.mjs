@@ -113,6 +113,22 @@ test("paid VIS creates a held nonmember grant atomically; physical handover is t
  assert.match(handover,/vis_grant_not_ready/);
 });
 
+test("cancelled active visitor access still suspends, but cancelled pending access never activates",()=>{
+ const worker=grantWorker;
+ assert.match(worker,/a\.activated_at == null\) return/);
+ assert.match(worker,/a\.booking_source !== "gym_public_guest" \|\| a\.booking_status === "confirmed"/);
+ assert.match(worker,/a\.payment_status === "confirmed"/);
+ assert.match(worker,/const targetGroup = shouldBeActive \? 1 : 2/);
+ assert.match(worker,/const commandType = shouldBeActive \? "ACTIVATE_USER" : "SUSPEND_USER"/);
+ // The cancellation guard must not precede a normal paid grant's end-of-life
+ // suspend merely because the booking state has been revoked.
+ const start=worker.indexOf("if (a.booking_source === \"gym_public_guest\"");
+ const end=worker.indexOf("const pin = String(a.user_pin)",start);
+ const guard=worker.slice(start,end);
+ assert.match(guard,/a\.activated_at == null/);
+ assert.doesNotMatch(guard,/booking_status !== "confirmed"\) return;/);
+});
+
 test("VIS activation worker requires collected reservation, leaves ordinary PINs and legacy cards alone",()=>{
  assert.match(grantWorker,/a\.booking_source === "gym_public_guest"/);
  assert.match(grantWorker,/Kartu VIS001–VIS006 menunggu pilihan/);
