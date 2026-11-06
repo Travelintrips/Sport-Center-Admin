@@ -42,6 +42,7 @@ export * from "./publicExpenses";
 export * from "./publicMemberships";
 export * from "./vendors";
 export * from "./scEmployees";
+export * from "./scEmployeeKasbon";
 export * from "./coaAccounts";
 export * from "./waDailyUsageSnapshots";
 export * from "./waNotifLogs";

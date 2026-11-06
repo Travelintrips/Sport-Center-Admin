@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import { Pencil, Plus, Search, Users } from "lucide-react";
+import SCEmployeeKasbon from "./SCEmployeeKasbon";
 
 type Employee = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string | null };
 type Form = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string };
@@ -28,6 +29,7 @@ export default function SCEmployees() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export default function SCEmployees() {
     if (!form.fullName.trim() || !form.whatsappNumber.trim()) return;
     save.mutate(form);
   };
+  if (selectedEmployee) return <div className="space-y-6 p-4 md:p-6"><SCEmployeeKasbon employee={selectedEmployee} onBack={() => setSelectedEmployee(null)}/></div>;
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -87,11 +90,11 @@ export default function SCEmployees() {
         </div>
         {isLoading ? <p>Memuat data karyawan...</p> : isError ? <p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p> : (
           <div className="overflow-x-auto"><table className="w-full text-left text-sm">
-            <thead><tr className="border-b"><th className="p-3">ID Karyawan</th><th className="p-3">Nama Lengkap</th><th className="p-3">Nomor WhatsApp</th><th className="p-3">Status</th><th className="p-3">Keterangan</th><th className="p-3">Tindakan</th></tr></thead>
+            <thead><tr className="border-b"><th className="p-3">ID Karyawan</th><th className="p-3">Nama Lengkap</th><th className="p-3">Nomor WhatsApp</th><th className="p-3">Status</th><th className="p-3">Tindakan</th></tr></thead>
             <tbody>{filtered.map((employee) => <tr key={employee.employeeId} className="border-b">
-              <td className="p-3 font-medium">{employee.employeeId}</td><td className="p-3">{employee.fullName}</td><td className="p-3">{employee.whatsappNumber}</td>
+              <td className="p-3 font-medium">{employee.employeeId}</td><td className="p-3"><button type="button" className="font-medium text-primary underline-offset-4 hover:underline focus-visible:underline" aria-label={"Buka histori kasbon " + employee.fullName} onClick={() => setSelectedEmployee(employee)}>{employee.fullName}</button></td><td className="p-3">{employee.whatsappNumber}</td>
               <td className="p-3"><Badge variant={employee.isActive ? "default" : "secondary"}>{employee.isActive ? "Aktif" : "Nonaktif"}</Badge></td>
-              <td className="max-w-xs whitespace-pre-wrap p-3">{employee.notes || "-"}</td>
+
               <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => edit(employee)}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" disabled={toggle.isPending} onClick={() => toggle.mutate(employee)}>{employee.isActive ? "Nonaktifkan" : "Aktifkan"}</Button></div></td>
             </tr>)}</tbody>
           </table>{!filtered.length && <p className="py-6 text-center text-muted-foreground">Belum ada karyawan yang sesuai.</p>}</div>
