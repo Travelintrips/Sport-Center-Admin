@@ -982,19 +982,6 @@ router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, re
 });
 
 
-router.get("/memberships/:id", adminMiddleware, async (req, res) => {
-  try {
-    const id = parseInt(String(req.params.id));
-    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
-    if (!membership) { res.status(404).json({ error: "Not found" }); return; }
-    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
-  } catch (err) {
-    req.log.error({ err }, "Get membership error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-
 // Admin review for a combined receipt: read-only and repeatable.
  // No paid state or X904 entitlement may be changed by this endpoint.
 router.get("/memberships/admin-combined-receipts", adminMiddleware, async (req, res) => {
@@ -1027,6 +1014,19 @@ router.get("/memberships/admin-combined-receipts", adminMiddleware, async (req, 
     res.status(503).json({error:"Daftar bukti gabungan belum dapat dibaca."});
   }
 });
+
+router.get("/memberships/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    if (!membership) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
+  } catch (err) {
+    req.log.error({ err }, "Get membership error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 
 // Explicit admin attestation based on the saved photo, not an assertion of bank settlement.
 // All membership/payment/booking/mapping/receipt writes happen in ONE DB transaction.

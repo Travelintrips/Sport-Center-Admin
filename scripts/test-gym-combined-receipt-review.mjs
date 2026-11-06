@@ -104,3 +104,10 @@ test("admin photo approval requires explicit action and stored receipt, not re-u
  assert.match(ui,/receipt.status==="awaiting_bank_verification"/);
  assert.match(ui,/acknowledgeNotBankVerified:true/);
 });
+
+test("combined receipt GET route precedes dynamic membership detail GET",()=>{
+ const review=api.indexOf('router.get("/memberships/admin-combined-receipts"');
+ const detail=api.indexOf('router.get("/memberships/:id", adminMiddleware');
+ assert.ok(review>=0 && detail>=0 && review<detail,
+ "Review route must be registered before /memberships/:id to avoid a 500 for nonnumeric id");
+});
