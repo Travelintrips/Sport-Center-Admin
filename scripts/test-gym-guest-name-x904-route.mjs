@@ -31,7 +31,7 @@ test("public PIN must match the registered name and never grants X904 by itself"
  const route=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('// GET /api/wa/status/:orderNumber'));
  assert.match(route,/guestSubmittedPin/);
  assert.match(route,/guestSubmittedPin !== guestNameRoute\.userPin/);
- assert.match(route,/guestNameRoute\?\.route !== "registered" && guestSubmittedPin/);
+ assert.match(route,/guestSubmittedPin && guestNameRoute\?\.route !== "registered"/);
  assert.match(route,/resolveGymGuestName\(bookingCustomerName\)/);
  assert.match(route,/guestNameRoute\?\.route === "registered"/);
  assert.match(route,/guestNameRoute\?\.route === "visitor_card"/);
