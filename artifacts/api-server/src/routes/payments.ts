@@ -1813,6 +1813,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       // idempotent, but repair that narrowly-defined split state when an admin
       // retries the confirmation from the dashboard.
       if (bookingForRepair && repairableBookingStatuses.includes(bookingForRepair.status)) {
+        const previousBookingStatus = bookingForRepair.status;
         const repairedPaidAt = before.paidAt ?? before.confirmedAt ?? new Date();
         await db
           .update(bookingsTable)
@@ -1824,7 +1825,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         bookingForRepair.status = "confirmed";
         await db.insert(bookingHistoryTable).values({
           bookingId: before.bookingId,
-          fromStatus: bookingForRepair.status,
+          fromStatus: previousBookingStatus,
           toStatus: "confirmed",
           changedByName: getUserFromReq(req).userName || "admin",
           note: "Status booking disinkronkan dengan pembayaran yang sudah dikonfirmasi",
@@ -1834,7 +1835,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           action: "RECONCILE_CONFIRMED_PAYMENT_BOOKING",
           entity: "payment",
           entityId: before.id,
-          before: { bookingStatus: bookingForRepair.status, paymentStatus: before.status },
+          before: { bookingStatus: previousBookingStatus, paymentStatus: before.status },
           after: { bookingStatus: "confirmed", paymentStatus: before.status },
           ...getClientInfo(req),
         });
