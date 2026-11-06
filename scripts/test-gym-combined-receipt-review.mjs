@@ -111,3 +111,14 @@ test("combined receipt GET route precedes dynamic membership detail GET",()=>{
  assert.ok(review>=0 && detail>=0 && review<detail,
  "Review route must be registered before /memberships/:id to avoid a 500 for nonnumeric id");
 });
+
+test("photo approval audit actor comes from validated userId session, not missing id/email",()=>{
+ const begin=api.indexOf('router.post("/memberships/admin-combined-receipts/:id/approve-photo"');
+ const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const handler=api.slice(begin,end);
+ assert.match(handler,/\.user\?\.userId/);
+ assert.match(handler,/Number\.isSafeInteger\(authenticatedUserId\)/);
+ assert.match(handler,/sport_center_user:/);
+ assert.doesNotMatch(handler,/\.user\?\.id \?\?/);
+ assert.doesNotMatch(handler,/\.user\?\.email \?\?/);
+});
