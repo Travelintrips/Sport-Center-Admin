@@ -60,7 +60,7 @@ export async function kasbonPoolTick():Promise<void> {
    await tx.execute(sql`INSERT INTO sport_center.sc_kasbon_pool_sync_ledger
      (kasbon_id,employee_id,sheet_cell,spreadsheet_id,amount,source_event_id)
      VALUES (${kasbonId},${employeeId},${result.cell},${result.sheetId},${result.amount}::numeric,${id})
-     ON CONFLICT DO NOTHING`);
+    `);
    await tx.execute(sql`UPDATE sport_center.sc_kasbon_pool_sync_events
      SET status='synced',last_error_code=null,processed_at=now()
      WHERE id=${id} AND status='processing'`);

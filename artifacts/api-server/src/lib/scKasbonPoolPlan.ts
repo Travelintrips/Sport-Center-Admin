@@ -29,6 +29,12 @@ export function planPoolKasbon(input:PoolInput):PoolPlan {
    return {status:"blocked",reason:"EMPLOYEE_MAPPING_REQUIRED"};
  if (!alias[employeeId] || !alias[employeeId].test(normalize(rowDescription)))
    return {status:"blocked",reason:"EMPLOYEE_ROW_NOT_VERIFIED"};
+ const names:Record<string,RegExp>={
+  SC003:/^robby$/i, SC005:/^seno$/i, SC006:/^mustofa$/i,
+  SC007:/^sandi$/i, SC008:/^dede saefulah\s*\/\s*sonik$/i
+ };
+ if(!names[employeeId]?.test(normalize(input.employeeName)))
+   return {status:"blocked",reason:"EMPLOYEE_MASTER_NAME_CHANGED"};
  if (!/^2026-11-(0[1-9]|[12]\d|30)$/.test(kasbonDate))
    return {status:"blocked",reason:"MONTH_NOT_AUDITED"};
  const day=Number(kasbonDate.slice(-2));

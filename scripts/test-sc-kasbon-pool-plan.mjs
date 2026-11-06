@@ -11,6 +11,7 @@ assert.deepEqual(planPoolKasbon(base),{status:"ready",cell:"J1047",row:1047,col:
 for(const [changes,reason] of [
   [{configuredRow:null},"EMPLOYEE_MAPPING_REQUIRED"],
   [{employeeId:"SC004"},"EMPLOYEE_ROW_NOT_VERIFIED"],
+  [{employeeName:"Someone else"},"EMPLOYEE_MASTER_NAME_CHANGED"],
   [{rowDescription:"Kasbon orang lain"},"EMPLOYEE_ROW_NOT_VERIFIED"],
   [{kasbonDate:"2026-12-06"},"MONTH_NOT_AUDITED"],
   [{headings:{"I":"11-5-2026"}},"DATE_COLUMN_NOT_UNIQUE"],
