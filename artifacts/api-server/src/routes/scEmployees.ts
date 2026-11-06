@@ -3,6 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import { db, scEmployeesTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { parseEmployeeSalary } from "./scEmployeeSalary";
 
 const router = Router();
 const employeeIdPattern = /^[A-Z0-9_-]{2,32}$/;
@@ -21,12 +22,15 @@ function validateEmployee(input: any) {
   const whatsappNumber = normalizeEmployeePhone(input?.whatsappNumber);
   const notes = typeof input?.notes === "string" ? input.notes.trim() : "";
   const isActive = input?.isActive === undefined ? true : input.isActive;
+  const checkedSalary = parseEmployeeSalary(input?.salary);
+  if ("error" in checkedSalary) return { error: checkedSalary.error };
+  const salary = checkedSalary.salary;
   if (employeeId && ! employeeIdPattern.test(employeeId)) return { error: "ID Karyawan tidak valid" };
   if (fullName.length < 2 || fullName.length > 150) return { error: "Nama lengkap wajib diisi (2-150 karakter)" };
   if (!whatsappNumber) return { error: "Nomor WhatsApp tidak valid. Gunakan nomor Indonesia, misalnya 081234567890" };
   if (typeof isActive !== "boolean") return { error: "Status harus Aktif atau Nonaktif" };
   if (notes.length > 2000) return { error: "Keterangan maksimal 2000 karakter" };
-  return { data: { employeeId, fullName, whatsappNumber, isActive, notes: notes || null } };
+  return { data: { employeeId, fullName, whatsappNumber, isActive, notes: notes || null, salary } };
 }
 
 router.get("/admin/sc-employees", adminMiddleware, async (_req, res) => {
@@ -59,7 +63,7 @@ router.patch("/admin/sc-employees/:id", adminMiddleware, async (req, res) => {
   try {
     const [existing] = await db.select().from(scEmployeesTable).where(eq(scEmployeesTable.employeeId, employeeId)).limit(1);
     if (!existing) { res.status(404).json({ error: "Karyawan tidak ditemukan" }); return; }
-    const permitted = ["fullName", "whatsappNumber", "isActive", "notes"];
+    const permitted = ["fullName", "whatsappNumber", "isActive", "notes", "salary"];
     if (!Object.keys(req.body ?? {}).length || Object.keys(req.body ?? {}).some((key) => !permitted.includes(key))) {
       res.status(400).json({ error: "Field perubahan tidak valid" }); return;
     }
