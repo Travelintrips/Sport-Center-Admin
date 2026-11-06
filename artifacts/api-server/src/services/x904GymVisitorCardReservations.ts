@@ -224,7 +224,7 @@ export async function returnVerifiedVisCard(input: {
   physicalCardReturned: boolean;
   x904ReadbackChecked: boolean;
   returnedBy: string;
-}): Promise<{ cardCode: string; state: "returned" }> {
+}): Promise<{ cardCode: string; state: "returned"; deviceSnapshotAt: string | null }> {
   if (input.physicalCardReturned !== true || input.x904ReadbackChecked !== true ||
       !String(input.returnedBy ?? "").trim()) {
     throw new VisReservationError(400,"return_verification_required",
@@ -240,7 +240,7 @@ export async function returnVerifiedVisCard(input: {
         WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
       if (!result.rows.length) throw new VisReservationError(404,"no_reservation","Kartu VIS belum dialokasikan.");
       const row = result.rows[0] as any;
-      if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned" };
+      if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned",deviceSnapshotAt:null };
       if (row.state !== "collected" || !row.collected_at)
         throw new VisReservationError(409,"invalid_return_state","Status kartu tidak dapat dikembalikan.");
       if (!["completed","cancelled","refunded","expired","rejected"].includes(String(row.booking_status))) {
@@ -305,7 +305,7 @@ export async function returnVerifiedVisCard(input: {
       await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
         SET state='returned',returned_at=now()
         WHERE id=${Number(row.id)} AND state='collected'`);
-      return { cardCode:String(row.card_code),state:"returned" };
+      return { cardCode:String(row.card_code),state:"returned",deviceSnapshotAt:new Date(String(readback.rows[0].observed_at)).toISOString() };
     });
   } catch (error) {
     if (error instanceof VisReservationError) throw error;
