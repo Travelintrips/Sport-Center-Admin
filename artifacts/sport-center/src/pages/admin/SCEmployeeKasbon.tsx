@@ -32,7 +32,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
-  onSuccess:()=>{qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Catatan kasbon berhasil disimpan"});},
+  onSuccess:()=>{qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
  const remove = useMutation({
   mutationFn: (record: Kasbon) => api(endpoint(employee.employeeId)+"/"+record.id,"DELETE"),

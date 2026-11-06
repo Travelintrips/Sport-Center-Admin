@@ -48,8 +48,18 @@ export async function kasbonPoolTick():Promise<void> {
   const [employee]=await db.select({name:scEmployeesTable.fullName})
     .from(scEmployeesTable).where(eq(scEmployeesTable.employeeId,employeeId)).limit(1);
   if(!employee){await finish(id,"needs_review","EMPLOYEE_MISSING");return;}
+  const aliases=records(await db.execute(sql`
+    SELECT sheet_label FROM sport_center.sc_kasbon_pool_employee_mapping
+    WHERE employee_id=${employeeId} AND verified=true`));
+  // Standard labels such as 'Kasbon Robby' are matched from the employee
+  // master name automatically. Only exceptional aliases (e.g. Sonik) need a
+  // one-time verified database mapping; never guess from fuzzy spelling.
+  if(aliases.length>1){await finish(id,"needs_review","EMPLOYEE_ALIAS_AMBIGUOUS");return;}
+  const verifiedSheetLabel=aliases.length===1&&typeof aliases[0].sheet_label==="string"
+    ? String(aliases[0].sheet_label) : employee.name;
   const result=await writeNewKasbonToPool({
    id:kasbonId,employeeId,employeeName:employee.name,
+   verifiedSheetLabel,
    kasbonDate:String(data.kasbonDate??data.kasbon_date),
    amount:String(data.amount)
   });
@@ -80,6 +90,19 @@ export function startKasbonPoolAutoWorker():void{
   SET status='needs_review',last_error_code='INTERRUPTED_WRITE_CHECK_REQUIRED'
   WHERE status='processing' AND created_at < now()-interval '10 minutes'`)
   .catch(err=>logger.error({err},"Kasbon POOL interrupted queue recovery failed"));
+ // Recover only older missing-ENV-map failures that now have a verified
+ // employee alias, without replaying an already-linked or superseded event.
+ void db.execute(sql`UPDATE sport_center.sc_kasbon_pool_sync_events e
+  SET status='pending',last_error_code=null,processed_at=null
+  WHERE e.status='needs_review' AND e.event_type='created'
+   AND e.last_error_code='EMPLOYEE_MAP_AMBIGUOUS'
+   AND EXISTS (SELECT 1 FROM sport_center.sc_kasbon_pool_employee_mapping m
+      WHERE m.employee_id=e.employee_id AND m.verified=true)
+   AND NOT EXISTS (SELECT 1 FROM sport_center.sc_kasbon_pool_sync_ledger l
+      WHERE l.kasbon_id=e.kasbon_id)
+   AND NOT EXISTS (SELECT 1 FROM sport_center.sc_kasbon_pool_sync_events newer
+      WHERE newer.kasbon_id=e.kasbon_id AND newer.id>e.id)`)
+  .catch(err=>logger.error({err},"Kasbon legacy mapping review recovery failed"));
  void kasbonPoolTick();
  const timer=setInterval(()=>void kasbonPoolTick(),30_000);timer.unref();
 }
