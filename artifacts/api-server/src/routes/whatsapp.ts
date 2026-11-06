@@ -921,13 +921,11 @@ router.post("/wa/gym-name-route", async (req, res) => {
     res.status(400).json({ error: "Masukkan nama lengkap yang valid." }); return;
   }
   try {
-    const match = await resolveGymGuestName(name);
+    const match = await resolveGymGuestName(name, submittedPin);
     res.json({
       route: match.route,
       // The PIN is compared only on the server. Never return the stored PIN, UID or machine identity.
-      pinMatch: submittedPin && match.route === "registered"
-        ? submittedPin === match.userPin
-        : null,
+      pinMatch: submittedPin ? (match.inventoryPinMatch ?? null) : null,
       // Never send user_pin, UID, or complete machine identity on an anonymous endpoint.
       message: match.route === "registered"
         ? "Nama ditemukan sebagai nonmember terverifikasi di X904. Petugas tetap harus mencocokkan kepemilikan sebelum pintu aktif."
