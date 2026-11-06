@@ -215,7 +215,7 @@ async function getBookingWithPayment(id: number) {
     confidence: "high" | "low";
   }>();
   const detailPaymentIds = allPayments.map((item) => item.id);
-  if (detailPaymentIds.length > 0) {
+  if (process.env.NODE_ENV !== "production" && detailPaymentIds.length > 0) {
     try {
       const detectionResult = await db.execute(sql`
         SELECT DISTINCT ON (payment_id)
