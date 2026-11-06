@@ -21,7 +21,7 @@ beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
   await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text);
     CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
-    CREATE TABLE sport_center.sport_bookings(id int primary key, booking_date text NOT NULL DEFAULT '2026-11-06', start_time text NOT NULL DEFAULT '06:00');
+    CREATE TABLE sport_center.sport_bookings(id int primary key, booking_date text NOT NULL DEFAULT '2026-11-06', start_time text NOT NULL DEFAULT '06:00', source text, notes text, status text NOT NULL DEFAULT 'confirmed');
     CREATE TABLE sport_center.sport_payments(id int primary key,booking_id int references sport_center.sport_bookings(id),status text,confirmed_at timestamptz,paid_at timestamptz);
     CREATE TABLE sport_center.gym_x904_access_snapshots(snapshot_id bigserial primary key,device_serial text,observed_at timestamptz,user_count int,users jsonb);
     CREATE TABLE sport_center.x904_user_commands(
@@ -33,6 +33,7 @@ beforeAll(async () => {
       lease_token uuid,leased_until timestamptz);
     CREATE UNIQUE INDEX x904_one_active_test ON sport_center.x904_user_commands(device_serial,user_pin)
       WHERE state IN ('queued','claimed');`);
+  await run("CREATE TABLE sport_center.gym_vis_card_reservations (booking_id int primary key, payment_id int, device_serial text NOT NULL DEFAULT 'TDBD234200545',card_code text NOT NULL, user_pin text NOT NULL, device_uid int NOT NULL,state text NOT NULL DEFAULT 'reserved',collected_at timestamptz)");
   await run(migration);
   await run(activationClockMigration);
   await run(businessHoursMigration);
@@ -47,7 +48,7 @@ beforeAll(async () => {
       ('TDBD234200545','602',602,'TEST REVOKED',0),
       ('TDBD234200545','603',603,'TEST RACE',0);`);
   await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
-    INSERT INTO sport_center.sport_bookings VALUES(9001);
+    INSERT INTO sport_center.sport_bookings(id) VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','card','VIS001','78',338,'VIS 001',9001);
     INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9101,9001,'pending');`);
@@ -118,7 +119,7 @@ test("pending payment holds; confirmed VIS payment activates, retries DEVICE_BUS
 });
 
 test("refund of an active paid nonmember queues suspend; protected PINs do not auto-suspend", async () => {
-  await run(`INSERT INTO sport_center.sport_bookings VALUES(9002);
+  await run(`INSERT INTO sport_center.sport_bookings(id) VALUES(9002);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','pin','PIN:500','500',500,'TEST NONMEMBER',9002);
     INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9102,9002,'pending');
@@ -141,7 +142,7 @@ test("refund of an active paid nonmember queues suspend; protected PINs do not a
 });
 
 test("PIN 237 remains protected from activation and suspension by nonmember worker", async () => {
-  await run(`INSERT INTO sport_center.sport_bookings VALUES(9003);
+  await run(`INSERT INTO sport_center.sport_bookings(id) VALUES(9003);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','pin','PIN:237','237',237,'SANDI',9003);
     INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9103,9003,'pending');
@@ -153,7 +154,7 @@ test("PIN 237 remains protected from activation and suspension by nonmember work
 });
 
 test("wrong UID in ACK never marks access active", async () => {
-  await run("INSERT INTO sport_center.sport_bookings VALUES(9004)");
+  await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9004)");
   await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','pin','PIN:501','501',501,'NEGATIVE UID',9004)");
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9104,9004,'pending')");
   await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9104");
@@ -171,7 +172,7 @@ test("wrong UID in ACK never marks access active", async () => {
 });
 
 test("cancelled payment before activation never queues activation", async () => {
-  await run("INSERT INTO sport_center.sport_bookings VALUES(9005)");
+  await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9005)");
   await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','pin','PIN:502','502',502,'CANCELLED ACCESS',9005)");
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9105,9005,'pending')");
   await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9105");
@@ -186,7 +187,7 @@ test("cancelled payment before activation never queues activation", async () => 
 });
 
 test("completed SUSPEND ACK cannot be reused as ACTIVATE ACK", async () => {
-  await run("INSERT INTO sport_center.sport_bookings VALUES(9006)");
+  await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9006)");
   await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','pin','PIN:503','503',503,'SUSPEND ACK',9006)");
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9106,9006,'pending')");
   await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9106");
@@ -205,7 +206,7 @@ test("completed SUSPEND ACK cannot be reused as ACTIVATE ACK", async () => {
 });
 
 test("cancelled payment cannot suspend pre-existing Group 1 without verified activation", async () => {
-  await run("INSERT INTO sport_center.sport_bookings VALUES(9007)");
+  await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9007)");
   await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','pin','PIN:504','504',504,'EXISTING GROUP ONE',9007)");
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9107,9007,'pending')");
   await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9107");
@@ -220,7 +221,7 @@ test("cancelled payment cannot suspend pre-existing Group 1 without verified act
 });
 
 test("VIS006 existing Group 1 must not receive automatic suspend before paid activation", async () => {
-  await run("INSERT INTO sport_center.sport_bookings VALUES(9008)");
+  await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9008)");
   await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9008)");
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9108,9008,'pending')");
   await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9108");
@@ -248,7 +249,7 @@ test('VIS006 review_required unpaid booking recovers automatically after fresh s
   try {
     // Prior negative test owns the same PIN; remove only that isolated fixture.
     await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008");
-    await run("INSERT INTO sport_center.sport_bookings VALUES(9099)");
+    await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9099)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9099)");
     const access = (await run('SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9099')).rows[0].access_id;
     // Stale snapshot previously moved this unpaid booking to review_required.
@@ -270,7 +271,7 @@ test('paid VIS006 review_required becomes expired after verified suspend and new
   process.env.GYM_X904_NONMEMBER_ONLY_PIN='15';
   try {
     await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9008");
-    await run("INSERT INTO sport_center.sport_bookings VALUES(9100)");
+    await run("INSERT INTO sport_center.sport_bookings(id) VALUES(9100)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9100)");
     await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9200,9100,'pending')");
     await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9200");
@@ -343,4 +344,39 @@ test("registry verified nonmember enqueues once, revoked and mid-cycle revoked n
   } finally {
     delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   }
+});
+
+test("real worker: new VIS003 cannot activate while reserved; activates only after handover, then cancels to suspend", async()=>{
+  const at = new Date("2026-11-06T01:00:00Z");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = "13";
+  try {
+    await run("INSERT INTO sport_center.sport_bookings (id,source,notes,status) VALUES (9123,'gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed')");
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id) VALUES ('TDBD234200545','card','VIS003','13',13,'VIS 003',9123)");
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES(9223,9123,'pending')");
+    await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at='2026-11-06T01:00:00Z' WHERE id=9223");
+    const linked = (await run("SELECT access_id,payment_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9123")).rows[0];
+    expect(Number(linked.payment_id)).toBe(9223);
+    await run("INSERT INTO sport_center.gym_vis_card_reservations (booking_id,payment_id,card_code,user_pin,device_uid,state) VALUES(9123,9223,'VIS003','13',13,'reserved')");
+    await addSnapshot(new Date(at.getTime()-1000),'13','VIS 003',2);
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+100));
+    expect(await commandFor("ACTIVATE_USER",Number(linked.access_id))).toBeUndefined();
+    await run("UPDATE sport_center.gym_vis_card_reservations SET state='collected',collected_at='2026-11-06T01:00:00Z' WHERE booking_id=9123");
+    await addSnapshot(new Date(at.getTime()+200),'13','VIS 003',2);
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+500));
+    const activate=await commandFor("ACTIVATE_USER",Number(linked.access_id));
+    expect(activate).toBeTruthy();
+    expect(activate?.payload).toMatchObject({expectedUid:13,source:"AUTO_NONMEMBER_GYM_12H"});
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+800));
+    expect((await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE command_type='ACTIVATE_USER' AND user_pin='13'")).rows[0].n).toBe(1);
+    const ackAt=new Date(at.getTime()+1500);
+    await ack(String(activate.command_id),ackAt,'13','VIS 003',13,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+4000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9123")).rows[0].access_state).toBe("active");
+    await run("UPDATE sport_center.sport_bookings SET status='cancelled' WHERE id=9123");
+    await addSnapshot(new Date(at.getTime()+5000),'13','VIS 003',1);
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+7000));
+    const suspended=await commandFor("SUSPEND_USER",Number(linked.access_id));
+    expect(suspended).toBeTruthy();
+    expect(suspended?.payload).toMatchObject({expectedUid:13,source:"AUTO_NONMEMBER_GYM_12H"});
+  } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
 });
