@@ -756,6 +756,15 @@ export default function AdminCheckoutForm() {
           ". Perlu ACK/read-back mesin resmi sebelum membuat membership.");
         return;
       }
+      const readinessResponse=await fetch(
+        "/api/memberships/admin-x904-create-user/"+encodeURIComponent(newX904CommandId)+"/readiness",
+        {headers:auth,cache:"no-store"});
+      const readiness=await readinessResponse.json().catch(()=>({}));
+      if(!readinessResponse.ok)throw new Error(readiness.error||"Verifikasi keamanan akses X904 gagal.");
+      if(readiness.ready!==true || readiness.accessHeld!==true){
+        setNewX904Notice("User belum boleh diproses: tunggu snapshot akses Grup 2, Disabled, dan ACK yang cocok.");
+        return;
+      }
       const candidatesResponse=await fetch(
         "/api/memberships/admin-x904-candidates?q="+encodeURIComponent(newX904ReservedPin),
         {headers:auth,cache:"no-store"});

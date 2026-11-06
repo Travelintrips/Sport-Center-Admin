@@ -998,6 +998,51 @@ router.post("/memberships/admin-x904-create-user", adminMiddleware, async (req,r
   }
 });
 
+
+// Read-only deny-first readiness. A successful CREATE_USER ACK by itself is
+// insufficient: a newer authenticated access snapshot must explicitly prove
+// group 2 and disabled account for this exact PIN and device name.
+router.get("/memberships/admin-x904-create-user/:commandId/readiness",adminMiddleware,async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  const actor=(req as any).user;
+  if(!actor || !["owner","super_admin"].includes(actor.role))
+    return res.status(403).json({error:"Akses tidak diizinkan."});
+  const commandId=String(req.params.commandId??"");
+  if(!/^[0-9a-f-]{36}$/i.test(commandId))
+    return res.status(400).json({error:"ID command tidak valid."});
+  try {
+    const result=await db.execute(sql`SELECT c.command_id,c.user_pin,c.payload->>'name' AS expected_name,
+      c.state,c.completed_at,c.result,
+      (SELECT s.observed_at FROM sport_center.gym_x904_access_snapshots s
+        WHERE s.device_serial=c.device_serial ORDER BY s.snapshot_id DESC LIMIT 1) AS observed_at,
+      EXISTS(
+        SELECT 1 FROM (
+          SELECT a.* FROM sport_center.gym_x904_access_snapshots a
+          WHERE a.device_serial=c.device_serial ORDER BY a.snapshot_id DESC LIMIT 1
+        ) s, jsonb_array_elements(s.users) AS u
+        WHERE s.observed_at > c.completed_at
+          AND s.observed_at >= now() - interval '15 minutes'
+          AND u->>'pin'=c.user_pin
+          AND u->>'name'=c.payload->>'name'
+          AND u->>'group'='2' AND u->>'enabled'='false'
+          AND u->>'role'='0'
+      ) AS safe_access
+      FROM sport_center.x904_user_commands c
+      WHERE c.command_id=${commandId}::uuid AND c.device_serial='TDBD234200545'
+        AND c.command_type='CREATE_USER' AND c.payload->>'source'='gym_admin_new_member'
+        AND c.requested_by=${actor.userId}`);
+    if(result.rows.length!==1)return res.status(404).json({error:"Command tidak ditemukan."});
+    const row=result.rows[0];
+    const ack=(row.result as any)?.readBackConfirmed===true;
+    const safe=ack && row.state==="completed" && row.safe_access===true;
+    return res.json({pin:String(row.user_pin),state:row.state,ready:safe,
+      accessHeld:safe,reason:safe?null:"Menunggu ACK, snapshot terbaru, Grup 2 dan status Disabled."});
+  } catch(err) {
+    req.log.error({err},"Gym X904 deny-first readiness failed");
+    return res.status(503).json({error:"Status aman X904 belum dapat diverifikasi."});
+  }
+});
+
 router.get("/memberships/admin-x904-candidates", adminMiddleware, async (req, res) => {
   try {
     const role = String((req as any).user?.role ?? "");
@@ -1533,6 +1578,44 @@ router.post("/memberships/admin-register-paid", adminMiddleware, membershipProof
       if (!x904IdentityConfirmed || !x904VerifiedName ||
           x904VerifiedName !== String(machineUsers.rows[0].display_name).trim()) {
         throw new MembershipProofError(409,"Konfirmasi identitas PIN X904 tidak cocok. Verifikasi ulang nama di mesin.");
+      }
+      // New PINs require stronger evidence than existing machine users:
+      // a command ACK followed by a newer authenticated snapshot with group 2,
+      // disabled account and matching UID/name. No customer/payment is inserted
+      // if either source is unavailable.
+      const gymCreated = await tx.execute(sql`
+        SELECT c.state,c.completed_at,c.result
+        FROM sport_center.x904_user_commands c
+        WHERE c.device_serial='TDBD234200545'
+          AND c.command_type='CREATE_USER'
+          AND c.user_pin=${x904Pin}
+          AND c.payload->>'source'='gym_admin_new_member'
+        ORDER BY c.created_at DESC LIMIT 1
+      `);
+      if(gymCreated.rows.length){
+        const created=gymCreated.rows[0] as any;
+        const uidFromCommand=Number(created.result?.deviceUid);
+        const access=await tx.execute(sql`
+          SELECT s.observed_at, EXISTS(
+            SELECT 1 FROM jsonb_array_elements(s.users) AS u
+            WHERE u->>'pin'=${x904Pin}
+              AND u->>'name'=${x904VerifiedName}
+              AND u->>'group'='2' AND u->>'enabled'='false'
+              AND u->>'role'='0'
+          ) AS safe_access
+          FROM sport_center.gym_x904_access_snapshots s
+          WHERE s.device_serial='TDBD234200545'
+          ORDER BY s.snapshot_id DESC LIMIT 1
+        `);
+        const last=access.rows[0] as any;
+        if(created.state!=="completed" || created.result?.readBackConfirmed!==true ||
+          uidFromCommand!==Number(machineUsers.rows[0].device_uid) ||
+          !created.completed_at || !last || last.safe_access!==true ||
+          new Date(String(last.observed_at)).getTime()<=new Date(String(created.completed_at)).getTime() ||
+          Date.now()-new Date(String(last.observed_at)).getTime()>15*60_000) {
+          throw new MembershipProofError(409,
+            "PIN baru belum terbukti aman (ACK X904, status Disabled, Grup 2 dan snapshot terbaru wajib cocok).");
+        }
       }
       const mappings = await tx.execute(sql`
         SELECT membership_id,status FROM sport_center.gym_x904_member_mapping

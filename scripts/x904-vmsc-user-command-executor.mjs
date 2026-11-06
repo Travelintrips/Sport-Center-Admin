@@ -81,6 +81,11 @@ async function snapshot(tcp){
  return result.data;
 }
 try{
+ // Gym enrollment requires a deny-first executor: the legacy CREATE_USER
+ // packet contains no SDK enabled/group field. NEVER transmit an unguarded
+ // paid-member user, even if the API rollout flag was enabled accidentally.
+ if(c.commandType==="CREATE_USER" && payload.source==="gym_admin_new_member")
+   fail("GYM_CREATE_DENY_FIRST_NOT_READY");
  await zk.createSocket();
  const tcp=zk.zklibTcp;
  requireValue(tcp?.socket,"TCP_AUTH_REQUIRED");
