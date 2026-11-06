@@ -189,9 +189,11 @@ export async function collectReservedVisCard(input: {
   try {
     return await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
-      const found = await tx.execute(sql`SELECT r.id,r.card_code,r.state
+      const found = await tx.execute(sql`SELECT r.id,r.card_code,r.state,b.status::text AS booking_status,
+               p.status::text AS payment_status
         FROM sport_center.gym_vis_card_reservations r
         JOIN sport_center.sport_bookings b ON b.id=r.booking_id
+        JOIN sport_center.sport_payments p ON p.id=r.payment_id
         WHERE b.order_number=${input.orderNumber} FOR UPDATE OF r`);
       if (found.rows.length !== 1) throw new VisReservationError(404, "vis_not_reserved",
         "Reservasi kartu VIS tidak ditemukan.");
@@ -199,6 +201,10 @@ export async function collectReservedVisCard(input: {
       if (row.state === "collected") return { cardCode: String(row.card_code), state: "collected" };
       if (row.state !== "reserved") throw new VisReservationError(409,"vis_not_handover_ready",
         "Kartu VIS tidak sedang menunggu penyerahan.");
+      if (row.booking_status !== "confirmed" || row.payment_status !== "confirmed") {
+        throw new VisReservationError(409,"vis_payment_or_booking_changed",
+          "Booking atau pembayaran sudah tidak terkonfirmasi. Jangan serahkan kartu VIS.");
+      }
       await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
         SET state='collected',collected_at=now()
         WHERE id=${Number(row.id)} AND state='reserved'`);
