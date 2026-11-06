@@ -1535,9 +1535,17 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
       const member = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
         WHERE device_serial='TDBD234200545' AND user_pin=${pin} LIMIT 1`);
       if (inventory.rows.length !== 1 || approved.rows.length !== 1 || member.rows.length !== 0) return "identity_changed";
-      const activeElsewhere = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
-        WHERE device_serial='TDBD234200545' AND user_pin=${pin}
-          AND access_id<>${Number(grant.access_id)} AND access_state IN ('pending','active','review_required')
+      const activeElsewhere = await tx.execute(sql`SELECT 1
+        FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.sport_bookings prior ON prior.id=a.booking_id
+        WHERE a.device_serial='TDBD234200545'
+          AND a.user_pin=${pin} AND a.access_id<>${Number(grant.access_id)}
+          AND (
+            a.access_state IN ('pending','active')
+            OR (a.access_state='review_required'
+              AND prior.booking_date=${currentDate}
+              AND prior.status NOT IN ('cancelled','expired','rejected','refunded','completed'))
+          )
         LIMIT 1`);
       if (activeElsewhere.rows.length) return "pin_busy";
       await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
