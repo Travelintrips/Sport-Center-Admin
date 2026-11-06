@@ -16,14 +16,15 @@ describe('X904 full automatic worker execution with isolated in-memory database 
       const i=calls++;
       switch(i){
         case 0:return {rows:[{}]}; // advisory lock
-        case 1:return {rows:event==='pending'?[{event_id:10,membership_id:99,event_key:'test-payment-100'}]:[]};
-        case 2:return {rows:command?[{state:command,result:command==='completed'?{readBackConfirmed:true}:null}]:[]};
-        case 3:if(command==='completed'){event='processed';return {rows:[]};}return {rows:[{start_date:'2020-01-01',end_date:'2099-12-31',status:'active',user_pin:'987654',device_uid:777,display_name:'TEST MEMBER',device_role:0}]};
-        case 4:return {rows:[{id:100,period_start:'2020-01-01',period_end:'2099-12-31',status:'confirmed',amount:300000,booking_count:1}]};
-        case 5:return {rows:[{observed_at:new Date(Date.now()-1000),user_count:1,users:[{pin:'987654',name:'TEST MEMBER',role:0,group:2,enabled:true}]}]};
-        case 6:return {rows:[]}; // no previous command
-        case 7:return {rows:[]}; // no other outstanding command
-        case 8:inserts++;command='queued';return {rows:[]};
+        case 1:return {rows:event==='pending'?[{event_id:10,membership_id:99,event_key:'test-payment-100',reason:'PAYMENT_CONFIRMED',payment_id:100}]:[]};
+        case 2:return {rows:[{}]}; // confirmed payment belongs to event membership
+        case 3:return {rows:command?[{state:command,result:command==='completed'?{readBackConfirmed:true}:null}]:[]};
+        case 4:if(command==='completed'){event='processed';return {rows:[]};}return {rows:[{start_date:'2020-01-01',end_date:'2099-12-31',status:'active',user_pin:'987654',device_uid:777,display_name:'TEST MEMBER',device_role:0}]};
+        case 5:return {rows:[{id:100,period_start:'2020-01-01',period_end:'2099-12-31',status:'confirmed',amount:300000,booking_count:1}]};
+        case 6:return {rows:[{observed_at:new Date(Date.now()-1000),user_count:1,users:[{pin:'987654',name:'TEST MEMBER',role:0,group:2,enabled:true}]}]};
+        case 7:return {rows:[]}; // no previous command
+        case 8:return {rows:[]}; // no other outstanding command
+        case 9:inserts++;command='queued';return {rows:[]};
         default:throw Error('UNEXPECTED_WORKER_QUERY '+i);
       }
     }};
@@ -36,7 +37,7 @@ describe('X904 full automatic worker execution with isolated in-memory database 
       for(const state of ['first','retry','ack','post'] as const){
         calls=0;
         let rootReads=0;
-        store.execute=async()=>({rows:++rootReads===1?[{id:301}]:event==='pending'?[{event_id:10,membership_id:99,event_key:'test-payment-100'}]:[]});
+        store.execute=async()=>({rows:++rootReads===1?[{id:301}]:event==='pending'?[{event_id:10,membership_id:99,event_key:'test-payment-100',reason:'PAYMENT_CONFIRMED',payment_id:100}]:[]});
         await processX904AutomaticCommands(store as any);
         if(state==='first'){expect(inserts).toBe(1);expect(command).toBe('queued');expect(event).toBe('pending');}
         if(state==='retry'){expect(inserts).toBe(1);expect(event).toBe('pending');command='completed';}

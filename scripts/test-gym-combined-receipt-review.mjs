@@ -149,3 +149,20 @@ test("scoped dual-PIN X904 rollout stays allowlisted and serializes machine comm
  assert.match(worker,/isX904AutoSuspendExempt/);
  assert.doesNotMatch(worker,/GYM_X904_AUTOMATIC_SCOPE==="all_verified"\s*\|\|/);
 });
+
+test("verified-paid-members mode remains opt-in and enforces eligibility per event",()=>{
+ const worker=read("artifacts/api-server/src/services/x904AutomaticCommandWorker.ts");
+ assert.match(worker,/scope==="verified_paid_members" \|\| scope==="all_verified"/);
+ assert.match(worker,/e.reason IN \('PAYMENT_CONFIRMED','DAILY_EXPIRY'\)/);
+ assert.match(worker,/eventPayment\.rows\.length!==1/);
+ assert.match(worker,/membership_id=\$\{membershipId\} AND status='confirmed'/);
+ assert.match(worker,/Number\(owners.rows\[0\]\?\.count\)!==1/);
+ assert.match(worker,/Number\(m.device_role\)!==0/);
+ assert.match(worker,/Number\(p.booking_count\)===1/);
+ assert.match(worker,/resolvePaidX904Automation/);
+ assert.match(worker,/isX904AutoSuspendExempt/);
+ assert.match(worker,/age>300000/);
+ assert.match(worker,/readBackConfirmed===true/);
+ assert.match(worker,/pg_advisory_xact_lock\(904201\)/);
+ assert.match(worker,/ON CONFLICT \(idempotency_key\) DO NOTHING/);
+});
