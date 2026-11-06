@@ -1169,7 +1169,7 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
         const [confirmed]=await tx.update(membershipPaymentsTable).set({
           status:"confirmed",confirmedAt:approvedAt,
           settlementProviderCode:"admin_photo_approval_not_bank_verified",
-          mutationKey:`SC-GYM-COMBINED-${receiptId}`,
+          mutationKey:`SC-GYM-COMBINED-${receiptId}-P${payment.id}`,
           accountingRef:`GYM-COMBINED-${receiptId}-P${payment.id}`,
           updatedAt:approvedAt,
         }).where(and(eq(membershipPaymentsTable.id,payment.id),
