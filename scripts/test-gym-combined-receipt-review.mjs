@@ -63,7 +63,7 @@ test("photo-only combined intake generates internal reference, never trusts a us
 
 test("admin receipt review is read-only and lists allocations without granting access",()=>{
  const begin=api.indexOf('router.get("/memberships/admin-combined-receipts"');
- const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const end=api.indexOf('// Explicit admin attestation based on the saved photo',begin);
  const review=api.slice(begin,end);
  assert.ok(begin>0&&end>begin);
  assert.match(review,/adminMiddleware/);
@@ -75,7 +75,7 @@ test("admin receipt review is read-only and lists allocations without granting a
  assert.match(ui,/Bukti gabungan tersimpan/);
  assert.match(ui,/loadCombinedReceipts\(\)/);
  assert.match(ui,/receipt.allocationSum!==receipt.amount/);
- assert.match(ui,/Belum boleh dinyatakan lunas sampai dana diterima/);
+ assert.match(ui,/Persetujuan berdasarkan foto adalah keputusan admin/);
 });
 
 test("photo-approval is atomic, admin-only, audited and must not mint a second bank mutation",()=>{
