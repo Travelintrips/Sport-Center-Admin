@@ -1457,7 +1457,31 @@ function BookingDetailDrawer({
       ["ambiguous", "review_required"].includes(String(payment?.qrisEmailDetection?.status ?? "")),
     ) ??
     null;
-  const adminQrisEmailDetection = booking.adminQrisEmailDetection ?? null;
+  const {
+    data: adminQrisDetectionPayload,
+    error: adminQrisDetectionError,
+  } = useQuery({
+    queryKey: ["admin-qris-email-detection", booking.id],
+    enabled: Boolean(booking.id),
+    staleTime: 0,
+    refetchOnMount: "always",
+    retry: 1,
+    queryFn: async () => {
+      const response = await fetch(
+        "/api/admin/bookings/" + booking.id + "/qris-email-detection",
+        {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      }
+      return payload;
+    },
+  });
+  const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
   const qrisEmailDetection =
     adminQrisEmailDetection ??
     qrisDetectionPayment?.qrisEmailDetection ??
@@ -1781,6 +1805,14 @@ function BookingDetailDrawer({
             detection={qrisEmailDetection}
             paymentStatus={qrisEmailPaymentStatus}
           />
+          {adminQrisDetectionError && (
+            <div
+              data-testid="admin-qris-detection-error"
+              className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-300"
+            >
+              Status QRIS Mandiri gagal dimuat. Coba tutup lalu buka kembali Detail Booking.
+            </div>
+          )}
 
           {/* Invoice-level proof is evidence, not a payment confirmation. */}
           {booking.payerType === "company" && (booking as any).companyInvoicePaymentProofUrl && (
@@ -3374,28 +3406,12 @@ export default function AdminBookings() {
     })
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const detail = await response.json();
-        let adminQrisEmailDetection = null;
-        try {
-          const qrisResponse = await fetch("/api/admin/bookings/" + id + "/qris-email-detection", {
-            signal: controller.signal,
-            headers: { Authorization: `Bearer ${getToken() ?? ""}` },
-          });
-          if (qrisResponse.ok) {
-            const qrisPayload = await qrisResponse.json();
-            adminQrisEmailDetection = qrisPayload?.detection ?? null;
-          }
-        } catch (error) {
-          if (!controller.signal.aborted) {
-            console.error("Failed to refresh admin QRIS detection", error);
-          }
-        }
-        return { detail, adminQrisEmailDetection };
+        return response.json();
       })
-      .then(({ detail, adminQrisEmailDetection }) => {
+      .then((detail) => {
         if (!controller.signal.aborted) {
           setSelectedBooking((current: any) =>
-            current?.id === id ? { ...current, ...detail, adminQrisEmailDetection } : current
+            current?.id === id ? { ...current, ...detail } : current
           );
         }
       })
