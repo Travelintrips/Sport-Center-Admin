@@ -21,11 +21,14 @@ for reconciliation, NOT silently overwritten in Google Sheets.
 - Existing cells are **never overwritten**, including Robby's historical
   I1047 Rp1.500.000 and Sonic I1056 Rp1.000.000.
 - Only a uniquely mapped employee, existing November date column, exact
-  row label, empty day cell, employee total FORMULA spanning D:AI, and daily
-  total FORMULA spanning all rows 1043–1057 qualify.
+  row label and empty day cell qualify. An employee or daily subtotal must
+  either have a complete SUM formula or be a verified numeric constant equal
+  to the live sum of source cells. Only such verified subtotal constants are
+  automatically replaced by full SUM formulas in the same batched write.
 - Cumulative edits, deleted transactions, duplicate same-date entries, missing
   formulas, and earlier unprocessed event versions go to needs_review.
-- The ledger stores source kasbon ID and exact cell, and re-read verifies write.
+- The ledger stores source kasbon ID and exact cell. Read-back checks the
+  transaction amount, employee subtotal, daily subtotal, and monthly total.
 - Google Sheets and PostgreSQL cannot share an atomic transaction. If write
   succeeds but ledger recording fails, the occupied-cell safeguard blocks
   any automatic retry and requires manual reconciliation.
@@ -60,8 +63,10 @@ the approved workbook before enablement.
 Before enabling production:
 1. Clone the workbook for DEV, preserving all formula cells and existing data.
 2. Reconcile the historical Robby amount and the prior Sonic daily subtotal.
-3. Convert needed hardcoded daily and row totals to verified covering formulas
-   on an authorized copy. *The worker never changes formulas automatically.*
+3. Verify subtotal formulas and numeric constants on an authorized copy.
+   The worker can convert **only verified manual subtotal constants** into
+   covering formulas while writing an otherwise empty target cell. If any
+   pre-existing total is inconsistent, the transaction is blocked.
 4. Run E2E create -> Sheets -> ledger, restart/retry, occupied cell,
    multiple records per employee/day, and editor race tests.
 5. Confirm SCA-registered employee IDs and exact historical aliases/rows.

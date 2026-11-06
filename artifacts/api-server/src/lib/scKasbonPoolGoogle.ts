@@ -61,6 +61,10 @@ export async function writeNewKasbonToPool(input:{
  const sumDay=Array.from({length:15},(_,i)=>i+1043)
    .reduce((sum,r)=>sum+asMoney(rv[r-1041]?.[targetCol-1]),0);
  const rowTotal=at(rv,row??0,3), dayTotal=at(rv,1058,targetCol);
+ const monthTotal=asMoney(rv[1058-1041]?.[2]);
+ const monthSum=Array.from({length:14},(_,i)=>1043+i)
+   .reduce((sum,r)=>sum+asMoney(rv[r-1041]?.[2]),0);
+ if(Math.abs(monthTotal-monthSum)>0.001)throw Error("MONTH_TOTAL_INCONSISTENT");
  // A manually entered subtotal, even when correct now, is not guaranteed to update
  // after writing. Require both formulas before any write.
  if(at(ff,row??0,3).startsWith("=") && Math.abs(Number(rowTotal)-sumRow)>0.001)throw Error("EMPLOYEE_TOTAL_INCONSISTENT");
@@ -71,21 +75,44 @@ export async function writeNewKasbonToPool(input:{
   headings,currentCell:at(ff,row??0,targetCol),
   employeeTotalFormula:at(ff,row??0,3),
   dailyTotalFormula:at(ff,1058,targetCol),
+  employeeTotalCurrent:rowTotal,employeeTotalCalculated:sumRow,
+  dailyTotalCurrent:dayTotal,dailyTotalCalculated:sumDay,
+  monthlyTotalFormula:at(ff,1058,3),
   totalRowLabel:at(fm,1058,2),
  });
  if(result.status!=="ready")throw Error(result.reason);
- // Re-read exactly the destination moments before the update. If anyone edited
- // it between the initial read and this step, fail without changing any cell.
- const before=await sheets.spreadsheets.values.get({spreadsheetId,range:quote+"!"+result.cell,valueRenderOption:"FORMULA"});
- if(String(before.data.values?.[0]?.[0]??"").trim()!=="")throw Error("TARGET_CHANGED_BEFORE_WRITE");
- await sheets.spreadsheets.values.update({
-  spreadsheetId,range:quote+"!"+result.cell,valueInputOption:"RAW",
-  requestBody:{values:[[Number(input.amount)]]}
+ // Re-read every intended destination immediately before changing any value.
+ const targets=[result.cell,...result.subtotalRepairs.map(x=>x.cell)];
+ const before=await sheets.spreadsheets.values.batchGet({
+  spreadsheetId,ranges:targets.map(cell=>quote+"!"+cell),valueRenderOption:"FORMULA"
  });
- const after=await sheets.spreadsheets.values.get({
-  spreadsheetId,range:quote+"!"+result.cell,valueRenderOption:"UNFORMATTED_VALUE"
+ for(let i=0;i<targets.length;i++){
+  const cell=targets[i];
+  const match=cell.match(/^([A-Z]+)(\d+)$/);
+  if(!match)throw Error("DESTINATION_INVALID");
+  const ci=cols.indexOf(match[1])+1,rowNumber=Number(match[2]);
+  if(ci<1)throw Error("DESTINATION_INVALID");
+  const earlier=at(ff,rowNumber,ci);
+  const actual=String(before.data.valueRanges?.[i]?.values?.[0]?.[0]??"").trim();
+  if(actual!==earlier)throw Error("SHEET_CHANGED_DURING_PREFLIGHT");
+ }
+ // One batch changes ONLY the empty transaction cell and, when safe,
+ // mathematically verified manual subtotal cells (converting to full SUM).
+ await sheets.spreadsheets.values.batchUpdate({
+  spreadsheetId,requestBody:{valueInputOption:"USER_ENTERED",data:[
+   {range:quote+"!"+result.cell,values:[[Number(input.amount)]]},
+   ...result.subtotalRepairs.map(x=>({range:quote+"!"+x.cell,values:[[x.formula]]}))
+  ]}
  });
- if(Math.abs(Number(after.data.values?.[0]?.[0])-Number(input.amount))>0.001)
-  throw Error("WRITE_READBACK_MISMATCH");
+ const after=await sheets.spreadsheets.values.batchGet({
+  spreadsheetId,ranges:[result.cell,"C"+result.row,result.col+"1058","C1058"].map(c=>quote+"!"+c),
+  valueRenderOption:"UNFORMATTED_VALUE"
+ });
+ const observed=(i:number)=>Number(after.data.valueRanges?.[i]?.values?.[0]?.[0]);
+ if(Math.abs(observed(0)-Number(input.amount))>0.001 ||
+    Math.abs(observed(1)-(sumRow+Number(input.amount)))>0.001 ||
+    Math.abs(observed(2)-(sumDay+Number(input.amount)))>0.001 ||
+    Math.abs(observed(3)-(monthTotal+Number(input.amount)))>0.001)
+  throw Error("SHEETS_READBACK_TOTALS_MISMATCH");
  return {cell:result.cell,sheetId:spreadsheetId,amount:input.amount};
 }
