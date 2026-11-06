@@ -126,8 +126,14 @@ test("fresh X904 group 2 snapshot rejects group 1, stale evidence and later comm
     observed_at timestamptz NOT NULL,device_serial text NOT NULL,users jsonb NOT NULL
   )`);
   await db.query(`CREATE TABLE sport_center.x904_user_commands (
+    command_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     device_serial text NOT NULL,user_pin text NOT NULL,
-    created_at timestamptz NOT NULL,state text NOT NULL
+    created_at timestamptz NOT NULL,state text NOT NULL,
+    command_type text NOT NULL DEFAULT 'ACTIVATE_USER', completed_at timestamptz
+  )`);
+  await db.query(`CREATE TABLE sport_center.x904_vmsc_command_receipts (
+    command_id uuid PRIMARY KEY,verified boolean NOT NULL,
+    callback_received_at timestamptz NOT NULL
   )`);
   const verify=()=>db.query(`WITH latest AS (
     SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
@@ -142,7 +148,26 @@ test("fresh X904 group 2 snapshot rejects group 1, stale evidence and later comm
       WHERE u->>'pin'='13' AND u->>'group'='2' AND u->>'role'='0')
     AND NOT EXISTS (SELECT 1 FROM sport_center.x904_user_commands cmd
       WHERE cmd.device_serial=$1 AND cmd.user_pin='13'
-      AND cmd.created_at>latest.observed_at)`,[device]);
+      AND cmd.created_at>latest.observed_at)
+    AND NOT EXISTS (
+      SELECT 1 FROM (
+        SELECT command_id,command_type,state,completed_at
+        FROM sport_center.x904_user_commands
+        WHERE device_serial=$1 AND user_pin='13'
+        AND created_at>=now()-interval '5 minutes'
+        ORDER BY created_at DESC,command_id DESC LIMIT 1
+      ) last_command
+      WHERE last_command.command_type<>'SUSPEND_USER'
+         OR last_command.state<>'completed'
+         OR last_command.completed_at IS NULL
+         OR last_command.completed_at>latest.observed_at
+         OR NOT EXISTS (
+           SELECT 1 FROM sport_center.x904_vmsc_command_receipts receipt
+           WHERE receipt.command_id=last_command.command_id
+           AND receipt.verified=true
+           AND receipt.callback_received_at<=latest.observed_at
+         )
+    )`,[device]);
   assert.equal((await verify()).rows.length,0,"missing snapshot is not readback");
   await db.query("INSERT INTO sport_center.gym_x904_access_snapshots VALUES (now()-interval '20 minutes',$1,$2::jsonb)",[device,JSON.stringify([{pin:"13",group:2,role:0}])]);
   assert.equal((await verify()).rows.length,0,"stale snapshot is not readback");
@@ -150,8 +175,19 @@ test("fresh X904 group 2 snapshot rejects group 1, stale evidence and later comm
   assert.equal((await verify()).rows.length,0,"active group is not safe readback");
   await db.query("INSERT INTO sport_center.gym_x904_access_snapshots VALUES (now(),$1,$2::jsonb)",[device,JSON.stringify([{pin:"13",group:2,role:0}])]);
   assert.equal((await verify()).rows.length,1,"fresh snapshot with suspended PIN may pass");
-  await db.query("INSERT INTO sport_center.x904_user_commands VALUES ($1,'13',now()+interval '1 second','pending')",[device]);
+  await db.query("INSERT INTO sport_center.x904_user_commands(device_serial,user_pin,created_at,state) VALUES ($1,'13',now()+interval '1 second','pending')",[device]);
   assert.equal((await verify()).rows.length,0,"later activation command voids readback");
   await db.query("UPDATE sport_center.x904_user_commands SET state='failed'");
   assert.equal((await verify()).rows.length,0,"a failed command cannot prove the device stayed suspended");
+  await db.query(`UPDATE sport_center.x904_user_commands
+    SET command_type='SUSPEND_USER',state='completed',
+        created_at=now()-interval '15 seconds',
+        completed_at=now()-interval '10 seconds'`);
+  assert.equal((await verify()).rows.length,0,"completed suspend without verified VMSC receipt is insufficient");
+  await db.query(`INSERT INTO sport_center.x904_vmsc_command_receipts
+    SELECT command_id,false,now()-interval '5 seconds' FROM sport_center.x904_user_commands`);
+  assert.equal((await verify()).rows.length,0,"unverified receipt must not release card");
+  await db.query("UPDATE sport_center.x904_vmsc_command_receipts SET verified=true");
+  assert.equal((await verify()).rows.length,1,"verified suspend receipt and later group-2 snapshot permit safe return");
+
 });
