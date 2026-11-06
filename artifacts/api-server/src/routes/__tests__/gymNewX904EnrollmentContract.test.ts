@@ -106,3 +106,11 @@ describe("VMSC protected CREATE_USER staged executor",()=>{
     expect(verifier).not.toContain("SSR_SetUserInfo");
   });
 });
+
+describe("safe production default for X904 new-user UI",()=>{
+  test("new PIN creation UI is pilot-gated and old existing-user picker defaults visible",()=>{
+    expect(ui).toContain('import.meta.env.VITE_GYM_X904_NEW_USER_PILOT === "true"');
+    expect(ui).toContain('open={import.meta.env.VITE_GYM_X904_NEW_USER_PILOT !== "true"}');
+    expect(ui).toContain('Cari nama / PIN mesin X904 (alur berjalan)');
+  });
+});

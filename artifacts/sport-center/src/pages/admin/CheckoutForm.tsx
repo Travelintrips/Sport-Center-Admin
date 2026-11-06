@@ -2085,6 +2085,7 @@ export default function AdminCheckoutForm() {
               {memberAction === "new" ? <>
                 <p className="text-xs text-muted-foreground">Isi nama, WhatsApp dan email di atas. Fasilitas Gym otomatis; tidak ada tarif kunjungan Rp30.000.</p>
                 <div className="rounded-lg border p-3 space-y-2">
+                  {import.meta.env.VITE_GYM_X904_NEW_USER_PILOT === "true" && <>
                   <Label>Buat user X904 *</Label>
                   <p className="text-xs text-muted-foreground">Pilih PIN manual 3 digit atau Generate PIN otomatis (100–999). Server menolak PIN yang sudah ada, pernah diantrekan, atau sudah dipetakan. Pendaftaran dan pembayaran belum diproses sampai user terverifikasi di mesin.</p>
                   <div className="flex flex-wrap gap-4 text-sm" role="radiogroup" aria-label="Metode pembuatan PIN X904">
@@ -2106,8 +2107,9 @@ export default function AdminCheckoutForm() {
                     </div>
                   )}
                   {newX904Notice && <p className="text-xs" role="status">{newX904Notice}</p>}
-                  <details className="rounded-md border p-2">
-                    <summary className="cursor-pointer text-xs font-medium">Gunakan PIN user yang sudah ada di mesin (alur lama)</summary>
+                  </>}
+                  <details open={import.meta.env.VITE_GYM_X904_NEW_USER_PILOT !== "true"} className="rounded-md border p-2">
+                    <summary className="cursor-pointer text-xs font-medium">{import.meta.env.VITE_GYM_X904_NEW_USER_PILOT === "true" ? "Gunakan PIN user yang sudah ada di mesin (alur lama)" : "Cari nama / PIN mesin X904 (alur berjalan)"}</summary>
                     <div className="mt-2 space-y-2">
                   <Label htmlFor="membership-x904-search">Cari nama / PIN mesin X904 *</Label>
                   <Input id="membership-x904-search" autoComplete="off"
