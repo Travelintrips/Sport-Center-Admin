@@ -62,7 +62,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
         "Nama sekarang terdaftar di X904; petugas perlu memeriksa identitas, bukan mengambil kartu VIS.");
 
       const payResult = await tx.execute(sql`SELECT id,amount,status::text AS status,
-          proof_url,confirmed_at
+          proof_url,confirmed_at,reference_number,provider_reference,provider_trade_no,merchant_trade_no
         FROM sport_center.sport_payments
         WHERE booking_id=${Number(booking.id)}
           AND status::text='confirmed'
@@ -75,6 +75,17 @@ export async function autoReserveVisAfterFundsVerified(input: {
           Number(payment.amount) < Number(booking.amount)) {
         throw new VisReservationError(409, "payment_unverified",
           "Status, jumlah, atau bukti pembayaran belum memenuhi ketentuan.");
+      }
+      // A provider-confirmed payment may already carry a canonical transaction
+      // reference. A manually entered reference must never contradict that evidence.
+      // Bank transfers without a stored reference still require the staff attestation.
+      const recordedReferences = [
+        payment.reference_number, payment.provider_reference,
+        payment.provider_trade_no, payment.merchant_trade_no,
+      ].map((value: unknown) => String(value ?? "").trim().toUpperCase()).filter(Boolean);
+      if (recordedReferences.length > 0 && !recordedReferences.includes(ref)) {
+        throw new VisReservationError(409, "bank_reference_mismatch",
+          "Referensi resmi tidak cocok dengan referensi pembayaran yang tercatat. Perlu rekonsiliasi.");
       }
       const prior = await tx.execute(sql`SELECT card_code,state,funds_reference
         FROM sport_center.gym_vis_card_reservations
