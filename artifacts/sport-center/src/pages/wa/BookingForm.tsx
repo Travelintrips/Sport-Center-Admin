@@ -689,7 +689,18 @@ export default function WaBookingForm() {
                 <CardTitle className="text-base font-bold text-[#142441]">Pencocokan Identitas Gym X904</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 p-5">
-                <p className="text-sm text-slate-600">Isi nama lengkap pada bagian Data Pemesan di bawah. Sistem akan memeriksa nama yang sama persis pada mesin X904. Pengunjung tidak perlu memilih PIN sendiri.</p>
+                <p className="text-sm text-slate-600">Masukkan nama lengkap di Data Pemesan. Sistem mencocokkan identitas dan PIN X904 terdaftar secara otomatis; nomor PIN tidak diumumkan lewat halaman publik.</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">PIN Mesin X904</p>
+                  <p className="mt-1 text-sm font-semibold text-[#142441]">
+                    {guestIdentityRoute === "registered" ? "Terdeteksi — menunggu verifikasi petugas" :
+                      guestIdentityRoute === "checking" ? "Sedang diperiksa..." :
+                      guestIdentityRoute === "visitor_card" ? "Belum terdaftar" :
+                      guestIdentityRoute === "staff_review" ? "Memerlukan pemeriksaan petugas" :
+                      guestIdentityRoute === "unavailable" ? "Sementara tidak tersedia" :
+                      "Isi nama untuk pemeriksaan otomatis"}
+                  </p>
+                </div>
                 <div role="status" aria-live="polite" className="rounded-xl border border-orange-100 bg-orange-50 p-3 text-sm text-slate-800">
                   {guestIdentityRoute === "registered" && (
                     <div className="space-y-2">
