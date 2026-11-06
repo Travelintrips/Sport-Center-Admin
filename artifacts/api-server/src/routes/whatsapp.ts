@@ -979,6 +979,15 @@ router.post("/wa/booking", async (req, res) => {
     if (publicGymGuest && !guestNameRoute) {
       res.status(503).json({ error: "Verifikasi identitas X904 belum tersedia." }); return;
     }
+    // Never attach an unrelated PIN. Name must resolve uniquely to a verified
+    // nonmember record, and the PIN entered by the customer must match it.
+    if (publicGymGuest && guestNameRoute?.route === "registered" &&
+        guestSubmittedPin !== guestNameRoute.userPin) {
+      res.status(409).json({ error: "Nama dan PIN X904 tidak cocok atau belum lengkap. Periksa kembali atau hubungi petugas." }); return;
+    }
+    if (publicGymGuest && guestSubmittedPin && guestNameRoute?.route !== "registered") {
+      res.status(409).json({ error: "PIN X904 belum dapat diverifikasi untuk nama ini. Hubungi petugas." }); return;
+    }
     if (gymWalkIn && !publicGymGuest && (!x904IdentityType || !String(x904IdentityValue ?? "").trim())) {
       res.status(400).json({ error: "Masukkan PIN X904 atau pilih kartu VIS001–VIS006 untuk akses Gym harian." });
       return;
