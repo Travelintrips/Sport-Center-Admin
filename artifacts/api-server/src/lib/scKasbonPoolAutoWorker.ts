@@ -90,6 +90,19 @@ export function startKasbonPoolAutoWorker():void{
   SET status='needs_review',last_error_code='INTERRUPTED_WRITE_CHECK_REQUIRED'
   WHERE status='processing' AND created_at < now()-interval '10 minutes'`)
   .catch(err=>logger.error({err},"Kasbon POOL interrupted queue recovery failed"));
+ // Recover only older missing-ENV-map failures that now have a verified
+ // employee alias, without replaying an already-linked or superseded event.
+ void db.execute(sql`UPDATE sport_center.sc_kasbon_pool_sync_events e
+  SET status='pending',last_error_code=null,processed_at=null
+  WHERE e.status='needs_review' AND e.event_type='created'
+   AND e.last_error_code='EMPLOYEE_MAP_AMBIGUOUS'
+   AND EXISTS (SELECT 1 FROM sport_center.sc_kasbon_pool_employee_mapping m
+      WHERE m.employee_id=e.employee_id AND m.verified=true)
+   AND NOT EXISTS (SELECT 1 FROM sport_center.sc_kasbon_pool_sync_ledger l
+      WHERE l.kasbon_id=e.kasbon_id)
+   AND NOT EXISTS (SELECT 1 FROM sport_center.sc_kasbon_pool_sync_events newer
+      WHERE newer.kasbon_id=e.kasbon_id AND newer.id>e.id)`)
+  .catch(err=>logger.error({err},"Kasbon legacy mapping review recovery failed"));
  void kasbonPoolTick();
  const timer=setInterval(()=>void kasbonPoolTick(),30_000);timer.unref();
 }
