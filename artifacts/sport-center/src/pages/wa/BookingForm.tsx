@@ -476,6 +476,18 @@ export default function WaBookingForm() {
       setError("PIN X904 harus berisi 1 sampai 8 angka.");
       return;
     }
+    // Reject mismatched or unchecked registered PINs before creating a booking
+    // or accepting a proof. The API repeats this check authoritatively.
+    if (publicGymGuest && guestIdentityRoute === "registered" && guestPinMatch !== true) {
+      setError(guestPinMatch === false
+        ? "Nama dan PIN X904 tidak cocok. Periksa kembali sebelum membuat booking."
+        : "Pemeriksaan PIN X904 belum selesai. Pastikan nama dan PIN sudah cocok.");
+      return;
+    }
+    if (publicGymGuest && guestPin.trim() && guestPinMatch === false) {
+      setError("PIN X904 yang Anda masukkan tidak cocok dengan nama terdaftar.");
+      return;
+    }
     if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
       return;
@@ -588,6 +600,12 @@ export default function WaBookingForm() {
                   {gymWalkIn ? result.startTime : `${result.startTime} – ${result.endTime}`}
                 </span>
               </div>
+              {publicGymGuest && guestPin.trim() && guestPinMatch === true && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">PIN X904 yang Anda masukkan</span>
+                  <span className="font-semibold">{guestPin}</span>
+                </div>
+              )}
               <div className="flex justify-between border-t border-gray-200 pt-1.5">
                 <span className="font-bold text-gray-700">Grand Total</span>
                 <span className="font-black text-orange-600">Rp {result.totalPrice.toLocaleString("id-ID")}</span>
@@ -1180,6 +1198,10 @@ export default function WaBookingForm() {
                 availabilityLoading ||
                 !availabilitySlots ||
                 !timeSlots.includes(form.startTime)
+              )) ||
+              (publicGymGuest && (
+                (guestIdentityRoute === "registered" && (!guestPin.trim() || guestPinMatch !== true)) ||
+                (guestPin.trim() && guestPinMatch === false)
               )) ||
               !form.customerName ||
               !form.customerPhone ||
