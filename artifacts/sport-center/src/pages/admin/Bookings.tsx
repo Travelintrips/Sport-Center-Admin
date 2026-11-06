@@ -77,6 +77,7 @@ import {
 } from "@/lib/tax";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
+import { AdminQrisDetectionBanner } from "@/components/AdminQrisDetectionBanner";
 
 /* ─── Status Config ────────────────────────────────────────────── */
 
@@ -1450,6 +1451,13 @@ function BookingDetailDrawer({
     editablePayment?.confirmedAt ??
     editablePayment?.submittedAt ??
     booking.paidAt;
+  const qrisDetectionPayment =
+    allPayments.find((payment) => payment?.qrisEmailDetection?.status === "reference_match_review") ??
+    allPayments.find((payment) =>
+      ["ambiguous", "review_required"].includes(String(payment?.qrisEmailDetection?.status ?? "")),
+    ) ??
+    null;
+  const qrisEmailDetection = qrisDetectionPayment?.qrisEmailDetection ?? null;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [cancellationNoteError, setCancellationNoteError] = useState("");
   const [cancellationReason, setCancellationReason] = useState("");
@@ -1760,6 +1768,11 @@ function BookingDetailDrawer({
               </div>
             </div>
           </div>
+
+          <AdminQrisDetectionBanner
+            detection={qrisEmailDetection}
+            paymentStatus={qrisDetectionPayment?.status}
+          />
 
           {/* Invoice-level proof is evidence, not a payment confirmation. */}
           {booking.payerType === "company" && (booking as any).companyInvoicePaymentProofUrl && (
