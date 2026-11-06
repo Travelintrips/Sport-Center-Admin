@@ -607,7 +607,7 @@ router.post("/admin/wa-bookings/:orderNumber/return-vis", adminMiddleware, async
       .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
     if (booking) await logAudit({
       action: "gym_guest_vis_card_returned", entity: "booking", entityId: booking.id,
-      userName: actor, after: { cardCode: outcome.cardCode, returnState: outcome.state, x904ReadbackChecked: true },
+      userName: actor, after: { cardCode: outcome.cardCode, returnState: outcome.state, deviceSnapshotAt: outcome.deviceSnapshotAt },
     });
     res.json({ success: true, ...outcome });
   } catch (error) {
