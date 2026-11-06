@@ -1263,7 +1263,8 @@ router.post("/wa/booking", async (req, res) => {
       statusUrl,
       uploadProofUrl,
       gymGuestIdentityRoute: guestNameRoute?.route ?? null,
-      x904Identity: verifiedX904Identity ? {
+      // Never leak linked PIN/UID via an anonymous no-login response.
+      x904Identity: !publicGymGuest && verifiedX904Identity ? {
         type: verifiedX904Identity.identityType,
         label: verifiedX904Identity.identityLabel,
         displayName: verifiedX904Identity.displayName,
