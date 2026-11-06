@@ -35,26 +35,31 @@ router.get("/admin/bookings/:id/qris-email-detection", adminMiddleware, async (r
     const tableName = process.env.NODE_ENV === "production"
       ? "sport_center.qris_email_transactions"
       : "sport_center.qris_email_transactions_dev";
-    const paymentIdList = paymentIds.map((value) => Number(value)).filter(Number.isInteger).join(",");
-    if (!paymentIdList) {
-      res.json({ detection: null });
-      return;
-    }
 
-    const query = [
-      "SELECT payment_id, match_status, transaction_at FROM (",
-      "SELECT UNNEST(candidate_payment_ids) AS payment_id, match_status, transaction_at, id",
-      "FROM " + tableName,
-      "WHERE candidate_payment_ids && ARRAY[" + paymentIdList + "]::integer[]",
-      "AND match_status IN ('reference_match_review','ambiguous','review_required')",
-      ") admin_qris_candidates",
-      "ORDER BY CASE match_status",
-      "WHEN 'reference_match_review' THEN 0",
-      "WHEN 'ambiguous' THEN 1",
-      "ELSE 2 END, id DESC LIMIT 1",
-    ].join(" ");
-
-    const result = await db.execute(sql.raw(query));
+    const result = await db.execute(sql`
+      SELECT payment_id, match_status, transaction_at
+      FROM (
+        SELECT
+          UNNEST(candidate_payment_ids) AS payment_id,
+          match_status,
+          transaction_at,
+          id
+        FROM ${sql.raw(tableName)}
+        WHERE candidate_payment_ids && ARRAY[${sql.join(
+          paymentIds.map((paymentId) => sql`${paymentId}`),
+          sql`, `,
+        )}]::integer[]
+          AND match_status IN ('reference_match_review','ambiguous','review_required')
+      ) admin_qris_candidates
+      ORDER BY
+        CASE match_status
+          WHEN 'reference_match_review' THEN 0
+          WHEN 'ambiguous' THEN 1
+          ELSE 2
+        END,
+        id DESC
+      LIMIT 1
+    `);
     const row = (((result as any).rows ?? result) as Array<{
       payment_id: unknown;
       match_status: unknown;

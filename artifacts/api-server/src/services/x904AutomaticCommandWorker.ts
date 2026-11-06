@@ -20,16 +20,25 @@ export function startX904AutomaticCommandWorker(): void {
   interval.unref();
 }
 
-/** Only explicitly allowlisted machine identities may receive automated commands. */
+/** Each command is restricted to a verified machine-to-membership identity and paid entitlement. */
 export async function processX904AutomaticCommands(store: Pick<typeof db,'execute'|'transaction'> = db): Promise<void> {
   if(process.env.GYM_X904_AUTOMATIC_COMMANDS_ENABLED!=="true")return;
-  // Roll out to verified members only under a separate explicit opt-in.
-  // Existing production configuration remains single-PIN until approved.
-  const allVerified=process.env.GYM_X904_AUTOMATIC_SCOPE==="all_verified";
+  // "verified_paid_members" is an explicit general rollout after the scoped pilot.
+  // This does NOT grant access to every X904 user: mapping, membership,
+  // confirmed paid period, one booking, UID/name/role and snapshot still gate
+  // each command, while a confirmed ACK/read-back gates completion.
+  // Preserve the existing "all_verified" opt-in for compatibility.
+  const scope=process.env.GYM_X904_AUTOMATIC_SCOPE;
+  const allVerified=scope==="verified_paid_members" || scope==="all_verified";
   const pins=(process.env.GYM_X904_AUTOMATIC_ALLOWED_PINS??"").split(",").map(x=>x.trim()).filter(Boolean);
-  if(!allVerified && (pins.length!==1 || !/^[0-9]{1,8}$/.test(pins[0])))return;
+  // Allow a deliberately scoped two-PIN rollout without enabling all_verified.
+  // Keep backward-compatible single-PIN deployments; reject duplicates and broad allowlists.
+  if(!allVerified && (pins.length<1 || pins.length>2 ||
+      pins.some(pin=>!/^[0-9]{1,8}$/.test(pin)) ||
+      new Set(pins).size!==pins.length))return;
+  const scopedPinFilter=sql.join(pins.map(pin=>sql`${pin}`),sql`,`);
   // Only one outstanding automatic machine mutation at a time.
-  if(allVerified) {
+  if(allVerified || pins.length>1) {
     const outstanding=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
       WHERE device_serial='TDBD234200545'
         AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'
@@ -54,19 +63,36 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
   const events=await store.execute(sql`SELECT e.event_id,e.membership_id,e.event_key
     FROM sport_center.x904_automatic_entitlement_events e
     WHERE e.state='pending'
+      AND e.reason IN ('PAYMENT_CONFIRMED','DAILY_EXPIRY')
       ${allVerified ? sql`` : sql`AND EXISTS (
         SELECT 1 FROM sport_center.gym_x904_member_mapping mp
         WHERE mp.membership_id=e.membership_id AND mp.status='verified'
-          AND mp.device_serial='TDBD234200545' AND mp.user_pin=${pins[0]}
+          AND mp.device_serial='TDBD234200545' AND mp.user_pin IN (${scopedPinFilter})
       )`}
-    ORDER BY e.event_id LIMIT 20`);
+    -- A fixed window of old DAILY_EXPIRY events may remain in review/hold
+    -- indefinitely, starving newly confirmed paid memberships.
+    -- Prioritize confirmed payment events while retaining a bounded batch.
+    ORDER BY CASE WHEN e.reason='PAYMENT_CONFIRMED' AND e.payment_id IS NOT NULL THEN 0 ELSE 1 END,
+      CASE WHEN e.reason='PAYMENT_CONFIRMED' AND e.payment_id IS NOT NULL THEN e.event_id END DESC,
+      e.event_id ASC LIMIT 20`);
   for(const ev of events.rows){
     await store.transaction(async tx=>{
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904201)`);
-      const event=await tx.execute(sql`SELECT event_id,membership_id,event_key FROM sport_center.x904_automatic_entitlement_events
-        WHERE event_id=${Number(ev.event_id)} AND state='pending' FOR UPDATE`);
+      const event=await tx.execute(sql`SELECT event_id,membership_id,event_key,reason,payment_id FROM sport_center.x904_automatic_entitlement_events
+        WHERE event_id=${Number(ev.event_id)} AND state='pending'
+          AND reason IN ('PAYMENT_CONFIRMED','DAILY_EXPIRY') FOR UPDATE`);
       if(event.rows.length!==1)return;
       const membershipId=Number(event.rows[0].membership_id);
+      // A PAYMENT_CONFIRMED event must refer to its own confirmed payment.
+      // A stale/misaligned event may never unlock or suspend another identity.
+      if(String(event.rows[0].reason)==="PAYMENT_CONFIRMED"){
+        const paymentId=Number(event.rows[0].payment_id);
+        if(!Number.isSafeInteger(paymentId)||paymentId<=0)return;
+        const eventPayment=await tx.execute(sql`SELECT 1 FROM sport_center.sport_membership_payments
+          WHERE id=${paymentId} AND membership_id=${membershipId} AND status='confirmed'
+            AND amount>0`);
+        if(eventPayment.rows.length!==1)return;
+      }
       // A queued command is not completion. Only a confirmed machine read-back
       // may close the event; hold failures for explicit investigation.
       const sent=await tx.execute(sql`SELECT state,result,created_at,completed_at,count(*) OVER()::int AS attempt_count FROM sport_center.x904_user_commands
@@ -103,7 +129,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
         JOIN sport_center.gym_x904_member_mapping mp ON mp.membership_id=m.id AND mp.status='verified'
         JOIN sport_center.gym_x904_lan_users u ON u.device_serial=mp.device_serial AND u.user_pin=mp.user_pin
         WHERE m.id=${membershipId} AND mp.device_serial='TDBD234200545'
-          ${allVerified ? sql`` : sql`AND mp.user_pin=${pins[0]}`}`);
+          ${allVerified ? sql`` : sql`AND mp.user_pin IN (${scopedPinFilter})`}`);
       if(candidates.rows.length!==1)return;
       const m=candidates.rows[0];
       const pin=String(m.user_pin);
@@ -193,7 +219,7 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
       // Next worker cycle resolves the event against its actual machine command.
 
     });
-    if(allVerified) {
+    if(allVerified || pins.length>1) {
       // Never create a second machine command while the first awaits VMSC.
       const queued=await store.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
         WHERE device_serial='TDBD234200545' AND payload->>'source'='AUTO_MEMBERSHIP_PAYMENT'

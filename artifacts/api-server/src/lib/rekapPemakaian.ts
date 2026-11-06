@@ -1,5 +1,5 @@
 import { db, bookingsTable, facilitiesTable, gymCheckinsTable, gymMembershipsTable, usersTable } from "@workspace/db";
-import { eq, and, or, isNull, ne } from "drizzle-orm";
+import { eq, and, or, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { sendWAToAdmins } from "./notifications";
 import { logger } from "./logger";
@@ -188,6 +188,57 @@ export async function generateRekapPemakaian(
     logger.warn({ err }, "[rekap] Gagal mengambil gym check-ins, dilewati");
   }
 
+  // LAN scans are observational evidence, NOT authenticated check-ins.
+  // Surface unmapped-to-checkin verified-identity scans as review-only entries.
+  // Never backfill gym_checkins, grant access, or claim a payment was confirmed.
+  try {
+    const pendingScans = await db.execute(sql`
+      SELECT DISTINCT ON (m.membership_id)
+        sm.name,
+        left(l.device_time, 16) AS scan_time
+      FROM sport_center.gym_x904_lan_logs l
+      JOIN sport_center.gym_x904_member_mapping m
+        ON m.device_serial = l.device_serial AND m.user_pin = l.user_pin
+        AND m.status = 'verified'
+      JOIN sport_center.sport_memberships sm ON sm.id = m.membership_id
+      WHERE left(l.device_time, 10) = ${tanggalBooking}
+        AND sm.status = 'active'
+        AND sm.start_date <= ${tanggalBooking}
+        AND sm.end_date >= ${tanggalBooking}
+        AND NOT EXISTS (
+          SELECT 1 FROM sport_center.gym_checkins c
+          WHERE c.membership_id = m.membership_id
+            AND c.checkin_date = ${tanggalBooking}::date
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM sport_center.gym_x904_verification_evidence v
+          WHERE v.device_serial = l.device_serial
+            AND v.event_index = l.event_index
+            AND v.user_pin = l.user_pin
+            AND v.source_event_id = l.event_id
+            AND v.capture_source = 'vmsc_automated'
+            AND v.evidence_status = 'verified'
+        )
+      ORDER BY m.membership_id, l.device_time ASC
+    `);
+    for (const scan of pendingScans.rows) {
+      const name = String(scan.name ?? "Member Gym");
+      const scanTime = String(scan.scan_time ?? "").slice(11, 16);
+      if (!grouped["GYM"]) grouped["GYM"] = [];
+      grouped["GYM"]!.push({
+        customerName: name,
+        startTime: scanTime || "00:00",
+        endTime: scanTime || "00:00",
+        kategori: "GYM",
+        status: "scan_unverified",
+        customerLabel: "m",
+      });
+    }
+  } catch (err) {
+    logger.warn({ err }, "[rekap] Pending X904 scans unavailable; no attendance inferred");
+  }
+  if (grouped["GYM"]) grouped["GYM"]!.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
   return grouped;
 }
 
@@ -217,6 +268,7 @@ export function formatRekapWhatsapp(
     tanggalStr,
     ``,
     `Ket: ✅ Lunas  ⏳ Verifikasi  ❌ Belum Bayar`,
+    `⚠️ Scan X904 belum terverifikasi (bukan check-in resmi atau bukti bayar)`,
   ];
 
   for (const kategori of KATEGORI_ORDER) {
@@ -232,7 +284,9 @@ export function formatRekapWhatsapp(
         const label = `(${item.customerLabel})`;
         const companyTag = item.companyName ? ` (${item.companyName})` : "";
         if (kategori === "GYM") {
-          lines.push(`${idx + 1}. ${item.customerName}${companyTag} ${label} ${icon}`);
+          lines.push(item.status === "scan_unverified"
+            ? `${idx + 1}. ${item.customerName}${companyTag} ${label} ⚠️ scan perlu verifikasi`
+            : `${idx + 1}. ${item.customerName}${companyTag} ${label} ${icon}`);
         } else {
           lines.push(`${idx + 1}. ${item.customerName}${companyTag} ${item.startTime.substring(0,5)}-${item.endTime.substring(0,5)} ${label} ${icon}`);
         }

@@ -122,3 +122,47 @@ test("photo approval audit actor comes from validated userId session, not missin
  assert.doesNotMatch(handler,/\.user\?\.id \?\?/);
  assert.doesNotMatch(handler,/\.user\?\.email \?\?/);
 });
+
+test("confirmed membership events outrank historical expiry backlog without bypassing ACK",()=>{
+ const worker=read("artifacts/api-server/src/services/x904AutomaticCommandWorker.ts");
+ assert.match(worker,/e.reason='PAYMENT_CONFIRMED' AND e.payment_id IS NOT NULL THEN 0 ELSE 1/);
+ assert.match(worker,/ORDER BY CASE/);
+ assert.match(worker,/LIMIT 20/);
+ assert.match(worker,/readBackConfirmed===true/);
+ assert.match(worker,/state IN \('queued','claimed'\)/);
+});
+test("approved receipt reloads from server and shows Gym membership, not nonmember",()=>{
+ const ui=read("artifacts/sport-center/src/pages/admin/CheckoutForm.tsx");
+ assert.match(ui,/void loadCombinedReceipts\(\)/);
+ assert.match(ui,/Membership diproses — disetujui dari foto/);
+ assert.match(ui,/Member Gym baru/);
+ assert.match(ui,/Perpanjangan member Gym/);
+});
+
+test("scoped dual-PIN X904 rollout stays allowlisted and serializes machine commands",()=>{
+ const worker=read("artifacts/api-server/src/services/x904AutomaticCommandWorker.ts");
+ assert.match(worker,/pins.length>2/);
+ assert.match(worker,/new Set\(pins\).size!==pins.length/);
+ assert.match(worker,/mp.user_pin IN \(\$\{scopedPinFilter\}\)/);
+ assert.match(worker,/if\(allVerified \|\| pins.length>1\)/);
+ assert.match(worker,/readBackConfirmed===true/);
+ assert.match(worker,/isX904AutoSuspendExempt/);
+ assert.doesNotMatch(worker,/GYM_X904_AUTOMATIC_SCOPE==="all_verified"\s*\|\|/);
+});
+
+test("verified-paid-members mode remains opt-in and enforces eligibility per event",()=>{
+ const worker=read("artifacts/api-server/src/services/x904AutomaticCommandWorker.ts");
+ assert.match(worker,/scope==="verified_paid_members" \|\| scope==="all_verified"/);
+ assert.match(worker,/e.reason IN \('PAYMENT_CONFIRMED','DAILY_EXPIRY'\)/);
+ assert.match(worker,/eventPayment\.rows\.length!==1/);
+ assert.match(worker,/membership_id=\$\{membershipId\} AND status='confirmed'/);
+ assert.match(worker,/Number\(owners.rows\[0\]\?\.count\)!==1/);
+ assert.match(worker,/Number\(m.device_role\)!==0/);
+ assert.match(worker,/Number\(p.booking_count\)===1/);
+ assert.match(worker,/resolvePaidX904Automation/);
+ assert.match(worker,/isX904AutoSuspendExempt/);
+ assert.match(worker,/age>300000/);
+ assert.match(worker,/readBackConfirmed===true/);
+ assert.match(worker,/pg_advisory_xact_lock\(904201\)/);
+ assert.match(worker,/ON CONFLICT \(idempotency_key\) DO NOTHING/);
+});

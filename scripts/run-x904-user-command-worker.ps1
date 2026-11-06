@@ -46,12 +46,21 @@ try {
   $id=[string]$job.commandId; $lease=[string]$job.leaseToken
   if($id -notmatch '^[a-fA-F0-9-]{36}$' -or $lease -notmatch '^[a-fA-F0-9-]{36}$' -or $job.deviceSerial -ne 'TDBD234200545') {throw 'CLAIM_SHAPE_INVALID'}
   $isGroup=@('SUSPEND_USER','ACTIVATE_USER') -ccontains [string]$job.commandType
+  $isGymCreate=([string]$job.commandType -ceq 'CREATE_USER' -and
+    [string]$job.payload.source -ceq 'gym_admin_new_member')
+  if($isGymCreate -and $e['X904_GYM_DENY_FIRST_EXECUTOR_ENABLED'] -ne 'true'){
+    Report 'GYM_DENY_FIRST_EXECUTOR_DISABLED'
+    # Fail closed: no executor call, no machine mutation. DB command remains
+    # claimed until normal guarded failure handling, never auto-replayed.
+  }
+
   if($isGroup -and $e['X904_MANUAL_ACCESS_ENABLED'] -ne 'true') {
     throw 'MANUAL_ACCESS_DISABLED'
   }
   $cfg=@{deviceIp=$e['X904_DEVICE_IP'];deviceSerial=$e['X904_DEVICE_SERIAL'];
     sendEnabled=$e['X904_SEND_ENABLED'];userWriteEnabled=$e['X904_USER_WRITE_ENABLED'];
     manualAccessEnabled=$e['X904_MANUAL_ACCESS_ENABLED'];
+    gymDenyFirstEnabled=($e['X904_GYM_DENY_FIRST_EXECUTOR_ENABLED'] -eq 'true');
     commKey=$e['X904_DEVICE_COMM_KEY'];command=$job}|ConvertTo-Json -Depth 9 -Compress
   Push-Location $base
   try {
@@ -60,6 +69,16 @@ try {
       if(-not(Test-Path $groupExecutor)){throw 'GROUP_EXECUTOR_UNAVAILABLE'}
       $output=$cfg | & powershell.exe -NoProfile -NonInteractive -File $groupExecutor -ExecuteClaimed 2>&1
       $nodeExit=$LASTEXITCODE
+    } elseif($isGymCreate) {
+      if($e['X904_GYM_DENY_FIRST_EXECUTOR_ENABLED'] -ne 'true') {
+        $output='{"readBackConfirmed":false,"errorCode":"GYM_DENY_FIRST_EXECUTOR_DISABLED"}'
+        $nodeExit=1
+      } else {
+        $protectedExecutor=Join-Path $base 'migration\\x904-vmsc-gym-create-deny-first-stage.ps1'
+        if(-not(Test-Path $protectedExecutor)){throw 'GYM_DENY_FIRST_EXECUTOR_MISSING'}
+        $output=$cfg | & powershell.exe -NoProfile -NonInteractive -File $protectedExecutor -ExecuteClaimed 2>&1
+        $nodeExit=$LASTEXITCODE
+      }
     } else {
       $output=$cfg | & $node $executor --execute-claimed 2>&1
       $nodeExit=$LASTEXITCODE
