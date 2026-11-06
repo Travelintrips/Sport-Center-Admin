@@ -79,9 +79,12 @@ export async function autoReserveVisAfterFundsVerified(input: {
       // A provider-confirmed payment may already carry a canonical transaction
       // reference. A manually entered reference must never contradict that evidence.
       // Bank transfers without a stored reference still require the staff attestation.
+      // For static Mandiri QRIS, provider_reference / merchant_trade_no may
+      // be merchant-generated order identifiers, NOT the bank receipt.
+      // Compare only explicit bank reference or provider transaction receipt.
+      // The admin enters the official bank statement reference separately.
       const recordedReferences = [
-        payment.reference_number, payment.provider_reference,
-        payment.provider_trade_no, payment.merchant_trade_no,
+        payment.reference_number, payment.provider_trade_no,
       ].map((value: unknown) => String(value ?? "").trim().toUpperCase()).filter(Boolean);
       if (recordedReferences.length > 0 && !recordedReferences.includes(ref)) {
         throw new VisReservationError(409, "bank_reference_mismatch",
