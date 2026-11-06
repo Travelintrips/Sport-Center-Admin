@@ -70,6 +70,18 @@ test("staff cannot assign without official bank attestation; public ticket is ca
  assert.doesNotMatch(status,/visitorCard.*user_pin/);
 });
 
+test("booking repair preserves original status in history and audit, while VIS sees confirmed",()=>{
+ const route=payments.slice(payments.indexOf('router.patch("/payments/:id"'));
+ const start=route.indexOf('const previousBookingStatus = bookingForRepair.status');
+ const repair=route.indexOf('bookingForRepair.status = "confirmed"');
+ const reservation=route.indexOf('const visReservation = bookingForRepair');
+ assert.ok(start>=0 && start<repair && repair<reservation);
+ const history=route.slice(route.indexOf('await db.insert(bookingHistoryTable)',repair),reservation);
+ assert.match(history,/fromStatus: previousBookingStatus/);
+ assert.match(history,/before: \{ bookingStatus: previousBookingStatus, paymentStatus: before.status \}/);
+ assert.match(history,/toStatus: "confirmed"/);
+});
+
 test("repeat paid confirmation repairs pending booking before automatic VIS reservation",()=>{
  const route=payments.slice(payments.indexOf('router.patch("/payments/:id"'));
  const repair=route.indexOf('bookingForRepair.status = "confirmed"');
