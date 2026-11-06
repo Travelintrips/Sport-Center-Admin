@@ -1028,6 +1028,205 @@ router.get("/memberships/admin-combined-receipts", adminMiddleware, async (req, 
   }
 });
 
+// Explicit admin attestation based on the saved photo, not an assertion of bank settlement.
+// All membership/payment/booking/mapping/receipt writes happen in ONE DB transaction.
+// Deliberately does not invoke pushMembershipPaymentAsBankMutation.
+router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddleware, async (req,res) => {
+  if (!["owner","super_admin","admin","finance"].includes(String((req as any).user?.role ?? ""))) {
+    res.status(403).json({error:"Persetujuan foto hanya untuk admin keuangan/owner berwenang."});return;
+  }
+  if (req.body?.confirmPhoto !== true || req.body?.acknowledgeNotBankVerified !== true) {
+    res.status(400).json({error:"Konfirmasi pemeriksaan foto dan pengakuan bahwa ini bukan verifikasi bank wajib diberikan."});return;
+  }
+  const receiptId=Number(req.params.id);
+  if (!Number.isSafeInteger(receiptId) || receiptId<=0) {res.status(400).json({error:"ID bukti tidak valid."});return;}
+  const actor=String((req as any).user?.id ?? (req as any).user?.email ?? "").trim();
+  if(!actor) {res.status(403).json({error:"Identitas admin tidak tersedia."});return;}
+  try {
+    const day=jakartaDateOnly();
+    const untilOneMonth=(start:string):string=>{
+      const d=new Date(start+"T00:00:00Z");
+      const targetMonth=d.getUTCMonth()+1;
+      const year=d.getUTCFullYear()+Math.floor(targetMonth/12);
+      const month=targetMonth%12;
+      const maxDay=new Date(Date.UTC(year,month+1,0)).getUTCDate();
+      return new Date(Date.UTC(year,month,Math.min(d.getUTCDate(),maxDay))).toISOString().slice(0,10);
+    };
+    // Booking order numbers are generated before the transaction to avoid allocating
+    // them from a second connection inside a held transaction.
+    const orderNumbers=await Promise.all(Array.from({length:10},()=>generateBookingOrderNumber()));
+    const result=await db.transaction(async tx=>{
+      const rows=await tx.execute(sql`SELECT * FROM sport_center.gym_combined_receipts
+        WHERE id=${receiptId} FOR UPDATE`);
+      if(rows.rows.length!==1) throw new MembershipProofError(404,"Bukti gabungan tidak ditemukan.");
+      const receipt=rows.rows[0] as any;
+      const details=await tx.execute(sql`SELECT * FROM sport_center.gym_combined_receipt_allocations
+        WHERE receipt_id=${receiptId} ORDER BY id FOR UPDATE`);
+      if(receipt.status==="photo_approved") {
+        if(details.rows.some((a:any)=>a.status!=="confirmed" || a.membership_payment_id==null))
+          throw new MembershipProofError(409,"Persetujuan sebelumnya belum konsisten; diperlukan audit.");
+        return {fresh:false,results:details.rows.map((a:any)=>({
+          pin:String(a.user_pin),membershipId:Number(a.membership_id),
+          paymentId:Number(a.membership_payment_id),name:String(a.device_name)
+        })),completed:[] as any[]};
+      }
+      if(receipt.status!=="awaiting_bank_verification" || receipt.bank_mutation_id!=null)
+        throw new MembershipProofError(409,"Bukti ini tidak berada pada status yang dapat disetujui dari foto.");
+      if(details.rows.length<2 || details.rows.length>10 ||
+         details.rows.some((a:any)=>a.status!=="pending" || Number(a.amount)!==PRICE_PER_MONTH) ||
+         details.rows.reduce((n:number,a:any)=>n+Number(a.amount),0)!==Number(receipt.amount))
+        throw new MembershipProofError(409,"Alokasi pembayaran tidak valid atau sudah berubah.");
+      const paymentDate=String(receipt.payment_date).slice(0,10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate) || paymentDate>day)
+        throw new MembershipProofError(409,"Tanggal bukti tidak valid.");
+      const completed:Array<{membership:any;payment:any;booking:any;pin:string;name:string;action:string}>=[];
+      for(let i=0;i<details.rows.length;i++) {
+        const a=details.rows[i] as any;
+        const pin=String(a.user_pin),uid=Number(a.device_uid),name=String(a.device_name).trim();
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"TDBD234200545:"+pin}))`);
+        const identity=await tx.execute(sql`SELECT device_uid,display_name,device_role
+          FROM sport_center.gym_x904_lan_users
+          WHERE device_serial='TDBD234200545' AND user_pin=${pin}`);
+        if(identity.rows.length!==1 || Number(identity.rows[0].device_uid)!==uid ||
+           String(identity.rows[0].display_name).trim().toUpperCase()!==name.toUpperCase() ||
+           Number(identity.rows[0].device_role)!==0)
+          throw new MembershipProofError(409,"Identitas X904 berubah. Persetujuan dibatalkan.");
+        let membership:any;
+        const action=String(a.allocation_kind);
+        if(action==="renew") {
+          const id=Number(a.membership_id);
+          const current=await tx.select().from(gymMembershipsTable)
+            .where(eq(gymMembershipsTable.id,id)).for("update").limit(1);
+          membership=current[0];
+          if(!membership || membership.name.trim().toUpperCase()!==name.toUpperCase())
+            throw new MembershipProofError(409,"Membership perpanjangan tidak sesuai.");
+          const mapping=await tx.execute(sql`SELECT membership_id,status
+            FROM sport_center.gym_x904_member_mapping
+            WHERE device_serial='TDBD234200545' AND user_pin=${pin}`);
+          if(mapping.rows.length!==1 || Number(mapping.rows[0].membership_id)!==id ||
+             mapping.rows[0].status!=="verified")
+            throw new MembershipProofError(409,"Mapping PIN membership belum terverifikasi.");
+        } else if(action==="new" && a.membership_id==null) {
+          const approved=await tx.execute(sql`SELECT 1
+            FROM sport_center.x904_verified_nonmember_identities
+            WHERE device_serial='TDBD234200545' AND user_pin=${pin}
+              AND device_uid=${uid} AND verification_state='verified'
+              AND revoked_at IS NULL AND upper(trim(display_name))=upper(trim(${name}::text))`);
+          if(approved.rows.length!==1)
+            throw new MembershipProofError(409,"PIN calon member baru belum memiliki identitas terverifikasi.");
+          const mapped=await tx.execute(sql`SELECT membership_id FROM sport_center.gym_x904_member_mapping
+            WHERE device_serial='TDBD234200545' AND user_pin=${pin} FOR UPDATE`);
+          if(mapped.rows.some((x:any)=>x.membership_id!=null))
+            throw new MembershipProofError(409,"PIN calon member baru sudah digunakan membership lain.");
+          // Reuse a uniquely matched customer. No generated email/password or fake contact.
+          const customers=await tx.select().from(usersTable)
+            .where(sql`upper(trim(${usersTable.name}))=upper(trim(${name}::text)) AND ${usersTable.role}='customer'`)
+            .limit(3);
+          if(customers.length!==1 || !customers[0].email || !customers[0].phone)
+            throw new MembershipProofError(409,"Data customer baru belum lengkap atau ambigu. Lengkapi identitas customer terlebih dahulu.");
+          const customer=customers[0];
+          const conflicts=await tx.select({id:gymMembershipsTable.id}).from(gymMembershipsTable)
+            .where(sql`lower(${gymMembershipsTable.email})=lower(${customer.email}) AND
+              ${gymMembershipsTable.status} IN ('active','pending_payment','waiting_confirmation')`)
+            .limit(1);
+          if(conflicts.length) throw new MembershipProofError(409,"Customer telah mempunyai membership aktif/tagihan.");
+          const end=untilOneMonth(day);
+          const [created]=await tx.insert(gymMembershipsTable).values({
+            name,email:customer.email,phone:customer.phone,startDate:day,endDate:end,
+            months:1,totalPrice:String(a.amount),status:"pending_payment",
+            notes:`Bukti gabungan #${receiptId} - persetujuan foto admin; belum verifikasi bank`,
+          }).returning();
+          if(!created) throw new Error("COMBINED_MEMBERSHIP_CREATE_FAILED");
+          membership=created;
+          const mapResult=await tx.execute(sql`INSERT INTO sport_center.gym_x904_member_mapping
+            (device_serial,user_pin,membership_id,status,verified_at,verified_by,review_reason,updated_at)
+            VALUES ('TDBD234200545',${pin},${created.id},'verified',now(),
+              'combined_photo_admin','Membership dari bukti gabungan disetujui admin',now())
+            ON CONFLICT(device_serial,user_pin) DO UPDATE
+              SET membership_id=excluded.membership_id,status=excluded.status,
+                  verified_at=excluded.verified_at,verified_by=excluded.verified_by,updated_at=now()
+              WHERE sport_center.gym_x904_member_mapping.membership_id IS NULL
+            RETURNING membership_id`);
+          if(mapResult.rows.length!==1) throw new MembershipProofError(409,"Mapping PIN tidak dapat dibuat.");
+        } else throw new MembershipProofError(409,"Jenis alokasi tidak valid.");
+        const pending=await tx.select({id:membershipPaymentsTable.id}).from(membershipPaymentsTable)
+          .where(and(eq(membershipPaymentsTable.membershipId,membership.id),
+            inArray(membershipPaymentsTable.status,["pending_payment","waiting_confirmation"]))).limit(1);
+        if(pending.length) throw new MembershipProofError(409,"Membership memiliki pembayaran tertunda; hentikan agar tidak ganda.");
+        const start=action==="renew"?
+          resolveGymRenewalStart(membership.status,membership.endDate,day):day;
+        const end=untilOneMonth(start);
+        const [payment]=await tx.insert(membershipPaymentsTable).values({
+          membershipId:membership.id,periodStart:start,periodEnd:end,months:1,
+          amount:String(a.amount),status:"waiting_confirmation",
+          paymentMethod:receipt.payment_method,paymentProofUrl:receipt.proof_url,
+          paymentDate,submittedAt:new Date(),
+        }).returning();
+        if(!payment) throw new Error("COMBINED_PAYMENT_CREATE_FAILED");
+        const pendingBooking=await ensureMembershipPaymentBooking(membership,payment,tx,orderNumbers[i]);
+        const approvedAt=new Date();
+        const [confirmed]=await tx.update(membershipPaymentsTable).set({
+          status:"confirmed",confirmedAt:approvedAt,
+          settlementProviderCode:"admin_photo_approval_not_bank_verified",
+          mutationKey:`SC-GYM-COMBINED-${receiptId}`,
+          accountingRef:`GYM-COMBINED-${receiptId}-P${payment.id}`,
+          updatedAt:approvedAt,
+        }).where(and(eq(membershipPaymentsTable.id,payment.id),
+          eq(membershipPaymentsTable.status,"waiting_confirmation"))).returning();
+        if(!confirmed) throw new Error("COMBINED_PAYMENT_CONFIRM_FAILED");
+        const booking=await ensureMembershipPaymentBooking(membership,confirmed,tx,orderNumbers[i]);
+        if(booking.id!==pendingBooking.id) throw new Error("COMBINED_BOOKING_DUPLICATE");
+        const [active]=await tx.update(gymMembershipsTable).set({
+          status:"active",startDate:start,endDate:end,months:1,totalPrice:String(a.amount),
+          paymentMethod:receipt.payment_method,paymentProofUrl:receipt.proof_url,updatedAt:approvedAt,
+        }).where(eq(gymMembershipsTable.id,membership.id)).returning();
+        if(!active) throw new Error("COMBINED_MEMBERSHIP_ACTIVATE_FAILED");
+        const link=await tx.execute(sql`UPDATE sport_center.gym_combined_receipt_allocations
+          SET membership_id=${active.id},membership_payment_id=${confirmed.id},status='confirmed'
+          WHERE id=${a.id} AND receipt_id=${receiptId} AND status='pending' RETURNING id`);
+        if(link.rows.length!==1)throw new Error("COMBINED_ALLOCATION_LINK_FAILED");
+        await tx.execute(sql`INSERT INTO sport_center.x904_automatic_entitlement_events
+          (membership_id,payment_id,reason,event_key)
+          VALUES (${active.id},${confirmed.id},'PAYMENT_CONFIRMED',${x904PaymentConfirmedEventKey(confirmed.id)})
+          ON CONFLICT(event_key) DO NOTHING`);
+        completed.push({membership:active,payment:confirmed,booking,pin,name,action});
+      }
+      const approvedAt=new Date();
+      const update=await tx.execute(sql`UPDATE sport_center.gym_combined_receipts
+        SET status='photo_approved',photo_approved_at=${approvedAt},
+            photo_approved_by=${actor},updated_at=now()
+        WHERE id=${receiptId} AND status='awaiting_bank_verification' AND bank_mutation_id IS NULL RETURNING id`);
+      if(update.rows.length!==1) throw new Error("COMBINED_RECEIPT_APPROVAL_RACE");
+      await tx.execute(sql`INSERT INTO sport_center.gym_combined_photo_approval_audit
+        (receipt_id,actor,decision,allocation_count,total_amount)
+        VALUES (${receiptId},${actor},'PHOTO_APPROVED_NOT_BANK_VERIFIED',
+          ${details.rows.length},${receipt.amount})`);
+      return {fresh:true,completed,results:completed.map(x=>({
+        pin:x.pin,name:x.name,membershipId:x.membership.id,paymentId:x.payment.id
+      }))};
+    });
+    // These mirrors are non-bank side effects. Do not use the legacy per-payment
+    // bank_mutation push; receipt ID is the only external payment reference.
+    if(result.fresh) {
+      for(const item of result.completed) {
+        syncMembershipToBizportal(item.membership).catch(err=>req.log.error({err},"Combined membership sync failed"));
+        syncBookingRecordToBizportal(item.booking).catch(err=>req.log.error({err},"Combined booking sync failed"));
+        reportGymPayment(item.membership,item.payment,item.booking,"confirmed",undefined,
+          item.action==="new"?"new":"renew").catch(err=>req.log.error({err},"Combined WA notification failed"));
+        syncToPublic(item.membership).catch(err=>req.log.error({err},"Combined membership public sync failed"));
+      }
+    }
+    res.json({receiptId,photoApproved:true,bankVerified:false,
+      alreadyApproved:!result.fresh,allocations:result.results,
+      x904Status:"pending_device_ack",
+      message:"Disetujui admin berdasarkan foto; BUKAN verifikasi mutasi bank. Dua membership diproses dari satu bukti."});
+  } catch(err) {
+    if(err instanceof MembershipProofError) {res.status(err.status).json({error:err.message});return;}
+    req.log.error({err,receiptId},"Combined photo approval atomic completion failed");
+    res.status(503).json({error:"Persetujuan gabungan belum berhasil. Tidak ada pemrosesan sebagian; periksa ulang bukti yang sama."});
+  }
+});
+
 // Prevent reusing a shared receipt image in either old single-member paid flow.
 // The existence probe keeps old deployments working before the additive migration.
 async function assertProofNotCombinedReceipt(proofBytes: Buffer): Promise<void> {
