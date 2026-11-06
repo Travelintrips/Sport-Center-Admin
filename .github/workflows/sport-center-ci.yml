@@ -158,6 +158,8 @@ jobs:
 
       - name: Verify automatic VIS reservation after official funds check
         run: node --test scripts/test-gym-vis-auto-reservation.mjs
+      - name: Verify static QRIS diagnostic is read-only and reference-aware
+        run: node --test scripts/test-qris-static-bank-match-dev.mjs
 
       - name: Verify Gym name match and visitor-card routing without public X904 grants
         run: node --test scripts/test-gym-guest-name-x904-route.mjs
