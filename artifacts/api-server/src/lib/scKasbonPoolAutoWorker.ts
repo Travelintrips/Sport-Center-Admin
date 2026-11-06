@@ -48,8 +48,18 @@ export async function kasbonPoolTick():Promise<void> {
   const [employee]=await db.select({name:scEmployeesTable.fullName})
     .from(scEmployeesTable).where(eq(scEmployeesTable.employeeId,employeeId)).limit(1);
   if(!employee){await finish(id,"needs_review","EMPLOYEE_MISSING");return;}
+  const aliases=records(await db.execute(sql`
+    SELECT sheet_label FROM sport_center.sc_kasbon_pool_employee_mapping
+    WHERE employee_id=${employeeId} AND verified=true`));
+  // Standard labels such as 'Kasbon Robby' are matched from the employee
+  // master name automatically. Only exceptional aliases (e.g. Sonik) need a
+  // one-time verified database mapping; never guess from fuzzy spelling.
+  if(aliases.length>1){await finish(id,"needs_review","EMPLOYEE_ALIAS_AMBIGUOUS");return;}
+  const verifiedSheetLabel=aliases.length===1&&typeof aliases[0].sheet_label==="string"
+    ? String(aliases[0].sheet_label) : employee.name;
   const result=await writeNewKasbonToPool({
    id:kasbonId,employeeId,employeeName:employee.name,
+   verifiedSheetLabel,
    kasbonDate:String(data.kasbonDate??data.kasbon_date),
    amount:String(data.amount)
   });
