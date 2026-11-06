@@ -1478,8 +1478,11 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
     if (!principal?.userId || !isOperationalBookingRole(principal.role)) {
       res.status(403).json({ error: "Hanya petugas booking terautentikasi yang boleh mengesahkan PIN." }); return;
     }
-    if (req.body?.identityChecked !== true) {
-      res.status(400).json({ error: "Petugas harus memeriksa kepemilikan PIN langsung sebelum aktivasi." }); return;
+    const officialBankReference = String(req.body?.officialBankReference ?? "").trim().toUpperCase();
+    if (req.body?.identityChecked !== true ||
+        req.body?.officialFundsChecked !== true ||
+        !/^[A-Z0-9][A-Z0-9 ._/-]{5,79}$/.test(officialBankReference)) {
+      res.status(400).json({ error: "Petugas wajib memeriksa identitas fisik, dana resmi, dan mencatat referensi transaksi bank (minimal 6 karakter)." }); return;
     }
     const bookingId = Number(req.params.bookingId);
     if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
@@ -1554,7 +1557,7 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
       action: "x904_guest_pin_staff_attestation",
       entity: "booking",
       entityId: bookingId,
-      after: { identityChecked: true, verifiedBy: principal.userId, accessState: "pending" },
+      after: { identityChecked: true, officialFundsChecked: true, officialBankReference, verifiedBy: principal.userId, accessState: "pending" },
     });
     res.json({ success: true, accessState: "pending", message: "PIN disahkan petugas. Aktivasi menunggu worker dan ACK X904." });
   } catch (error) {
