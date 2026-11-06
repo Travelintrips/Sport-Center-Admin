@@ -236,3 +236,55 @@ test("isolated PostgreSQL: paid VIS stays held until matching physical handover"
     SET verification_state='pending' WHERE booking_id=5`);
   assert.equal((await canWorkerAct()).rows[0].n,0,"withdrawn verification blocks activation");
 });
+
+test("synthetic VIS006 E2E: confirmed payment, held grant, card handover, device ACK, 23:00 suspend", async()=>{
+  // Local vis_ci only; this is not a live payment/physical X904 test.
+  const open="2026-11-06T12:00:00+07:00", close="2026-11-06T23:00:00+07:00";
+  await db.query("ALTER TABLE sport_center.sport_bookings ADD COLUMN status text DEFAULT 'pending_payment'");
+  await db.query("ALTER TABLE sport_center.sport_payments ADD COLUMN status text DEFAULT 'pending'");
+  await db.query("ALTER TABLE sport_center.sport_payments ADD COLUMN confirmed_at timestamptz");
+  await db.query("ALTER TABLE sport_center.x904_nonmember_daily_access ADD COLUMN confirmed_at timestamptz");
+  await db.query("ALTER TABLE sport_center.x904_nonmember_daily_access ADD COLUMN verified_name text");
+  await db.query("ALTER TABLE sport_center.x904_user_commands ADD COLUMN result jsonb");
+  await db.query("ALTER TABLE sport_center.x904_user_commands ADD COLUMN idempotency_key text UNIQUE");
+  await db.query("UPDATE sport_center.sport_bookings SET status='confirmed' WHERE id=6");
+  await db.query("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=$1 WHERE id=6",[open]);
+  // These two inserts must share one booking/payment transaction.
+  await db.query("BEGIN");
+  try {
+    await insertReservation(6,6,"VIS006","15",15,"ADMINPAY-6");
+    await db.query("INSERT INTO sport_center.x904_nonmember_daily_access (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state) VALUES ($1,'card','VIS006','15',15,'VIS 006',6,6,$2,$3,'pending','pending')",[device,open,close]);
+    await db.query("COMMIT");
+  } catch(e) {await db.query("ROLLBACK");throw e;}
+  const eligible=async at=>db.query("SELECT a.booking_id FROM sport_center.x904_nonmember_daily_access a JOIN sport_center.gym_vis_card_reservations r ON r.booking_id=a.booking_id AND r.payment_id=a.payment_id AND r.user_pin=a.user_pin AND r.device_uid=a.device_uid JOIN sport_center.sport_bookings b ON b.id=a.booking_id JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id WHERE a.booking_id=6 AND a.verification_state='verified' AND a.access_state IN ('pending','active') AND r.state='collected' AND r.collected_at IS NOT NULL AND b.status='confirmed' AND p.status='confirmed' AND $1::timestamptz<a.expires_at",[at]);
+  assert.equal((await eligible(open)).rows.length,0,"payment alone cannot enable machine");
+  await assert.rejects(insertReservation(7,7,"VIS006","15",15,"ADMINPAY-7"),e=>e.code==="23505","duplicate physical card blocked");
+  await db.query("BEGIN");
+  try {
+    const granted=await db.query("UPDATE sport_center.x904_nonmember_daily_access SET verification_state='verified' WHERE booking_id=6 AND payment_id=6 AND user_pin='15' AND device_uid=15 AND identity_type='card' AND identity_label='VIS006' AND verification_state='pending' AND access_state='pending' RETURNING booking_id");
+    assert.equal(granted.rows.length,1);
+    await db.query("UPDATE sport_center.gym_vis_card_reservations SET state='collected',collected_at=$1 WHERE booking_id=6 AND state='reserved'",[open]);
+    await db.query("COMMIT");
+  } catch(e) {await db.query("ROLLBACK");throw e;}
+  assert.equal((await eligible(open)).rows.length,1,"physical handover makes grant eligible");
+  assert.equal((await eligible(close)).rows.length,0,"23:00 closing prevents activation");
+  const ackKey="ci:vis006:activation:6";
+  const enqueue=()=>db.query("INSERT INTO sport_center.x904_user_commands (device_serial,user_pin,created_at,state,command_type,idempotency_key) VALUES ($1,'15',$2,'queued','ACTIVATE_USER',$3) ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id",[device,open,ackKey]);
+  assert.equal((await enqueue()).rows.length,1);
+  assert.equal((await enqueue()).rows.length,0,"retry never enqueues twice");
+  await db.query("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$1,result=$2::jsonb WHERE idempotency_key=$3",["2026-11-06T12:00:30+07:00",JSON.stringify({readBackConfirmed:true,afterGroup:1,deviceUid:15}),ackKey]);
+  const activation=await db.query("SELECT result FROM sport_center.x904_user_commands WHERE idempotency_key=$1",[ackKey]);
+  assert.equal(activation.rows[0].result.afterGroup,1);
+  await db.query("UPDATE sport_center.x904_nonmember_daily_access SET activated_at=$1,access_state='active',expires_at=LEAST($1::timestamptz+interval '12 hours',('2026-11-06'::date+time '23:00') AT TIME ZONE 'Asia/Jakarta') WHERE booking_id=6",["2026-11-06T12:00:30+07:00"]);
+  const current=await db.query("SELECT access_state,expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=6");
+  assert.equal(current.rows[0].access_state,"active");
+  assert.equal(new Date(current.rows[0].expires_at).toISOString(),"2026-11-06T16:00:00.000Z","closing is earlier than 12-hour duration");
+  await db.query("INSERT INTO sport_center.x904_user_commands (device_serial,user_pin,created_at,state,command_type,completed_at,result,idempotency_key) VALUES ($1,'15',$2,'completed','SUSPEND_USER',$3,$4::jsonb,'ci:vis006:suspend:6')",[device,close,"2026-11-06T23:00:15+07:00",JSON.stringify({readBackConfirmed:true,afterGroup:2,deviceUid:15})]);
+  await db.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired' WHERE booking_id=6");
+  await db.query("UPDATE sport_center.sport_bookings SET status='completed' WHERE id=6");
+  const safe=await db.query("SELECT 1 FROM sport_center.gym_vis_card_reservations r JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=r.booking_id JOIN sport_center.x904_user_commands cmd ON cmd.user_pin=r.user_pin AND cmd.idempotency_key='ci:vis006:suspend:6' WHERE r.booking_id=6 AND r.state='collected' AND a.access_state='expired' AND cmd.command_type='SUSPEND_USER' AND cmd.state='completed' AND cmd.result->>'readBackConfirmed'='true' AND cmd.result->>'afterGroup'='2' AND cmd.result->>'deviceUid'='15'");
+  assert.equal(safe.rows.length,1,"verified simulated suspend ACK permits return");
+  await db.query("UPDATE sport_center.gym_vis_card_reservations SET state='returned',returned_at=now() WHERE booking_id=6");
+  const returned=await db.query("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=6");
+  assert.equal(returned.rows[0].state,"returned");
+});
