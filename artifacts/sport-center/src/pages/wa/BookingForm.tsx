@@ -720,6 +720,7 @@ export default function WaBookingForm() {
                       guestIdentityRoute === "registered" ? "Nama terdaftar — masukkan PIN untuk dicocokkan" :
                       guestIdentityRoute === "checking" ? "Sedang diperiksa..." :
                       guestIdentityRoute === "visitor_card" ? "Belum terdaftar" :
+                      guestIdentityRoute === "staff_review" && guestPinMatch === true ? "Nama dan PIN cocok di mesin — perlu verifikasi petugas" :
                       guestIdentityRoute === "staff_review" ? "Memerlukan pemeriksaan petugas" :
                       guestIdentityRoute === "unavailable" ? "Sementara tidak tersedia" :
                       "Isi nama untuk pemeriksaan otomatis"}
@@ -737,7 +738,7 @@ export default function WaBookingForm() {
                     <p><strong>Nama belum terdaftar.</strong> Anda diarahkan ke kartu pengunjung VIS001–VIS006. Petugas akan memilih kartu yang tersedia setelah verifikasi pembayaran dan identitas.</p>
                   )}
                   {guestIdentityRoute === "staff_review" && (
-                    <p><strong>Identitas X904 ditemukan, tetapi belum diverifikasi sebagai nonmember.</strong> Petugas perlu memeriksa status registry, kepemilikan PIN, dan pengecualian akses. Memasukkan PIN saja tidak mengaktifkan pintu.</p>
+                    <p><strong>{guestPinMatch === true ? "Nama dan PIN cocok pada inventaris mesin X904." : "Identitas X904 ditemukan, tetapi belum diverifikasi sebagai nonmember."}</strong> Petugas perlu memeriksa status registry, kepemilikan PIN, dan pengecualian akses. Memasukkan PIN saja tidak mengaktifkan pintu.</p>
                   )}
                   {guestIdentityRoute === "checking" && <p>Mencocokkan nama dan PIN dengan daftar X904...</p>}
                   {guestIdentityRoute === "unavailable" && <p>Pencocokan belum tersedia. Petugas akan memeriksa identitas pada saat kunjungan.</p>}
