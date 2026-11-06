@@ -2551,7 +2551,7 @@ export default function AdminCheckoutForm() {
               {combinedOutcome && <p role="status" className="rounded-md border p-3 text-sm">{combinedOutcome}</p>}
             </form>
           </CardContent>
-          </div>
+          </div>}
         </Card>
       )}
 
