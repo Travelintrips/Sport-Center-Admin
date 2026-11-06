@@ -952,10 +952,11 @@ router.post("/wa/booking", async (req, res) => {
     // Public self-service is an unbound reservation, NEVER a physical door grant.
     // The person may pay without registration; PIN/card assignment is a separate verified step.
     const publicGymGuest = req.body.publicGymGuest === true;
-    // Never accept anonymous user-provided PIN selection. The route is derived
-    // from the exact stored device name on the server, not from public input.
-    if (publicGymGuest && req.body.requestedX904Pin != null) {
-      res.status(400).json({ error: "PIN X904 tidak boleh dipilih secara manual. Sistem mencocokkan nama pengunjung." }); return;
+    // A self-service visitor can provide a PIN to match with the separately
+    // resolved registered name. Neither input proves ownership or grants access.
+    const guestSubmittedPin = publicGymGuest ? String(req.body.requestedX904Pin ?? "").trim() : "";
+    if (publicGymGuest && guestSubmittedPin && !/^[0-9]{1,8}$/.test(guestSubmittedPin)) {
+      res.status(400).json({ error: "PIN X904 harus berisi 1 sampai 8 angka." }); return;
     }
     if (publicGymGuest) {
       const guestPhone = String(customerPhone ?? "").trim();
