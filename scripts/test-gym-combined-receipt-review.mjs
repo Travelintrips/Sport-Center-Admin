@@ -77,3 +77,30 @@ test("admin receipt review is read-only and lists allocations without granting a
  assert.match(ui,/receipt.allocationSum!==receipt.amount/);
  assert.match(ui,/Belum boleh dinyatakan lunas sampai dana diterima/);
 });
+
+test("photo-approval is atomic, admin-only, audited and must not mint a second bank mutation",()=>{
+ const begin=api.indexOf('router.post("/memberships/admin-combined-receipts/:id/approve-photo"');
+ const end=api.indexOf('// Prevent reusing a shared receipt image',begin);
+ const endpoint=api.slice(begin,end);
+ assert.ok(begin>0&&end>begin);
+ assert.match(endpoint,/adminMiddleware/);
+ assert.match(endpoint,/acknowledgeNotBankVerified/);
+ assert.match(endpoint,/await db.transaction\(async tx=>/);
+ assert.match(endpoint,/FOR UPDATE/);
+ assert.match(endpoint,/photo_approved/);
+ assert.match(endpoint,/gym_combined_photo_approval_audit/);
+ assert.match(endpoint,/x904_automatic_entitlement_events/);
+ assert.match(endpoint,/gym_combined_receipt_allocations/);
+ assert.match(endpoint,/alreadyApproved:!result.fresh/);
+ assert.match(endpoint,/settlementProviderCode:"admin_photo_approval_not_bank_verified"/);
+ assert.doesNotMatch(endpoint,/pushMembershipPaymentAsBankMutation\(/);
+ assert.doesNotMatch(endpoint,/INSERT INTO sport_center.bank_mutations/);
+});
+test("admin photo approval requires explicit action and stored receipt, not re-upload",()=>{
+ const ui=read("artifacts/sport-center/src/pages/admin/CheckoutForm.tsx");
+ assert.match(ui,/approveCombinedPhoto\(receipt/);
+ assert.match(ui,/Setujui Foto & Proses Membership/);
+ assert.match(ui,/confirmPhoto:true,acknowledgeNotBankVerified:true/);
+ assert.match(ui,/receipt.status==="awaiting_bank_verification"/);
+ assert.match(ui,/acknowledgeNotBankVerified:true/);
+});
