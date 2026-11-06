@@ -266,7 +266,6 @@ export async function returnVerifiedVisCard(input: {
             WHERE cmd.device_serial='TDBD234200545'
               AND cmd.user_pin=${String(row.user_pin)}
               AND cmd.created_at>latest.observed_at
-              AND cmd.state NOT IN ('cancelled','failed')
           ) LIMIT 1`);
       if (!readback.rows.length) throw new VisReservationError(409,"x904_readback_missing",
         "Snapshot X904 terbaru belum membuktikan PIN tersuspend di Grup 2. Kartu tetap ditahan.");
