@@ -127,3 +127,15 @@ test("VIS release requires fresh actual device snapshot with suspended group and
  assert.match(release,/x904_readback_missing/);
  assert.match(release,/access_state IN \('pending','active','review_required'\)/);
 });
+
+test("physical handover is required before VIS can be returned or reused",()=>{
+ const handover=service.slice(service.indexOf("export async function collectReservedVisCard"),service.indexOf("export async function returnVerifiedVisCard"));
+ const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
+ assert.match(handover,/physicalCardHandedOver !== true/);
+ assert.match(handover,/state='collected',collected_at=now\(\)/);
+ assert.match(release,/row\.state !== "collected" \|\| !row\.collected_at/);
+ assert.match(release,/observed_at >= \$\{row\.collected_at\}/);
+ assert.match(api,/\/admin\/wa-bookings\/:orderNumber\/collect-vis/);
+ assert.match(admin,/Tandai Kartu Sudah Diambil/);
+ assert.match(admin,/detail\.visCardReservation\?\.state === "collected"/);
+});
