@@ -230,6 +230,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           p.status::text AS payment_status,
           booking.booking_date AS booking_date, booking.start_time AS booking_start_time,
           booking.source AS booking_source, booking.notes AS booking_notes,
+          booking.status::text AS booking_status,
           a.identity_type AS identity_type, a.identity_label AS identity_label
         FROM sport_center.x904_nonmember_daily_access a
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
@@ -246,6 +247,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       // Legacy verified-card/PIN grants retain their established behavior.
       if (a.booking_source === "gym_public_guest" &&
           String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
+        if (a.booking_status !== "confirmed" || a.payment_status !== "confirmed") return;
         const handover = await tx.execute(sql`SELECT 1
           FROM sport_center.gym_vis_card_reservations r
           WHERE r.booking_id=${Number(a.booking_id)}
