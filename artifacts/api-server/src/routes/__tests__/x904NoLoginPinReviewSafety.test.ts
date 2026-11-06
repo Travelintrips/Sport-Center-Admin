@@ -26,6 +26,7 @@ describe("No-login ordinary PIN booking/payment isolation", () => {
   });
   test("confirmed bank payment cannot bypass identity staff review for guests", () => {
     expect(migration).toContain("b.source='gym_public_guest'");
+    expect(migration).toContain("AND a.identity_type='pin'");
     expect(migration).toContain("WHEN is_guest THEN 'review_required'");
     expect(migration).toContain("WHEN is_guest THEN 'review_required' ELSE 'verified'");
     expect(migration).toContain("NEW.status::text = 'confirmed'");
