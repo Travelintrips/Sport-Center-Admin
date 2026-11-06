@@ -40,6 +40,7 @@ beforeAll(async () => {
   // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
   await run("CREATE ROLE anon");
   await run("CREATE ROLE authenticated");
+  await run("ALTER TABLE sport_center.x904_nonmember_daily_access ADD COLUMN visitor_name text");
   await run(`ALTER TABLE sport_center.sport_bookings
     ADD COLUMN order_number text,
     ADD COLUMN customer_name text,
