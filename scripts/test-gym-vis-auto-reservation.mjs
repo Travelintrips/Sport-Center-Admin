@@ -149,3 +149,10 @@ test("post-handover machine commands demand verified final suspend receipt",()=>
  assert.match(release,/receipt\.callback_received_at<=latest\.observed_at/);
  assert.match(release,/created_at>=\$\{row\.collected_at\}/);
 });
+
+test("VIS cannot return to the available pool while the customer booking remains open",()=>{
+ const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
+ assert.match(release,/b\.status::text AS booking_status/);
+ assert.match(release,/booking_still_open/);
+ assert.match(release,/\["completed","cancelled","refunded","expired","rejected"\]/);
+});
