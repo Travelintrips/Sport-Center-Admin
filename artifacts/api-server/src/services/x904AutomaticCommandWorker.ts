@@ -59,7 +59,12 @@ export async function processX904AutomaticCommands(store: Pick<typeof db,'execut
         WHERE mp.membership_id=e.membership_id AND mp.status='verified'
           AND mp.device_serial='TDBD234200545' AND mp.user_pin=${pins[0]}
       )`}
-    ORDER BY e.event_id LIMIT 20`);
+    -- A fixed window of old DAILY_EXPIRY events may remain in review/hold
+    -- indefinitely, starving newly confirmed paid memberships.
+    -- Prioritize confirmed payment events while retaining a bounded batch.
+    ORDER BY CASE WHEN e.reason='PAYMENT_CONFIRMED' AND e.payment_id IS NOT NULL THEN 0 ELSE 1 END,
+      CASE WHEN e.reason='PAYMENT_CONFIRMED' AND e.payment_id IS NOT NULL THEN e.event_id END DESC,
+      e.event_id ASC LIMIT 20`);
   for(const ev of events.rows){
     await store.transaction(async tx=>{
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904201)`);

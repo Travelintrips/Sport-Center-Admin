@@ -792,6 +792,14 @@ export default function AdminCheckoutForm() {
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
       && membershipX904Name && membershipX904IdentityConfirmed && membershipX904Pin && membershipX904SelectedUid !== null && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && renewalPeriodValid && (memberAction !== "checkin" || matchedMember.status === "active"));
+  // Restore the authoritative receipt state when returning after a session
+  // redirect or a successful approval. Never rely on a stale client-only card.
+  useEffect(() => {
+    if (["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole()??"")) {
+      void loadCombinedReceipts();
+    }
+  }, []);
+
   async function loadCombinedReceipts() {
     if (!["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "")) return;
     setCombinedReviewLoading(true);
@@ -1478,7 +1486,7 @@ export default function AdminCheckoutForm() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <strong>Bukti #{receipt.id} · {formatRupiah(receipt.amount)}</strong>
                   <span className={receipt.status==="verified"?"text-green-700":"text-amber-700"}>
-                    {receipt.status==="awaiting_bank_verification"?"Menunggu persetujuan foto":receipt.status==="photo_approved"?"Disetujui dari foto (belum diverifikasi bank)":receipt.status}
+                    {receipt.status==="awaiting_bank_verification"?"Menunggu persetujuan foto":receipt.status==="photo_approved"?"Membership diproses — disetujui dari foto (belum verifikasi bank)":receipt.status}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -1487,7 +1495,7 @@ export default function AdminCheckoutForm() {
                 </div>
                 {receipt.allocations.map((allocation,index)=>(
                   <div key={index} className="flex flex-wrap justify-between gap-2 border-t pt-2">
-                    <span>{allocation.name} · PIN {allocation.pin} · {allocation.kind==="new"?"Member baru":"Perpanjangan"}</span>
+                    <span>{allocation.name} · PIN {allocation.pin} · {allocation.kind==="new"?"Member Gym baru":"Perpanjangan member Gym"}{allocation.status==="confirmed"?" · Terproses":""}</span>
                     <strong>{formatRupiah(allocation.amount)}</strong>
                   </div>
                 ))}
