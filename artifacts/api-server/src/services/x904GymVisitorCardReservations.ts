@@ -29,7 +29,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
   if (input.officialFundsChecked !== true || !/^[A-Z0-9/_-]{6,80}$/.test(ref) ||
       actor.length < 3 || !/^[A-Z0-9-]{4,40}$/i.test(String(input.orderNumber))) {
     throw new VisReservationError(400, "bank_verification_required",
-      "Petugas harus mencocokkan mutasi bank resmi dan memasukkan nomor referensi transaksi bank.");
+      "Admin wajib memeriksa penerimaan dana di kanal resmi Mandiri/Yokke atau rekening bank dan mencatat referensi transaksi yang unik.");
   }
   try {
     return await db.transaction(async tx => {
@@ -87,24 +87,13 @@ export async function autoReserveVisAfterFundsVerified(input: {
         throw new VisReservationError(409, "bank_reference_mismatch",
           "Referensi resmi tidak cocok dengan referensi pembayaran yang tercatat. Perlu rekonsiliasi.");
       }
-      // Do not treat a staff checkbox, screenshot or manually imported bank
-      // mutation as independent proof of payment. Require a linked incoming
-      // bank credit with recorded ingestion provenance.
-      const bankEvidence = await tx.execute(sql`SELECT id
-        FROM sport_center.bank_mutations
-        WHERE matched_payment_id=${Number(payment.id)}
-          AND status::text='auto_matched'
-          AND upper(btrim(direction))='IN'
-          AND credit_amount>=${Number(booking.amount)}
-          AND upper(btrim(coalesce(provider_order_id,'')))=${ref}
-          AND nullif(btrim(coalesce(source_app,'')),'') IS NOT NULL
-          AND nullif(btrim(coalesce(source_module,'')),'') IS NOT NULL
-          AND lower(btrim(coalesce(provider_name,''))) NOT IN ('','manual')
-        LIMIT 2 FOR UPDATE`);
-      if (bankEvidence.rows.length !== 1) {
-        throw new VisReservationError(409, "independent_bank_evidence_missing",
-          "Rekonsiliasi mutasi bank independen belum tersedia untuk pembayaran ini. Kartu VIS tetap ditahan.");
-      }
+      // Manual Mandiri/Yokke QRIS or bank transfer workflow:
+      // payment and booking must already be confirmed by staff, then a
+      // logged-in admin re-attests that funds reached the official account.
+      // A screenshot alone, matching amount, or unmatched Gmail notification
+      // cannot set those statuses or reserve a card.
+      // The provider/API feed is optional for manual confirmation, not a
+      // prerequisite for physical card reservation.
       const prior = await tx.execute(sql`SELECT card_code,state,funds_reference
         FROM sport_center.gym_vis_card_reservations
         WHERE booking_id=${Number(booking.id)} FOR UPDATE`);
