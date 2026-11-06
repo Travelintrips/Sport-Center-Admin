@@ -118,7 +118,7 @@ test("VIS release requires fresh actual device snapshot with suspended group and
  const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
  assert.match(release,/gym_x904_access_snapshots/);
  assert.match(release,/observed_at >= now\(\)-interval '10 minutes'/);
- assert.match(release,/observed_at >= \$\{row\.reserved_at\}/);
+ assert.match(release,/observed_at >= \$\{row\.collected_at\}/);
  assert.match(release,/jsonb_array_elements\(users\)/);
  assert.match(release,/u->>'group'='2'/);
  assert.match(release,/u->>'role'='0'/);
