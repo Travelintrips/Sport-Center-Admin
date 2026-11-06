@@ -1381,7 +1381,10 @@ export default function AdminCheckoutForm() {
                     {receipt.status==="awaiting_bank_verification"?"Menunggu verifikasi dana":receipt.status}
                   </span>
                 </div>
-                <div className="text-xs text-muted-foreground">{receipt.method.toUpperCase()} · {receipt.paymentDate}</div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{receipt.method.toUpperCase()} · {receipt.paymentDate}</span>
+                  <a href={receipt.proofUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline">Lihat bukti foto</a>
+                </div>
                 {receipt.allocations.map((allocation,index)=>(
                   <div key={index} className="flex flex-wrap justify-between gap-2 border-t pt-2">
                     <span>{allocation.name} · PIN {allocation.pin} · {allocation.kind==="new"?"Member baru":"Perpanjangan"}</span>
