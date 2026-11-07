@@ -7,7 +7,10 @@ const api = read("artifacts/api-server/src/routes/whatsapp.ts");
 const admin = read("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
 
 test("public Gym never allows arbitrary unverified PIN self-selection",()=>{
- assert.match(form,/Pencocokan Identitas Gym X904/);
+ assert.doesNotMatch(form,/Pencocokan Identitas Gym X904/);
+ assert.match(form,/Verifikasi PIN X904 untuk nama terdaftar/);
+ assert.match(form,/type="password" inputMode="numeric"/);
+ assert.match(form,/font-bold text-green-700 border-green-300/);
  assert.doesNotMatch(form,/PIN Mesin X904 \(Opsional\)/);
  assert.match(form,/publicGymGuest \|\| !dedicatedNonmember \|\| !x904IdentityValue\.trim\(\)/);
  assert.match(form,/\/api\/wa\/gym-name-route/);
