@@ -167,6 +167,9 @@ jobs:
       - name: Verify stale admin chunk handling and Hostinger SPA asset responses
         run: node --test scripts/test-stale-admin-chunk-recovery.mjs
 
+      - name: Verify new X904 role-0 enrollment default-suspend safety
+        run: node --test scripts/test-x904-new-user-role0-default-suspend.mjs
+
       - name: Verify Gym name match and visitor-card routing without public X904 grants
         run: node --test scripts/test-gym-guest-name-x904-route.mjs
 
