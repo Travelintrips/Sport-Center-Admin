@@ -3704,6 +3704,18 @@ export default function AdminBookings() {
     return m;
   }, [bookings]);
 
+  // Only collapse a receipt when ALL allocations are on the current page.
+  // A paginated/incomplete result must never show a misleading partial total.
+  const combinedGymCountByReceiptId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const row of bookings as any[]) {
+      if (row.source !== "gym_membership_payment" || row.combinedGymReceipt?.id == null) continue;
+      const id = Number(row.combinedGymReceipt.id);
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  }, [bookings]);
+
   // Corporate monthly invoices can contain several recurring groups across
   // different facilities. They represent one payment obligation in the list,
   // so collapse those rows by companyInvoiceId rather than by groupRef.
@@ -3711,8 +3723,11 @@ export default function AdminBookings() {
     if (booking?.payerType === "company" && booking?.companyInvoiceId != null) {
       return `company-invoice:${booking.companyInvoiceId}`;
     }
-    if (booking?.combinedGymReceipt?.id != null && booking.source === "gym_membership_payment")
-      return `gym-receipt:${booking.combinedGymReceipt.id}`;
+    if (booking?.combinedGymReceipt?.id != null && booking.source === "gym_membership_payment") {
+      const id = Number(booking.combinedGymReceipt.id);
+      if (combinedGymCountByReceiptId.get(id) === Number(booking.combinedGymReceipt.allocationCount))
+        return `gym-receipt:${id}`;
+    }
     return booking?.groupRef ? `group:${booking.groupRef}` : null;
   };
 
