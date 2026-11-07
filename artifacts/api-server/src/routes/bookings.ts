@@ -798,6 +798,37 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const membershipPaymentById = new Map(
       membershipPayments.map((payment) => [payment.id, payment]),
     );
+    // Read-only grouping metadata. Combined receipt is NOT a normal groupRef
+    // and must never trigger group payment/cancel/accounting actions.
+    const combinedGymByPaymentId = new Map<number, {
+      id: number; amount: number; allocationCount: number; status: string; method: string;
+    }>();
+    if (membershipPaymentIds.length > 0) {
+      try {
+        const linked = await db.execute(sql`
+          SELECT a.membership_payment_id, r.id receipt_id, r.amount, r.status,
+            r.payment_method,
+            (SELECT COUNT(*)::int FROM sport_center.gym_combined_receipt_allocations x
+             WHERE x.receipt_id=r.id AND x.status='confirmed') allocation_count
+          FROM sport_center.gym_combined_receipt_allocations a
+          JOIN sport_center.gym_combined_receipts r ON r.id=a.receipt_id
+          WHERE a.membership_payment_id IN
+            (${sql.join(membershipPaymentIds.map(id=>sql`${id}`),sql`, `)})
+            AND a.status='confirmed' AND r.status='photo_approved'
+            AND r.bank_mutation_id IS NULL
+        `);
+        for (const row of linked.rows as any[]) {
+          combinedGymByPaymentId.set(Number(row.membership_payment_id), {
+            id:Number(row.receipt_id), amount:Number(row.amount),
+            allocationCount:Number(row.allocation_count),
+            status:String(row.status), method:String(row.payment_method),
+          });
+        }
+      } catch (err) {
+        req.log.warn({err}, "Combined Gym read-only list metadata unavailable");
+      }
+    }
+
     const latestMembershipPaymentByMembership = new Map<number, (typeof membershipPayments)[number]>();
     const membershipPaymentsByMembership = new Map<
       number,
@@ -1016,6 +1047,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           : null;
       return {
         ...b,
+        combinedGymReceipt: b.membershipPaymentId != null
+          ? (combinedGymByPaymentId.get(b.membershipPaymentId) ?? null)
+          : null,
         companyInvoiceId: companyInvoiceId ?? b.companyInvoiceId,
         companyInvoiceNumber: invoice?.invoiceNumber ?? null,
         companyInvoiceTotal: companyInvoiceTotal && companyInvoiceTotal > 0 ? companyInvoiceTotal : null,
