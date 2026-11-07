@@ -780,3 +780,62 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
     delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
   }
 });
+
+
+test("unrestricted role-0 rollout handles two fresh PINs and protects special, mapped, registered and reused PINs", async () => {
+  process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED="true";
+  process.env.GYM_X904_NEW_USER_BASELINE_AT="2026-11-08T23:59:00.000Z";
+  delete process.env.GYM_X904_NEW_USER_ONLY_PIN;
+  try {
+    await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
+      VALUES ('TDBD234200545','660',660,'NEW MULTI SPACE',0),
+             ('TDBD234200545','661',661,'SECOND ORDINARY',0),
+             ('TDBD234200545','662',662,'NEW SPECIAL FOUR',4),
+             ('TDBD234200545','663',663,'NEW SPECIAL ADMIN',14),
+             ('TDBD234200545','664',664,'NEW MAPPED MEMBER',0),
+             ('TDBD234200545','665',665,'NEW REGISTERED',0),
+             ('TDBD234200545','668',668,'REUSED HISTORICAL',0)`);
+    await run("INSERT INTO sport_center.gym_x904_member_mapping(membership_id,user_pin,device_serial) VALUES(9664,'664','TDBD234200545')");
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+      VALUES ('TDBD234200545','665',665,'NEW REGISTERED','verified','ci',now())`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:03:00Z',user_count+1,
+        users || '[{"pin":"668","name":"REUSED HISTORICAL","role":0,"group":1,"enabled":true}]'::jsonb
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:04:00Z',user_count-1,
+        (SELECT jsonb_agg(item) FROM jsonb_array_elements(users) item WHERE item->>'pin'<>'668')
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:05:00Z',user_count+7,
+        users || '[
+          {"pin":"660","name":"NEW MULTI SPACE","role":0,"group":1,"enabled":true},
+          {"pin":"661","name":"SECOND ORDINARY","role":0,"group":1,"enabled":true},
+          {"pin":"662","name":"NEW SPECIAL FOUR","role":4,"group":1,"enabled":true},
+          {"pin":"663","name":"NEW SPECIAL ADMIN","role":14,"group":1,"enabled":true},
+          {"pin":"664","name":"NEW MAPPED MEMBER","role":0,"group":1,"enabled":true},
+          {"pin":"665","name":"NEW REGISTERED","role":0,"group":1,"enabled":true},
+          {"pin":"668","name":"REUSED HISTORICAL","role":0,"group":1,"enabled":true}
+        ]'::jsonb
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    const at=new Date("2026-11-09T00:06:00.000Z");
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,at);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,at);
+    const rows=(await run(`SELECT user_pin,command_type,state,payload FROM sport_center.x904_user_commands
+      WHERE payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND' ORDER BY user_pin`)).rows;
+    expect(rows.map((r:any)=>r.user_pin)).toEqual(["650","660","661"]);
+    expect(rows.every((r:any)=>r.command_type==="SUSPEND_USER" && r.state==="queued")).toBe(true);
+    expect(rows.find((r:any)=>r.user_pin==="660").payload).toMatchObject({
+      expectedUid:660,expectedName:"NEW MULTI SPACE",expectedRole:0,
+      firstObservedAt:"2026-11-09T00:05:00.000Z",
+      suspendDeadlineAt:"2026-11-09T00:35:00.000Z"
+    });
+  } finally {
+    delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
+    delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
+  }
+});
