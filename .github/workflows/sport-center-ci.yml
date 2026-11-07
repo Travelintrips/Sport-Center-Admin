@@ -209,6 +209,9 @@ jobs:
       - name: Verify QRIS Gmail PROD detection safety contract
         run: node --test scripts/qris-mandiri/qris-prod-runtime-contract.test.mjs
 
+      - name: Verify payroll tab creation previews and safeguards
+        run: node scripts/test-sc-employee-payroll-tab-contract.mjs
+
       - name: Verify Kasbon salary Sheets B-to-G planner (no production writes)
         run: node --experimental-strip-types scripts/test-sc-kasbon-total-sheet-plan.mjs
 
