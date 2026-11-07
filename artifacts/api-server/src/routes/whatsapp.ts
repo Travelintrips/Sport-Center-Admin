@@ -972,8 +972,8 @@ router.post("/wa/booking", async (req, res) => {
         res.status(400).json({ error: "Booking Gym mandiri tidak menerima pemilihan PIN/kartu X904." }); return;
       }
       if (!/^[\p{L}\p{M}\p{N} .'-]{2,100}$/u.test(bookingCustomerName) ||
-          !/^628[0-9]{7,13}$/.test(guestPhone)) {
-        res.status(400).json({ error: "Isi nama pengunjung dan nomor WhatsApp 628xxxxxxxxxx yang valid." }); return;
+          !/^[1-9][0-9]{7,14}$/.test(guestPhone)) {
+        res.status(400).json({ error: "Isi nama pengunjung dan nomor WhatsApp internasional yang valid." }); return;
       }
       if (!["qris", "transfer"].includes(String(req.body.paymentMethod ?? ""))) {
         res.status(400).json({ error: "Pilih QRIS atau Transfer Bank." }); return;
