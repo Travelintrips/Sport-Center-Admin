@@ -573,10 +573,12 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
   const { default: express } = await import("express");
   const { default: supertest } = await import("supertest");
   const { default: bookingsRouter } = await import("../routes/bookings.js");
+  const { default: whatsappRouter } = await import("../routes/whatsapp.js");
   const { createToken } = await import("../lib/auth.js");
   const app = express();
   app.use(express.json());
   app.use("/api", bookingsRouter);
+  app.use("/api", whatsappRouter);
   const request = supertest(app);
   const id=9606, pay=9706, pin="606", uid=606, name="CI HTTP PIN STAFF";
   const dateParts=new Intl.DateTimeFormat("en-CA",{
@@ -588,6 +590,10 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
     timeZone:"Asia/Jakarta",hour:"2-digit",hourCycle:"h23"
   }).format(new Date()));
   const endpoint=`/api/bookings/${id}/x904-guest-pin-approve`;
+  // Real public booking HTTP route: reject incomplete checkout before any DB write.
+  const incomplete=await request.post("/api/wa/booking").send({publicGymGuest:true});
+  expect(incomplete.status).toBe(400);
+  expect(incomplete.body).toHaveProperty("error");
 
   process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
   try {
