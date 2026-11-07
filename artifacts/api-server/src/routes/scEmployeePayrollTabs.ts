@@ -93,7 +93,7 @@ router.post("/admin/sc-employees/payroll-tabs/create",adminMiddleware,async(req,
   });
   const identityChanged=sourceRows.some((row,i)=>{
    const number=String(row?.[0]??"").trim(),name=String(row?.[1]??"").trim();
-   if(!/^[1-9]\\d{0,2}$/.test(number)||!name)return false;
+   if(!/^[1-9]\d{0,2}$/.test(number)||!name)return false;
    return String(after[i]?.[0]??"").trim()!==number||
     String(after[i]?.[1]??"").trim()!==name;
   });
