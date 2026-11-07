@@ -1370,6 +1370,52 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
         console.warn("[gym-vis] reservation status unavailable", error);
       }
     }
+    // Public status: fail closed. Never expose the X904 PIN/UID, raw command or audit data.
+    // An access becomes scan-ready only after an authenticated command's durable read-back.
+    let gymAccessStatus: "not_active" | "pending" | "active" | "expired" = "not_active";
+    let gymAccessExpiresAt: string | null = null;
+    if (booking.source === "gym_public_guest") {
+      try {
+        const accessRows = await db.execute(sql`
+          SELECT a.access_state, a.verification_state, a.activated_at, a.expires_at,
+                 last_command.command_type, last_command.state AS command_state,
+                 last_command.result AS command_result
+          FROM sport_center.x904_nonmember_daily_access a
+          LEFT JOIN LATERAL (
+            SELECT c.command_type, c.state, c.result
+            FROM sport_center.x904_user_commands c
+            WHERE c.payload->>'accessId' = a.access_id::text
+              AND c.command_type IN ('ACTIVATE_USER','SUSPEND_USER')
+            ORDER BY c.created_at DESC, c.command_id DESC LIMIT 1
+          ) last_command ON true
+          WHERE a.booking_id = ${booking.id}
+          ORDER BY a.created_at DESC, a.access_id DESC LIMIT 1
+        `);
+        if (accessRows.rows.length === 1) {
+          const access = accessRows.rows[0] as any;
+          const expiresAt = access.expires_at ? new Date(String(access.expires_at)) : null;
+          const accessNotExpired = !!expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() > Date.now();
+          const latestActivationVerified =
+            access.command_type === "ACTIVATE_USER" &&
+            access.command_state === "completed" &&
+            access.command_result?.readBackConfirmed === true &&
+            Number(access.command_result?.afterGroup) === 1;
+          const paymentVerified = ["confirmed", "completed"].includes(booking.status) && payment?.status === "confirmed";
+          if (access.access_state === "expired" || (expiresAt && !accessNotExpired)) {
+            gymAccessStatus = "expired";
+          } else if (paymentVerified && access.verification_state === "verified" &&
+                     access.access_state === "active" && access.activated_at &&
+                     accessNotExpired && latestActivationVerified) {
+            gymAccessStatus = "active";
+            gymAccessExpiresAt = expiresAt!.toISOString();
+          } else {
+            gymAccessStatus = "pending";
+          }
+        }
+      } catch (error) {
+        console.warn("[gym-access-status] unavailable", error);
+      }
+    }
     const withholding = calculateBookingWithholdingTax(booking);
     res.json({
       orderNumber: booking.orderNumber,
@@ -1391,6 +1437,8 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       status: booking.status,
       source: booking.source,
       visitorCard,
+      gymAccessStatus: booking.source === "gym_public_guest" ? gymAccessStatus : null,
+      gymAccessExpiresAt: booking.source === "gym_public_guest" ? gymAccessExpiresAt : null,
       // Guest notes historically contained PIN requests. Never expose them
       // through the unauthenticated order-status API, even for old bookings.
       notes: booking.source === "gym_public_guest" ? "Identitas X904 ditinjau petugas." : booking.notes,

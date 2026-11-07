@@ -24,6 +24,8 @@ interface BookingStatus {
   status: string;
   source: string;
   visitorCard?: { code: string; state: string } | null;
+  gymAccessStatus?: "not_active" | "pending" | "active" | "expired" | null;
+  gymAccessExpiresAt?: string | null;
   notes: string | null;
   paymentDeadline: string | null;
   checkedInAt: string | null;
@@ -94,16 +96,26 @@ export default function WaBookingStatus() {
   const [booking, setBooking] = useState<BookingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function reloadStatus(initial = false) {
+    if (!initial) setRefreshing(true);
+    try {
+      const response = await fetch(`/api/wa/status/${encodeURIComponent(params.orderNumber)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || "Gagal memuat status booking");
+      setBooking(data);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal memuat data booking");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
-    fetch(`/api/wa/status/${params.orderNumber}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) setError(data.error);
-        else setBooking(data);
-      })
-      .catch(() => setError("Gagal memuat data booking"))
-      .finally(() => setLoading(false));
+    void reloadStatus(true);
   }, [params.orderNumber]);
 
   if (loading) {
@@ -135,6 +147,11 @@ export default function WaBookingStatus() {
   // receive a fresh upload link.
   const canUploadProof = booking.status === "pending_payment" && booking.uploadProofUrl;
   const grossAmount = booking.grandTotal ?? booking.totalPrice;
+  const publicGymGuest = booking.source === "gym_public_guest";
+  const paymentConfirmed = ["confirmed", "completed"].includes(booking.status) && booking.payment?.status === "confirmed";
+  const bookingCancelled = ["cancelled", "rejected", "expired", "refunded"].includes(booking.status);
+  const paymentDescription = paymentConfirmed ? "Lunas" : bookingCancelled ? "Tidak Aktif" : booking.status === "pending_payment" ? "Menunggu Pembayaran" : "Menunggu Verifikasi Admin";
+  const gymAccessDescription = booking.gymAccessStatus === "active" ? "Aktif — Silakan Scan" : booking.gymAccessStatus === "expired" ? "Masa Akses Berakhir" : booking.gymAccessStatus === "pending" ? "Menunggu Aktivasi X904" : "Belum Aktif";
   const hasWithholding = Number(booking.pphAmount ?? 0) > 0 && booking.netAmount != null;
 
   return (
@@ -180,7 +197,26 @@ export default function WaBookingStatus() {
           </CardContent>
         </Card>
 
-        {booking.source === "gym_public_guest" && booking.visitorCard && (
+        {publicGymGuest && (
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold uppercase tracking-wide text-slate-700">Status Booking, Pembayaran & Akses Gym</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-3"><span>Booking</span><strong>{bookingCancelled ? "Tidak Aktif" : "Berhasil Dibuat"}</strong></div>
+              <div className="flex items-center justify-between gap-3"><span>Pembayaran</span><strong className={paymentConfirmed ? "text-green-700" : "text-amber-700"}>{paymentDescription}</strong></div>
+              <div className="flex items-center justify-between gap-3"><span>Akses X904</span><strong className={booking.gymAccessStatus === "active" && paymentConfirmed ? "text-green-700" : "text-slate-700"}>{paymentConfirmed && booking.gymAccessStatus === "active" ? "Aktif — Silakan Scan" : gymAccessDescription}</strong></div>
+              {paymentConfirmed && booking.gymAccessStatus === "active" && booking.gymAccessExpiresAt && (
+                <p className="rounded-lg bg-green-50 p-2 text-xs text-green-800">Berlaku hingga {formatDateTime(booking.gymAccessExpiresAt)}. Gunakan identitas yang telah diverifikasi petugas.</p>
+              )}
+              <p className="border-t border-slate-100 pt-2 text-xs text-slate-500">Status akses hanya aktif setelah pembayaran dan identitas terverifikasi serta aktivasi mesin memiliki read-back berhasil. Status ini bukan bukti pintu sudah terbuka.</p>
+              <Button type="button" variant="outline" className="w-full" disabled={refreshing} onClick={() => void reloadStatus()}>
+                {refreshing ? "Memperbarui..." : "Perbarui Status"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+        {publicGymGuest && booking.visitorCard && (
           <Card className="overflow-hidden border-orange-200 bg-gradient-to-br from-orange-50 to-white shadow-sm">
             <CardContent className="p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-orange-700">Tiket Kartu Pengunjung Gym</p>

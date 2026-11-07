@@ -4,6 +4,7 @@ import { join } from "node:path";
 describe("Gym no-login ordinary PIN field and server-side match", () => {
   const form = readFileSync(join(process.cwd(), "../sport-center/src/pages/wa/BookingForm.tsx"), "utf8");
   const api = readFileSync(join(process.cwd(), "src/routes/whatsapp.ts"), "utf8");
+  const statusPage = readFileSync(join(process.cwd(), "../sport-center/src/pages/wa/BookingStatus.tsx"), "utf8");
 
   test("no-login guest sees green registered name without ever entering a PIN", () => {
     expect(form).toContain('guestIdentityRoute === "registered" || guestIdentityRoute === "expired_member"');
@@ -59,6 +60,22 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).toContain("Cek Status Booking");
     expect(form).not.toContain("Booking Dikonfirmasi!");
     expect(form).not.toContain("Bukti pembayaran cocok dan booking otomatis dikonfirmasi.");
+  });
+
+  test("Gym booking status is gated by payment, entitlement and X904 read-back", () => {
+    expect(api).toContain('c.payload->>\'accessId\' = a.access_id::text');
+    expect(api).toContain('access.command_result?.readBackConfirmed === true');
+    expect(api).toContain('Number(access.command_result?.afterGroup) === 1');
+    expect(api).toContain('access.access_state === "active"');
+    expect(api).toContain('access.verification_state === "verified"');
+    expect(api).toContain('accessNotExpired && latestActivationVerified');
+    expect(api).toContain('payment?.status === "confirmed"');
+    expect(api).toContain('gymAccessStatus: booking.source === "gym_public_guest"');
+    expect(statusPage).toContain('Aktif — Silakan Scan');
+    expect(statusPage).toContain('Perbarui Status');
+    expect(statusPage).toContain('cache: "no-store"');
+    expect(statusPage).toContain('booking.gymAccessStatus === "active" && paymentConfirmed');
+    expect(statusPage).not.toContain('setInterval(');
   });
 
   test("VIS path remains separate and anonymous cannot force a PIN/UID", () => {
