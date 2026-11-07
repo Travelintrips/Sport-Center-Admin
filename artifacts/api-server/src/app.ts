@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import * as _pinoHttpModule from "pino-http";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,7 +174,7 @@ if (process.env.NODE_ENV === "production") {
       maxAge: "1y",
       fallthrough: false,
     }));
-    app.use("/assets", (_err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    app.use("/assets", (_err: unknown, _req: Request, res: Response, _next: NextFunction) => {
       res.setHeader("Cache-Control", "no-store");
       res.status(404).type("text/plain").send("Asset not found");
     });
