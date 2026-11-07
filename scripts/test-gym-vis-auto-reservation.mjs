@@ -42,6 +42,9 @@ test("only official verified funds plus confirmed unique payment can reserve a p
  assert.match(service,/a\.access_state='review_required'/);
  assert.match(service,/snap\.observed_at>=now\(\)-interval '5 minutes'/);
  assert.match(service,/su->>'group'='2'/);
+ assert.match(service,/SET access_state='expired'/);
+ assert.match(service,/a\.access_state='review_required'/);
+ assert.match(service,/a\.expires_at IS NOT NULL AND a\.expires_at<=now\(\)/);
  const allocateOnly=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function returnVerifiedVisCard"));
  assert.doesNotMatch(allocateOnly,/ACTIVATE_USER|SUSPEND_USER|x904_user_commands/);
 });
