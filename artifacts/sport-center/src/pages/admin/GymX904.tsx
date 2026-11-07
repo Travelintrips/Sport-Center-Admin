@@ -643,15 +643,7 @@ export default function GymX904() {
         <p className="text-xs text-muted-foreground">Waktu lokal mesin; jenis verifikasi tidak tersedia melalui pembacaan TCP. Tidak otomatis dihitung sebagai check-in member Sport Center.</p>
         {lanLogsError ? <p role="alert" className="text-sm">Log LAN belum tersedia atau backend belum aktif.</p> :
           lanLogsLoading ? <p className="text-sm">Memuat catatan LAN...</p> :
-          <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-4 md:px-5">
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Daftar pengguna</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">Status berdasarkan pembacaan terakhir perangkat X904.</p>
-              </div>
-              <span className="rounded-md border border-border/70 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">Read-only snapshot</span>
-            </div>
-            <div className="overflow-x-auto"><table className="w-full min-w-[1300px] border-separate border-spacing-0 text-left text-[13px]"><thead><tr className="border-b"><th className="p-2">Waktu mesin</th><th className="p-2">PIN</th><th className="p-2">Diterima database</th></tr></thead>
+          <div className="overflow-x-auto rounded-xl border border-border/70 bg-card shadow-sm"><table className="w-full min-w-[1240px] border-separate border-spacing-0 text-left text-[13px]"><thead><tr className="border-b"><th className="p-2">Waktu mesin</th><th className="p-2">PIN</th><th className="p-2">Diterima database</th></tr></thead>
           <tbody>{(lanLogs?.events ?? []).map((e) => <tr key={e.event_id} className="border-b">
             <td className="p-2">{e.device_time}</td><td className="p-2">{e.user_pin}</td>
             <td className="p-2">{new Date(e.received_at).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB</td>
