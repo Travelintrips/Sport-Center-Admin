@@ -8,6 +8,7 @@ import {
   settingsTable,
   waBookingSessionsTable,
   auditLogsTable,
+  usersTable,
 } from "@workspace/db";
 import { eq, and, desc, or, sql, ilike } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -562,8 +563,12 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
 router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware, async (req, res) => {
   const admin = (req as any).user;
   const auditUser = getUserFromReq(req);
-  const adminEmail = String(auditUser.userName ?? admin?.email ?? admin?.name ?? "").trim();
-  if (!adminEmail) { res.status(403).json({ error: "Identitas admin tidak tersedia." }); return; }
+  const adminUserId = Number(admin?.userId ?? 0);
+  const [adminAccount] = Number.isSafeInteger(adminUserId) && adminUserId > 0
+    ? await db.select({ name: usersTable.name, email: usersTable.email })
+        .from(usersTable).where(eq(usersTable.id, adminUserId)).limit(1)
+    : [];
+  const adminEmail = String(auditUser.userName ?? adminAccount?.email ?? adminAccount?.name ?? `admin-user-${adminUserId || "authenticated"}`).trim();
   try {
     const confirmedPaymentId = Number(req.body?.confirmedPaymentId ?? 0);
     const assigned = Number.isSafeInteger(confirmedPaymentId) && confirmedPaymentId > 0
