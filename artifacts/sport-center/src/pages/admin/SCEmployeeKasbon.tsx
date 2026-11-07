@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [open,setOpen]=useState(false), [editing,setEditing]=useState<number|null>(null), [form,setForm]=useState<Form>(blank);
  const [uploading,setUploading]=useState(false);
  const [toDelete,setToDelete]=useState<Kasbon|null>(null);
+ const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string}|null>(null);
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
@@ -44,6 +45,17 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   },
   onError: (e:Error) => toast({title:"Gagal menghapus kasbon",description:e.message,variant:"destructive"}),
  });
+
+ const previewSalary=useMutation({
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
+  onSuccess:result=>setSalaryPreview(result),
+  onError:(e:Error)=>toast({title:"Pratinjau Sync gagal",description:e.message,variant:"destructive"})
+ });
+ const syncSalary=useMutation({
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}),
+  onSuccess:result=>{setSalaryPreview(null);toast({title:"Kasbon berhasil Sync ke Google Sheets",description:result.cell+" — "+currency(result.amount)});},
+  onError:(e:Error)=>{setSalaryPreview(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
+ });
  const uploadProof=async (file:File)=>{
   if(file.size>10*1024*1024 || !["image/jpeg","image/png","image/webp","application/pdf"].includes(file.type)){toast({title:"Gunakan JPG, PNG, WebP, atau PDF maksimal 10 MB",variant:"destructive"});return;}
   setUploading(true);
@@ -58,7 +70,12 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   <div className="flex flex-wrap items-center justify-between gap-3">
    <div className="flex items-start gap-3"><Button variant="outline" size="icon" aria-label="Kembali ke daftar karyawan" onClick={onBack}><ArrowLeft className="h-4 w-4"/></Button>
     <div><h2 className="text-xl font-bold">Histori Kasbon — {employee.fullName}</h2><p className="text-sm text-muted-foreground">ID Karyawan: {employee.employeeId} · Histori pencatatan kasbon</p></div></div>
-   <div className="flex flex-wrap gap-2"><Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button></div>
+   <div className="flex flex-wrap gap-2">
+    <Button variant="outline" disabled={isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} onClick={()=>previewSalary.mutate()}>
+      <RefreshCw className="mr-2 h-4 w-4"/>{previewSalary.isPending?"Memeriksa...":"Insert / Sync Sheets"}
+    </Button>
+    <Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button>
+   </div>
   </div>
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
    <CardTitle>Histori Kasbon ({records.length})</CardTitle>
@@ -73,6 +90,22 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
+  <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
+   <DialogContent className="max-w-md">
+    <DialogHeader><DialogTitle>Konfirmasi Insert / Sync Kasbon</DialogTitle></DialogHeader>
+    <div className="space-y-2 text-sm">
+     <p>Karyawan: <strong>{employee.fullName}</strong> ({employee.employeeId})</p>
+     <p>Nama Google Sheets: <strong>{salaryPreview?.name}</strong></p>
+     <p>Tujuan: Gaji November 2026 — <strong>{salaryPreview?.cell}</strong> (kolom G)</p>
+     <p>Total Kasbon terbaru: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
+     <p className="text-muted-foreground">Nilai kolom G sebelumnya akan diganti (bukan dijumlah). Jika baris berubah atau nama tidak cocok, sistem menolak penulisan.</p>
+    </div>
+    <div className="flex justify-end gap-2">
+     <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
+     <Button disabled={!salaryPreview||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Insert / Sync"}</Button>
+    </div>
+   </DialogContent>
+  </Dialog>
   <Dialog open={toDelete!==null} onOpenChange={value=>{if(!value&&!remove.isPending)setToDelete(null);}}>
    <DialogContent className="max-w-md">
     <DialogHeader><DialogTitle>Hapus catatan kasbon?</DialogTitle></DialogHeader>
