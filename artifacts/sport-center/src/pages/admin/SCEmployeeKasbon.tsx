@@ -45,7 +45,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  });
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
- const syncEvidence=salaryCheck??initialSalaryCheck;
+ const syncEvidence=initialSalaryCheck??salaryCheck;
  const isSalarySynced=Boolean(syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
  // Historical receipt alone cannot prove the current payroll G cell matches.
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
