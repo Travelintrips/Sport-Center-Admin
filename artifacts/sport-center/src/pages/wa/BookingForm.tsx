@@ -98,7 +98,7 @@ function extractProofToken(uploadProofUrl: string): string | null {
 function localWhatsappDigits(value: string): string {
   const digits = value.replace(/\D/g, "");
   if (digits.startsWith("628")) return digits.slice(2);
-  if (digits.startsWith("08")) return digits.slice(1);
+  if (digits.startsWith("0")) return digits.slice(1);
   return digits;
 }
 
