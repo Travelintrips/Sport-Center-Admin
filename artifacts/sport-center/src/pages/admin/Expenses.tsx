@@ -673,6 +673,12 @@ export default function AdminExpenses() {
               />
             </div>
 
+            <div className="space-y-1">
+              <Label>Catatan tujuan transaksi <span className="text-red-500">*</span></Label>
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Wajib: barang/jasa yang dibeli, tujuan pembayaran, atau alasan transfer..." rows={2} required minLength={3} />
+              <p className="text-xs text-gray-500">Berbeda dari deskripsi bank; catatan ini menjadi keterangan pembukuan Sport Center.</p>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label className="flex items-center gap-1">
@@ -841,11 +847,6 @@ export default function AdminExpenses() {
               </button>
             </div>
 
-            <div className="space-y-1">
-              <Label>Catatan tujuan transaksi <span className="text-red-500">*</span></Label>
-              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Wajib: barang/jasa yang dibeli, tujuan pembayaran, atau alasan transfer..." rows={2} required minLength={3} />
-              <p className="text-xs text-gray-500">Berbeda dari deskripsi bank; catatan ini menjadi keterangan pembukuan Sport Center.</p>
-            </div>
 
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
