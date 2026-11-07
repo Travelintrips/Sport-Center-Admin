@@ -631,6 +631,7 @@ async function preprocessImage(
 export async function scanPaymentProof(
   buffer: Buffer,
   mimetype: string,
+  options: { fullMetadata?: boolean } = {},
 ): Promise<PaymentProofOcrScan> {
   const scannedAt = new Date().toISOString();
   if (!mimetype.startsWith("image/")) {
@@ -714,7 +715,7 @@ export async function scanPaymentProof(
 
           // The current customer flow only blocks on nominal. Avoid a second
           // OCR pass when the first normalized image already found it.
-          if (scan?.amount != null && variant === "color") break;
+          if (scan?.amount != null && variant === "color" && !options.fullMetadata) break;
         } catch (error) {
           console.error(`[payment-proof-ocr] ${variant} OCR pass failed`, error);
         }

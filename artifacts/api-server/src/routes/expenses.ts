@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { scanPaymentProof } from "../lib/paymentProofOcr";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -143,12 +144,22 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
       res.status(400).json({ error: "Persetujuan pemrosesan OCR diperlukan" });
       return;
     }
-    const result = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    const result = await scanPaymentProof(req.file.buffer, req.file.mimetype, { fullMetadata: true });
+    const bankReference = parseBluProofReference(result.rawText);
+    const date = parseBluProofDate(result.rawText) ?? result.date;
+    const textAmount = parseBluExpenseAmount(result.rawText);
+    // This endpoint is explicitly opt-in. Missing metadata gets an image vision
+    // fallback; generic payment confirmation/booking OCR remains unchanged.
+    const fallback = (!bankReference || !date || !textAmount)
+      ? await readExpenseBluMissingFieldsWithVision(req.file.buffer, req.file.mimetype)
+      : null;
     res.json({
-      amount: result.amount,
-      date: result.date,
+      amount: textAmount ?? fallback?.amount ?? result.amount,
+      date: date ?? fallback?.date ?? null,
+      bankReference: bankReference ?? fallback?.bankReference ?? null,
       recipient: result.recipient,
-      paymentMethod: result.paymentMethod,
+      paymentMethod: /PLN\s+PRABAYAR/i.test(result.rawText) ? "PLN Prabayar" :
+        /BI[\s-]*FAST/i.test(result.rawText) ? "BI-FAST" : result.paymentMethod,
       engine: result.engine,
       // Suggestions only, never verified payment evidence.
       verified: false,
