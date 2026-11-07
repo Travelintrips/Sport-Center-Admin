@@ -1606,7 +1606,38 @@ function BookingDetailDrawer({
     onError: (error: any) => {
       paymentToast.toast({ title: "Serah-terima kartu belum berhasil", description: String(error?.message ?? error), variant: "destructive" });
     },
+  })
+  const returnGymVisMutation = useMutation({
+    mutationFn: async () => {
+      if (!gymVisAccess?.returnReady) throw new Error("Suspend/read-back Group 2 belum terbukti");
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/return-vis`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`,
+        },
+        body: JSON.stringify({ physicalCardReturned: true, x904ReadbackChecked: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (payload: any) => {
+      setVisPhysicalReturned(false);
+      await Promise.all([
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] }),
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] }),
+      ]);
+      paymentToast.toast({
+        title: `${payload?.cardCode ?? "Kartu VIS"} kembali ke pool`,
+        description: "Pengembalian diterima setelah suspend dan read-back Group 2 terbukti.",
+      });
+    },
+    onError: (error: any) => {
+      paymentToast.toast({ title: "Pengembalian kartu belum aman", description: String(error?.message ?? error), variant: "destructive" });
+    },
   });
+;
   async function submitNewPaymentProof() {
     if (!newPaymentProof || savingNewPayment || !booking.id) return;
     setSavingNewPayment(true);
