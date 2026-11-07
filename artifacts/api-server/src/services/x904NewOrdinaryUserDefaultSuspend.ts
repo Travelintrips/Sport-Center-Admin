@@ -144,7 +144,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
           Number(check.rows[0].snapshot_id) !== Number(latest.snapshot_id)) return;
       const everSeen = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_access_snapshots
         WHERE device_serial=${DEVICE} AND snapshot_id < ${Number(observedFirst.snapshot_id)}
-          AND users @> jsonb_build_array(jsonb_build_object('pin', ${pin}))
+          AND users @> jsonb_build_array(jsonb_build_object('pin', ${pin}::text))
         LIMIT 1`);
       if (everSeen.rows.length) return;
       const inventory = await tx.execute(sql`SELECT device_uid,display_name,device_role
