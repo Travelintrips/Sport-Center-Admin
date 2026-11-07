@@ -6,6 +6,7 @@ import { LanguageProvider } from "@/lib/i18n";
 import { CartProvider } from "@/lib/cart";
 import NotFound from "@/pages/not-found";
 import { Component, lazy, Suspense, type ReactNode, type ErrorInfo } from "react";
+import { recoverStaleChunk, isStaleChunkError } from "@/lib/staleChunkRecovery";
 
 class AdminErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -17,6 +18,7 @@ class AdminErrorBoundary extends Component<{ children: ReactNode }, { error: Err
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[AdminErrorBoundary] Render error:", error, info);
+    recoverStaleChunk(error);
   }
   render() {
     if (this.state.error) {
@@ -24,6 +26,7 @@ class AdminErrorBoundary extends Component<{ children: ReactNode }, { error: Err
         <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-8 text-center">
           <div className="text-4xl">⚠️</div>
           <h1 className="text-xl font-bold">Terjadi Kesalahan</h1>
+          {isStaleChunkError(this.state.error) && <p className="text-sm text-muted-foreground">Versi aplikasi sudah diperbarui. Muat ulang untuk menggunakan versi terbaru.</p>}
           <p className="text-muted-foreground text-sm max-w-md">{this.state.error.message}</p>
           <button
             className="mt-2 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg"
