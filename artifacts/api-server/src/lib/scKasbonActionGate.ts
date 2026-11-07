@@ -18,7 +18,7 @@ function secrets() {
  return {hash,key};
 }
 export function kasbonGateConfigured():boolean { return secrets()!==null; }
-export async function verifyKasbonPassword(password:unknown,userId:number,limiterKey:string):Promise<{status:"ok";token:string;expiresInSeconds:number}|{status:"disabled"|"locked"|"invalid"}> {
+export async function verifyKasbonPassword(password:unknown,userId:number,limiterKey:string):Promise<{status:"ok"}|{status:"disabled"|"locked"|"invalid"}> {
  const conf=secrets();
  if(!conf)return {status:"disabled"};
  if(!Number.isSafeInteger(userId)||userId<1)return {status:"invalid"};
@@ -33,7 +33,7 @@ export async function verifyKasbonPassword(password:unknown,userId:number,limite
   return {status:count>=MAX_ATTEMPTS?"locked":"invalid"};
  }
  attempts.delete(id);
- return {status:"ok",token:"",expiresInSeconds:Math.round(GRANT_MS/1000)};
+ return {status:"ok"};
 }
 export function issueKasbonGrant(userId:number,employeeId:string,recordId:number):string {
  const conf=secrets();if(!conf)throw Error("KASBON_GATE_DISABLED");
