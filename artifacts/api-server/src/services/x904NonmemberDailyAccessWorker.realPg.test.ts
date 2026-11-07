@@ -459,6 +459,21 @@ test("real worker: new VIS003 cannot activate while reserved; activates only aft
   } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
 });
 
+test("completed gym guest booking keeps an already activated entitlement until expiry", async()=>{
+  const pin="11";
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  try {
+    await run("INSERT INTO sport_center.sport_bookings (id,source,notes,status,booking_date,start_time) VALUES (9199,'gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','completed','2026-11-07','18:00')");
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at) VALUES(9299,9199,'confirmed','2026-11-07T11:00:00Z')");
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,activated_at,verification_state,access_state) VALUES ('TDBD234200545','card','VIS005','11',11,'VIS 005',9199,9299,'2026-11-07T11:00:00Z','2026-11-07T16:00:00Z','2026-11-07T11:30:00Z','verified','active')");
+    const grant=(await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9199")).rows[0];
+    await run("INSERT INTO sport_center.gym_vis_card_reservations (booking_id,payment_id,card_code,user_pin,device_uid,state,collected_at,funds_reference,funds_verified_by) VALUES(9199,9299,'VIS005','11',11,'collected','2026-11-07T11:20:00Z','CI-9199','CI')");
+    await addSnapshot(new Date('2026-11-07T12:00:00Z'),'11','VIS 005',1);
+    await processX904NonmemberDailyAccess(db as any,new Date('2026-11-07T12:00:30Z'));
+    expect(await commandFor("SUSPEND_USER",Number(grant.access_id))).toBeUndefined();
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
 test("real VIS reservation service: admin-confirmed payment creates one held grant and only card handover releases it", async()=>{
   // Directly call the production service against isolated x904_nonmember_safe2.
   // No app DEV/PROD DB credentials and no physical X904 command.

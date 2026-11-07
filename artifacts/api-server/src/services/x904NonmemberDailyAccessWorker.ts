@@ -315,7 +315,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const expiry = activeStart
         ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
         : null;
-      const shouldBeActive = (a.booking_source !== "gym_public_guest" || a.booking_status === "confirmed") &&
+      const shouldBeActive = (a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status))) &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&

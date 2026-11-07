@@ -138,7 +138,7 @@ test("paid VIS creates a held nonmember grant atomically; physical handover is t
 test("cancelled active visitor access still suspends, but cancelled pending access never activates",()=>{
  const worker=grantWorker;
  assert.match(worker,/a\.activated_at == null\) return/);
- assert.match(worker,/a\.booking_source !== "gym_public_guest" \|\| a\.booking_status === "confirmed"/);
+ assert.match(worker,/a\.booking_source !== "gym_public_guest" \|\| \["confirmed","completed"\]\.includes\(String\(a\.booking_status\)\)/);
  assert.match(worker,/a\.payment_status === "confirmed"/);
  assert.match(worker,/const targetGroup = shouldBeActive \? 1 : 2/);
  assert.match(worker,/const commandType = shouldBeActive \? "ACTIVATE_USER" : "SUSPEND_USER"/);
