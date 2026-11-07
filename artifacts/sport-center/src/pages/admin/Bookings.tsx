@@ -1553,6 +1553,32 @@ function BookingDetailDrawer({
       paymentToast.toast({ title: "Alokasi kartu VIS belum berhasil", description: String(error?.message ?? error), variant: "destructive" });
     },
   });
+
+  const handoverGymVisMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/collect-vis`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`,
+        },
+        body: JSON.stringify({ physicalCardHandedOver: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (payload: any) => {
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      paymentToast.toast({
+        title: `${payload?.cardCode ?? "Kartu VIS"} diserahkan`,
+        description: "Serah-terima tercatat. Worker X904 sekarang boleh menerbitkan perintah ACTIVATE_USER dan menunggu ACK/read-back.",
+      });
+    },
+    onError: (error: any) => {
+      paymentToast.toast({ title: "Serah-terima kartu belum berhasil", description: String(error?.message ?? error), variant: "destructive" });
+    },
+  });
   async function submitNewPaymentProof() {
     if (!newPaymentProof || savingNewPayment || !booking.id) return;
     setSavingNewPayment(true);
@@ -1875,6 +1901,23 @@ function BookingDetailDrawer({
                   <div className="mt-1 text-2xl font-black">{gymVisReservation.cardCode}</div>
                   <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
                   <div className="mt-2 text-xs font-semibold">Kartu belum berarti pintu aktif; tunggu serah-terima, worker, ACK dan read-back X904.</div>
+                  {gymVisReservation.state === "reserved" && (
+                    <button
+                      type="button"
+                      onClick={() => handoverGymVisMutation.mutate()}
+                      disabled={handoverGymVisMutation.isPending}
+                      className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {handoverGymVisMutation.isPending
+                        ? "Mencatat serah-terima..."
+                        : `${gymVisReservation.cardCode} Sudah Diserahkan → Aktifkan Akses`}
+                    </button>
+                  )}
+                  {gymVisReservation.state === "collected" && (
+                    <div className="mt-3 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs font-semibold">
+                      Kartu sudah diserahkan. Menunggu worker, ACK dan read-back X904.
+                    </div>
+                  )}
                 </>
               ) : gymIdentityRoute === "registered" ? (
                 <div className="mt-2 text-xs">Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN sebelum pembayaran dan kepemilikan identitas sah.</div>
