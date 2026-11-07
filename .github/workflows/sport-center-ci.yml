@@ -209,6 +209,9 @@ jobs:
       - name: Verify Kasbon salary Sheets B-to-G planner (no production writes)
         run: node --experimental-strip-types scripts/test-sc-kasbon-total-sheet-plan.mjs
 
+      - name: Verify Kasbon Check Sync shows salary values (no production writes)
+        run: node scripts/test-sc-kasbon-check-sync-display.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

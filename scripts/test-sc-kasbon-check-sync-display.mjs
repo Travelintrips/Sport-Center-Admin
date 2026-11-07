@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const source=readFileSync("artifacts/api-server/src/lib/scKasbonSalaryGoogle.ts","utf8");
+const preview=source.slice(source.indexOf('if(dryRun){'),source.indexOf('// A fresh re-read'));
+assert.match(preview,/valueRenderOption:"FORMATTED_VALUE"/,"Check Sync must retrieve displayed results, not formulas");
+assert.match(preview,/totalSalary:String\(display\[5\]/,"Total Salary must use calculated display cell F");
+assert.match(preview,/sisaGaji:String\(display\[7\]/,"Sisa Gaji must use calculated display cell H");
+assert.doesNotMatch(preview,/totalSalary:String\(raw\[5\]/,"Do not expose FORMULA content to UI");
+assert.doesNotMatch(preview,/sisaGaji:raw\[7\]/,"Do not expose FORMULA content to UI");
+assert.match(source,/valueRenderOption:"FORMULA"/,"Safety checks must keep formula inspection");
+console.log("PASS: Check Sync displays salary results while preserving formula safety; no writes");

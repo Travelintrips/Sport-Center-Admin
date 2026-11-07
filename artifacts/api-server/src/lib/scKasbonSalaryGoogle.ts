@@ -52,11 +52,19 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
   const raw=rows[entry.row-1]??[];
   const observed=typeof raw[6]==="number" ? raw[6] : Number(String(raw[6]??"").replace(/[^0-9.-]/g,""));
   const matched=String(raw[6]??"").trim()!=="" && Number.isFinite(observed) && observed===entry.amount;
+  // FORMULA is required for safety/identity checks, but must never be shown in UI.
+  // Read the same employee row as displayed by Google Sheets, including calculated salary cells.
+  const displayResult=await sheets.spreadsheets.values.get({
+   spreadsheetId:SPREADSHEET_ID,range:tabRange("A"+entry.row+":H"+entry.row),
+   valueRenderOption:"FORMATTED_VALUE"
+  });
+  const display=displayResult.data.values?.[0]??[];
+  if(String(display[1]??"").trim()!==entry.name)throw Error("SALARY_ROW_CHANGED_DURING_CHECK");
   return {status:"preview" as const,...report,matched,
-   sheetRow:{row:entry.row,number:String(raw[0]??""),name:String(raw[1]??""),
-    uangMakan:String(raw[2]??""),hariKerja:String(raw[3]??""),
-    persentase:String(raw[4]??""),totalSalary:String(raw[5]??""),
-    kasbon:raw[6]??"",sisaGaji:raw[7]??""}};
+   sheetRow:{row:entry.row,number:String(display[0]??""),name:String(display[1]??""),
+    uangMakan:String(display[2]??""),hariKerja:String(display[3]??""),
+    persentase:String(display[4]??""),totalSalary:String(display[5]??""),
+    kasbon:String(display[6]??""),sisaGaji:String(display[7]??"")}};
  }
  // A fresh re-read detects manual changes between preview and writing.
  const before=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range:tabRange("A"+entry.row+":G"+entry.row),valueRenderOption:"FORMULA"});
