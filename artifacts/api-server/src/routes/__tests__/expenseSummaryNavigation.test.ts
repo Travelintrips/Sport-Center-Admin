@@ -11,7 +11,7 @@ describe("SC expense sidebar and financial summary", () => {
     const employee = sidebar.indexOf('href: "/admin/sc-employees", label: "Data Karyawan SC"');
     expect(expense).toBeGreaterThan(0);
     expect(employee).toBeGreaterThan(expense);
-    expect(sidebar.slice(expense + 'href: "/admin/expenses"'.Length, employee)).not.toContain('href: "/admin/');
+    expect(sidebar.slice(expense + 'href: "/admin/expenses"'.length, employee)).not.toContain('href: "/admin/');
   });
   it("shows only two cards with distinct sources", () => {
     expect(ui).toContain('>Pengeluaran Bulan Ini (Rp)</span>');
