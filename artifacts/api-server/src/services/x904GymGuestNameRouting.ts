@@ -1,7 +1,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
-export type GymGuestIdentityRoute = "registered" | "visitor_card" | "staff_review";
+export type GymGuestIdentityRoute = "registered" | "expired_member" | "visitor_card" | "staff_review";
 export type GymGuestIdentityMatch = {
   route: GymGuestIdentityRoute;
   userPin: string | null;
@@ -23,7 +23,9 @@ export function normalizeGymGuestName(value: string): string {
  * Read-only identity routing, never a door authorization.
  * Registered = one uniquely matched, nonmember, operator-verified machine identity.
  * Visitor = name does not exist in device inventory: staff must assign an available VIS.
- * Staff review = existing but ambiguous/privileged/member/unverified identity.
+ * Expired member = historically mapped membership no longer eligible for member access;
+ * booking is allowed, but never borrow that member PIN for nonmember activation.
+ * Staff review = existing but ambiguous/privileged/active member/unverified identity.
  * Do not return a PIN from the public route; only booking/admin audit may store it.
  */
 export async function resolveGymGuestName(rawName: string, submittedPin = ""): Promise<GymGuestIdentityMatch> {
@@ -45,9 +47,27 @@ export async function resolveGymGuestName(rawName: string, submittedPin = ""): P
       normalizeGymGuestName(visibleName) !== name) {
     return { route: "staff_review", userPin: null, deviceUid: null, displayName: null };
   }
-  const ownership = await db.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
-    WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
-  if (ownership.rows.length > 0) return { route: "staff_review", userPin: null, deviceUid: null, displayName: null };
+  const ownership = await db.execute(sql`SELECT mp.membership_id,mp.status AS mapping_status,
+      m.status::text AS membership_status,m.end_date
+    FROM sport_center.gym_x904_member_mapping mp
+    JOIN sport_center.sport_memberships m ON m.id=mp.membership_id
+    WHERE mp.device_serial=${DEVICE} AND mp.user_pin=${pin} LIMIT 3`);
+  if (ownership.rows.length > 0) {
+    // A genuine, uniquely verified EXPIRED membership can book a day visit.
+    // Do not expose or assign its member PIN: the member worker still owns it,
+    // and a daily grant must never override its suspend/grace/renewal state.
+    const member = ownership.rows[0] as any;
+    const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta",
+      year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const end = String(member.end_date ?? "");
+    const isPastGrace = /^\\d{4}-\\d{2}-\\d{2}$/.test(end) &&
+      Date.parse(end + "T00:00:00Z") + 8 * 86400000 <= Date.parse(todayWib + "T00:00:00Z");
+    if (ownership.rows.length === 1 && member.mapping_status === "verified" &&
+        member.membership_status === "expired" && isPastGrace) {
+      return { route: "expired_member", userPin: null, deviceUid: null, displayName: null };
+    }
+    return { route: "staff_review", userPin: null, deviceUid: null, displayName: null };
+  }
   // An inventory match is NOT operator approval or a door entitlement.
   const inventoryPinMatch = submittedPin ? submittedPin === pin : null;
   const approved = await db.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities

@@ -6,7 +6,7 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
   const api = readFileSync(join(process.cwd(), "src/routes/whatsapp.ts"), "utf8");
 
   test("no-login guest sees green registered name without ever entering a PIN", () => {
-    expect(form).toContain('className={publicGymGuest && guestIdentityRoute === "registered"');
+    expect(form).toContain('guestIdentityRoute === "registered" || guestIdentityRoute === "expired_member"');
     expect(form).toContain('font-bold text-green-700 border-green-300');
     expect(form).toContain('body:JSON.stringify({customerName:name})');
     expect(form).not.toContain('id="guest-x904-pin"');
@@ -38,4 +38,16 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).not.toContain('guestPinMatch');
     expect(form).not.toContain('guestPinChecking');
   });
+  test("fully expired mapped member is eligible for daily booking but never gets former PIN access", () => {
+    const routing = readFileSync(join(process.cwd(), "src/services/x904GymGuestNameRouting.ts"), "utf8");
+    expect(routing).toContain('member.membership_status === "expired"');
+    expect(routing).toContain('member.mapping_status === "verified"');
+    expect(routing).toContain("isPastGrace");
+    expect(routing).toContain('route: "expired_member", userPin: null, deviceUid: null');
+    expect(api).toContain('guestNameRoute?.route === "expired_member"');
+    expect(api).toContain("PIN membership lama tidak diberikan hak akses");
+    expect(form).toContain('guestIdentityRoute === "expired_member"');
+    expect(form).toContain("Boleh booking harian");
+  });
+
 });

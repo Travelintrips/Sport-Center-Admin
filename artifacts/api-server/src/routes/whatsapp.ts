@@ -929,6 +929,8 @@ router.post("/wa/gym-name-route", async (req, res) => {
       // Never send user_pin, UID, or complete machine identity on an anonymous endpoint.
       message: match.route === "registered"
         ? "Nama ditemukan sebagai nonmember terverifikasi di X904. Petugas tetap harus mencocokkan kepemilikan sebelum pintu aktif."
+        : match.route === "expired_member"
+          ? "Membership lama sudah berakhir. Anda boleh memesan tiket Gym harian tanpa memperpanjang; akses tetap diperiksa petugas dan tidak memakai hak akses membership lama."
         : match.route === "visitor_card"
           ? "Nama belum terdaftar di X904. Anda akan diarahkan ke kartu pengunjung VIS; petugas akan menyerahkannya setelah verifikasi."
           : "Nama membutuhkan pemeriksaan petugas. Jangan menggunakan PIN atau kartu milik orang lain.",
@@ -1206,6 +1208,8 @@ router.post("/wa/booking", async (req, res) => {
       notes: publicGymGuest
         ? (guestNameRoute?.route === "registered"
           ? "Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required; verifikasi kepemilikan wajib oleh petugas. Hak akses menunggu pembayaran resmi."
+          : guestNameRoute?.route === "expired_member"
+            ? "Gym mandiri; membership lama telah expired dan melewati tenggang. Tiket harian tanpa perpanjangan; petugas wajib verifikasi identitas dan pembayaran, lalu menetapkan akses nonmember terpisah (misalnya kartu VIS). PIN membership lama tidak diberikan hak akses."
           : guestNameRoute?.route === "visitor_card"
             ? "Gym mandiri; nama tidak terdaftar di inventaris X904. Kartu VIS001–VIS006 menunggu pilihan dan penyerahan petugas; belum ada hak akses X904."
             : "Gym mandiri; nama ada tetapi memerlukan peninjauan identitas X904 oleh petugas; jangan menggunakan PIN/kartu milik pengguna lain.")

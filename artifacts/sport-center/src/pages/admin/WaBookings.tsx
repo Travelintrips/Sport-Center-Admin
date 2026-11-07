@@ -541,6 +541,8 @@ export default function AdminWaBookings() {
                         <p>UID: <strong>{detail.x904IdentityMatch.deviceUid}</strong></p>
                         <p className="mt-2 text-amber-800">Nama cocok, tetapi kepemilikan belum diverifikasi. Cocokkan identitas pengunjung, penerimaan dana, dan hak akses sebelum menautkan PIN.</p>
                       </div>
+                    ) : detail.x904IdentityMatch?.route === "expired_member" ? (
+                      <p className="mt-2">Membership sebelumnya telah berakhir. Booking harian boleh diproses setelah dana dan identitas diverifikasi. Jangan aktifkan PIN member lama; siapkan akses nonmember terpisah melalui kartu VIS yang tersedia.</p>
                     ) : detail.x904IdentityMatch?.route === "visitor_card" ? (
                       <p className="mt-2">Nama belum terdaftar. Siapkan kartu VIS001–VIS006 yang tersedia setelah pemeriksaan petugas; jangan gunakan kartu yang masih dipinjam.</p>
                     ) : (
