@@ -38,7 +38,7 @@ describe("Kasbon dedicated action gate",()=>{
   expect(checkKasbonGrant(token,102,"SC003",4)).toBe(false);
   expect(checkKasbonGrant(token,101,"SC009",4)).toBe(false);
   expect(checkKasbonGrant(token,101,"SC003",14)).toBe(false);
-  expect(checkKasbonGrant(token.slice(0,-1)+"a",101,"SC003",4)).toBe(false);
+  expect(checkKasbonGrant(token.split(".")[0]+"."+ (token.split(".")[1][0]==="a"?"b":"a")+token.split(".")[1].slice(1),101,"SC003",4)).toBe(false);
  });
  it("locks repeated wrong-password attempts",async()=>{
   for(let i=0;i<4;i++)expect((await verifyKasbonPassword("wrong-but-long-enough",103,"unit-lock")).status).toBe("invalid");
