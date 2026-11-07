@@ -148,17 +148,19 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
     const bankReference = parseBluProofReference(result.rawText);
     const date = parseBluProofDate(result.rawText) ?? result.date;
     const textAmount = parseBluExpenseAmount(result.rawText);
-    const recipient = parseBluProofRecipient(result.rawText) ?? result.recipient;
+    const bluProof = /\bBLU\b|BCA\s*DIGITAL/i.test(result.rawText) || Boolean(bankReference);
+    const recipient = parseBluProofRecipient(result.rawText);
+    const genericRecipient = bluProof ? null : result.recipient;
     // This endpoint is explicitly opt-in. Missing metadata gets an image vision
     // fallback; generic payment confirmation/booking OCR remains unchanged.
-    const fallback = (!bankReference || !date || !textAmount || !recipient)
+    const fallback = (!bankReference || !date || !textAmount || !(recipient ?? genericRecipient))
       ? await readExpenseBluMissingFieldsWithVision(req.file.buffer, req.file.mimetype)
       : null;
     res.json({
       amount: textAmount ?? fallback?.amount ?? result.amount,
       date: date ?? fallback?.date ?? null,
       bankReference: bankReference ?? fallback?.bankReference ?? null,
-      recipient: recipient ?? fallback?.recipient ?? null,
+      recipient: recipient ?? fallback?.recipient ?? genericRecipient ?? null,
       paymentMethod: /PLN\s+PRABAYAR/i.test(result.rawText) ? "PLN Prabayar" :
         /BI[\s-]*FAST/i.test(result.rawText) ? "BI-FAST" : result.paymentMethod,
       engine: result.engine,
