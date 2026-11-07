@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const ui=readFileSync("artifacts/sport-center/src/pages/admin/SCEmployeeKasbon.tsx","utf8");
+const route=readFileSync("artifacts/api-server/src/routes/scEmployeeKasbon.ts","utf8");
+const receipt=readFileSync("artifacts/api-server/src/lib/scKasbonSalarySnapshot.ts","utf8");
+assert.match(ui,/const payrollMatches=Boolean\(!isSalaryChecking&&!isSalaryCheckError&&syncEvidence\?\.matched/);
+assert.match(ui,/payrollMatches&&syncedRecordIds\.has\(r\.id\)/);
+assert.match(ui,/Perlu Sync Total/);
+assert.match(ui,/Memeriksa Sheets\.\.\./);
+assert.match(ui,/refetchOnWindowFocus:true/);
+assert.match(ui,/staleTime:0/);
+assert.match(ui,/const syncEvidence=initialSalaryCheck\?\?salaryCheck/);
+assert.match(ui,/qc\.setQueryData\(syncKey,result\)/);
+assert.match(ui,/const isSalarySynced=Boolean\(!isSalaryChecking&&!isSalaryCheckError&&syncEvidence\?\.matched&&syncEvidence\?\.allSynced/);
+assert.match(route,/getKasbonReceiptStatus\(snapshot,receipt,action==="sync" \|\| \(outcome\.status==="preview" && outcome\.matched\)\)/);
+assert.match(receipt,/allSynced:liveMatched && !!receipt/);
+assert.doesNotMatch(ui,/const payrollMatches=Boolean\(syncedRecordIds/);
+console.log("PASS: Status Sync Total fails closed on cleared salary G, refresh pending/error; receipt alone never green");
