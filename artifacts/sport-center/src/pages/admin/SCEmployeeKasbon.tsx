@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,23 +29,32 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [uploading,setUploading]=useState(false);
  const [toDelete,setToDelete]=useState<Kasbon|null>(null);
  const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string}|null>(null);
+ type SalaryCheck={matched:boolean;name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
+ const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
+ const [checkOpen,setCheckOpen]=useState(false);
+ const [syncRecordId,setSyncRecordId]=useState<number|null>(null);
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
-  onSuccess:()=>{qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
+  onSuccess:()=>{setSalaryCheck(null);qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
  const remove = useMutation({
   mutationFn: (record: Kasbon) => api(endpoint(employee.employeeId)+"/"+record.id,"DELETE"),
   onSuccess: () => {
-   qc.invalidateQueries({queryKey:key});
+   setSalaryCheck(null);qc.invalidateQueries({queryKey:key});
    setToDelete(null);
    toast({title:"Catatan kasbon berhasil dihapus"});
   },
   onError: (e:Error) => toast({title:"Gagal menghapus kasbon",description:e.message,variant:"destructive"}),
  });
 
+ const checkSalary=useMutation({
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
+  onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);setCheckOpen(true);},
+  onError:(e:Error)=>{setSalaryCheck(null);toast({title:"Check Sync gagal",description:e.message,variant:"destructive"});}
+ });
  const previewSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
   onSuccess:result=>setSalaryPreview(result),
@@ -53,8 +62,8 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  });
  const syncSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}),
-  onSuccess:result=>{setSalaryPreview(null);toast({title:"Kasbon berhasil Sync ke Google Sheets",description:result.cell+" — "+currency(result.amount)});},
-  onError:(e:Error)=>{setSalaryPreview(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
+  onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);void checkSalary.mutate();toast({title:"Kasbon berhasil Sync ke Google Sheets",description:result.cell+" — "+currency(result.amount)});},
+  onError:(e:Error)=>{setSalaryPreview(null);setSalaryCheck(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
  });
  const uploadProof=async (file:File)=>{
   if(file.size>10*1024*1024 || !["image/jpeg","image/png","image/webp","application/pdf"].includes(file.type)){toast({title:"Gunakan JPG, PNG, WebP, atau PDF maksimal 10 MB",variant:"destructive"});return;}
@@ -71,11 +80,23 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    <div className="flex items-start gap-3"><Button variant="outline" size="icon" aria-label="Kembali ke daftar karyawan" onClick={onBack}><ArrowLeft className="h-4 w-4"/></Button>
     <div><h2 className="text-xl font-bold">Histori Kasbon — {employee.fullName}</h2><p className="text-sm text-muted-foreground">ID Karyawan: {employee.employeeId} · Histori pencatatan kasbon</p></div></div>
    <div className="flex flex-wrap gap-2">
-    <Button variant="outline" disabled={isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} onClick={()=>previewSalary.mutate()}>
-      <RefreshCw className="mr-2 h-4 w-4"/>{previewSalary.isPending?"Memeriksa...":"Insert / Sync Sheets"}
-    </Button>
     <Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button>
    </div>
+  </div>
+  <div className="rounded-xl border bg-background px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><p className="font-semibold">Check Sync</p><p className="text-xs text-muted-foreground">Lihat hanya baris karyawan ini dari Google Sheets Gaji November 2026.</p></div>
+      <Button variant="outline" disabled={checkSalary.isPending||isLoading||isError} onClick={()=>{if(checkOpen){setCheckOpen(false);}else{checkSalary.mutate();}}}>
+        <RefreshCw className="mr-2 h-4 w-4"/>{checkSalary.isPending?"Memeriksa...":checkOpen?"Tutup":"Check Sync"}
+      </Button>
+    </div>
+    {checkOpen&&salaryCheck&&<div className="mt-4 space-y-3">
+     <div className="flex flex-wrap items-center gap-2 text-sm"><span>Nama Sheets: <strong>{salaryCheck.name}</strong></span><span>· Sel: <strong>{salaryCheck.cell}</strong></span>
+      <span className={salaryCheck.matched?"rounded-full bg-green-100 px-2 py-0.5 font-semibold text-green-700":"rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{salaryCheck.matched?"Synced — total cocok":"Belum cocok"}</span>
+     </div>
+     <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-xs"><thead><tr className="border-b">{["No","Nama","Uang Makan","Hari Kerja","Persentase","Total Salary","Kasbon","Sisa Gaji"].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead>
+      <tbody><tr>{[salaryCheck.sheetRow.number,salaryCheck.sheetRow.name,salaryCheck.sheetRow.uangMakan,salaryCheck.sheetRow.hariKerja,salaryCheck.sheetRow.persentase,salaryCheck.sheetRow.totalSalary,salaryCheck.sheetRow.kasbon,salaryCheck.sheetRow.sisaGaji].map((v,i)=><td key={i} className="border-b p-2 whitespace-nowrap">{i===6 && Number.isFinite(Number(v))?currency(v):String(v||"—")}</td>)}</tr></tbody></table></div>
+    </div>}
   </div>
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
    <CardTitle>Histori Kasbon ({records.length})</CardTitle>
@@ -85,9 +106,11 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    </div>
   </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
-   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Tindakan</th></tr></thead><tbody>
+   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
-    <td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
+    <td className="p-3">{salaryCheck?.matched?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
+    <td className="p-3"><div className="flex flex-wrap gap-2">
+    <Button size="sm" variant="outline" disabled={previewSalary.isPending||syncSalary.isPending||isLoading||isError} onClick={()=>{setSyncRecordId(r.id);previewSalary.mutate();}}><RefreshCw className="mr-1 h-3 w-3"/>{previewSalary.isPending&&syncRecordId===r.id?"Memeriksa...":"Sync"}</Button><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
   <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
@@ -97,8 +120,9 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
      <p>Karyawan: <strong>{employee.fullName}</strong> ({employee.employeeId})</p>
      <p>Nama Google Sheets: <strong>{salaryPreview?.name}</strong></p>
      <p>Tujuan: Gaji November 2026 — <strong>{salaryPreview?.cell}</strong> (kolom G)</p>
-     <p>Total Kasbon terbaru: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
-     <p className="text-muted-foreground">Nilai kolom G sebelumnya akan diganti (bukan dijumlah). Jika baris berubah atau nama tidak cocok, sistem menolak penulisan.</p>
+     <p>Transaksi dipilih: <strong>KB-{String(syncRecordId??0).padStart(5,"0")}</strong></p>
+     <p>Total seluruh kasbon karyawan: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
+     <p className="text-muted-foreground">Sync menulis total seluruh kasbon karyawan ke satu sel G, bukan nominal satu transaksi. Tidak dijumlahkan ulang. Jika baris berubah atau nama tidak cocok, penulisan ditolak.</p>
     </div>
     <div className="flex justify-end gap-2">
      <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
