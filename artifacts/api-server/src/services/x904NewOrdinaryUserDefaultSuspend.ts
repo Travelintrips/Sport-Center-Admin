@@ -71,7 +71,8 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   const latestTime = new Date(String(latest.observed_at)).getTime();
   const previousTime = new Date(String(previous.observed_at)).getTime();
   if (!Number.isFinite(latestTime) || !Number.isFinite(previousTime) ||
-      previousTime >= latestTime || latestTime > now.getTime() ||
+      previousTime >= latestTime || latestTime - previousTime > 10 * 60_000 ||
+      latestTime > now.getTime() ||
       now.getTime() - latestTime > SNAPSHOT_MAX_AGE_MS) return;
   const currentUsers: SnapshotUser[] = Array.isArray(latest.users) ? latest.users : [];
   const priorUsers: SnapshotUser[] = Array.isArray(previous.users) ? previous.users : [];
