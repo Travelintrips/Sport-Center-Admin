@@ -768,7 +768,15 @@ export default function GymX904() {
         </div>
         {lanUsersError ? <p role="alert" className="text-sm">Daftar LAN belum tersedia atau backend belum aktif.</p> :
           lanUsersLoading ? <p className="text-sm">Memuat pengguna dari snapshot LAN...</p> :
-          <div className="overflow-x-auto"><table className="w-full text-sm text-left">
+          <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-4 md:px-5">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Daftar Pengguna</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">Pembacaan terakhir perangkat X904, bukan perintah langsung ke mesin.</p>
+              </div>
+              <span className="rounded-md border border-border/70 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">Snapshot LAN</span>
+            </div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[1300px] border-separate border-spacing-0 text-left text-[13px]">
             <thead className="bg-slate-50 text-[10px] font-semibold uppercase tracking-[0.075em] text-slate-500 dark:bg-slate-900/40 dark:text-slate-400"><tr className="border-b"><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">PIN mesin</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Nama</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">UID</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Peran perangkat</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Terakhir terbaca</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Jenis pengguna</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Status membership</th><th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Status akses</th>{userCommandCapabilities?.allowed&&<th className="whitespace-nowrap border-b border-border/70 px-4 py-3">Tindakan</th>}</tr></thead>
             <tbody>{(lanUsers?.users ?? []).filter(u=>(!machineUserSearch.trim() || String(u.display_name ?? "").toLowerCase().includes(machineUserSearch.trim().toLowerCase()) || String(u.user_pin).includes(machineUserSearch.trim())) && (machineRoleFilter==="all" || (machineRoleFilter==="regular" ? u.device_role===0 : u.device_role!==0)) && (machineIdentityFilter==="all" || machineIdentity(u)===machineIdentityFilter) && (machineAccessFilter==="all" || machineAccessState(u)===machineAccessFilter)).map((u) => <tr key={u.user_pin} className="group bg-card transition-colors hover:bg-slate-50/90 dark:hover:bg-slate-900/30">
               <td className="whitespace-nowrap border-b border-border/40 px-4 py-3.5 font-mono text-xs font-semibold tabular-nums text-slate-600 dark:text-slate-300">{u.user_pin}</td><td className="border-b border-border/40 px-4 py-3.5 text-sm font-semibold tracking-tight text-foreground">{u.display_name || "—"}</td><td className="border-b border-border/40 px-4 py-3 font-mono tabular-nums text-muted-foreground">{u.device_uid}</td>
