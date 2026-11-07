@@ -158,7 +158,7 @@ async function sync(): Promise<any> {
     }
 
     const candidateResult = await pool.query(
-      `select id,amount,provider_reference,merchant_trade_no,provider_trade_no
+      `select id,amount,provider_reference,merchant_trade_no,provider_trade_no,paid_at,created_at
        from sport_center.sport_payments
        where payment_method='QRIS'
          and payment_provider::text='mandiri_direct'
@@ -180,7 +180,14 @@ async function sync(): Promise<any> {
         .some((value: any) => String(value ?? "").trim().toUpperCase() === normalizedReference),
     );
     const exact = referenced.filter((payment: any) => Math.abs(Number(payment.amount) - total) < 0.005);
-    const amountMatches = candidateResult.rows.filter((payment: any) => Math.abs(Number(payment.amount) - total) < 0.005);
+    const transactionAt = new Date(`${date}T${time}+07:00`).getTime();
+    const amountMatches = candidateResult.rows.filter((payment: any) => {
+      if (Math.abs(Number(payment.amount) - total) >= 0.005) return false;
+      const anchor = payment.paid_at ?? payment.created_at;
+      const anchorMs = anchor ? new Date(anchor).getTime() : Number.NaN;
+      if (!Number.isFinite(transactionAt) || !Number.isFinite(anchorMs)) return false;
+      return Math.abs(transactionAt - anchorMs) <= 3 * 24 * 60 * 60 * 1000;
+    });
 
     let status = "unmatched";
     let ids: number[] = [];

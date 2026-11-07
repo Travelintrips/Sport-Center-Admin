@@ -42,7 +42,7 @@ router.get("/admin/bookings/:id/qris-email-detection", adminMiddleware, async (r
     );
 
     const result = await db.execute(sql`
-      SELECT payment_id, match_status, transaction_at
+      SELECT c.payment_id, c.match_status, c.transaction_at
       FROM (
         SELECT
           UNNEST(candidate_payment_ids) AS payment_id,
@@ -52,15 +52,23 @@ router.get("/admin/bookings/:id/qris-email-detection", adminMiddleware, async (r
         FROM ${sql.raw(tableName)}
         WHERE candidate_payment_ids && ARRAY[${paymentIdSql}]::integer[]
           AND match_status IN ('reference_match_review','ambiguous','review_required')
-      ) admin_qris_candidates
-      WHERE payment_id IN (${paymentIdSql})
+      ) c
+      JOIN sport_center.sport_payments p ON p.id = c.payment_id
+      WHERE c.payment_id IN (${paymentIdSql})
+        AND (
+          c.match_status = 'reference_match_review'
+          OR (
+            COALESCE(p.paid_at, p.created_at) IS NOT NULL
+            AND ABS(EXTRACT(EPOCH FROM (c.transaction_at - COALESCE(p.paid_at, p.created_at)))) <= 259200
+          )
+        )
       ORDER BY
-        CASE match_status
+        CASE c.match_status
           WHEN 'reference_match_review' THEN 0
           WHEN 'ambiguous' THEN 1
           ELSE 2
         END,
-        id DESC
+        c.id DESC
       LIMIT 1
     `);
     const row = (((result as any).rows ?? result) as Array<{
