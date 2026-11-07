@@ -82,7 +82,7 @@ export default function SCEmployees() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-2xl font-bold">Data Karyawan SC</h1><p className="text-sm text-muted-foreground">Master karyawan Sport Center untuk identitas WhatsApp Mina AI.</p></div>
+        <div><h1 className="text-2xl font-bold">Data Karyawan SC</h1><p className="text-sm text-muted-foreground">Data karyawan dan Pencatatan kasbon karyawan Sport Center</p></div>
         <Button onClick={() => { setEditing(null); setForm(emptyForm); setOpen(true); }}><Plus className="mr-2 h-4 w-4"/>Tambah Karyawan</Button>
       </div>
       <Card><CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-5 w-5"/>Daftar Karyawan ({employees.length})</CardTitle></CardHeader>
