@@ -709,8 +709,27 @@ router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, a
       latestCommand?.command_type === 'SUSPEND_USER' && latestCommand?.state === 'completed' &&
       commandResult?.readBackConfirmed === true && Number(commandResult?.afterGroup) === 2 &&
       Number(commandResult?.deviceUid) === Number(row.device_uid));
+    const cards = [['VIS001','78',338],['VIS002','90',339],['VIS003','13',13],['VIS004','17',17],['VIS005','11',11],['VIS006','15',15]] as const;
+    const busy = await db.execute(sql`SELECT r.card_code,NULL::text AS pin,'reservation'::text AS kind
+      FROM sport_center.gym_vis_card_reservations r
+      WHERE r.device_serial='TDBD234200545' AND r.state IN ('reserved','collected')
+      UNION ALL
+      SELECT NULL::text,a.user_pin,'access'::text AS kind
+      FROM sport_center.x904_nonmember_daily_access a
+      WHERE a.device_serial='TDBD234200545' AND a.access_state IN ('pending','active')`);
+    const fresh = Boolean(snap?.observed_at && Date.now()-new Date(String(snap.observed_at)).getTime() <= 300000);
+    const pool = cards.map(([cardCode,userPin,deviceUid]) => {
+      const u = users.find((item:any) => String(item?.pin) === userPin);
+      const reserved = busy.rows.some((b:any) => b.kind === 'reservation' && b.card_code === cardCode);
+      const accessBusy = busy.rows.some((b:any) => b.kind === 'access' && b.pin === userPin);
+      const group = u?.group == null ? null : Number(u.group);
+      const available = Boolean(fresh && group === 2 && Number(u?.role) === 0 && u?.enabled === true && !reserved && !accessBusy);
+      return { cardCode,userPin,deviceUid,group,snapshotAt:snap?.observed_at ?? null,available,
+        status:reserved?'reserved':accessBusy?'access_busy':!fresh?'snapshot_stale':group!==2?'not_group2':available?'available':'review' };
+    });
     res.json({
       bookingStatus: booking.status,
+      pool,
       reservation: row ? {
         cardCode:String(row.card_code),state:String(row.card_state),userPin:String(row.user_pin),deviceUid:Number(row.device_uid),
         reservedAt:row.reserved_at ?? null,collectedAt:row.collected_at ?? null,returnedAt:row.returned_at ?? null,
