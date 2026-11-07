@@ -351,11 +351,6 @@ export default function AdminExpenses() {
   const summary = data?.summary ?? { totalThisMonth: 0, pendingApproval: 0, paid: 0, unpaid: 0 };
   const allExpenses: any[] = data?.expenses ?? [];
 
-  // Get selected COA account info
-  const selectedCoa = form.coaAccountId
-    ? (coaAccounts as CoaAccount[]).find((a) => a.id === Number(form.coaAccountId)) ?? null
-    : null;
-
   const recipientSuggestions = [
     ...employees.map((e) => ({ key: `staff-${e.employeeId}`, name: e.fullName, kind: "Karyawan SC", vendorId: "" })),
     ...vendors.map((v) => ({ key: `vendor-${v.id}`, name: v.name, kind: "Vendor", vendorId: String(v.id) })),
