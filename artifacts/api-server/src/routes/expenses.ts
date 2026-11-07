@@ -251,6 +251,42 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
         .reduce((s, e) => s + Number(e.totalAmount), 0),
     };
 
+    // Separate, read-only bank-sheet summary. Never insert imported bank rows
+    // into SC expense records and never infer that a draft expense is a bank movement.
+    let incomingThisMonth: number | null = null;
+    let incomingSheetSyncedAt: string | null = null;
+    try {
+      const bankSheet = await db.execute(sql`
+        SELECT bsc.id,
+               bsc.last_synced_at::text AS last_synced_at,
+               COALESCE(SUM(bm.amount), 0)::text AS incoming_amount
+        FROM public.bank_sheet_configs bsc
+        LEFT JOIN public.bank_mutations bm
+          ON bm.sheet_config_id = bsc.id
+         AND bm.company_id = bsc.company_id
+         AND bm.bank_account_id = bsc.bank_account_id::text
+         AND bm.direction = 'IN'
+         AND bm.transaction_date >= date_trunc('month', timezone('Asia/Jakarta', now()))::date
+         AND bm.transaction_date < (date_trunc('month', timezone('Asia/Jakarta', now())) + interval '1 month')::date
+        WHERE lower(trim(bsc.tab_name)) = 'kas besar sc'
+          AND bsc.is_active = true
+          AND bsc.bank_account_id IS NOT NULL
+        GROUP BY bsc.id, bsc.last_synced_at
+        ORDER BY bsc.id DESC
+        LIMIT 1
+      `);
+      const rows = (bankSheet as any).rows ?? bankSheet;
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (row) {
+        incomingThisMonth = Number(row.incoming_amount);
+        incomingSheetSyncedAt = row.last_synced_at ?? null;
+      }
+    } catch (bankError) {
+      // Unavailable banking data must not break the SC expense page or
+      // masquerade as Rp0. Leave the value explicitly unavailable.
+      req.log.warn({ err: bankError }, "Expense read-only bank-sheet summary unavailable");
+    }
+
     res.json({
       expenses: filtered.map((e) => {
         const vendorId = (e as any).vendorId as number | null;
@@ -266,7 +302,7 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
           vendorName: vendor?.name ?? e.vendorName ?? null,
         };
       }),
-      summary,
+      summary: { ...summary, incomingThisMonth, incomingSheetSyncedAt },
       categories: EXPENSE_CATEGORIES,
     });
   } catch (err) {

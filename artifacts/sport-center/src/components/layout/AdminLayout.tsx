@@ -108,7 +108,8 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
       { href: "/admin/google-sheets", label: "Google Sheets", icon: Sheet },
-      { href: "/admin/expenses", label: "Pengeluaran", icon: TrendingDown },
+      { href: "/admin/expenses", label: "Pengeluaran SC", icon: TrendingDown },
+      { href: "/admin/sc-employees", label: "Data Karyawan SC", icon: Users },
       { href: "/admin/vendors", label: "Daftar Vendor", icon: Building2 },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
@@ -117,7 +118,6 @@ const NAV_GROUPS = [
       { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },
       { href: "/admin/bank-reconciliation", label: "Rekonsiliasi Bank", icon: Landmark },
       { href: "/admin/operator-accounts", label: "Akun Operator", icon: UserCog },
-      { href: "/admin/sc-employees", label: "Data Karyawan SC", icon: Users },
       { href: "/admin/user-roles", label: "Pengguna & Hak Akses", icon: ShieldCheck },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
       { href: "/admin/data-connections", label: "Data Connections", icon: Activity },

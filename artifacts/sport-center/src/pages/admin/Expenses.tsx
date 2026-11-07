@@ -14,8 +14,8 @@ import { ChevronsUpDown } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Plus, Search, TrendingDown, Clock, CheckCircle2,
-  Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
+  Plus, Search, TrendingDown, Banknote,
+  Eye, Edit2, ThumbsUp, ThumbsDown, X, Receipt,
   Upload, Loader2, Trash2,
 } from "lucide-react";
 
@@ -453,7 +453,7 @@ export default function AdminExpenses() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-gray-900">Pengeluaran</h1>
+          <h1 className="text-2xl font-black text-gray-900">Pengeluaran SC</h1>
           <p className="text-gray-500 text-sm mt-0.5">Manajemen pengeluaran operasional Sport Center</p>
         </div>
         <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
@@ -461,42 +461,33 @@ export default function AdminExpenses() {
         </Button>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Ringkasan: SC expenses vs. imported bank-sheet inflows (distinct sources). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="border-l-4 border-l-orange-500">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
               <TrendingDown className="w-4 h-4 text-orange-500" />
-              <span className="text-xs text-gray-500 font-medium">Total Bulan Ini</span>
+              <span className="text-sm text-gray-600 font-medium">Pengeluaran Bulan Ini (Rp)</span>
             </div>
             <p className="text-xl font-black text-gray-900">{formatIDR(summary.totalThisMonth)}</p>
+            <p className="text-xs text-gray-500 mt-1">Catatan operasional Pengeluaran SC bulan berjalan</p>
           </CardContent>
         </Card>
-        <Card className="border-l-4 border-l-yellow-500">
+        <Card className="border-l-4 border-l-emerald-500">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
-              <Clock className="w-4 h-4 text-yellow-500" />
-              <span className="text-xs text-gray-500 font-medium">Pending Approval</span>
+              <Banknote className="w-4 h-4 text-emerald-600" />
+              <span className="text-sm text-gray-600 font-medium">Uang Masuk (Rp)</span>
             </div>
-            <p className="text-xl font-black text-gray-900">{summary.pendingApproval} item</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-green-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <CheckCircle2 className="w-4 h-4 text-green-500" />
-              <span className="text-xs text-gray-500 font-medium">Sudah Dibayar</span>
-            </div>
-            <p className="text-xl font-black text-gray-900">{formatIDR(summary.paid)}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Banknote className="w-4 h-4 text-blue-500" />
-              <span className="text-xs text-gray-500 font-medium">Belum Dibayar</span>
-            </div>
-            <p className="text-xl font-black text-gray-900">{formatIDR(summary.unpaid)}</p>
+            <p className="text-xl font-black text-gray-900">
+              {typeof summary.incomingThisMonth === "number" ? formatIDR(summary.incomingThisMonth) : "Belum tersedia"}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Mutasi masuk bulan berjalan dari kas besar sc (BizPortal, baca saja).
+              {summary.incomingSheetSyncedAt && (
+                <> Sinkron terakhir: {new Date(summary.incomingSheetSyncedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB.</>
+              )}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -508,7 +499,7 @@ export default function AdminExpenses() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Cari nomor, deskripsi, vendor, akun COA..."
+                placeholder="Cari nomor, catatan, atau penerima..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
