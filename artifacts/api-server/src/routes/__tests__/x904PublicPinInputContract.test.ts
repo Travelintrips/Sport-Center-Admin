@@ -6,7 +6,7 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
   const api = readFileSync(join(process.cwd(), "src/routes/whatsapp.ts"), "utf8");
 
   test("no-login guest sees green registered name without ever entering a PIN", () => {
-    expect(form).toContain('className={publicGymGuest && guestIdentityRoute === "registered"');
+    expect(form).toContain('guestIdentityRoute === "registered" || guestIdentityRoute === "expired_member"');
     expect(form).toContain('font-bold text-green-700 border-green-300');
     expect(form).toContain('body:JSON.stringify({customerName:name})');
     expect(form).not.toContain('id="guest-x904-pin"');
