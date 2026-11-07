@@ -122,6 +122,11 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
+  const [proofPreview, setProofPreview] = useState<{
+    amount: number | null; date: string | null; recipient: string | null;
+    paymentMethod: string; engine: string; verified: boolean;
+  } | null>(null);
+  const [scanningProof, setScanningProof] = useState(false);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
@@ -155,11 +160,46 @@ export default function AdminExpenses() {
       }
       setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
       toast({ title: `${uploaded.length} foto nota berhasil diupload` });
+      // Optional read-only OCR preview; a failure must not lose uploaded evidence.
+      const firstProof = fileArr.find((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type));
+      if (firstProof) {
+        setScanningProof(true);
+        try {
+          const proofFd = new FormData();
+          proofFd.append("proof", firstProof);
+          const response = await fetch(`${API}/admin/expenses/preview-proof`, {
+            method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: proofFd,
+          });
+          if (!response.ok) throw new Error("OCR unavailable");
+          const preview = await response.json();
+          if (preview.amount != null || preview.date || preview.recipient) setProofPreview(preview);
+          else toast({ title: "Bukti tersimpan", description: "Data bukti belum terbaca, silakan isi form manual." });
+        } catch {
+          toast({ title: "Bukti tersimpan", description: "Pratinjau otomatis tidak tersedia; isikan detail secara manual." });
+        } finally {
+          setScanningProof(false);
+        }
+      }
     } catch (err: any) {
       toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
     } finally {
       setUploadingReceipt(false);
     }
+  }
+
+  function applyProofPreview() {
+    if (!proofPreview) return;
+    setForm((prev) => ({
+      ...prev,
+      expenseDate: proofPreview.date && /^\d{4}-\d{2}-\d{2}$/.test(proofPreview.date)
+        ? proofPreview.date : prev.expenseDate,
+      amount: proofPreview.amount != null && Number.isFinite(proofPreview.amount) && proofPreview.amount > 0
+        ? String(proofPreview.amount) : prev.amount,
+      paymentMethod: proofPreview.paymentMethod === "QRIS" ? "QRIS"
+        : proofPreview.paymentMethod === "Transfer Bank" ? "Transfer Bank" : prev.paymentMethod,
+    }));
+    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, dan metode sebelum membuat pengeluaran." });
+    setProofPreview(null);
   }
 
   function removeReceiptUrl(idx: number) {
@@ -318,6 +358,7 @@ export default function AdminExpenses() {
   function openCreate() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM });
+    setProofPreview(null);
     setFormOpen(true);
   }
 
@@ -339,6 +380,7 @@ export default function AdminExpenses() {
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
       notes: expense.notes ?? "",
     });
+    setProofPreview(null);
     setFormOpen(true);
   }
 
@@ -794,6 +836,18 @@ export default function AdminExpenses() {
             <div className="space-y-2">
               <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
               <p className="text-xs text-gray-500">Unggah screenshot atau bukti transaksi blu (seperti bukti yang dibagikan dari aplikasi). Periksa isian tanggal, nominal dan penerima secara manual.</p>
+              {scanningProof && <p className="text-xs text-teal-700">Membaca bukti pembayaran untuk saran isian...</p>}
+              {proofPreview && (
+                <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
+                  <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>
+                  <p>Nominal: {proofPreview.amount == null ? "Tidak terbaca" : formatIDR(proofPreview.amount)} • Tanggal: {proofPreview.date ?? "Tidak terbaca"}</p>
+                  <p>Penerima terdeteksi: {proofPreview.recipient ?? "Tidak terbaca"} • Metode: {proofPreview.paymentMethod}</p>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={applyProofPreview}>Terapkan saran ke form</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setProofPreview(null)}>Abaikan</Button>
+                  </div>
+                </div>
+              )}
               <input
                 ref={receiptInputRef}
                 type="file"

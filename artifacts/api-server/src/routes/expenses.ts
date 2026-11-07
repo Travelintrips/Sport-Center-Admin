@@ -1,4 +1,6 @@
 import { Router } from "express";
+import multer from "multer";
+import { scanPaymentProof } from "../lib/paymentProofOcr";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -120,6 +122,35 @@ async function deleteFromPublic(expenseNo: string) {
     console.warn("[sync-public-expenses] Non-fatal delete error:", err);
   }
 }
+
+// Preview only: no expense created and no bank confirmation implied.
+// Reuse the existing payment-proof OCR worker without fetching arbitrary URLs.
+const expenseProofPreviewUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)),
+});
+router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPreviewUpload.single("proof"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: "Unggah bukti berupa JPG, PNG atau WebP" });
+      return;
+    }
+    const result = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    res.json({
+      amount: result.amount,
+      date: result.date,
+      recipient: result.recipient,
+      paymentMethod: result.paymentMethod,
+      engine: result.engine,
+      // Suggestions only, never verified payment evidence.
+      verified: false,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Expense proof OCR preview error");
+    res.status(500).json({ error: "Gagal membaca bukti; silakan isi manual" });
+  }
+});
 
 // ─── GET COA accounts for expense form ────────────────────────────────────────
 router.get("/admin/expenses/coa-accounts", adminMiddleware, async (req, res) => {
