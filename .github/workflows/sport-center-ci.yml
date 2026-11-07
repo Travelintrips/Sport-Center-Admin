@@ -218,6 +218,9 @@ jobs:
       - name: Verify Kasbon aggregate Sync receipts and transaction badges
         run: node --experimental-strip-types scripts/test-sc-kasbon-total-sync-snapshot.mjs
 
+      - name: Verify green payroll badge requires current Sheets G match
+        run: node scripts/test-sc-kasbon-total-badge-live-match.mjs
+
       - name: Verify Kasbon create Simpan/Sync without duplicate writes
         run: node scripts/test-sc-kasbon-save-sync.mjs
 
