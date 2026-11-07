@@ -2013,7 +2013,16 @@ function BookingDetailDrawer({
                   )}
                 </>
               ) : gymIdentityRoute === "registered" ? (
-                <div className="mt-2 text-xs">Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN sebelum pembayaran dan kepemilikan identitas sah.</div>
+                <div className="mt-2 space-y-2 text-xs">
+  <div>Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN hanya karena pembayaran confirmed.</div>
+  {gymPinGrant && (
+    <div className="rounded border border-sky-200 bg-sky-50 p-2 text-sky-900">
+      <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
+      <div>Pembayaran: <strong>{gymPinGrant.paymentStatus ?? "-"}</strong> · Verifikasi: <strong>{gymPinGrant.verificationState}</strong> · Akses: <strong>{gymPinGrant.accessState}</strong></div>
+      <div className="mt-1">Pengesahan PIN memerlukan pemeriksaan identitas fisik + dana resmi dan tetap menunggu worker serta ACK/read-back X904.</div>
+    </div>
+  )}
+</div>
               ) : (
                 <>
                   <div className="mt-2 text-xs">Belum ada kartu VIS yang dialokasikan. Setelah pembayaran benar-benar diverifikasi Admin/Finance, sistem harus otomatis memilih satu VIS001–VIS006 yang tersedia.</div>
@@ -2028,6 +2037,20 @@ function BookingDetailDrawer({
                     </button>
                   )}
                 </>
+              )}
+              {gymVisPool.length > 0 && (
+                <div className="mt-4 border-t border-emerald-200 pt-3">
+                  <div className="mb-2 text-xs font-bold">Pool VIS / X904</div>
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                    {gymVisPool.map((card: any) => (
+                      <div key={card.cardCode} className={`rounded border px-2 py-1 text-[11px] ${card.available ? "border-emerald-300 bg-white" : "border-slate-200 bg-slate-50"}`}>
+                        <div className="font-bold">{card.cardCode} · PIN {card.userPin}</div>
+                        <div>Group {card.group ?? "-"} · {card.available ? "AVAILABLE" : card.status}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 text-[10px] text-slate-600">AVAILABLE hanya jika snapshot X904 ≤5 menit, role 0, enabled, Group 2, dan tidak sedang reserved/active.</div>
+                </div>
               )}
             </div>
           )}
