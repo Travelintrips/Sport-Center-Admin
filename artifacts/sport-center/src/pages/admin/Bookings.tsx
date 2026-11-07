@@ -5351,6 +5351,15 @@ export default function AdminBookings() {
                       }
                     }
                     const uniquePaymentRowsForTruth = [...uniquePaymentRepresentations.values()];
+                    const tableHasPendingProofForVerification =
+                      !isMultiSessionGroup &&
+                      b.status === "pending_payment" &&
+                      uniquePaymentRowsForTruth.some((payment: any) =>
+                        payment?.status === "pending" && Boolean(payment?.proofUrl),
+                      );
+                    const effectiveTableStatus = tableHasPendingProofForVerification
+                      ? "waiting_confirmation"
+                      : groupStatus;
                     const uniqueConfirmedPayments = uniquePaymentRowsForTruth
                       .filter((payment: any) => payment.status === "confirmed");
                     // Corporate bookings are settled once at invoice level.
@@ -5678,7 +5687,7 @@ export default function AdminBookings() {
                               groupStatus ? (
                                 <InlineStatusSelect
                                   bookingId={(groupVerificationRow ?? b).id}
-                                  status={groupStatus}
+                                  status={effectiveTableStatus}
                                   onUpdate={(_id, status) => {
                                     if (status === "cancelled") {
                                       // The API detects groupRef and cancels every sibling
@@ -5700,7 +5709,7 @@ export default function AdminBookings() {
                             ) : (
                               <InlineStatusSelect
                                 bookingId={b.id}
-                                status={b.status}
+                                status={effectiveTableStatus}
                                 onUpdate={(id, status) => {
                                   if (status === "cancelled") {
                                     openTableCancellation(id, 1, false);
@@ -5742,6 +5751,10 @@ export default function AdminBookings() {
                               isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
                               isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                             />
+                          ) : tableHasPendingProofForVerification ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+                              <CreditCard size={11} /> Verifikasi
+                            </span>
                           ) : b.status === "pending_payment" ? (
                             b.isDpPaid ? (
                               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
