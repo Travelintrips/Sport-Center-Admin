@@ -208,10 +208,13 @@ export default function AdminExpenses() {
       amount: proofPreview.amount != null && Number.isSafeInteger(proofPreview.amount) && proofPreview.amount > 0
         ? String(proofPreview.amount) : prev.amount,
       bankReference: proofPreview.bankReference ?? prev.bankReference,
+      vendorName: proofPreview.recipient && proofPreview.recipient.trim()
+        ? proofPreview.recipient.trim() : prev.vendorName,
+      vendorId: proofPreview.recipient ? "" : prev.vendorId,
       paymentMethod: PAYMENT_METHODS.includes(proofPreview.paymentMethod)
         ? proofPreview.paymentMethod : prev.paymentMethod,
     }));
-    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, nomor referensi, dan metode sebelum menyimpan." });
+    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, penerima, nomor referensi, dan metode sebelum menyimpan." });
     setProofPreview(null);
   }
 

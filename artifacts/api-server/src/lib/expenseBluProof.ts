@@ -48,7 +48,44 @@ export function parseBluExpenseAmount(text: string): number | null {
   return null;
 }
 
-type VisionFields = { date: string | null; bankReference: string | null; amount: number | null };
+
+/** Expense-only fallback for blu proofs where beneficiary is not explicitly labelled. */
+export function parseBluProofRecipient(text: string): string | null {
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const clean=(raw: string | undefined): string | null => {
+    if (!raw) return null;
+    const value=raw.replace(/^[^A-Za-z]+/,"").replace(/[^A-Za-z.' -]+$/,"").trim().replace(/\s+/g," ");
+    if (!/^[A-Za-z][A-Za-z.' -]{3,75}$/.test(value) || value.split(" ").length < 2) return null;
+    if (/\b(?:TRANSAKSI|BERHASIL|NOMINAL|TOTAL|KATEGORI|PEMBAYARAN|BANK|PLN|BCA|DIGITAL|PRABAYAR|WIB|CHARGER|REIMBUSH|REIMBURSE)\b/i.test(value)) return null;
+    return value.toUpperCase();
+  };
+  // Blu transfers: name is immediately ABOVE the destination account line,
+  // after the transfer nominal. Do not take the sender's bluAccount name.
+  for (let i=0;i<lines.length;i++) {
+    const line=lines[i]!;
+    if (/\b(?:BCA|MANDIRI|BNI|BRI|BSI|CIMB|PERMATA)\s*[-–:]\s*\d[\d\s-]{5,}/i.test(line)) {
+      const name=clean(lines[i-1]);
+      if (name) return name;
+    }
+  }
+  // Blu PLN prepayment: recipient appears directly before meter/voltage.
+  if (/PLN\s*PRABAYAR|LISTRIK\s*PRABAYAR/i.test(text)) {
+    for (let i=0;i<lines.length;i++) {
+      const line=lines[i]!;
+      if (/\b\d{9,13}\s*[-/]\s*(?:R\d\s*[/]\s*\d{3,5}\s*VA|\d{3,5}\s*VA)/i.test(line)) {
+        const recipient=clean(lines[i-1]);
+        if (recipient) return recipient;
+      }
+      if (/^(?:NAMA)\s*[:\-]?\s*[A-Z][A-Z .'-]{3,}$/i.test(line)) {
+        const recipient=clean(line.replace(/^NAMA\s*[:\-]?/i,""));
+        if (recipient) return recipient;
+      }
+    }
+  }
+  return null;
+}
+
+type VisionFields = { date: string | null; bankReference: string | null; amount: number | null; recipient: string | null };
 export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime: string): Promise<VisionFields | null> {
   const key=process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
@@ -62,8 +99,8 @@ export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime
     } catch { /* keep original data */ }
     const client=new OpenAI({apiKey:key,...(process.env.OPENAI_BASE_URL ? {baseURL:process.env.OPENAI_BASE_URL}:{}),timeout:20000,maxRetries:0});
     const response=await client.chat.completions.create({
-      model:process.env.PAYMENT_PROOF_VISION_MODEL||"gpt-4o-mini",temperature:0,max_tokens:180,
-      messages:[{role:"system",content:"Extract data from Indonesian blu/BCA Digital transaction proof. Return ONLY JSON with fields date (YYYY-MM-DD or null), bankReference (digits of No. Ref blu only; null if not explicitly present), amount (integer rupiah of nominal transaction or TOTAL BAYAR; not PLN RP BAYAR or fees; null if unclear). Do not invent dates on receipts lacking date. A PLN meter number, token, and provider NO REF are NOT No. Ref blu. Keep exact reference digits, joining groups."},
+      model:process.env.PAYMENT_PROOF_VISION_MODEL||"gpt-4o-mini",temperature:0,max_tokens:220,
+      messages:[{role:"system",content:"Extract data from Indonesian blu/BCA Digital transaction proof. Return ONLY JSON with fields date (YYYY-MM-DD or null), bankReference (digits of No. Ref blu only; null if not explicitly present), amount (integer rupiah of nominal transaction or TOTAL BAYAR; not PLN RP BAYAR or fees; null if unclear), recipient (name of beneficiary/receiver of transfer or PLN service customer, or null; NEVER sender/source owner). For blu transfer proof, identify recipient near destination bank/account (e.g. DEDE SAEFULLAH near BCA account), not Felicia Justiani bluAccount; on PLN proof return DEDE YANI. Do not invent dates on receipts lacking date. A PLN meter number, token, and provider NO REF are NOT No. Ref blu. Keep exact reference digits, joining groups."},
         {role:"user",content:[{type:"text",text:"Read the screenshot and return the specified JSON fields only."},
           {type:"image_url",image_url:{url:`data:${type};base64,${data.toString("base64")}`,detail:"high"}}]}],
     });
@@ -72,8 +109,12 @@ export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime
     const date=typeof parsed.date==="string" && /^20\d{2}-\d{2}-\d{2}$/.test(parsed.date) && parsePaymentProofDate(parsed.date)===parsed.date ? parsed.date : null;
     const bankReference=typeof parsed.bankReference==="string" ? parsed.bankReference.replace(/\D/g,"") : null;
     const amount=Number(parsed.amount);
+    const recipient=typeof parsed.recipient==="string" ? parsed.recipient.trim().replace(/\s+/g," ") : "";
+    const safeRecipient=recipient.length>=3 && recipient.length<=120 &&
+      /^[\p{L} .'-]+$/u.test(recipient) && !/^(null|unknown|tidak\s*terbaca)$/i.test(recipient)
+      ? recipient.toUpperCase() : null;
     return {date,bankReference:bankReference && bankReference.length>=12 && bankReference.length<=20?bankReference:null,
-      amount:Number.isSafeInteger(amount)&&amount>=1000&&amount<=1_000_000_000?amount:null};
+      amount:Number.isSafeInteger(amount)&&amount>=1000&&amount<=1_000_000_000?amount:null, recipient:safeRecipient};
   } catch {
     return null;
   }
