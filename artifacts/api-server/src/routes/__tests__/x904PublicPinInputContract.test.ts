@@ -49,4 +49,17 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).toContain('publicGymGuest && guestPin.trim() && guestPinMatch === true');
   });
 
+  test("PIN lookup is on-demand, handles rate limits and does not unlock the checkout on API errors", () => {
+    expect(form).toContain('async function checkGuestPinIdentity()');
+    expect(form).toContain('onClick={() => void checkGuestPinIdentity()}');
+    expect(form).toContain('response.status === 429');
+    expect(form).toContain('response.status === 503');
+    expect(form).toContain('guestLookupAbort.current?.abort()');
+    expect(form).toContain('guestPin.trim() && (guestIdentityRoute !== "registered" || guestPinMatch !== true)');
+    const start = form.indexOf('// Identity preview runs only on demand.');
+    const end = form.indexOf('async function checkGuestPinIdentity()', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(form.slice(start,end)).not.toContain('fetch("/api/wa/gym-name-route"');
+  });
+
 });
