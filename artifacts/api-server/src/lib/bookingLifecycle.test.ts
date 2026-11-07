@@ -48,7 +48,7 @@ describe("booking lifecycle guard contracts", () => {
   it("requires a meaningful audit reason when completing without check-in", () => {
     expect(normalizeBookingCompletionExceptionReason(undefined)).toBeNull();
     expect(normalizeBookingCompletionExceptionReason("")).toBeNull();
-    expect(normalizeBookingCompletionExceptionReason("WA sudah ada")).toBeNull();
+    expect(normalizeBookingCompletionExceptionReason("WA ada")).toBeNull();
     expect(normalizeBookingCompletionExceptionReason("   ")).toBeNull();
     expect(normalizeBookingCompletionExceptionReason("x".repeat(1001))).toBeNull();
     expect(normalizeBookingCompletionExceptionReason("Petugas  mengonfirmasi  sesi telah lewat"))
