@@ -113,4 +113,96 @@ router.post("/admin/sc-employees/payroll-tabs/create",adminMiddleware,async(req,
   res.status(422).json({error:e instanceof Error?e.message:"PAYROLL_TAB_CREATE_FAILED"});
  }finally{writing=false;}
 });
+
+// One-time, fail-closed repair for the already-created December 2026 tab.
+// Copy only cells cleared by the older implementation; never overwrite user
+// changes or create/delete a worksheet in this repair operation.
+async function decemberRepairPlan(){
+ if(process.env.APP_ENV!=="production"||process.env.NODE_ENV!=="production")
+  throw Error("PAYROLL_PRODUCTION_ONLY");
+ const raw=process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+ if(!raw)throw Error("GOOGLE_SERVICE_ACCOUNT_MISSING");
+ const credentials=JSON.parse(raw);
+ if(credentials.client_email!==EXPECTED_ACCOUNT)throw Error("GOOGLE_SERVICE_ACCOUNT_UNEXPECTED");
+ if(typeof credentials.private_key==="string")credentials.private_key=credentials.private_key.replace(/\\n/g,"\n");
+ const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
+ const sheets=google.sheets({version:"v4",auth});
+ const spreadsheetId=PROD_SPREADSHEET;
+ const meta=await sheets.spreadsheets.get({spreadsheetId,fields:"sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)))"});
+ const source=meta.data.sheets?.filter(x=>x.properties?.sheetId===NOVEMBER_GID&&x.properties.title==="Gaji November 2026");
+ const destination=meta.data.sheets?.filter(x=>x.properties?.title==="Gaji Desember 2026");
+ if(source?.length!==1||destination?.length!==1||destination[0].properties?.hidden)
+  throw Error("PAYROLL_REPAIR_SHEETS_UNVERIFIED");
+ const destId=destination[0].properties!.sheetId;
+ if(!Number.isSafeInteger(destId)||destId===NOVEMBER_GID)throw Error("PAYROLL_REPAIR_DESTINATION_UNSAFE");
+ const [a,b]=await Promise.all([
+  sheets.spreadsheets.values.get({spreadsheetId,range:"'Gaji November 2026'!A:M",valueRenderOption:"FORMULA"}),
+  sheets.spreadsheets.values.get({spreadsheetId,range:"'Gaji Desember 2026'!A:M",valueRenderOption:"FORMULA"})
+ ]);
+ const sourceRows=a.data.values??[],destRows=b.data.values??[];
+ if(sourceRows.length<20||sourceRows.length>200||destRows.length>200)
+  throw Error("PAYROLL_REPAIR_ROWS_UNSAFE");
+ const planned=planPayrollDraft("2026-12",sourceRows);
+ if(planned.employeeCount<4)throw Error("PAYROLL_REPAIR_TEMPLATE_UNSAFE");
+ const missing:Array<{r:number;c:number;cell:string}>=[];
+ const conflicts:string[]=[];
+ for(let r=0;r<sourceRows.length;r++){
+  const row=sourceRows[r]??[],to=destRows[r]??[];
+  for(let c=0;c<13;c++){
+   const from=String(row[c]??"").trim(),current=String(to[c]??"").trim();
+   if(!from&&!current)continue;
+   if(!from&&current){conflicts.push(String.fromCharCode(65+c)+(r+1));continue;}
+   if(from===current)continue;
+   const cell=String.fromCharCode(65+c)+(r+1);
+   if(!current)missing.push({r,c,cell});
+   else conflicts.push(cell);
+  }
+ }
+ if(conflicts.length)throw Error("PAYROLL_REPAIR_CONFLICT_NONEMPTY_CELLS:"+conflicts.slice(0,8).join(","));
+ if(missing.length>600)throw Error("PAYROLL_REPAIR_TOO_MANY_CELLS");
+ return {sheets,spreadsheetId,sourceId:NOVEMBER_GID,destId:destId!,missing,
+  sourceRows,employeeCount:planned.employeeCount};
+}
+router.post("/admin/sc-employees/payroll-tabs/restore-december-preview",adminMiddleware,async(_req,res)=>{
+ try{
+  const plan=await decemberRepairPlan();
+  res.setHeader("Cache-Control","no-store");
+  res.json({sourceTitle:"Gaji November 2026",targetTitle:"Gaji Desember 2026",
+   employeeCount:plan.employeeCount,missingCells:plan.missing.length,
+   sampleCells:plan.missing.slice(0,12).map(x=>x.cell),
+   writeEnabled:process.env.SC_SALARY_TAB_CREATE_ENABLED==="true"});
+ }catch(e){res.status(422).json({error:e instanceof Error?e.message:"PAYROLL_REPAIR_PREVIEW_FAILED"});}
+});
+router.post("/admin/sc-employees/payroll-tabs/restore-december",adminMiddleware,async(req,res)=>{
+ if(process.env.SC_SALARY_TAB_CREATE_ENABLED!=="true"){
+  res.status(503).json({error:"PAYROLL_TAB_CREATE_DISABLED"});return;
+ }
+ if(writing){res.status(409).json({error:"PAYROLL_TAB_CREATE_BUSY"});return;}
+ writing=true;
+ try{
+  if(Object.keys(req.body??{}).length!==0)throw Error("PAYROLL_REPAIR_BODY_FORBIDDEN");
+  const plan=await decemberRepairPlan();
+  if(plan.missing.length){
+   // Copy only empty cells in target. PASTE_NORMAL retains original cell
+   // value/formula as well as number format; same grid coordinates.
+   const requests=plan.missing.map(({r,c})=>({copyPaste:{
+    source:{sheetId:plan.sourceId,startRowIndex:r,endRowIndex:r+1,startColumnIndex:c,endColumnIndex:c+1},
+    destination:{sheetId:plan.destId,startRowIndex:r,endRowIndex:r+1,startColumnIndex:c,endColumnIndex:c+1},
+    pasteType:"PASTE_NORMAL" as const,pasteOrientation:"NORMAL" as const
+   }}));
+   await plan.sheets.spreadsheets.batchUpdate({spreadsheetId:plan.spreadsheetId,requestBody:{requests}});
+  }
+  const read=await plan.sheets.spreadsheets.values.get({spreadsheetId:plan.spreadsheetId,
+   range:"'Gaji Desember 2026'!A1:M"+plan.sourceRows.length,valueRenderOption:"FORMULA"});
+  const after=read.data.values??[];
+  if(plan.sourceRows.some((row,r)=>row.some((v,c)=>String(v??"").trim()!==String(after[r]?.[c]??"").trim())))
+   throw Error("PAYROLL_REPAIR_READBACK_MISMATCH");
+  await logAudit({...getUserFromReq(req),action:"SC_PAYROLL_DECEMBER_VALUES_RESTORED",
+   entity:"sc_employee_payroll_tab",after:{month:"2026-12",sourceGid:NOVEMBER_GID,
+    targetGid:plan.destId,restoredCells:plan.missing.length},...getClientInfo(req)});
+  res.json({restored:true,restoredCells:plan.missing.length,targetTitle:"Gaji Desember 2026",
+   url:`https://docs.google.com/spreadsheets/d/${plan.spreadsheetId}/edit?gid=${plan.destId}#gid=${plan.destId}`});
+ }catch(e){res.status(422).json({error:e instanceof Error?e.message:"PAYROLL_REPAIR_FAILED"});}
+ finally{writing=false;}
+});
 export default router;
