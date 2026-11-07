@@ -165,8 +165,6 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     // Small bounded batches prevent device command floods and keep
     // PostgreSQL/VMSC capacity available for bookings and paid access.
     if (queuedThisCycle >= 5) break;
-    queuedThisCycle += 1;
-    const pin = String(candidate.pin);
     const name = String(candidate.name).trim().replace(/\s+/g, " ");
     const firstIndex = firstIndexOf(pin);
     if (firstIndex <= 0) continue;
@@ -184,7 +182,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         Number(u.role) === 0).length !== 1)) continue;
     const onlyPin = process.env.GYM_X904_NEW_USER_ONLY_PIN;
     if (onlyPin && pin !== onlyPin) continue;
-    await store.transaction(async tx => {
+    const enqueued = await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904215)`);
       // Fail closed if a new snapshot appeared or if the PIN had existed in
       // any historical snapshot, including before our activation baseline.
@@ -240,7 +238,9 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
         VALUES (${DEVICE},'SUSPEND_USER',${pin},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
+      return true;
     });
+    if (enqueued) queuedThisCycle += 1;
   }
 
 }
