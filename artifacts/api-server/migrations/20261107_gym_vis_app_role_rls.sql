@@ -19,6 +19,6 @@ IF NOT EXISTS(SELECT 1 FROM pg_policies WHERE schemaname='sport_center' AND tabl
 IF NOT EXISTS(SELECT 1 FROM pg_policies WHERE schemaname='sport_center' AND tablename='x904_nonmember_daily_access' AND policyname='x904_nonmember_app_update') THEN EXECUTE $pol5$CREATE POLICY x904_nonmember_app_update ON sport_center.x904_nonmember_daily_access FOR UPDATE TO sport_center_app USING ((device_serial = 'TDBD234200545'::text)) WITH CHECK ((device_serial = 'TDBD234200545'::text))$pol5$; END IF;
 END $policy_install$;
 DO $verify$ DECLARE actual text; BEGIN
-SELECT md5(string_agg(tablename||'|'||policyname||'|'||cmd||'|'||array_to_string(roles,',')||'|'||coalesce(qual,'')||'|'||coalesce(with_check,''),E'\\n' ORDER BY tablename,policyname)) INTO actual FROM pg_policies WHERE schemaname='sport_center' AND tablename IN ('gym_vis_card_reservations','x904_nonmember_daily_access');
+SELECT md5(string_agg(tablename||'|'||policyname||'|'||cmd||'|'||array_to_string(roles,',')||'|'||coalesce(qual,'')||'|'||coalesce(with_check,''),E'\n' ORDER BY tablename,policyname)) INTO actual FROM pg_policies WHERE schemaname='sport_center' AND tablename IN ('gym_vis_card_reservations','x904_nonmember_daily_access');
 IF actual IS DISTINCT FROM '710dfadf00fb76e5f4eb6b78fa35564e' THEN RAISE EXCEPTION 'VIS_POLICY_DRIFT'; END IF;
 END $verify$;
