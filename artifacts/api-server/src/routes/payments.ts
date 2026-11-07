@@ -16,7 +16,7 @@ import { isSessionCurrent } from "../lib/roleAuthorization";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminBookingReport, notifyGymVisitorCardReserved } from "../lib/notifications";
+import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminBookingReport, notifyGymVisitorCardReserved, notifyGymGuestPaymentVerified } from "../lib/notifications";
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
@@ -2337,19 +2337,21 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
               .where(eq(facilitiesTable.id, booking.facilityId))
               .limit(1);
 
-            logger.info({ orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
-            notifyPaymentConfirmed({
-              customerName: booking.customerName,
-              customerPhone: booking.customerPhone,
-              orderNumber: booking.orderNumber,
-              facilityName: facility?.name ?? "",
-              bookingDate: booking.bookingDate,
-              startTime: booking.startTime,
-              endTime: booking.endTime,
-              totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-              bookingId: booking.id,
-              groupRef: booking.groupRef,
-            }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
+            if (booking.source !== "gym_public_guest") {
+              logger.info({ orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
+              notifyPaymentConfirmed({
+                customerName: booking.customerName,
+                customerPhone: booking.customerPhone,
+                orderNumber: booking.orderNumber,
+                facilityName: facility?.name ?? "",
+                bookingDate: booking.bookingDate,
+                startTime: booking.startTime,
+                endTime: booking.endTime,
+                totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+                bookingId: booking.id,
+                groupRef: booking.groupRef,
+              }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
+            }
 
             // Kirim invoice PDF ke customer via email & WA (fire-and-forget).
             // Split-state recovery skips delivery because booking confirmation
@@ -2570,6 +2572,15 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           booking, payment, userInfo.userName || String((req as any).user?.email ?? "ADMIN"),
         )
       : null;
+    if (status === "confirmed" && booking?.source === "gym_public_guest" && !visReservation) {
+      notifyGymGuestPaymentVerified({
+        bookingId: booking.id,
+        orderNumber: booking.orderNumber,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+      }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[gym-guest] verified payment notice failed"));
+    }
     res.json({ ...payment, amount: Number(payment.amount),
       ...(visReservation ? { visReservation } : {}) });
   } catch (err: any) {

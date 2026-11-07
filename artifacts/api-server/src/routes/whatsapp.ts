@@ -1588,6 +1588,10 @@ router.post("/wa/action/:token", async (req, res) => {
           return;
         }
         payment = await ensurePaymentBankAccount(payment, booking);
+        if (booking.source === "gym_public_guest") {
+          res.status(409).json({ error: "Booking Gym mandiri wajib diverifikasi dari Booking Admin agar VIS/PIN dan X904 diproses dengan aman." });
+          return;
+        }
 
         await consumeWaToken(req.params.token);
 
@@ -2559,6 +2563,10 @@ router.post("/wa/review/:token", async (req, res) => {
         return;
       }
       payment = await ensurePaymentBankAccount(payment, booking);
+      if (booking.source === "gym_public_guest") {
+        res.status(409).json({ error: "Booking Gym mandiri wajib diverifikasi dari Booking Admin agar VIS/PIN dan X904 diproses dengan aman." });
+        return;
+      }
 
       await consumeWaToken(req.params.token);
 
@@ -3394,6 +3402,10 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
     return;
   }
+  if (booking.source === "gym_public_guest") {
+    await sendWAMsg(adminPhone, `⚠️ *${orderNumber}* adalah Booking Gym Mandiri. Verifikasi pembayaran wajib dilakukan dari Booking Admin agar kartu VIS/PIN dan X904 diproses dengan aman.`);
+    return;
+  }
 
   const [facility] = await db.select().from(facilitiesTable)
     .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
@@ -3652,6 +3664,10 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
   if (!booking) {
     await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  if (booking.source === "gym_public_guest") {
+    await sendWAMsg(adminPhone, `⚠️ *${orderNumber}* adalah Booking Gym Mandiri. Verifikasi pembayaran wajib dilakukan dari Booking Admin agar kartu VIS/PIN dan X904 diproses dengan aman.`);
     return;
   }
   if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(booking.status)) {
