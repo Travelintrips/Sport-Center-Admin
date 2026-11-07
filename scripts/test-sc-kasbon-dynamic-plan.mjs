@@ -38,12 +38,23 @@ for(const [h,month,year,day] of [[12,12,2026,5],[55,1,2027,3]]) {
  assert.equal(plan.status,"ready",JSON.stringify(plan));
  assert.equal(plan.destination,(day+4===9?"I":day+4===7?"G":"UNKNOWN")+(h+1));
  assert.equal(plan.repairs.length,3);
- // Formulas that do not cover complete day rows must not pass.
+ // Legacy truncated SUM ranges can be extended only after verifying that
+ // the live calculated subtotal equals the sum of all expected source cells.
  const col=day+4;
- formulas[h+2][col-1]=`=SUM(I${h+1}:I${h+1})`;
+ const colLetter=col===9?"I":"G";
+ formulas[h+2][col-1]=`=SUM(${colLetter}${h+1}:${colLetter}${h+1})`;
+ const expandable=planDynamicKasbon(section,formulas,raw,"1500000.00");
+ assert.equal(expandable.status,"ready",JSON.stringify(expandable));
+ assert.ok(expandable.repairs.some(r=>r.cell===colLetter+(h+3)),"repair truncated day subtotal");
+ formulas[h+2][col-1]=`=SUM(Z${h+1}:Z${h+2})`;
  const rejected=planDynamicKasbon(section,formulas,raw,"1500000.00");
  assert.equal(rejected.status,"blocked");
  assert.equal(rejected.reason,"KASBON_SUBTOTAL_FORMULA_INCOMPLETE");
+ formulas[h+2][col-1]=`=SUM(${colLetter}${h+1}:${colLetter}${h+1})`;
+ raw[h+2][col-1]=500;
+ const mismatch=planDynamicKasbon(section,formulas,raw,"1500000.00");
+ assert.equal(mismatch.status,"blocked");
+ assert.equal(mismatch.reason,"KASBON_SUBTOTAL_INCONSISTENT");
 }
 console.log("PASS: month-agnostic subtotal planning and incomplete-formula rejection");
 
