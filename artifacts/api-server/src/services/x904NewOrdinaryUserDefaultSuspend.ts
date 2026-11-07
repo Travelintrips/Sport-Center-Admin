@@ -90,7 +90,19 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       AND observed_at >= ${new Date(now.getTime() - 75 * 60_000)}
     ORDER BY snapshot_id DESC LIMIT 80`);
   if (snapshots.rows.length < 2) return;
-  const history = (snapshots.rows as any[]).reverse();
+  const allHistory = (snapshots.rows as any[]).reverse();
+  // A collector outage must not freeze registration processing for the whole
+  // 75-minute window. Use only the newest contiguous segment and still verify
+  // the PIN has NEVER appeared in any older snapshot before queuing a command.
+  let segmentStart = 0;
+  for (let i = 1; i < allHistory.length; i++) {
+    const before = new Date(String(allHistory[i - 1].observed_at)).getTime();
+    const current = new Date(String(allHistory[i].observed_at)).getTime();
+    if (Number.isFinite(before) && Number.isFinite(current) &&
+        current - before > 10 * 60_000) segmentStart = i;
+  }
+  const history = allHistory.slice(segmentStart);
+  if (history.length < 2) return;
   const latest = history[history.length - 1];
   const latestTime = new Date(String(latest.observed_at)).getTime();
   if (!Number.isFinite(latestTime) || latestTime > now.getTime() ||
@@ -113,22 +125,48 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
   if (!newCandidates.length) return;
-  // An implausibly large simultaneous inventory expansion could indicate
-  // sync corruption or a partial/device restore. Fail closed rather than
-  // sending bulk access commands; an operator must review the snapshot.
-  if (newCandidates.length > 10) {
-    console.error("[x904-new-user-default-suspend] unexpected-bulk-enrollment", JSON.stringify({
-      candidates: newCandidates.length, maximumPerSnapshot: 10,
-      action: "review_snapshot_before_automatic_commands",
-    }));
-    return;
-  }
+  const firstIndexOf = (pin: string): number => history.findIndex(row =>
+    (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
 
+  // A snapshot with >10 newly enrolled ordinary identities is anomalous.
+  // Restrict only THAT transition, not independent legitimate enrollments
+  // across many different snapshots during the 75-minute detection window.
+  const byTransition = new Map<number, SnapshotUser[]>();
   for (const candidate of newCandidates) {
+    const first = firstIndexOf(String(candidate.pin));
+    if (first <= 0) continue;
+    byTransition.set(first, [...(byTransition.get(first) ?? []), candidate]);
+  }
+  const allowedCandidates: SnapshotUser[] = [];
+  for (const [firstIndex, candidates] of byTransition) {
+    if (candidates.length > 10) {
+      console.error("[x904-new-user-default-suspend] unexpected-bulk-enrollment",
+        JSON.stringify({ snapshotId: history[firstIndex].snapshot_id,
+          candidates: candidates.length, maximumPerSnapshot: 10,
+          action: "review_snapshot_before_automatic_commands" }));
+      continue;
+    }
+    allowedCandidates.push(...candidates);
+  }
+  if (!allowedCandidates.length) return;
+
+  // Skip already processed or manually handled PINs BEFORE opening a
+  // transaction. This prevents repeated advisory locks and history scans
+  // every minute for the same registration during the 75-minute lookback.
+  const pins = allowedCandidates.map(u => String(u.pin));
+  const existing = await store.execute(sql`SELECT DISTINCT user_pin
+    FROM sport_center.x904_user_commands
+    WHERE device_serial=${DEVICE} AND user_pin IN (${sql.join(pins.map(pin => sql`${pin}`), sql`,`)})`);
+  const previouslyHandled = new Set(existing.rows.map(row => String(row.user_pin)));
+  let queuedThisCycle = 0;
+  for (const candidate of allowedCandidates) {
     const pin = String(candidate.pin);
+    if (previouslyHandled.has(pin)) continue;
+    // Small bounded batches prevent device command floods and keep
+    // PostgreSQL/VMSC capacity available for bookings and paid access.
+    if (queuedThisCycle >= 5) break;
     const name = String(candidate.name).trim().replace(/\s+/g, " ");
-    const firstIndex = history.findIndex(row =>
-      (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
+    const firstIndex = firstIndexOf(pin);
     if (firstIndex <= 0) continue;
     // The preceding snapshot must prove absence; all subsequent snapshots
     // must continue to refer to exactly the same ordinary identity.
@@ -144,7 +182,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         Number(u.role) === 0).length !== 1)) continue;
     const onlyPin = process.env.GYM_X904_NEW_USER_ONLY_PIN;
     if (onlyPin && pin !== onlyPin) continue;
-    await store.transaction(async tx => {
+    const enqueued = await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904215)`);
       // Fail closed if a new snapshot appeared or if the PIN had existed in
       // any historical snapshot, including before our activation baseline.
@@ -200,7 +238,9 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
         VALUES (${DEVICE},'SUSPEND_USER',${pin},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
+      return true;
     });
+    if (enqueued) queuedThisCycle += 1;
   }
 
 }

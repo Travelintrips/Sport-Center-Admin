@@ -21,8 +21,14 @@ test("only newly appearing role 0 in Group 1 is considered", () => {
   assert.match(worker, /!previousPins\.has\(pin\)/);
   assert.match(worker, /history\.findIndex/);
   assert.match(worker, /history\.slice\(firstIndex\)/);
-  assert.match(worker, /newCandidates\.length > 10/);
+  assert.match(worker, /candidates\.length > 10/);
   assert.match(worker, /unexpected-bulk-enrollment/);
+  assert.match(worker, /segmentStart = i/);
+  assert.match(worker, /const history = allHistory\.slice\(segmentStart\)/);
+  assert.match(worker, /const previouslyHandled = new Set/);
+  assert.match(worker, /if \(previouslyHandled\.has\(pin\)\) continue/);
+  assert.match(worker, /if \(queuedThisCycle >= 5\) break/);
+
   assert.match(worker, /Number\(user\.role\) === 0/);
   assert.match(worker, /Number\(user\.group\) === 1/);
   assert.match(worker, /user\.enabled === true/);
