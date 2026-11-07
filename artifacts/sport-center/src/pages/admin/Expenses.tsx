@@ -704,6 +704,22 @@ export default function AdminExpenses() {
               <p className="text-xs text-gray-500">Contoh dari kas besar sc. Nama lain boleh diketik manual.</p>
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="income-bank">Bank Pengirim <span className="text-red-500">*</span></Label>
+              <Input id="income-bank" list="income-bank-suggestions"
+                placeholder="Contoh: Mandiri, BCA, blu"
+                required
+                value={incomeForm.bank}
+                onChange={(e) => { setIncomeForm({ ...incomeForm, bank: e.target.value }); setIncomePreview(false); }} />
+              <datalist id="income-bank-suggestions">
+                <option value="Mandiri" />
+                <option value="BCA" />
+                <option value="blu by BCA Digital" />
+                <option value="BNI" />
+                <option value="BRI" />
+              </datalist>
+              <p className="text-xs text-gray-500">Bank asal dana. Berbeda dengan bank atau akun penerima.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label>Metode <span className="text-red-500">*</span></Label>
               <Select value={incomeForm.method} onValueChange={(value) => {
                 setIncomeForm({ ...incomeForm, method: value }); setIncomePreview(false);
@@ -716,21 +732,6 @@ export default function AdminExpenses() {
                   <SelectItem value="Lainnya">Lainnya</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="income-bank">Bank Pengirim (opsional)</Label>
-              <Input id="income-bank" list="income-bank-suggestions"
-                placeholder="Contoh: Mandiri, BCA, blu"
-                value={incomeForm.bank}
-                onChange={(e) => { setIncomeForm({ ...incomeForm, bank: e.target.value }); setIncomePreview(false); }} />
-              <datalist id="income-bank-suggestions">
-                <option value="Mandiri" />
-                <option value="BCA" />
-                <option value="blu by BCA Digital" />
-                <option value="BNI" />
-                <option value="BRI" />
-              </datalist>
-              <p className="text-xs text-gray-500">Bank asal transfer, jika diketahui. Berbeda dengan rekening yang menerima dana.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="income-receiving-account">
@@ -776,6 +777,7 @@ export default function AdminExpenses() {
               <Button type="button" variant="outline" onClick={() => setIncomeOpen(false)}>Batal</Button>
               <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white"
                 disabled={!incomeForm.transactionDate || !incomeForm.sourceName.trim() ||
+                  !incomeForm.bank.trim() ||
                   (incomeForm.method === "Transfer Bank" && !incomeForm.receivingAccount.trim()) ||
                   Number(incomeForm.amount) <= 0}>
                 Pratinjau Input
