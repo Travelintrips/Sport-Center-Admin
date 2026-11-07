@@ -1517,7 +1517,25 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? null;
+  const { data: gymX904Monitoring } = useQuery({
+    queryKey: ["admin-gym-x904-monitoring", booking.orderNumber],
+    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    staleTime: 0,
+    refetchInterval: 15000,
+    queryFn: async () => {
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/x904-monitoring`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+  });
+  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? gymX904Monitoring?.reservation ?? null;
+  const gymVisAccess = gymX904Monitoring?.access ?? null;
+  const gymVisPool = gymX904Monitoring?.pool ?? [];
+  const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
   const gymIdentityRoute = gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
 
   const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
@@ -1536,6 +1554,7 @@ function BookingDetailDrawer({
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
   const [newPaymentError, setNewPaymentError] = useState("");
+  const [visPhysicalReturned, setVisPhysicalReturned] = useState(false);
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
   const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
