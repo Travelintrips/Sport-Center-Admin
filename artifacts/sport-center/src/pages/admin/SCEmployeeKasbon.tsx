@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2, LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,8 +18,8 @@ type Form = { kasbonDate: string; amount: string; notes: string; proofUrl: strin
 const blank = (): Form => ({kasbonDate: new Date().toLocaleDateString("en-CA"),amount:"",notes:"",proofUrl:null});
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const endpoint = (id: string) => "/admin/sc-employees/" + encodeURIComponent(id) + "/kasbon";
-async function api(path: string,method="GET",body?: unknown): Promise<any> {
- const res = await fetch(API + path,{method,headers:{Authorization:"Bearer "+getToken(),"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})});
+async function api(path: string,method="GET",body?: unknown,actionGrant?:string): Promise<any> {
+ const res = await fetch(API + path,{method,headers:{Authorization:"Bearer "+getToken(),"Content-Type":"application/json",...(actionGrant?{"x-sc-kasbon-authorization":actionGrant}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const json = await res.json(); if(!res.ok) throw Error(json.error || "Permintaan gagal"); return json;
 }
 const currency = (value: string | number) => new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(Number(value));
@@ -28,6 +28,10 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [open,setOpen]=useState(false), [editing,setEditing]=useState<number|null>(null), [form,setForm]=useState<Form>(blank);
  const [uploading,setUploading]=useState(false);
  const [toDelete,setToDelete]=useState<Kasbon|null>(null);
+ const [unlockRecord,setUnlockRecord]=useState<Kasbon|null>(null);
+ const [actionPassword,setActionPassword]=useState("");
+ const [actionGrant,setActionGrant]=useState<{recordId:number;authorization:string;expiresAt:number}|null>(null);
+ const hasActionGrant=(recordId:number)=>actionGrant?.recordId===recordId&&actionGrant.expiresAt>Date.now();
  const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string}|null>(null);
  type SalaryCheck={matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
@@ -53,7 +57,8 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const save=useMutation({
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
-   const row=await api(endpoint(employee.employeeId)+(isCreate?"":"/"+editing),isCreate?"POST":"PATCH",payload);
+   if(!isCreate && (editing===null||!hasActionGrant(editing)))throw Error("Otorisasi Edit Kasbon sudah kedaluwarsa. Buka proteksi kembali.");
+   const row=await api(endpoint(employee.employeeId)+(isCreate?"":"/"+editing),isCreate?"POST":"PATCH",payload,isCreate?undefined:actionGrant?.authorization);
    if(!isCreate)return {row,created:false,pool:null};
    // Simpan / Sync only targets the per-transaction Kasbon POOL outbox.
    // Total Kasbon payroll (kolom G) is exclusively updated by Sync Total.
@@ -64,7 +69,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   retry:false,
   onSuccess:(result)=>{
    setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});
-   setOpen(false);setEditing(null);setForm(blank());
+   setOpen(false);setEditing(null);setForm(blank());setActionGrant(null);
    if(!result.created){
     toast({title:"Kasbon berhasil diperbarui",description:"Data perubahan disimpan. Periksa kebutuhan rekonsiliasi Sheets."});return;
    }
@@ -80,15 +85,36 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   onError:(e:Error)=>toast({title:"Gagal menyimpan kasbon",description:e.message,variant:"destructive"})
  });
  const remove = useMutation({
-  mutationFn: (record: Kasbon) => api(endpoint(employee.employeeId)+"/"+record.id,"DELETE"),
+  mutationFn: (record: Kasbon) => {
+   if(!hasActionGrant(record.id))throw Error("Otorisasi Hapus Kasbon sudah kedaluwarsa. Buka proteksi kembali.");
+   return api(endpoint(employee.employeeId)+"/"+record.id,"DELETE",undefined,actionGrant?.authorization);
+  },
   onSuccess: () => {
    setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});
-   setToDelete(null);
+   setToDelete(null);setActionGrant(null);
    toast({title:"Catatan kasbon berhasil dihapus"});
   },
   onError: (e:Error) => toast({title:"Gagal menghapus kasbon",description:e.message,variant:"destructive"}),
  });
 
+ const unlockAction=useMutation({
+  mutationFn:async()=>{
+   if(!unlockRecord)throw Error("Catatan kasbon belum dipilih");
+   return api(endpoint(employee.employeeId)+"/"+unlockRecord.id+"/unlock","POST",{password:actionPassword});
+  },
+  retry:false,
+  onSuccess:(result:{authorization:string;expiresInSeconds:number})=>{
+   if(!unlockRecord)return;
+   setActionGrant({recordId:unlockRecord.id,authorization:result.authorization,
+    expiresAt:Date.now()+Math.min(90,result.expiresInSeconds)*1000});
+   setUnlockRecord(null);setActionPassword("");
+   toast({title:"Otorisasi Kasbon berhasil",description:"Edit dan Hapus terbuka sementara hanya untuk catatan yang dipilih."});
+  },
+  onError:(error:Error)=>{
+   setActionPassword("");
+   toast({title:"Otorisasi ditolak",description:error.message,variant:"destructive"});
+  }
+ });
  const checkSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
   onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
@@ -155,7 +181,10 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
     <td className="p-3">{isSalaryChecking?<span className="text-xs text-muted-foreground">Memeriksa Sheets...</span>:payrollMatches&&syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:syncedRecordIds.has(r.id)?<span className="text-xs font-medium text-amber-700">Perlu Sync Total</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
-    <Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
+    {hasActionGrant(r.id)?<>
+    <Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button>
+    <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button>
+   </>:<Button size="sm" variant="outline" onClick={()=>{setActionGrant(null);setActionPassword("");setUnlockRecord(r);}}><LockKeyhole className="mr-1 h-3 w-3"/>Insert Password</Button>}</div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
   <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
@@ -173,6 +202,21 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
      <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
      <Button disabled={!salaryPreview||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Sync Total"}</Button>
     </div>
+   </DialogContent>
+  </Dialog>
+  <Dialog open={unlockRecord!==null} onOpenChange={value=>{if(!value&&!unlockAction.isPending){setUnlockRecord(null);setActionPassword("");}}}>
+   <DialogContent className="max-w-sm">
+    <DialogHeader><DialogTitle>Insert Password — Edit / Hapus Kasbon</DialogTitle></DialogHeader>
+    <p className="text-sm text-muted-foreground">Verifikasi khusus untuk KB-{String(unlockRecord?.id??0).padStart(5,"0")}. Role admin, owner, atau super_admin tidak dapat melewati verifikasi ini.</p>
+    <form className="space-y-3" onSubmit={e=>{e.preventDefault();unlockAction.mutate();}}>
+     <div className="space-y-1"><Label htmlFor="kasbon-action-password">Password Otorisasi</Label>
+      <Input id="kasbon-action-password" type="password" autoComplete="off" minLength={12} maxLength={256} required value={actionPassword}
+       onChange={e=>setActionPassword(e.target.value)} placeholder="Masukkan password khusus Kasbon"/></div>
+     <div className="flex justify-end gap-2">
+      <Button type="button" variant="outline" disabled={unlockAction.isPending} onClick={()=>{setUnlockRecord(null);setActionPassword("");}}>Batal</Button>
+      <Button type="submit" disabled={unlockAction.isPending||actionPassword.length<12}>{unlockAction.isPending?"Memverifikasi...":"Buka Edit / Hapus"}</Button>
+     </div>
+    </form>
    </DialogContent>
   </Dialog>
   <Dialog open={toDelete!==null} onOpenChange={value=>{if(!value&&!remove.isPending)setToDelete(null);}}>
