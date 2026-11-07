@@ -1481,6 +1481,24 @@ function BookingDetailDrawer({
       return payload;
     },
   });
+  const { data: gymGuestAdminDetail } = useQuery({
+    queryKey: ["admin-gym-guest-detail", booking.orderNumber],
+    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    staleTime: 0,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/detail`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+  });
+  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? null;
+  const gymIdentityRoute = gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
+
   const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
   const qrisEmailDetection =
     adminQrisEmailDetection ??
@@ -1805,6 +1823,24 @@ function BookingDetailDrawer({
             detection={qrisEmailDetection}
             paymentStatus={qrisEmailPaymentStatus}
           />
+          {booking.source === "gym_public_guest" && (
+            <div className={`rounded-xl border p-4 text-sm ${gymVisReservation ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+              <div className="font-bold">Akses Gym Mandiri — Kartu / X904</div>
+              {gymVisReservation ? (
+                <>
+                  <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
+                  <div className="mt-1 text-2xl font-black">{gymVisReservation.cardCode}</div>
+                  <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
+                  <div className="mt-2 text-xs font-semibold">Kartu belum berarti pintu aktif; tunggu serah-terima, worker, ACK dan read-back X904.</div>
+                </>
+              ) : gymIdentityRoute === "registered" ? (
+                <div className="mt-2 text-xs">Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN sebelum pembayaran dan kepemilikan identitas sah.</div>
+              ) : (
+                <div className="mt-2 text-xs">Belum ada kartu VIS yang dialokasikan. Setelah pembayaran benar-benar diverifikasi Admin/Finance, sistem harus otomatis memilih satu VIS001–VIS006 yang tersedia.</div>
+              )}
+            </div>
+          )}
+
           {adminQrisDetectionError && (
             <div
               data-testid="admin-qris-detection-error"

@@ -989,6 +989,23 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
 }
 
 /** Customer receives the assigned card number automatically, never the machine PIN. */
+export async function notifyGymGuestPaymentVerified(data: {
+  bookingId: number;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  statusUrl: string;
+}): Promise<void> {
+  const message =
+    "🏋️ *Pembayaran Gym Sudah Diverifikasi*\n\n" +
+    "Halo *" + data.customerName + "*, pembayaran booking *" + data.orderNumber + "* sudah diverifikasi.\n\n" +
+    "🔐 Akses X904 belum otomatis aktif. Petugas masih harus menyelesaikan verifikasi identitas / penyerahan kartu dan sistem harus menerima ACK/read-back dari mesin.\n" +
+    "🔎 Cek status terbaru: " + data.statusUrl;
+  await sendWAToCustomer(data.customerPhone, message, {
+    bookingId: data.bookingId, orderNumber: data.orderNumber, event: "gym_guest_payment_verified",
+  });
+}
+
 export async function notifyGymVisitorCardReserved(data: {
   bookingId: number;
   orderNumber: string;
