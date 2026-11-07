@@ -19,5 +19,7 @@ assert.match(ui,/Insert Password/);
 assert.match(ui,/hasActionGrant\(r\.id\)\?</);
 assert.match(ui,/x-sc-kasbon-authorization/);
 assert.match(ui,/setActionPassword\(""/);
+assert.match(ui,/actionPassword.length===0/,"filled password should enable submit regardless of length");
+assert.doesNotMatch(ui,/actionPassword.length<12/,"UI should not block already configured shorter password");
 assert.doesNotMatch(route,/admin\|owner\|super_admin.*unlock/i);
 console.log("PASS: password gate required on PATCH and DELETE, role cannot bypass, UI locked and short-lived scoped authorization");
