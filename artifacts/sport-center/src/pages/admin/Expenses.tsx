@@ -111,11 +111,20 @@ export default function AdminExpenses() {
   const qc = useQueryClient();
 
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
+  // UI-only preview. No API endpoint or persistence is wired for incoming funds.
+  const [incomeOpen, setIncomeOpen] = useState(false);
+  const [incomePreview, setIncomePreview] = useState(false);
+  const [incomeForm, setIncomeForm] = useState({
+    transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
+    sourceName: "",
+    method: "Transfer Bank",
+    bank: "",
+    amount: "",
+  });
   const [formOpen, setFormOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [recipientFocused, setRecipientFocused] = useState(false);
@@ -225,11 +234,10 @@ export default function AdminExpenses() {
   const params = new URLSearchParams();
   if (startDate) params.set("startDate", startDate);
   if (endDate) params.set("endDate", endDate);
-  if (filterStatus !== "all") params.set("status", filterStatus);
   if (filterCategory !== "all") params.set("category", filterCategory);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["expenses", startDate, endDate, filterStatus, filterCategory],
+    queryKey: ["expenses", startDate, endDate, filterCategory],
     queryFn: () =>
       fetch(`${API}/admin/expenses?${params}`, { headers: authHeaders() }).then((r) => r.json()),
   });
@@ -379,6 +387,8 @@ export default function AdminExpenses() {
     return (
       e.expenseNo?.toLowerCase().includes(q) ||
       e.description?.toLowerCase().includes(q) ||
+      e.notes?.toLowerCase().includes(q) ||
+      e.bankReference?.toLowerCase().includes(q) ||
       e.vendorName?.toLowerCase().includes(q) ||
       e.category?.toLowerCase().includes(q) ||
       e.coaAccount?.name?.toLowerCase().includes(q) ||
@@ -456,9 +466,25 @@ export default function AdminExpenses() {
           <h1 className="text-2xl font-black text-gray-900">Pengeluaran SC</h1>
           <p className="text-gray-500 text-sm mt-0.5">Manajemen pengeluaran operasional Sport Center</p>
         </div>
-        <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
-          <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            className="border-emerald-500 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => {
+              setIncomeForm({
+                transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
+                sourceName: "", method: "Transfer Bank", bank: "", amount: "",
+              });
+              setIncomePreview(false);
+              setIncomeOpen(true);
+            }}
+          >
+            <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
+          </Button>
+          <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
+            <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
+          </Button>
+        </div>
       </div>
 
       {/* Ringkasan: SC expenses vs. imported bank-sheet inflows (distinct sources). */}
@@ -499,23 +525,12 @@ export default function AdminExpenses() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Cari nomor, catatan, atau penerima..."
+                placeholder="Cari pengeluaran, cari nama, nomor ref..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
               />
             </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Status</SelectItem>
-                {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[150px]" />
             <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[150px]" />
           </div>
@@ -651,6 +666,102 @@ export default function AdminExpenses() {
           )}
         </CardContent>
       </Card>
+
+      {/* Incoming funds: UI-only form. Save is intentionally not connected yet. */}
+      <Dialog open={incomeOpen} onOpenChange={(open) => {
+        setIncomeOpen(open);
+        if (!open) setIncomePreview(false);
+      }}>
+        <DialogContent className="w-[min(94vw,540px)] max-w-[540px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-black">Input Uang Masuk</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-500">
+            Catat informasi dana yang diterima. Form ini masih pratinjau UI dan belum menyimpan data atau
+            mengubah total Uang Masuk.
+          </p>
+          <form className="space-y-4 pt-1" onSubmit={(event) => {
+            event.preventDefault();
+            setIncomePreview(true);
+          }}>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-date">Tanggal <span className="text-red-500">*</span></Label>
+              <Input id="income-date" type="date" required value={incomeForm.transactionDate}
+                onChange={(e) => { setIncomeForm({ ...incomeForm, transactionDate: e.target.value }); setIncomePreview(false); }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-source">Dana Masuk (Dari) <span className="text-red-500">*</span></Label>
+              <Input id="income-source" required list="income-source-suggestions" autoComplete="off"
+                placeholder="Ketik nama pengirim atau perusahaan"
+                value={incomeForm.sourceName}
+                onChange={(e) => { setIncomeForm({ ...incomeForm, sourceName: e.target.value }); setIncomePreview(false); }} />
+              <datalist id="income-source-suggestions">
+                <option value="Felicia Justiani" />
+                <option value="Cahaya Sejati Teknologi" />
+                <option value="Angelia Nirwana" />
+              </datalist>
+              <p className="text-xs text-gray-500">Contoh dari kas besar sc. Nama lain boleh diketik manual.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Metode <span className="text-red-500">*</span></Label>
+              <Select value={incomeForm.method} onValueChange={(value) => {
+                setIncomeForm({ ...incomeForm, method: value }); setIncomePreview(false);
+              }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Transfer Bank">Transfer Bank</SelectItem>
+                  <SelectItem value="Tunai">Tunai</SelectItem>
+                  <SelectItem value="QRIS">QRIS</SelectItem>
+                  <SelectItem value="Lainnya">Lainnya</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-bank">Bank {incomeForm.method === "Transfer Bank" ? <span className="text-red-500">*</span> : "(opsional)"}</Label>
+              <Input id="income-bank" list="income-bank-suggestions"
+                placeholder="Contoh: Mandiri, BCA, blu"
+                required={incomeForm.method === "Transfer Bank"}
+                value={incomeForm.bank}
+                onChange={(e) => { setIncomeForm({ ...incomeForm, bank: e.target.value }); setIncomePreview(false); }} />
+              <datalist id="income-bank-suggestions">
+                <option value="Mandiri" />
+                <option value="BCA" />
+                <option value="blu by BCA Digital" />
+                <option value="BNI" />
+                <option value="BRI" />
+              </datalist>
+              <p className="text-xs text-gray-500">Catatan bank penerima dana; belum terhubung ke rekening atau COA BizPortal.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-amount">Nominal (Rp) <span className="text-red-500">*</span></Label>
+              <Input id="income-amount" type="text" inputMode="numeric" required
+                placeholder="Contoh: 500.000"
+                value={formatExpenseRupiahInput(incomeForm.amount)}
+                onChange={(e) => {
+                  setIncomeForm({ ...incomeForm, amount: normalizeExpenseRupiahInput(e.target.value) });
+                  setIncomePreview(false);
+                }} />
+            </div>
+            {incomePreview && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-1">
+                <p className="font-semibold text-emerald-800">Pratinjau Uang Masuk — belum tersimpan</p>
+                <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
+                <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
+                <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setIncomeOpen(false)}>Batal</Button>
+              <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={!incomeForm.transactionDate || !incomeForm.sourceName.trim() ||
+                  (incomeForm.method === "Transfer Bank" && !incomeForm.bank.trim()) ||
+                  Number(incomeForm.amount) <= 0}>
+                Pratinjau Input
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Form Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
