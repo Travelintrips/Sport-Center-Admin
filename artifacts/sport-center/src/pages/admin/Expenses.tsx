@@ -122,6 +122,7 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
+  const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
     amount: number | null; date: string | null; recipient: string | null;
     paymentMethod: string; engine: string; verified: boolean;
@@ -162,11 +163,12 @@ export default function AdminExpenses() {
       toast({ title: `${uploaded.length} foto nota berhasil diupload` });
       // Optional read-only OCR preview; a failure must not lose uploaded evidence.
       const firstProof = fileArr.find((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type));
-      if (firstProof) {
+      if (firstProof && autoReadProof) {
         setScanningProof(true);
         try {
           const proofFd = new FormData();
           proofFd.append("proof", firstProof);
+          proofFd.append("consent", "true");
           const response = await fetch(`${API}/admin/expenses/preview-proof`, {
             method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: proofFd,
           });
@@ -359,6 +361,7 @@ export default function AdminExpenses() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM });
     setProofPreview(null);
+    setAutoReadProof(false);
     setFormOpen(true);
   }
 
@@ -836,6 +839,10 @@ export default function AdminExpenses() {
             <div className="space-y-2">
               <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
               <p className="text-xs text-gray-500">Unggah screenshot atau bukti transaksi blu (seperti bukti yang dibagikan dari aplikasi). Periksa isian tanggal, nominal dan penerima secara manual.</p>
+              <label className="flex items-start gap-2 text-xs text-gray-700">
+                <input type="checkbox" checked={autoReadProof} onChange={(e) => setAutoReadProof(e.target.checked)} className="mt-0.5" />
+                <span>Baca bukti otomatis (opsional). Jika diaktifkan, foto diproses oleh OCR server yang dapat memakai layanan AI terkonfigurasi sebagai cadangan; admin tetap harus memeriksa hasilnya.</span>
+              </label>
               {scanningProof && <p className="text-xs text-teal-700">Membaca bukti pembayaran untuk saran isian...</p>}
               {proofPreview && (
                 <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">

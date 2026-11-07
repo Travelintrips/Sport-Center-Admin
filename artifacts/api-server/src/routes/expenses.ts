@@ -136,6 +136,10 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
       res.status(400).json({ error: "Unggah bukti berupa JPG, PNG atau WebP" });
       return;
     }
+    if (req.body?.consent !== "true") {
+      res.status(400).json({ error: "Persetujuan pemrosesan OCR diperlukan" });
+      return;
+    }
     const result = await scanPaymentProof(req.file.buffer, req.file.mimetype);
     res.json({
       amount: result.amount,
