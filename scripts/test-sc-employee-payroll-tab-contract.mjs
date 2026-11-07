@@ -21,7 +21,14 @@ assert.match(routes,/APP_ENV!=="production"\|\|process\.env\.NODE_ENV!=="product
 assert.match(routes,/newSheetName:plan\.targetTitle/);
 assert.match(routes,/hidden:true/);
 assert.match(routes,/hidden:false/);
-assert.match(routes,/values\.batchClear/);
+assert.doesNotMatch(routes,/values\\.batchClear/,"no prior-month payroll data should be cleared");
+assert.match(routes,/PAYROLL_FULL_COPY_READBACK_FAILED/);
+assert.match(routes,/PAYROLL_REPAIR_CONFLICT_NONEMPTY_CELLS/);
+assert.match(routes,/PAYROLL_REPAIR_READBACK_MISMATCH/);
+assert.match(routes,/restore-december-preview/);
+assert.match(routes,/restore-december"/);
+assert.match(dialog,/Pratinjau Pemulihan Desember/);
+assert.match(dialog,/Pulihkan Data Desember/);
 assert.match(routes,/PAYROLL_DRAFT_READBACK_FAILED/);
 assert.match(routes,/SC_PAYROLL_MONTHLY_TAB_CREATED/);
 assert.match(registered,/router\.use\(scEmployeePayrollTabsRouter\)/);
