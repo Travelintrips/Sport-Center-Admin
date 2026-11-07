@@ -1,4 +1,6 @@
-import { db, paymentAllocationsTable } from "@workspace/db";
+import { db, paymentAllocationsTable, paymentsTable } from "@workspace/db";
+import { and, eq, inArray, ne } from "drizzle-orm";
+import { calculateExactFinalAllocations } from "./groupFinalAllocation";
 
 type GroupBookingAmount = {
   id: number;
@@ -41,8 +43,25 @@ export async function insertGroupPaymentAllocations(
   paymentId: number,
   bookings: GroupBookingAmount[],
   paymentAmount: number,
+  paymentType?: string,
 ): Promise<void> {
-  const allocations = calculateGroupPaymentAllocations(bookings, paymentAmount);
+  let allocations = calculateGroupPaymentAllocations(bookings, paymentAmount);
+  if (paymentType === "pelunasan" && bookings.length > 0) {
+    const previousConfirmed = await db
+      .select({
+        bookingId: paymentAllocationsTable.bookingId,
+        amount: paymentAllocationsTable.amount,
+      })
+      .from(paymentAllocationsTable)
+      .innerJoin(paymentsTable, eq(paymentAllocationsTable.paymentId, paymentsTable.id))
+      .where(and(
+        inArray(paymentAllocationsTable.bookingId, bookings.map((b) => b.id)),
+        eq(paymentsTable.status, "confirmed"),
+        ne(paymentsTable.id, paymentId),
+      ));
+    const exact = calculateExactFinalAllocations(bookings, previousConfirmed, Math.round(paymentAmount));
+    if (exact) allocations = exact;
+  }
   if (allocations.length === 0) return;
   await db.insert(paymentAllocationsTable).values(
     allocations.map((allocation) => ({

@@ -1,3 +1,4 @@
+import { resolvePartialPaymentGrossAmount } from "./accountingPaymentGross";
 import {
   db,
   accountingJournalsTable,
@@ -545,6 +546,7 @@ async function ensureSportCenterPaymentMirror(
  * booking/order number. A booking may have DP and pelunasan payments, and
  * each payment must produce at most one accounting entry.
  */
+
 export async function postSportCenterBookingPayment(
   input: SportCenterBookingPaymentPosting,
   transactionClient?: pg.PoolClient,
@@ -1919,9 +1921,15 @@ export function postConfirmedPaymentAccounting(
     const accountingPpnAmount = collectedByCustomer ? 0 : snapshotPpn;
     const accountingGrossAmount = collectedByCustomer ? snapshotDpp : snapshotGross;
     const netAmount = Math.round(Number(payment?.amount ?? input.netAmount ?? bookingSnapshot?.netAmount ?? input.dpp + input.ppnAmount));
-    const grossAmount = Math.round(Number(
-      input.grossAmount ?? (accountingGrossAmount > 0 ? accountingGrossAmount : netAmount + pphAmount),
-    ));
+    const grossAmount = resolvePartialPaymentGrossAmount({
+      paymentType: payment?.paymentType ?? input.paymentType ?? "full_payment",
+      paymentAmount: netAmount,
+      proposedGross: Math.round(Number(
+        input.grossAmount ?? (accountingGrossAmount > 0 ? accountingGrossAmount : netAmount + pphAmount),
+      )),
+      ppnAmount: accountingPpnAmount,
+      pphAmount,
+    });
     const pphRate = input.pphRate ?? (bookingSnapshot?.pphRate == null ? null : Number(bookingSnapshot.pphRate));
     const paymentMethod = payment?.paymentMethod ?? input.paymentMethod ?? null;
     const paymentProvider = payment?.paymentProvider ?? input.paymentProvider ?? "unknown";

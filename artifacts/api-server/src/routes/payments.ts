@@ -16,7 +16,8 @@ import { isSessionCurrent } from "../lib/roleAuthorization";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminBookingReport, notifyGymVisitorCardReserved, notifyGymGuestPaymentVerified } from "../lib/notifications";
+import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminPaymentProofRecorded, notifyAdminBookingReport, notifyGymVisitorCardReserved, notifyGymGuestPaymentVerified } from "../lib/notifications";
+import { isAuthorizedAdminProofUploader } from "../lib/adminPaymentProofReport";
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
@@ -824,7 +825,7 @@ router.post("/payments", async (req, res) => {
     if (booking.groupRef) {
       // One transfer/invoice means one financial payment. Session-level
       // amounts are stored separately as display-only allocations.
-      await insertGroupPaymentAllocations(payment.id, groupBookings, amountNum);
+      await insertGroupPaymentAllocations(payment.id, groupBookings, amountNum, paymentType);
     }
 
     const prevStatus = booking.status;
@@ -884,12 +885,28 @@ router.post("/payments", async (req, res) => {
     // Admin who creates the booking and has payment-confirmation authority
     // must not receive a redundant "Bukti Pembayaran Masuk" approval request.
     // Staff, customers, and customer-originated bookings retain the review flow.
-    const adminSelfServicePayment = booking.source === "admin" &&
-      Boolean(uploadActor) &&
-      uploadActor!.userId === booking.bookedByUserId &&
-      uploadActor!.role !== "staff" &&
-      uploadActor!.role !== "customer";
-    if (!adminSelfServicePayment) {
+    // Payment recorded by an authorized operator from Admin Booking Detail:
+    // send an informational proof report, never a duplicate approval request.
+    // This is about the uploader's verified role, not who created the booking.
+    const adminProofUpload = isAuthorizedAdminProofUploader(uploadActor);
+    if (adminProofUpload) {
+      const earlierDp = groupPayments
+        .filter((p) => p.paymentType === "dp" && p.status === "confirmed" && p.proofUrl)
+        .sort((a, b) => a.id - b.id);
+      notifyAdminPaymentProofRecorded({
+        bookingId: booking.id,
+        groupRef: booking.groupRef,
+        orderNumber: booking.orderNumber,
+        paymentId: payment.id,
+        paymentType,
+        paymentAmount: amountNum,
+        proofUrl: payment.proofUrl ?? "",
+        dpProofs: earlierDp.map((p) => ({ amount: Number(p.amount), proofUrl: p.proofUrl! })),
+      }).catch((err) => logger.error(
+        { err, bookingId: booking.id, paymentId: payment.id },
+        "[WA] Admin payment proof report failed",
+      ));
+    } else {
       const APP_URL = await getBaseUrl();
       const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
       notifyPaymentProofUploaded({

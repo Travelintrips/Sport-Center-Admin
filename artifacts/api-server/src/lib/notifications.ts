@@ -1,3 +1,4 @@
+import { buildAdminPaymentProofReport } from "./adminPaymentProofReport";
 import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable, bookingsTable, bookingGroupsTable, facilitiesTable } from "@workspace/db";
 import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
@@ -722,6 +723,41 @@ export async function notifyAdminBookingReport(data: {
     bookingId: booking.id,
     orderNumber: booking.orderNumber,
     event: paid ? "admin_booking_paid_report" : "admin_booking_unpaid_report",
+  });
+}
+
+export async function notifyAdminPaymentProofRecorded(input: {
+  bookingId: number;
+  groupRef?: string | null;
+  orderNumber: string;
+  paymentId: number;
+  paymentType: string;
+  paymentAmount: number;
+  proofUrl: string;
+  dpProofs: Array<{ amount: number; proofUrl: string }>;
+}): Promise<void> {
+  const earlierDp = input.paymentType === "pelunasan" ? input.dpProofs : [];
+  const proofs = await Promise.all([
+    ...earlierDp.map(async (dp) => ({
+      label: "DP", amount: dp.amount,
+      url: await getOrCreatePaymentProofShortUrl(dp.proofUrl),
+    })),
+    (async () => ({
+      label: input.paymentType === "dp" ? "DP" : input.paymentType === "pelunasan" ? "Pelunasan" : "Pembayaran",
+      amount: input.paymentAmount,
+      url: await getOrCreatePaymentProofShortUrl(input.proofUrl),
+    }))(),
+  ]);
+  const message = buildAdminPaymentProofReport({
+    groupRef: input.groupRef,
+    orderNumber: input.orderNumber,
+    paymentId: input.paymentId,
+    proofs,
+  });
+  await sendWAToAdmins(message, {
+    bookingId: input.bookingId,
+    orderNumber: input.orderNumber,
+    event: "admin_payment_proof_recorded",
   });
 }
 
