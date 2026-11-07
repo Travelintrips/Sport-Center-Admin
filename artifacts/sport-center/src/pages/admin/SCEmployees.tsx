@@ -12,6 +12,7 @@ import { getToken } from "@/lib/auth";
 import { Pencil, Plus, Search, Users } from "lucide-react";
 import SCEmployeeKasbon from "./SCEmployeeKasbon";
 import KasbonPeriodDialog from "./KasbonPeriodDialog";
+import PayrollTabDialog from "./PayrollTabDialog";
 import { formatKasbonAmount, normalizeKasbonAmount, fromDatabaseKasbonAmount } from "./kasbonAmount";
 
 type Employee = { employeeId: string; fullName: string; whatsappNumber: string; isActive: boolean; notes: string | null; salary: string | null };
@@ -102,6 +103,13 @@ export default function SCEmployees() {
           </table>{!filtered.length && <p className="py-6 text-center text-muted-foreground">Belum ada karyawan yang sesuai.</p>}</div>
         )}
       </CardContent></Card>
+      <Card aria-label="Pengelolaan tab laporan gaji">
+        <CardHeader>
+          <CardTitle>Tab Gaji Bulanan</CardTitle>
+          <p className="text-sm text-muted-foreground">Buat tab bulan baru pada Google Sheets GAJI JULI 2025 dengan pratinjau dan pemeriksaan duplikat.</p>
+        </CardHeader>
+        <CardContent><PayrollTabDialog/></CardContent>
+      </Card>
       <Card aria-label="Pengelolaan periode kasbon">
         <CardHeader>
           <CardTitle>Periode Kasbon</CardTitle>
