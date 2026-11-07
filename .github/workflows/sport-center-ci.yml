@@ -164,6 +164,9 @@ jobs:
       - name: Verify combined Gym receipt remains pending and single-counted
         run: node --test scripts/test-gym-combined-receipt-review.mjs
 
+      - name: Verify stale admin chunk handling and Hostinger SPA asset responses
+        run: node --test scripts/test-stale-admin-chunk-recovery.mjs
+
       - name: Verify Gym name match and visitor-card routing without public X904 grants
         run: node --test scripts/test-gym-guest-name-x904-route.mjs
 
