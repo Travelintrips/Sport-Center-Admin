@@ -780,7 +780,7 @@ export default function WaBookingForm() {
                   }}>
                     <SelectTrigger aria-label="Pilih kode negara WhatsApp" className="w-[110px] shrink-0 rounded-none border-0 border-r border-gray-200 bg-gray-50 px-2 shadow-none focus:ring-0">
                       <Phone className="mr-1 h-4 w-4 shrink-0 text-gray-500" />
-                      <SelectValue />
+                      <SelectValue>{whatsappCountryCode === "62" ? "🇮🇩 +62" : `+${whatsappCountryCode}`}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {WHATSAPP_COUNTRIES.map(({ code, label }) => (
