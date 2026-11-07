@@ -3666,6 +3666,10 @@ export default function AdminBookings() {
     isGroup: boolean;
   } | null>(null);
   const [tableCancellationReason, setTableCancellationReason] = useState("");
+  const [completionWithoutCheckin, setCompletionWithoutCheckin] = useState<{
+    id: number; orderNumber: string; customerName: string;
+  } | null>(null);
+  const [completionWithoutCheckinReason, setCompletionWithoutCheckinReason] = useState("");
   // Paginated group rows are summaries. Always load the authoritative booking
   // detail, including payment rows linked to *any* member of the group.
   useEffect(() => {
@@ -5968,7 +5972,17 @@ export default function AdminBookings() {
                             <InlineCheckInSelect
                               booking={b}
                               onCheckIn={(id) => checkInMutation.mutate({ id })}
-                              onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
+                              onComplete={(id) => {
+                                if (!b.checkedInAt) {
+                                  setCompletionWithoutCheckin({
+                                    id, orderNumber: b.orderNumber ?? String(id),
+                                    customerName: b.customerName ?? "Pelanggan",
+                                  });
+                                  setCompletionWithoutCheckinReason("");
+                                } else {
+                                  updateBookingMutation.mutate({ id, data: { status: "completed" } });
+                                }
+                              }}
                               isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
                               isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                             />
@@ -6326,6 +6340,76 @@ export default function AdminBookings() {
            onUpdateAdditionalCharges={handleAdditionalChargesUpdate}
         />
       )}
+
+      <Dialog
+        open={Boolean(completionWithoutCheckin)}
+        onOpenChange={(open) => {
+          if (!open && !updateBookingMutation.isPending) {
+            setCompletionWithoutCheckin(null);
+            setCompletionWithoutCheckinReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle size={18} className="text-amber-600" />
+              Selesaikan Booking Tanpa Check-in
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              {completionWithoutCheckin?.orderNumber} — {completionWithoutCheckin?.customerName}
+            </p>
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              Booking ini belum tercatat check-in resmi. Pesan pemakaian atau scan
+              X904 di WhatsApp bukan otomatis check-in untuk booking ini.
+              Tindakan ini hanya menutup status booking; tidak mengubah kehadiran,
+              transaksi pembayaran, ataupun waktu scan mesin.
+            </p>
+            <Label htmlFor="booking-complete-without-checkin-reason">
+              Alasan penyelesaian administratif (wajib)
+            </Label>
+            <Textarea
+              id="booking-complete-without-checkin-reason"
+              value={completionWithoutCheckinReason}
+              maxLength={1000}
+              onChange={(event) => setCompletionWithoutCheckinReason(event.target.value)}
+              placeholder="Contoh: Sesi telah lewat, petugas mengonfirmasi penggunaan lapangan tetapi check-in tidak tercatat."
+              rows={3}
+            />
+            <p className="text-xs text-slate-500">
+              Minimal 12 karakter. Alasan, identitas admin, dan perubahan status tersimpan dalam riwayat audit.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={updateBookingMutation.isPending}
+                onClick={() => { setCompletionWithoutCheckin(null); setCompletionWithoutCheckinReason(""); }}>
+                Batal
+              </Button>
+              <Button disabled={!completionWithoutCheckin ||
+                completionWithoutCheckinReason.trim().replace(/\\s+/g, " ").length < 12 ||
+                updateBookingMutation.isPending}
+                onClick={() => {
+                  if (!completionWithoutCheckin) return;
+                  updateBookingMutation.mutate({
+                    id: completionWithoutCheckin.id,
+                    data: {
+                      status: "completed",
+                      withoutCheckInReason: completionWithoutCheckinReason.trim(),
+                    } as any,
+                  }, {
+                    onSuccess: () => {
+                      setCompletionWithoutCheckin(null);
+                      setCompletionWithoutCheckinReason("");
+                    },
+                  });
+                }}>
+                {updateBookingMutation.isPending ? "Menyimpan..." : "Konfirmasi Selesai"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(tableCancellation)}
