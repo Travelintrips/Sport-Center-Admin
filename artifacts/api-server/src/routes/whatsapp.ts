@@ -985,9 +985,11 @@ router.post("/wa/booking", async (req, res) => {
     if (publicGymGuest && !guestNameRoute) {
       res.status(503).json({ error: "Verifikasi identitas X904 belum tersedia." }); return;
     }
-    // Never attach an unrelated PIN. Name must resolve uniquely to a verified
-    // nonmember record, and the PIN entered by the customer must match it.
-    if (publicGymGuest && guestNameRoute?.route === "registered" &&
+    // PIN matching happens server-side using the uniquely verified name.
+    // Anonymous visitors are never required to know a device PIN; any PIN
+    // supplied by an older client must still match, and no grant activates
+    // until an authenticated operator checks the physical identity and funds.
+    if (publicGymGuest && guestSubmittedPin && guestNameRoute?.route === "registered" &&
         guestSubmittedPin !== guestNameRoute.userPin) {
       res.status(409).json({ error: "Nama dan PIN X904 tidak cocok atau belum lengkap. Periksa kembali atau hubungi petugas." }); return;
     }

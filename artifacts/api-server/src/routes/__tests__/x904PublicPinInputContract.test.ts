@@ -5,68 +5,37 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
   const form = readFileSync(join(process.cwd(), "../sport-center/src/pages/wa/BookingForm.tsx"), "utf8");
   const api = readFileSync(join(process.cwd(), "src/routes/whatsapp.ts"), "utf8");
 
-  test("public self-service renders owner-entered PIN and includes it only in guest booking payload", () => {
-    expect(form).toContain('htmlFor="guest-x904-pin"');
-    expect(form).toContain('id="guest-x904-pin"');
-    expect(form).toContain("requestedX904Pin: guestPin.trim()");
-    expect(form).toContain('guestIdentityRoute === "registered" && !guestPin.trim()');
-    expect(form).toContain('value={guestPin}');
-  });
-
-  test("server rejects unverified/incorrect submitted PIN before booking and payment creation", () => {
-    const start = api.indexOf("const publicGymGuest = req.body.publicGymGuest === true");
-    const end = api.indexOf("const customer = publicGymGuest ? null : await ensureCustomer", start);
-    const scope = api.slice(start, end);
-    expect(scope).toContain("guestSubmittedPin");
-    expect(scope).toContain("/^[0-9]{1,8}$/.test(guestSubmittedPin)");
-    expect(scope).toContain('guestNameRoute?.route === "registered"');
-    expect(scope).toContain("guestSubmittedPin !== guestNameRoute.userPin");
-    expect(scope).toContain('guestNameRoute?.route !== "registered"');
-    expect(scope).toContain('res.status(409)');
-    expect(scope.indexOf("guestSubmittedPin !== guestNameRoute.userPin"))
-      .toBeLessThan(scope.indexOf("let verifiedX904Identity"));
-  });
-
-  test("name match does not grant physical access and does not reveal PIN to anonymous booking response", () => {
-    expect(api).toContain('publicGymGuest ? "review_required" : "verified"');
-    expect(api).toContain('publicGymGuest ? "review_required" : "pending"');
-    expect(api).toContain("x904Identity: !publicGymGuest && verifiedX904Identity");
-    expect(api).toContain("const customer = publicGymGuest ? null : await ensureCustomer");
-  });
-
-  test("VIS card path stays outside owner PIN matching", () => {
-    expect(api).toContain('guestSubmittedPin && guestNameRoute?.route !== "registered"');
-    expect(api).toContain('verifiedX904Identity?.identityType === "card"');
-    expect(api).toContain('guestNameRoute?.route === "visitor_card"');
-  });
-  test("public ordinary PIN checkout blocks mismatch before submission and does not reveal registry PIN", () => {
-    expect(form).toContain('guestIdentityRoute === "registered" && guestPinMatch !== true');
-    expect(form).toContain('guestPin.trim() && guestPinMatch === false');
-    expect(form).toContain('Pemeriksaan PIN X904 belum selesai');
-    expect(form).toContain('Nama dan PIN X904 tidak cocok. Periksa kembali sebelum membuat booking.');
-    expect(form).toContain('type="password" inputMode="numeric"');
-    expect(form).toContain('font-bold text-green-700 border-green-300');
-    expect(form).not.toContain('PIN X904 yang Anda masukkan</span>');
-    expect(form).toContain('guestPinMatch === true');
-  });
-
-  test("verified nonmember names get compact green styling; ordinary names stay unchanged", () => {
+  test("no-login guest sees green registered name without ever entering a PIN", () => {
     expect(form).toContain('className={publicGymGuest && guestIdentityRoute === "registered"');
     expect(form).toContain('font-bold text-green-700 border-green-300');
-    expect(form).toContain('Terdaftar di X904. Verifikasi PIN pribadi sebelum booking.');
-    expect(form).toContain('<details className="rounded-lg border border-slate-200');
-    expect(form).toContain('type="password" inputMode="numeric"');
-    expect(form).toContain('Cocokkan PIN');
-    expect(form).not.toContain('Pencocokan Identitas Gym X904');
-    expect(form).not.toContain('<span className="font-semibold">{guestPin}</span>');
-  });
-  test("name check is debounced, PIN checks remain explicit and checkout stays fail-closed", () => {
     expect(form).toContain('body:JSON.stringify({customerName:name})');
-    expect(form).toContain('},1600)');
-    expect(form).toContain('onClick={() => void checkGuestPinIdentity()}');
-    expect(form).toContain('response.status===429');
-    expect(form).toContain('guestLookupAbort.current?.abort()');
-    expect(form).toContain('guestPin.trim() && (guestIdentityRoute !== "registered" || guestPinMatch !== true)');
+    expect(form).not.toContain('id="guest-x904-pin"');
+    expect(form).not.toContain('requestedX904Pin: guestPin.trim()');
+    expect(form).not.toContain('Cocokkan PIN');
   });
 
+  test("backend resolves unique approved name and holds access for staff", () => {
+    const start = api.indexOf('const publicGymGuest = req.body.publicGymGuest === true');
+    const end = api.indexOf('const customer = publicGymGuest ? null : await ensureCustomer',start);
+    const scope = api.slice(start,end);
+    expect(scope).toContain('resolveGymGuestName(bookingCustomerName)');
+    expect(scope).toContain('guestNameRoute?.route === "registered"');
+    expect(scope).toContain('guestNameRoute.userPin');
+    expect(scope).toContain('guestNameRoute.deviceUid');
+    expect(scope).toContain('guestSubmittedPin && guestNameRoute?.route === "registered"');
+    expect(scope).toContain('guestSubmittedPin !== guestNameRoute.userPin');
+    expect(api).toContain('X904_NONMEMBER_PIN_BUSY');
+    expect(scope).toContain('x904_verified_nonmember_identities');
+    expect(api).toContain('publicGymGuest ? "review_required" : "verified"');
+    expect(api).toContain('publicGymGuest ? "review_required" : "pending"');
+    expect(api).toContain('x904Identity: !publicGymGuest && verifiedX904Identity');
+  });
+
+  test("VIS path remains separate and anonymous cannot force a PIN/UID", () => {
+    expect(api).toContain('guestNameRoute?.route === "visitor_card"');
+    expect(api).toContain('verifiedX904Identity?.identityType === "card"');
+    expect(api).toContain('publicGymGuest ? null : await ensureCustomer');
+    expect(form).not.toContain('guestPinMatch');
+    expect(form).not.toContain('guestPinChecking');
+  });
 });
