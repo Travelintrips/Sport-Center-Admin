@@ -31,18 +31,21 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(api).toContain('x904Identity: !publicGymGuest && verifiedX904Identity');
   });
 
-  test("booking WhatsApp uses visible +62 prefix but sends canonical 628 number", () => {
-    expect(form).toContain('Kode negara Indonesia, plus enam dua');
-    expect(form).toContain('> +62');
-    expect(form).toContain('placeholder="8123456789"');
-    expect(form).toContain('value={localWhatsappDigits(form.customerPhone)}');
-    expect(form).toContain('normalizedWhatsappNumber(e.target.value)');
-    expect(form).toContain('customerPhone: normalizedWhatsappNumber(phoneFromWA)');
+  test("booking WhatsApp defaults to +62 but supports optional international dial code", () => {
+    expect(form).toContain('const [whatsappCountryCode, setWhatsappCountryCode] = useState(initialCountryCode)');
+    expect(form).toContain('if (!value.trim() || digits.startsWith("0")) return "62"');
+    expect(form).toContain('Pilih kode negara WhatsApp');
+    expect(form).toContain('WHATSAPP_COUNTRIES.map');
+    expect(form).toContain('code: "65"');
+    expect(form).toContain('code: "60"');
+    expect(form).toContain('value={localWhatsappDigits(form.customerPhone, whatsappCountryCode)}');
+    expect(form).toContain('normalizedWhatsappNumber(e.target.value, whatsappCountryCode)');
+    expect(form).toContain('customerPhone: normalizedWhatsappNumber(phoneFromWA, initialCountryCode)');
     expect(form).toContain('customerPhone: form.customerPhone,');
-    expect(form).toContain('/^628[0-9]{7,13}$/.test(form.customerPhone.trim())');
-    expect(form).toContain('if (digits.startsWith("628")) return digits.slice(2)');
-    expect(form).toContain('if (digits.startsWith("0")) return digits.slice(1)');
-    expect(form).toContain('local ? `62${local}` : ""');
+    expect(form).toContain('validWhatsappNumber(form.customerPhone.trim())');
+    expect(form).toContain('/^[1-9][0-9]{7,14}$/.test(value)');
+    expect(api).toContain('!/^[1-9][0-9]{7,14}$/.test(guestPhone)');
+    expect(api).not.toContain('!/^628[0-9]{7,13}$/.test(guestPhone)');
   });
 
   test("VIS path remains separate and anonymous cannot force a PIN/UID", () => {
