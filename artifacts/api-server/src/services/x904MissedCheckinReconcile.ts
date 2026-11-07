@@ -5,7 +5,7 @@ import { logger } from "../lib/logger";
 /**
  * Repair late LAN ingestion or a membership renewal that replaced the current
  * membership dates. Strictly bounded to today/yesterday, verified identities,
- * confirmed paid coverage and existing device logs. Never invent scan events.
+ * confirmed paid/grace coverage and existing device logs. Never invent scan events.
  * The canonical SQL function owns serialization and exactly-once attendance.
  */
 export async function reconcileX904MissedPaidCheckins(): Promise<void> {
@@ -23,8 +23,15 @@ export async function reconcileX904MissedPaidCheckins(): Promise<void> {
         ((now() AT TIME ZONE 'Asia/Jakarta')::date-1)::text)
       AND EXISTS (SELECT 1 FROM sport_center.sport_membership_payments p
         WHERE p.membership_id=m.id AND p.status='confirmed' AND p.amount>0
-          AND p.period_start<=left(l.device_time,10)
-          AND p.period_end>=left(l.device_time,10))
+          AND (
+            (p.period_start<=left(l.device_time,10)
+              AND p.period_end>=left(l.device_time,10))
+            OR
+            (m.start_date<=left(l.device_time,10)
+              AND m.end_date<left(l.device_time,10)
+              AND left(l.device_time,10)::date<=m.end_date::date+7
+              AND p.period_start<=m.end_date AND p.period_end>=m.end_date)
+          ))
       AND NOT EXISTS (SELECT 1 FROM sport_center.gym_checkins c
         WHERE c.membership_id=m.id AND c.checkin_date=left(l.device_time,10)::date)
     ORDER BY l.user_pin,left(l.device_time,10),l.device_time,l.event_index
