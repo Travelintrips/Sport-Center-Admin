@@ -493,6 +493,7 @@ test("real VIS reservation service: admin-confirmed payment creates one held gra
   const request={orderNumber:order,officialBankReference:"ADMINPAY-9423",verifiedBy:"CI_ADMIN",officialFundsChecked:true,confirmedPaymentId:9423};
   const reserved=await autoReserveVisAfterFundsVerified(request);
   expect(reserved).toMatchObject({cardCode:"VIS004",state:"reserved",newReservation:true});
+  expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9322")).rows[0].access_state).toBe("expired");
   const grants=await run("SELECT access_state,verification_state,identity_label,user_pin,device_uid,booking_id,payment_id,expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9323");
   expect(grants.rows).toHaveLength(1);
   expect(grants.rows[0]).toMatchObject({access_state:"pending",verification_state:"pending",identity_label:"VIS004",user_pin:"17",device_uid:17,booking_id:9323,payment_id:9423});

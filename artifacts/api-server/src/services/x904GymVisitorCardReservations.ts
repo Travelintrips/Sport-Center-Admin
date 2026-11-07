@@ -191,6 +191,18 @@ export async function autoReserveVisAfterFundsVerified(input: {
       if (!candidate.rows.length) throw new VisReservationError(409,"vis_pool_exhausted",
         "Seluruh kartu VIS sedang dipakai atau membutuhkan pemeriksaan petugas. Booking tetap tersimpan tanpa kartu.");
       const card = candidate.rows[0] as any;
+      // The candidate query has just proven this physical card is Group 2 in a
+      // fresh device snapshot. Close only old, expired review residues for the
+      // same PIN so they cannot block this new grant or the later card return.
+      await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access a
+        SET access_state='expired'
+        FROM sport_center.sport_bookings prior
+        WHERE prior.id=a.booking_id
+          AND a.device_serial='TDBD234200545' AND a.user_pin=${String(card.pin)}
+          AND a.access_state='review_required'
+          AND a.expires_at IS NOT NULL AND a.expires_at<=now()
+          AND (prior.booking_date::date < (now() AT TIME ZONE 'Asia/Jakarta')::date
+            OR prior.status::text IN ('completed','cancelled','expired','rejected','refunded'))`);
       await tx.execute(sql`INSERT INTO sport_center.gym_vis_card_reservations
         (booking_id,payment_id,card_code,user_pin,device_uid,funds_reference,funds_verified_by)
         VALUES (${Number(booking.id)},${Number(payment.id)},${String(card.code)},
