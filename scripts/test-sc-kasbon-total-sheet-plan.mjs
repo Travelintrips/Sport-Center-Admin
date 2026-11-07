@@ -35,15 +35,16 @@ const salaryRows=[
  [1,'TRI WISUDO','','','','','',''],
  [2,'SANDI','','','','','',''],
  [3,'MUSTOPA','','','','','',''],
+ [4,'RIAN UCOK','','','','',0,'',0],
  ['TOTAL','','','','','','Total',12900000],
 ];
 const balances=[{employeeId:'SC003',fullName:'Robby',total:1500000},...data];
 const preview=planKasbonSalaryColumnG(balances,salaryRows);
 assert.deepEqual(preview.writes.map(x=>[x.employeeId,x.range,x.amount]),[
- ['SC005','G5',2000000],['SC003','G11',1500000]]);
-assert.deepEqual(preview.unmatched.map(x=>x.employeeId),['SC004','SC009']);
+ ['SC005','G5',2000000],['SC003','G11',1500000],['SC009','G22',2571000]]);
+assert.deepEqual(preview.unmatched.map(x=>x.employeeId),['SC004']);
 const approved=planKasbonSalaryColumnG(balances,salaryRows,{'SC004':'TRI WISUDO'});
-assert.deepEqual(approved.writes.map(x=>x.range),['G5','G11','G19']);
+assert.deepEqual(approved.writes.map(x=>x.range),['G5','G11','G19','G22']);
 const rerun=planKasbonSalaryColumnG(balances,salaryRows,{'SC004':'TRI WISUDO'});
 assert.deepEqual(rerun,approved);
 const duplicated=salaryRows.map(r=>[...r]);duplicated[10][1]='SENO';
