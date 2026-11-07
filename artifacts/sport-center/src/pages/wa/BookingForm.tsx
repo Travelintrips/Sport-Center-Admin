@@ -126,7 +126,7 @@ export default function WaBookingForm() {
   const [x904VerifiedName, setX904VerifiedName] = useState("");
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
-  const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "visitor_card" | "staff_review" | "unavailable">("idle");
+  const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "expired_member" | "visitor_card" | "staff_review" | "unavailable">("idle");
   const [guestLookupError, setGuestLookupError] = useState("");
   const guestLookupAbort = useRef<AbortController | null>(null);
 
@@ -201,7 +201,7 @@ export default function WaBookingForm() {
         }
         const result=await response.json();
         if(controller.signal.aborted)return;
-        setGuestIdentityRoute(["registered","visitor_card","staff_review"].includes(result.route)?result.route:"unavailable");
+        setGuestIdentityRoute(["registered","expired_member","visitor_card","staff_review"].includes(result.route)?result.route:"unavailable");
       }catch{
         if(!controller.signal.aborted){
           setGuestIdentityRoute("unavailable");
@@ -716,7 +716,7 @@ export default function WaBookingForm() {
                     id="name"
                     placeholder="Contoh: Budi Santoso"
                     value={form.customerName}
-                    className={publicGymGuest && guestIdentityRoute === "registered" ? "font-bold text-green-700 border-green-300 focus-visible:ring-green-400" : undefined}
+                    className={publicGymGuest && (guestIdentityRoute === "registered" || guestIdentityRoute === "expired_member") ? "font-bold text-green-700 border-green-300 focus-visible:ring-green-400" : undefined}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, customerName: e.target.value }));
                     }}
@@ -725,6 +725,7 @@ export default function WaBookingForm() {
                   {publicGymGuest && guestIdentityRoute === "checking" && <p className="text-xs text-slate-500" role="status">Memeriksa nama...</p>}
                   {publicGymGuest && guestLookupError && <p className="text-xs text-amber-700" role="status">{guestLookupError}</p>}
                   {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Terdaftar sebagai nonmember X904. Akses menunggu verifikasi petugas.</p>}
+                  {publicGymGuest && guestIdentityRoute === "expired_member" && <p className="text-xs font-semibold text-green-700" role="status">Membership sebelumnya sudah berakhir. Boleh booking harian; akses nonmember ditetapkan petugas setelah pembayaran.</p>}
                 </div>
               )}
               <div className="space-y-1">
