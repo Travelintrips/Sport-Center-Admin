@@ -16,8 +16,10 @@ test("ALL machine roles and reserved PINs are recognizable but never auto-author
 });
 test("Active membership only is excluded from green recognition", () => {
   assert.match(routing, /m\.status::text='active'/);
-  assert.match(routing, /m\.start_date <= \$\{todayWib\}::date/);
-  assert.match(routing, /m\.end_date >= \$\{todayWib\}::date/);
+  assert.match(routing, /m\.start_date <= \$\{todayWib\}/);
+  assert.match(routing, /m\.end_date >= \$\{todayWib\}/);
+  assert.doesNotMatch(routing, /m\.start_date <= \$\{todayWib\}::date/);
+  assert.doesNotMatch(routing, /m\.end_date >= \$\{todayWib\}::date/);
   assert.match(routing, /if \(active\.rows\.length\) return review\(\)/);
   assert.doesNotMatch(routing, /isPastGrace/);
 });
