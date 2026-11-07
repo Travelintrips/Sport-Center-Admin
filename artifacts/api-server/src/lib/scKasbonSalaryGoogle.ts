@@ -1,0 +1,54 @@
+import { google } from "googleapis";
+import { planKasbonSalaryColumnG, type KasbonTotal } from "./scKasbonTotalSheetPlan";
+
+const SPREADSHEET_ID = "1_Zq5gX7xW35YdI46zeLNguvc6TNb6qP7_vGhTqDAtXg";
+const GID = 1429288652;
+const TAB = "Gaji November 2026";
+const tabRange = (cell: string) => "'" + TAB.replace(/'/g, "''") + "'!" + cell;
+const aliases: Record<string,string> = {
+  SC004: "TRI WISUDO",
+  SC008: "SONIK",
+};
+// The alias list must be reviewed against the registered employees before activation.
+// Unmatched or duplicate names always fail closed; no invented rows.
+function googleClient() {
+ const config = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+ if(!config)throw Error("GOOGLE_SERVICE_ACCOUNT_MISSING");
+ const credentials = JSON.parse(config);
+ if(credentials.client_email!=="sport-center@sport-center-506306.iam.gserviceaccount.com")
+  throw Error("GOOGLE_SERVICE_ACCOUNT_UNEXPECTED");
+ if(typeof credentials.private_key==="string")credentials.private_key=credentials.private_key.replace(/\\n/g,"\n");
+ const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
+ return google.sheets({version:"v4",auth});
+}
+export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean) {
+ if(process.env.SC_KASBON_SALARY_SYNC_ENABLED!=="true")throw Error("SALARY_SYNC_DISABLED");
+ if(process.env.APP_ENV!=="production" || process.env.NODE_ENV!=="production")throw Error("SALARY_PRODUCTION_ENV_REQUIRED");
+ const sheets=googleClient();
+ const meta=await sheets.spreadsheets.get({spreadsheetId:SPREADSHEET_ID,fields:"sheets(properties(sheetId,title,gridProperties(rowCount)),protectedRanges,merges)"});
+ const target=(meta.data.sheets??[]).find(s=>s.properties?.sheetId===GID&&s.properties?.title===TAB);
+ if(!target)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ const rowCount=target.properties?.gridProperties?.rowCount??0;
+ if(!Number.isSafeInteger(rowCount)||rowCount<22||rowCount>10000)throw Error("SALARY_ROWS_UNEXPECTED");
+ const range=tabRange("A1:H"+rowCount);
+ // FORMULA returns formulas, allowing the planner to protect existing formula cells.
+ const result=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range,valueRenderOption:"FORMULA"});
+ const rows=result.data.values??[];
+ const plan=planKasbonSalaryColumnG([input],rows,aliases);
+ const entry=plan.writes[0];
+ if(!entry)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
+ const existing=String(rows[entry.row-1]?.[6]??"");
+ if(existing.startsWith("="))throw Error("SALARY_KASBON_FORMULA_PROTECTED");
+ const cell=tabRange(entry.range);
+ const report={employeeId:input.employeeId,name:entry.name,cell:entry.range,previous:existing,amount:entry.amount,spreadsheetId:SPREADSHEET_ID,gid:GID};
+ if(dryRun)return {status:"preview" as const,...report};
+ // A fresh re-read detects manual changes between preview and writing.
+ const before=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range:tabRange("A"+entry.row+":G"+entry.row),valueRenderOption:"FORMULA"});
+ const live=before.data.values?.[0]??[];
+ if(String(live[1]??"").trim()!==entry.name || String(live[6]??"")!==existing)
+  throw Error("SALARY_ROW_CHANGED_RETRY");
+ await sheets.spreadsheets.values.update({spreadsheetId:SPREADSHEET_ID,range:cell,valueInputOption:"RAW",requestBody:{values:[[entry.amount]]}});
+ const check=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range:cell,valueRenderOption:"UNFORMATTED_VALUE"});
+ if(Number(check.data.values?.[0]?.[0])!==entry.amount)throw Error("SALARY_READBACK_FAILED");
+ return {status:"synced" as const,...report};
+}
