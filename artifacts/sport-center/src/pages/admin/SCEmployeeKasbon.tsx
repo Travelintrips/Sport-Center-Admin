@@ -35,15 +35,24 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [syncRecordId,setSyncRecordId]=useState<number|null>(null);
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
+ const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,records.map(r=>r.id+":"+r.amount).join("|")];
+ const {data:initialSalaryCheck}=useQuery<SalaryCheck>({
+  queryKey:syncKey,
+  queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
+  enabled:!isLoading&&!isError&&records.length>0,
+  staleTime:60_000,
+  refetchOnWindowFocus:false,
+  retry:false,
+ });
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
-  onSuccess:()=>{setSalaryCheck(null);qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
+  onSuccess:()=>{setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
  const remove = useMutation({
   mutationFn: (record: Kasbon) => api(endpoint(employee.employeeId)+"/"+record.id,"DELETE"),
   onSuccess: () => {
-   setSalaryCheck(null);qc.invalidateQueries({queryKey:key});
+   setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});
    setToDelete(null);
    toast({title:"Catatan kasbon berhasil dihapus"});
   },
@@ -62,7 +71,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  });
  const syncSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}),
-  onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);void checkSalary.mutate();toast({title:"Kasbon berhasil Sync ke Google Sheets",description:result.cell+" — "+currency(result.amount)});},
+  onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});toast({title:"Kasbon berhasil Sync ke Google Sheets",description:result.cell+" — "+currency(result.amount)});},
   onError:(e:Error)=>{setSalaryPreview(null);setSalaryCheck(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
  });
  const uploadProof=async (file:File)=>{
@@ -108,7 +117,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
-    <td className="p-3">{salaryCheck?.matched?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
+    <td className="p-3">{(initialSalaryCheck?.matched||salaryCheck?.matched)&&Number(initialSalaryCheck?.amount??salaryCheck?.amount)===totalKasbon?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
     <Button size="sm" variant="outline" disabled={previewSalary.isPending||syncSalary.isPending||isLoading||isError} onClick={()=>{setSyncRecordId(r.id);previewSalary.mutate();}}><RefreshCw className="mr-1 h-3 w-3"/>{previewSalary.isPending&&syncRecordId===r.id?"Memeriksa...":"Sync"}</Button><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
