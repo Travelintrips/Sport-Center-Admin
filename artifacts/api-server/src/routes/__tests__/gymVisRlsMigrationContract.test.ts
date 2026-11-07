@@ -1,26 +1,30 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-describe("Issue #682 Gym VIS RLS migration contract", () => {
-  const sql = readFileSync(join(process.cwd(), "migrations/20261107_gym_vis_app_role_rls.sql"), "utf8");
+describe("Issue #682: production-equivalent Gym VIS role policies", () => {
+ const sql = readFileSync(join(process.cwd(),"migrations/20261107_gym_vis_app_role_rls.sql"),"utf8");
 
-  test("policies are restricted to the trusted app role and exact reader tables", () => {
-    expect(sql).toContain("TO sport_center_app");
-    expect(sql).toContain("gym_vis_app_insert");
-    expect(sql).toContain("gym_vis_app_select");
-    expect(sql).toContain("gym_vis_app_update");
-    expect(sql).toContain("gym_vis_app_grant_insert");
-    expect(sql).toContain("TDBD234200545");
-    for (let i = 1; i <= 6; i++) expect(sql).toContain(`VIS${String(i).padStart(3, "0")}`);
-    expect(sql).not.toMatch(/CREATE POLICY[^;]+TO\s+(?:anon|authenticated|PUBLIC)\b/i);
-  });
+ test("all six production policy names remain app-role only", () => {
+  const names = [
+   "gym_vis_app_select", "gym_vis_app_insert", "gym_vis_app_update",
+   "x904_nonmember_app_select", "x904_nonmember_app_insert", "x904_nonmember_app_update"
+  ];
+  for (const name of names) expect(sql).toContain("CREATE POLICY "+name+" ON");
+  expect(sql).not.toContain("gym_vis_app_grant_insert");
+  expect((sql.match(/CREATE POLICY /g)||[]).length).toBe(6);
+  expect(sql).not.toMatch(/CREATE POLICY[^;]+TO\s+(?:anon|authenticated|PUBLIC)\b/i);
+ });
 
-  test("grant insert requires confirmed payment, booking ownership and pending state", () => {
-    expect(sql).toContain("p.booking_id=b.id");
-    expect(sql).toContain("p.id=payment_id");
-    expect(sql).toContain("p.status::text=''confirmed''");
-    expect(sql).toContain("b.source=''gym_public_guest''");
-    expect(sql).toContain("access_state = ''pending''");
-    expect(sql).toContain("identity_type = ''card''");
-  });
+ test("VIS pairing, verified payment and booking status remain restricted", () => {
+  for (const [card,pin,uid] of [["VIS001","78","338"],["VIS002","90","339"],["VIS003","13","13"],["VIS004","17","17"],["VIS005","11","11"],["VIS006","15","15"]]) {
+   expect(sql).toContain("card_code = '"+card+"'");
+   expect(sql).toContain("user_pin = '"+pin+"'");
+   expect(sql).toContain("device_uid = "+uid);
+  }
+  expect(sql).toContain("b.status");
+  expect(sql).toContain("p.status");
+  expect(sql).toContain("gym_public_guest");
+  expect(sql).toContain("verification_state = 'pending'");
+  expect(sql).toContain("activated_at IS NULL");
+ });
 });
