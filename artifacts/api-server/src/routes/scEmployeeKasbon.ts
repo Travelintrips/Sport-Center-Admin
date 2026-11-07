@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { and, desc, eq } from "drizzle-orm";
+import { syncEmployeeKasbonToSalary } from "../lib/scKasbonSalaryGoogle";
 import { db, scEmployeesTable, scEmployeeKasbonTable, auditLogsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -90,4 +91,28 @@ router.delete("/admin/sc-employees/:employeeId/kasbon/:id", adminMiddleware, asy
    res.status(500).json({ error: "Gagal menghapus kasbon. Data tidak diubah bila audit gagal." });
  }
 });
+
+router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware,async(req,res)=>{
+ const employeeId=String(req.params.employeeId||"").toUpperCase();
+ if(!employeePattern.test(employeeId)){res.status(400).json({error:"ID karyawan tidak valid"});return;}
+ const action=req.body?.action;
+ if(!["preview","sync"].includes(action)||Object.keys(req.body??{}).some(k=>k!=="action")){
+  res.status(400).json({error:"Aksi sinkronisasi tidak valid"});return;
+ }
+ try {
+  const [employee]=await db.select({employeeId:scEmployeesTable.employeeId,fullName:scEmployeesTable.fullName}).from(scEmployeesTable).where(eq(scEmployeesTable.employeeId,employeeId)).limit(1);
+  if(!employee){res.status(404).json({error:"Karyawan tidak ditemukan"});return;}
+  const records=await db.select({amount:scEmployeeKasbonTable.amount}).from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
+  const total=records.reduce((sum,record)=>sum+Number(record.amount),0);
+  if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
+  const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview");
+  if(action==="sync")await logAudit({...getUserFromReq(req),action:"SC_KASBON_SALARY_SHEET_SYNCED",entity:"sc_employee_kasbon",after:outcome,...getClientInfo(req)});
+  res.json(outcome);
+ }catch(e){
+  const code=(e as Error).message;
+  console.error("[SC_KASBON_SALARY_SYNC]",code);
+  res.status(code==="SALARY_SYNC_DISABLED"?503:409).json({error:code});
+ }
+});
+
 export default router;
