@@ -38,19 +38,19 @@ const salaryRows=[
  [4,'RIAN UCOK','','','','',0,'',0],
  ['TOTAL','','','','','','Total',12900000],
 ];
-const balances=[{employeeId:'SC003',fullName:'Robby',total:1500000},...data];
-const preview=planKasbonSalaryColumnG(balances,salaryRows);
+const balances=[{employeeId:'SC003',fullName:'Robby Rahman',total:1500000},...data];
+const preview=planKasbonSalaryColumnG(balances,salaryRows,{'SC003':'ROBBY'});
 assert.deepEqual(preview.writes.map(x=>[x.employeeId,x.range,x.amount]),[
  ['SC005','G5',2000000],['SC003','G11',1500000],['SC009','G22',2571000]]);
 assert.deepEqual(preview.unmatched.map(x=>x.employeeId),['SC004']);
-const approved=planKasbonSalaryColumnG(balances,salaryRows,{'SC004':'TRI WISUDO'});
+const approved=planKasbonSalaryColumnG(balances,salaryRows,{'SC003':'ROBBY','SC004':'TRI WISUDO'});
 assert.deepEqual(approved.writes.map(x=>x.range),['G5','G11','G19','G22']);
-const rerun=planKasbonSalaryColumnG(balances,salaryRows,{'SC004':'TRI WISUDO'});
+const rerun=planKasbonSalaryColumnG(balances,salaryRows,{'SC003':'ROBBY','SC004':'TRI WISUDO'});
 assert.deepEqual(rerun,approved);
 const duplicated=salaryRows.map(r=>[...r]);duplicated[10][1]='SENO';
-assert.throws(()=>planKasbonSalaryColumnG(balances,duplicated),/SALARY_NAME_AMBIGUOUS/);
+assert.throws(()=>planKasbonSalaryColumnG(balances,duplicated,{'SC003':'ROBBY'}),/SALARY_NAME_AMBIGUOUS/);
 const formula=salaryRows.map(r=>[...r]);formula[4][6]='=SUM(A1:A3)';
-assert.throws(()=>planKasbonSalaryColumnG(balances,formula),/FORMULA_PROTECTED/);
-assert.throws(()=>planKasbonSalaryColumnG([...balances,balances[0]],salaryRows),/IDENTITY_INVALID/);
-assert.throws(()=>planKasbonSalaryColumnG(balances,salaryRows,{'SC004':'SENO'}),/CLAIMED_TWICE/);
+assert.throws(()=>planKasbonSalaryColumnG(balances,formula,{'SC003':'ROBBY'}),/FORMULA_PROTECTED/);
+assert.throws(()=>planKasbonSalaryColumnG([...balances,balances[0]],salaryRows,{'SC003':'ROBBY'}),/IDENTITY_INVALID/);
+assert.throws(()=>planKasbonSalaryColumnG(balances,salaryRows,{'SC003':'ROBBY','SC004':'SENO'}),/CLAIMED_TWICE/);
 console.log('PASS: salary B->G row planning, skip headings/totals, explicit alias, idempotency, formula/duplicate guards; no sheet writes');

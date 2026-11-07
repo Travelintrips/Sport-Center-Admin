@@ -6,6 +6,7 @@ const GID = 1429288652;
 const TAB = "Gaji November 2026";
 const tabRange = (cell: string) => "'" + TAB.replace(/'/g, "''") + "'!" + cell;
 const aliases: Record<string,string> = {
+  SC003: "ROBBY",
   SC004: "TRI WISUDO",
   SC008: "SONIK",
 };
@@ -22,7 +23,9 @@ function googleClient() {
  return google.sheets({version:"v4",auth});
 }
 export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean) {
- if(process.env.SC_KASBON_SALARY_SYNC_ENABLED!=="true")throw Error("SALARY_SYNC_DISABLED");
+ // Preview is read-only and must never be blocked by the write switch.
+ // Only explicit admin-confirmed sync requests can write; deployment can disable writes with false.
+ if(!dryRun && process.env.SC_KASBON_SALARY_SYNC_ENABLED==="false")throw Error("SALARY_SYNC_DISABLED");
  if(process.env.APP_ENV!=="production" || process.env.NODE_ENV!=="production")throw Error("SALARY_PRODUCTION_ENV_REQUIRED");
  const sheets=googleClient();
  const meta=await sheets.spreadsheets.get({spreadsheetId:SPREADSHEET_ID,fields:"sheets(properties(sheetId,title,gridProperties(rowCount)),protectedRanges,merges)"});
@@ -34,6 +37,9 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
  // FORMULA returns formulas, allowing the planner to protect existing formula cells.
  const result=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range,valueRenderOption:"FORMULA"});
  const rows=result.data.values??[];
+ // The payroll sheet shortens Robby Rahman to ROBBY: bind only to the known SC003 identity.
+ if(input.employeeId==="SC003" && input.fullName.trim().toUpperCase()!=="ROBBY RAHMAN" && input.fullName.trim().toUpperCase()!=="ROBBY")
+  throw Error("SALARY_EMPLOYEE_ALIAS_IDENTITY_CHANGED");
  const plan=planKasbonSalaryColumnG([input],rows,aliases);
  const entry=plan.writes[0];
  if(!entry)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
