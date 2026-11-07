@@ -11,7 +11,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc, or, sql, ilike } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { logAudit, logAccountingError } from "../lib/auditLog";
+import { logAudit, logAccountingError, getUserFromReq } from "../lib/auditLog";
 import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import {
@@ -561,7 +561,8 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
 // and automatic. No X904 door command or grant is created here.
 router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware, async (req, res) => {
   const admin = (req as any).user;
-  const adminEmail = String(admin?.email ?? "").trim();
+  const auditUser = getUserFromReq(req);
+  const adminEmail = String(auditUser.userName ?? admin?.email ?? admin?.name ?? "").trim();
   if (!adminEmail) { res.status(403).json({ error: "Identitas admin tidak tersedia." }); return; }
   try {
     const confirmedPaymentId = Number(req.body?.confirmedPaymentId ?? 0);
