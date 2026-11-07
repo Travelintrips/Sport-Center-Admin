@@ -494,7 +494,10 @@ function BookingGroupSessionsDialog({
     return aKey.localeCompare(bKey);
   });
   const total = getGroupInvoiceTax(sortedSessions)?.netAmount ?? 0;
-  const groupCustomerName = sortedSessions.map((row) => row.customerName?.trim()).find(Boolean) || "Belum tercatat";
+  const isCombinedGym = Boolean(groupRef?.startsWith("GYM-GAB-"));
+  const groupCustomerName = isCombinedGym
+    ? sortedSessions.map((row) => row.customerName?.trim()).filter(Boolean).join(", ")
+    : sortedSessions.map((row) => row.customerName?.trim()).find(Boolean) || "Belum tercatat";
 
 
   return (
@@ -503,7 +506,7 @@ function BookingGroupSessionsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Layers size={17} className="text-violet-600" />
-            Detail Group Booking
+            {isCombinedGym ? "Detail Pembayaran Gabungan Membership Gym" : "Detail Group Booking"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
@@ -518,7 +521,7 @@ function BookingGroupSessionsDialog({
             </div>
             <div className="text-right">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-500">
-                Total {sortedSessions.length} sesi
+                Total {sortedSessions.length} {isCombinedGym ? "member" : "sesi"}
               </div>
               <div className="text-sm font-black text-violet-800 dark:text-violet-200">
                 {formatCurrency(total)}
@@ -545,13 +548,14 @@ function BookingGroupSessionsDialog({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                      Sesi {index + 1}
+                      {isCombinedGym ? "Member" : "Sesi"} {index + 1}
                     </span>
                     <span className="font-mono text-[11px] text-slate-400">
                       {session.orderNumber}
                     </span>
                     <StatusBadge status={session.status} isDpPaid={session.isDpPaid} />
                   </div>
+                  {isCombinedGym && <div className="mt-1 text-xs font-bold text-slate-800 dark:text-slate-200">{session.customerName}</div>}
                   <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-300">
                     {formatDate(session.bookingDate)} ·{" "}
                     {String(session.startTime ?? "").slice(0, 5)} –{" "}
@@ -3707,6 +3711,8 @@ export default function AdminBookings() {
     if (booking?.payerType === "company" && booking?.companyInvoiceId != null) {
       return `company-invoice:${booking.companyInvoiceId}`;
     }
+    if (booking?.combinedGymReceipt?.id != null && booking.source === "gym_membership_payment")
+      return `gym-receipt:${booking.combinedGymReceipt.id}`;
     return booking?.groupRef ? `group:${booking.groupRef}` : null;
   };
 
@@ -5116,6 +5122,13 @@ export default function AdminBookings() {
                     const groupRows = displayGroupKey
                       ? (bookingsByDisplayGroupKey[displayGroupKey] ?? [])
                       : [];
+                    const isCombinedGymGroup = Boolean(
+                      b.combinedGymReceipt?.id &&
+                      groupRows.length >= 2 &&
+                      groupRows.length === Number(b.combinedGymReceipt.allocationCount) &&
+                      groupRows.every((row: any) => row.source === "gym_membership_payment" &&
+                        Number(row.combinedGymReceipt?.id) === Number(b.combinedGymReceipt.id)),
+                    );
                     const isMultiSessionGroup = groupRows.length > 1;
                     const isCompanyInvoiceAggregate = Boolean(
                       isMultiSessionGroup &&
@@ -5350,7 +5363,7 @@ export default function AdminBookings() {
                                {isCompanyInvoiceAggregate
                                  ? (b.companyInvoiceNumber ?? `INV-${b.companyInvoiceId}`)
                                  : isMultiSessionGroup
-                                   ? b.groupRef
+                                   ? (isCombinedGymGroup ? `GYM-GAB-${b.combinedGymReceipt.id}` : b.groupRef)
                                    : b.orderNumber}
                             </span>
                             {(isBankReconciled || isSettledOutsideBankReconciliation) && (
@@ -5446,13 +5459,13 @@ export default function AdminBookings() {
                         </div>
                         <div className="text-[11px] text-slate-400">
                           {isMultiSessionGroup
-                            ? `${groupRows.length} sesi recurring`
+                            ? (isCombinedGymGroup ? `${groupRows.length} member Gym` : `${groupRows.length} sesi recurring`)
                             : `${b.startTime?.slice(0, 5)} – ${b.endTime?.slice(0, 5)}`}
                         </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                          {isMultiSessionGroup
+                          {isCombinedGymGroup ? "Membership" : isMultiSessionGroup
                             ? `${groupRows.reduce((sum: number, row: any) => sum + Number(row.durationHours ?? 0), 0)} jam total`
                             : `${b.durationHours} jam`}
                         </span>
@@ -5513,7 +5526,7 @@ export default function AdminBookings() {
                             <div className="flex flex-col gap-0.5 mt-0.5">
                               <div className="flex items-center gap-1 flex-wrap">
                                 <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-600 text-white dark:bg-violet-500">
-                                  {isCompanyInvoiceAggregate ? "Tagihan Perusahaan" : "Group Booking"}
+                                  {isCombinedGymGroup ? "Membership Gabungan" : isCompanyInvoiceAggregate ? "Tagihan Perusahaan" : "Group Booking"}
                                 </span>
                                 <span className="text-[10px] text-violet-500 dark:text-violet-400 font-semibold">
                                   {groupRows.length} Booking
@@ -5524,7 +5537,7 @@ export default function AdminBookings() {
                                   <Link2 size={9} />{" "}
                                   {isCompanyInvoiceAggregate
                                     ? (b.companyInvoiceNumber ?? `INV-${b.companyInvoiceId}`)
-                                    : b.groupRef}
+                                    : isCombinedGymGroup ? `GYM-GAB-${b.combinedGymReceipt.id}` : b.groupRef}
                                 </span>
                                 {isGroupTotalRow && (
                                   <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-400">
@@ -5589,7 +5602,9 @@ export default function AdminBookings() {
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex flex-col items-start gap-2">
                           <div>
-                            {isMultiSessionGroup ? (
+                            {isCombinedGymGroup ? (
+                              <span className="text-xs font-semibold text-slate-500">Status per member di Detail Grup</span>
+                            ) : isMultiSessionGroup ? (
                               groupStatus ? (
                                 <InlineStatusSelect
                                   bookingId={(groupVerificationRow ?? b).id}
@@ -5627,7 +5642,9 @@ export default function AdminBookings() {
                               />
                             )}
                           </div>
-                          {isMultiSessionGroup && groupPendingRows.length > 0 ? (
+                          {isCombinedGymGroup ? (
+                            <span className="text-[11px] text-slate-500">Kelola per member melalui Detail Grup</span>
+                          ) : isMultiSessionGroup && groupPendingRows.length > 0 ? (
                             isGroupVerificationRow ? (
                               <button
                                 onClick={() => setSelectedBooking(groupVerificationRow ?? b)}
@@ -5689,7 +5706,7 @@ export default function AdminBookings() {
                             whileTap={{ scale: 0.96 }}
                              onClick={() => {
                                if (isMultiSessionGroup) {
-                                 setSelectedGroupRef(b.groupRef);
+                                 setSelectedGroupRef(isCombinedGymGroup ? `GYM-GAB-${b.combinedGymReceipt.id}` : b.groupRef);
                                } else {
                                  setSelectedBooking(b);
                                }
@@ -5951,7 +5968,11 @@ export default function AdminBookings() {
 
       <BookingGroupSessionsDialog
         groupRef={selectedGroupRef}
-        sessions={selectedGroupRef ? (bookingsByGroupRef[selectedGroupRef] ?? []) : []}
+        sessions={selectedGroupRef
+          ? (selectedGroupRef.startsWith("GYM-GAB-")
+            ? (bookingsByDisplayGroupKey[`gym-receipt:${selectedGroupRef.slice("GYM-GAB-".length)}`] ?? [])
+            : (bookingsByGroupRef[selectedGroupRef] ?? []))
+          : []}
         open={Boolean(selectedGroupRef)}
         onClose={() => setSelectedGroupRef(null)}
         onSelectSession={(session) => {
