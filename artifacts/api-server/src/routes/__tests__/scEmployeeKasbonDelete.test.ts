@@ -39,13 +39,19 @@ jest.unstable_mockModule("@workspace/db", () => ({
 jest.unstable_mockModule("../../lib/auth.js", () => ({
  adminMiddleware: (req: Request,res: Response,next: NextFunction) => {
   if (req.headers.authorization !== "Bearer admin-test") {res.status(401).json({error:"Unauthorized"});return;}
-  (req as any).user={userId: null, role:"admin",name:"Test Admin"};
+  (req as any).user={userId: 101, role:"admin",name:"Test Admin"};
   next();
  }
 }));
 jest.unstable_mockModule("../../lib/auditLog.js", () => ({
- logAudit: async () => {}, getUserFromReq: () => ({ userId: null, userName: "Test Admin", userRole: "admin" }),
+ logAudit: async () => {}, getUserFromReq: () => ({ userId: 101, userName: "Test Admin", userRole: "admin" }),
  getClientInfo: () => ({ ipAddress:"127.0.0.1", userAgent:"test" })
+}));
+jest.unstable_mockModule("../../lib/scKasbonActionGate.js",()=>({
+ verifyKasbonPassword:async()=>({status:"invalid"}),
+ issueKasbonGrant:()=>"",
+ checkKasbonGrant:(grant:unknown,userId:number,employeeId:string,id:number)=>
+  grant==="test-grant-for-record-1"&&userId===101&&employeeId==="SC003"&&id===1
 }));
 const {default: express} = await import("express");
 const {default: supertest} = await import("supertest");
@@ -67,8 +73,14 @@ describe("SC employee kasbon safe delete route", () => {
   }
   expect(record).not.toBeNull();
  });
+ it("denies DELETE to authenticated admin without password-derived grant",async()=>{
+  const res=await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test");
+  expect(res.status).toBe(403);
+  expect(record).not.toBeNull();
+  expect(persistedAudit).toHaveLength(0);
+ });
  it("deletes existing employee record and logs before state", async () => {
-  const res = await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test");
+  const res = await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test").set("x-sc-kasbon-authorization","test-grant-for-record-1");
   expect(res.status).toBe(200);
   expect(res.body).toEqual({deleted:true,id:1,employeeId:"SC003"});
   expect(record).toBeNull();
@@ -76,14 +88,14 @@ describe("SC employee kasbon safe delete route", () => {
   expect(persistedAudit[0]).toMatchObject({ action:"SC_KASBON_DELETED", entityId:1, before:existing });
  });
  it("returns 404 on repeated delete", async () => {
-  await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test");
-  const res = await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test");
+  await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test").set("x-sc-kasbon-authorization","test-grant-for-record-1");
+  const res = await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test").set("x-sc-kasbon-authorization","test-grant-for-record-1");
   expect(res.status).toBe(404);
   expect(persistedAudit).toHaveLength(1);
  });
  it("rolls back delete if audit insertion fails", async () => {
   failAudit = true;
-  const res = await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test");
+  const res = await supertest(app).delete(endpoint).set("Authorization","Bearer admin-test").set("x-sc-kasbon-authorization","test-grant-for-record-1");
   expect(res.status).toBe(500);
   expect(record).not.toBeNull();
   expect(persistedAudit).toHaveLength(0);

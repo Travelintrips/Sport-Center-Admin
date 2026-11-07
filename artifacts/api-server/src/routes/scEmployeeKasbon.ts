@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { snapshotKasbonRecords, getKasbonReceiptStatus, type SalarySyncReceipt } from "../lib/scKasbonSalarySnapshot";
 import { syncEmployeeKasbonToSalary } from "../lib/scKasbonSalaryGoogle";
 import { kasbonPoolTick } from "../lib/scKasbonPoolAutoWorker";
+import {verifyKasbonPassword,issueKasbonGrant,checkKasbonGrant} from "../lib/scKasbonActionGate";
 import { db, scEmployeesTable, scEmployeeKasbonTable, auditLogsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -45,10 +46,49 @@ router.post("/admin/sc-employees/:employeeId/kasbon", adminMiddleware, async (re
    res.status(201).json(row);
  } catch {res.status(500).json({error:"Gagal mencatat kasbon"});}
 });
+// Dedicated password gate. A normal admin/owner/super_admin login is never enough.
+router.post("/admin/sc-employees/:employeeId/kasbon/:id/unlock",adminMiddleware,async(req,res)=>{
+ const employeeId=String(req.params.employeeId??"").toUpperCase(),id=Number(req.params.id);
+ const actor=getUserFromReq(req);
+ if(!employeePattern.test(employeeId)||!Number.isSafeInteger(id)||id<1||!actor.userId){
+  res.status(403).json({error:"KASBON_AUTH_REQUIRED"});return;
+ }
+ if(!req.body||Object.keys(req.body).some(key=>key!=="password")){
+  res.status(400).json({error:"KASBON_PASSWORD_REQUIRED"});return;
+ }
+ try {
+  const [existing]=await db.select({id:scEmployeeKasbonTable.id}).from(scEmployeeKasbonTable)
+   .where(and(eq(scEmployeeKasbonTable.id,id),eq(scEmployeeKasbonTable.employeeId,employeeId))).limit(1);
+  if(!existing){res.status(404).json({error:"Kasbon tidak ditemukan"});return;}
+  const outcome=await verifyKasbonPassword(req.body.password,actor.userId,req.ip??"unknown");
+  if(outcome.status!=="ok"){
+   await logAudit({...actor,action:"SC_KASBON_ACTION_UNLOCK_DENIED",entity:"sc_employee_kasbon",
+    entityId:id,after:{employeeId,reason:outcome.status},...getClientInfo(req)});
+   res.status(outcome.status==="disabled"?503:outcome.status==="locked"?429:403)
+    .json({error:outcome.status==="disabled"?"KASBON_GATE_NOT_CONFIGURED":outcome.status==="locked"?"KASBON_AUTH_LOCKED":"KASBON_PASSWORD_INVALID"});return;
+  }
+  const authorization=issueKasbonGrant(actor.userId,employeeId,id);
+  await logAudit({...actor,action:"SC_KASBON_ACTION_UNLOCKED",entity:"sc_employee_kasbon",entityId:id,after:{employeeId},...getClientInfo(req)});
+  res.setHeader("Cache-Control","no-store");
+  res.json({authorization,expiresInSeconds:90});
+ }catch(error){
+  console.error("[SC_KASBON_UNLOCK] verification failed",error instanceof Error?error.name:"UNKNOWN");
+  res.status(503).json({error:"KASBON_AUTH_UNAVAILABLE"});
+ }
+});
+function requireKasbonActionGrant(req:import("express").Request,res:import("express").Response):boolean {
+ const actor=getUserFromReq(req),employeeId=String(req.params.employeeId??"").toUpperCase(),id=Number(req.params.id);
+ const token=req.get("x-sc-kasbon-authorization");
+ if(!actor.userId||!checkKasbonGrant(token,actor.userId,employeeId,id)){
+  res.status(403).json({error:"KASBON_ACTION_PASSWORD_REQUIRED"});return false;
+ }
+ return true;
+}
 router.patch("/admin/sc-employees/:employeeId/kasbon/:id", adminMiddleware, async(req,res)=>{
  const employeeId = String(req.params.employeeId||"").toUpperCase();
  const id = Number(req.params.id);
  if (!employeePattern.test(employeeId) || !Number.isSafeInteger(id) || id < 1) {res.status(400).json({error:"ID tidak valid"});return;}
+ if(!requireKasbonActionGrant(req,res))return;
  if (Object.keys(req.body ?? {}).some(k=>!["kasbonDate","amount","notes","proofUrl"].includes(k))) {res.status(400).json({error:"Field kasbon tidak valid"});return;}
  try {
    const [existing] = await db.select().from(scEmployeeKasbonTable).where(and(eq(scEmployeeKasbonTable.employeeId,employeeId),eq(scEmployeeKasbonTable.id,id))).limit(1);
@@ -70,6 +110,7 @@ router.delete("/admin/sc-employees/:employeeId/kasbon/:id", adminMiddleware, asy
  }
  const id = Number(rawId);
  if (!Number.isSafeInteger(id)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+ if(!requireKasbonActionGrant(req,res))return;
  try {
    const deleted = await db.transaction(async (tx) => {
      const [existing] = await tx.select().from(scEmployeeKasbonTable)
