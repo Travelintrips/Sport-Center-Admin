@@ -25,8 +25,10 @@ describe("new ordinary X904 device user stays suspended until verified paid enti
     const paid = { ...base, confirmedPaymentAt: new Date("2026-11-07T03:00:00Z"),
       paymentState: "confirmed" as const };
     expect(decideNonmemberX904Access(paid)).toBe("activate");
+    // Preserve the existing special-role paid activation allowance. This
+    // change only prevents new-enrollment default suspension for those roles.
     for (const role of [4,14]) {
-      expect(decideNonmemberX904Access({ ...paid, deviceRole: role })).toBe("hold");
+      expect(decideNonmemberX904Access({ ...paid, deviceRole: role })).toBe("activate");
       expect(decideNonmemberX904Access({ ...paid, deviceRole: role, currentGroup: 1,
         now: new Date("2026-11-08T04:00:00Z") })).toBe("hold");
     }
