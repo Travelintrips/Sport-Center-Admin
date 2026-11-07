@@ -47,7 +47,17 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
  if(existing.startsWith("="))throw Error("SALARY_KASBON_FORMULA_PROTECTED");
  const cell=tabRange(entry.range);
  const report={employeeId:input.employeeId,name:entry.name,cell:entry.range,previous:existing,amount:entry.amount,spreadsheetId:SPREADSHEET_ID,gid:GID};
- if(dryRun)return {status:"preview" as const,...report};
+ if(dryRun){
+  // Live Sheets row, not a hardcoded G9/G11 mapping. Read-only on-demand check.
+  const raw=rows[entry.row-1]??[];
+  const observed=typeof raw[6]==="number" ? raw[6] : Number(String(raw[6]??"").replace(/[^0-9.-]/g,""));
+  const matched=String(raw[6]??"").trim()!=="" && Number.isFinite(observed) && observed===entry.amount;
+  return {status:"preview" as const,...report,matched,
+   sheetRow:{row:entry.row,number:String(raw[0]??""),name:String(raw[1]??""),
+    uangMakan:String(raw[2]??""),hariKerja:String(raw[3]??""),
+    persentase:String(raw[4]??""),totalSalary:String(raw[5]??""),
+    kasbon:raw[6]??"",sisaGaji:raw[7]??""}};
+ }
  // A fresh re-read detects manual changes between preview and writing.
  const before=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range:tabRange("A"+entry.row+":G"+entry.row),valueRenderOption:"FORMULA"});
  const live=before.data.values?.[0]??[];
