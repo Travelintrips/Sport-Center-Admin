@@ -614,8 +614,13 @@ router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware
 });
 
 router.post("/admin/wa-bookings/:orderNumber/collect-vis", adminMiddleware, async (req, res) => {
-  const actor = String((req as any).user?.email ?? "").trim();
-  if (!actor) { res.status(403).json({ error: "Identitas petugas tidak tersedia." }); return; }
+  const sessionUser = (req as any).user;
+  const userId = Number(sessionUser?.userId ?? 0);
+  const [account] = Number.isSafeInteger(userId) && userId > 0
+    ? await db.select({ name: usersTable.name, email: usersTable.email })
+        .from(usersTable).where(eq(usersTable.id,userId)).limit(1)
+    : [];
+  const actor = String(account?.email ?? account?.name ?? `admin-user-${userId || "authenticated"}`).trim();
   try {
     const outcome = await collectReservedVisCard({
       orderNumber: String(req.params.orderNumber),
@@ -638,8 +643,13 @@ router.post("/admin/wa-bookings/:orderNumber/collect-vis", adminMiddleware, asyn
 });
 
 router.post("/admin/wa-bookings/:orderNumber/return-vis", adminMiddleware, async (req, res) => {
-  const actor = String((req as any).user?.email ?? "").trim();
-  if (!actor) { res.status(403).json({ error: "Identitas petugas tidak tersedia." }); return; }
+  const sessionUser = (req as any).user;
+  const userId = Number(sessionUser?.userId ?? 0);
+  const [account] = Number.isSafeInteger(userId) && userId > 0
+    ? await db.select({ name: usersTable.name, email: usersTable.email })
+        .from(usersTable).where(eq(usersTable.id,userId)).limit(1)
+    : [];
+  const actor = String(account?.email ?? account?.name ?? `admin-user-${userId || "authenticated"}`).trim();
   try {
     const outcome = await returnVerifiedVisCard({
       orderNumber: String(req.params.orderNumber),
