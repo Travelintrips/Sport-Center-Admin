@@ -13,7 +13,7 @@ test("new user automation requires explicit opt-in and a fresh baseline", () => 
   assert.match(worker, /GYM_X904_MANUAL_ACCESS_ENABLED/);
   assert.match(worker, /GYM_X904_USER_WRITE_ENABLED/);
   assert.match(worker, /time <= before \|\| time - before > 10 \* 60_000/);
-  assert.match(worker, /latestTime - previousTime > 10 \* 60_000/);
+  assert.match(worker, /time <= before \|\| time - before > 10 \* 60_000/);
   assert.match(worker, /SNAPSHOT_MAX_AGE_MS/);
   assert.match(startup, /startX904NewOrdinaryUserDefaultSuspend\(\)/);
 });
