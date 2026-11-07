@@ -607,14 +607,20 @@ export default function WaBookingForm() {
               <CheckCircle className="w-9 h-9 text-green-600" />
             </div>
             <CardTitle className="text-green-700 font-black text-2xl">
-              {proofConfirmed ? "Booking Dikonfirmasi!" : "Booking Berhasil!"}
+              Booking Berhasil Dibuat!
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="bg-slate-50 rounded-2xl p-5 space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Order</span>
-                <span className="font-bold">{result.orderNumber}</span>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="block text-xs text-gray-500">Nomor Booking</span>
+                  <strong className="text-lg text-slate-900">{result.orderNumber}</strong>
+                </div>
+                <Button type="button" size="sm" variant="outline" aria-label="Salin nomor booking"
+                  onClick={() => { void navigator.clipboard?.writeText(result.orderNumber); }}>
+                  Salin
+                </Button>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Fasilitas</span>
@@ -636,6 +642,18 @@ export default function WaBookingForm() {
               </div>
             </div>
 
+            {dedicatedNonmember && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3" aria-label="Status booking dan akses Gym">
+                <h3 className="font-bold text-slate-900">Status Booking Gym</h3>
+                <div className="flex items-center justify-between gap-3 text-sm"><span>Booking</span><span className="font-semibold text-green-700">Berhasil Dibuat</span></div>
+                <div className="flex items-center justify-between gap-3 text-sm"><span>Pembayaran</span><span className="font-semibold text-amber-700">Menunggu Verifikasi Admin</span></div>
+                <div className="flex items-center justify-between gap-3 text-sm"><span>Akses X904</span><span className="font-semibold text-slate-600">Belum Aktif</span></div>
+                <p className="border-t border-slate-100 pt-3 text-xs text-slate-600">
+                  Status ini adalah kondisi awal setelah booking dikirim. Setelah admin memverifikasi dana dan petugas memeriksa identitas,
+                  akses baru siap jika aktivasi mesin serta read-back berhasil. Gunakan Cek Status Booking untuk perkembangan terbaru.
+                </p>
+              </div>
+            )}
             {publicGymGuest && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                 Pencocokan nama X904 belum merupakan hak akses. Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
@@ -643,11 +661,11 @@ export default function WaBookingForm() {
               </p>
             )}
             <p className="text-sm text-gray-600 text-center">
-              {proofConfirmed
-                ? "Bukti pembayaran cocok dan booking otomatis dikonfirmasi."
-                : proofUploadError
-                  ? "Booking sudah dibuat. Bukti pembayaran perlu diupload atau diperbaiki."
-                  : "Detail & instruksi pembayaran sudah dikirim ke WhatsApp kamu."}
+              {proofUploadError
+                ? "Booking sudah dibuat. Bukti pembayaran perlu diupload atau diperbaiki."
+                : dedicatedNonmember
+                  ? "Bukti pembayaran yang diterima tetap menunggu pemeriksaan petugas. Booking belum memberi akses pintu."
+                  : "Booking berhasil dibuat. Periksa status pembayaran melalui Cek Status Booking."}
             </p>
 
             {proofUploadError && (
