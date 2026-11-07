@@ -281,6 +281,15 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       return;
     }
 
+    if (typeof notes !== "string" || notes.trim().length < 3) {
+      res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
+      return;
+    }
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !Number.isFinite(Number(ppnAmount)) || Number(ppnAmount) < 0) {
+      res.status(400).json({ error: "Nominal atau PPN tidak valid" });
+      return;
+    }
+
     if (!coaAccountId && !category) {
       res.status(400).json({ error: "Akun COA wajib dipilih" });
       return;
@@ -325,7 +334,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       paymentStatus: "draft",
       receiptUrl: receiptUrl || null,
       receiptUrls: Array.isArray(receiptUrls) ? receiptUrls : [],
-      notes: notes || null,
+      notes: notes.trim(),
       createdBy: user.userId ?? null,
     } as any).returning();
 
@@ -383,6 +392,11 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
       amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
+
+    if (notes !== undefined && (typeof notes !== "string" || notes.trim().length < 3)) {
+      res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
+      return;
+    }
 
     // Resolve category from COA if provided
     let resolvedCategory = category ?? existing.category;

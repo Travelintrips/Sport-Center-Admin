@@ -22,7 +22,7 @@ import {
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
 
-const PAYMENT_METHODS = ["Transfer Bank", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
+const PAYMENT_METHODS = ["Transfer Bank", "BI-FAST", "QRIS", "PLN Prabayar", "E-Commerce", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -348,8 +348,8 @@ export default function AdminExpenses() {
       toast({ title: "Akun COA wajib dipilih", variant: "destructive" });
       return;
     }
-    if (!form.vendorId) {
-      toast({ title: "Vendor wajib dipilih", description: "Pilih vendor dari daftar yang tersedia", variant: "destructive" });
+    if (!form.notes.trim()) {
+      toast({ title: "Catatan transaksi wajib diisi", description: "Tuliskan tujuan penggunaan dana sebelum menyimpan.", variant: "destructive" });
       return;
     }
     const selectedV = vendors.find((v) => v.id === Number(form.vendorId));
@@ -365,7 +365,7 @@ export default function AdminExpenses() {
       paymentMethod: form.paymentMethod || null,
       paymentAccount: form.paymentAccount || null,
       receiptUrls: form.receiptUrls,
-      notes: form.notes || null,
+      notes: form.notes.trim(),
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, body });
@@ -590,12 +590,16 @@ export default function AdminExpenses() {
 
       {/* Form Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[min(94vw,860px)] max-w-[860px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-black">{editingId ? "Edit Pengeluaran" : "Tambah Pengeluaran"}</DialogTitle>
           </DialogHeader>
+          <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+            <p className="font-semibold">Pengeluaran operasional • Rekening blu</p>
+            <p className="mt-1">Catat pembayaran harian dan unggah bukti yang dibagikan dari blu. Catatan tujuan transaksi wajib diisi. Bukti hanya menjadi lampiran; data bank tidak terverifikasi otomatis.</p>
+          </div>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Tanggal <span className="text-red-500">*</span></Label>
                 <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
@@ -776,12 +780,14 @@ export default function AdminExpenses() {
               </div>
               <div className="space-y-1">
                 <Label>Rekening / Akun Pembayaran</Label>
+                <p className="text-xs text-gray-500">Misalnya: blu by BCA Digital</p>
                 <Input value={form.paymentAccount} onChange={(e) => setForm({ ...form, paymentAccount: e.target.value })} placeholder="Nama bank / no. rekening" />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label>Foto Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1)</span></Label>
+              <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
+              <p className="text-xs text-gray-500">Unggah screenshot atau bukti transaksi blu (seperti bukti yang dibagikan dari aplikasi). Periksa isian tanggal, nominal dan penerima secara manual.</p>
               <input
                 ref={receiptInputRef}
                 type="file"
@@ -828,7 +834,7 @@ export default function AdminExpenses() {
                 ) : (
                   <>
                     <Upload className="w-5 h-5" />
-                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Klik untuk upload foto nota"}</span>
+                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Unggah bukti dari blu atau foto nota"}</span>
                     <span className="text-xs">JPG, PNG, WebP — maks 10 MB per foto</span>
                   </>
                 )}
@@ -836,8 +842,9 @@ export default function AdminExpenses() {
             </div>
 
             <div className="space-y-1">
-              <Label>Catatan</Label>
-              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Catatan tambahan..." rows={2} />
+              <Label>Catatan tujuan transaksi <span className="text-red-500">*</span></Label>
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Wajib: barang/jasa yang dibeli, tujuan pembayaran, atau alasan transfer..." rows={2} required minLength={3} />
+              <p className="text-xs text-gray-500">Berbeda dari deskripsi bank; catatan ini menjadi keterangan pembukuan Sport Center.</p>
             </div>
 
             <div className="flex gap-3 justify-end pt-2">
