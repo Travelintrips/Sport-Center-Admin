@@ -1,3 +1,4 @@
+import { getBookingPaymentCapture } from "@/lib/bookingPaymentCapture";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
@@ -1443,6 +1444,14 @@ function BookingDetailDrawer({
         : booking.payment
           ? [booking.payment]
           : [];
+  const {
+    canRecord: canRecordGroupPayment,
+    paymentType: newPaymentType,
+    amount: paymentAmountToRecord,
+    total: groupInvoiceAmount,
+    confirmedAmount: confirmedGroupTotal,
+    hasConfirmedDp: hasConfirmedGroupDp,
+  } = getBookingPaymentCapture(booking, allPayments);
   const systemRepairPayments = allPayments.filter((payment: any) =>
     (payment?.status === "rejected" || payment?.status === "cancelled") &&
     String(payment?.notes ?? "").includes("UAT reversal"),
@@ -1595,12 +1604,12 @@ function BookingDetailDrawer({
           ((detected === "qris") !== (newPaymentMethod === "QRIS"))) {
         throw new Error("Metode pembayaran berbeda dari hasil pemeriksaan bukti. Periksa dan pilih metode yang benar.");
       }
-      const amount = Number(booking.grandTotal ?? booking.totalPrice);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Nominal booking tidak valid");
+      const amount = paymentAmountToRecord;
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Sisa tagihan tidak valid");
       const saved = await fetch(`${API_BASE}/payments`, {
         method:"POST",headers:{"Content-Type":"application/json",...auth},
         body:JSON.stringify({
-          bookingId:booking.id, amount, paymentType:"full_payment",
+          bookingId:booking.id, amount, paymentType: newPaymentType,
           paymentMethod:newPaymentMethod,
           ...(newPaymentMethod==="QRIS"?{paymentProvider:"mandiri_direct"}:{}),
           proofUrl:proofData.objectPath ?? proofData.url,
@@ -1627,7 +1636,8 @@ function BookingDetailDrawer({
       }
 
       setNewPaymentProof(null);
-      paymentQueryClient.invalidateQueries({queryKey:getListBookingsQueryKey()});
+      await paymentQueryClient.invalidateQueries({queryKey:getListBookingsQueryKey()});
+      onClose(); // Reopen to display the refreshed group ledger.
     } catch (error) {
       setNewPaymentError(error instanceof Error ? error.message : "Gagal mencatat pembayaran");
     } finally { setSavingNewPayment(false); }
@@ -2249,13 +2259,18 @@ function BookingDetailDrawer({
             </div>
           )}
 
-          {/* Accept first payment even when there are no prior payments. */}
-              {!membershipPaymentBooking && !membershipUsageBooking &&
-                ["pending_payment","expired"].includes(booking.status) &&
-                !allPayments.some(p=>["pending","confirmed"].includes(p.status)) && (
+          {/* Show pelunasan after confirmed DP, including a DP paid on a sibling booking. */}
+              {canRecordGroupPayment && (
                 <div className="rounded-lg border p-3 space-y-3 mb-3">
-                  <div className="font-semibold text-sm">Catat Pembayaran Pelanggan</div>
-                  <p className="text-xs text-muted-foreground">Order {booking.orderNumber} · Tagihan {Number(booking.grandTotal ?? booking.totalPrice).toLocaleString("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0})}</p>
+                  <div className="font-semibold text-sm">{hasConfirmedGroupDp ? "Catat Pelunasan" : "Catat Pembayaran Pelanggan"}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {booking.groupRef ? "Grup " + booking.groupRef : "Order " + booking.orderNumber}
+                    {" · "} {hasConfirmedGroupDp ? "Sisa pelunasan " : "Tagihan "}
+                    {paymentAmountToRecord.toLocaleString("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0})}
+                  </p>
+                  {hasConfirmedGroupDp && (
+                    <p className="text-xs text-muted-foreground">Total grup {formatCurrency(groupInvoiceAmount)} · DP terkonfirmasi {formatCurrency(confirmedGroupTotal)}. Satu bukti pelunasan berlaku untuk seluruh grup.</p>
+                  )}
                   <Label>Metode pembayaran</Label>
                   <Select value={newPaymentMethod} onValueChange={(v)=>setNewPaymentMethod(v as "QRIS"|"Transfer Bank")}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
