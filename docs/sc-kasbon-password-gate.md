@@ -7,7 +7,7 @@ Set these **secret environment variables on the API server**, not in GitHub,
 the frontend, browser local storage, ChatGPT, AI Core, OpenClaw, or a test screenshot.
 
 - `SC_KASBON_ACTION_PASSWORD_HASH` — bcrypt hash of one strong randomly
-  selected password (at least 12 characters; recommended 20+).
+  selected password (6–12 characters, as requested; prefer 12 random characters).
 - `SC_KASBON_ACTION_SIGNING_KEY` — independently generated cryptographically
   random hex key, at least 32 bytes / 64 hex characters.
 
@@ -25,7 +25,7 @@ application-level role enforcement.
 
 ## Behavior
 - Admin authentication is still mandatory for viewing the protected record.
-- A dedicated password verification is required for each chosen Kasbon record.
+- A dedicated 6–12 character password verification is required for each chosen Kasbon record. A six-character password provides weaker security than a longer random password.
 - Five incorrect attempts lock further attempts for 15 minutes *per backend
   process*. Apply upstream IP/account rate limiting across replicas in
   multi-instance deployments.

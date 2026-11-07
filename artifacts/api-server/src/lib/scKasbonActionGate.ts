@@ -25,7 +25,7 @@ export async function verifyKasbonPassword(password:unknown,userId:number,limite
  const id=String(userId)+":"+limiterKey;
  const current=attempts.get(id);
  if(current&&current.failures>=MAX_ATTEMPTS&&Date.now()<current.until)return {status:"locked"};
- if(typeof password!=="string"||password.length<12||password.length>256)return {status:"invalid"};
+ if(typeof password!=="string"||password.length<6||password.length>12)return {status:"invalid"};
  const ok=await bcrypt.compare(password,conf.hash);
  if(!ok){
   const count=(current&&Date.now()<current.until?current.failures:0)+1;
