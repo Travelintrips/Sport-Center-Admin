@@ -27,7 +27,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
-import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
+import { autoReserveVisAfterFundsVerified, reserveVisAfterAdminPaymentConfirmation, collectReservedVisCard, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { notifyGymVisitorCardReserved } from "../lib/notifications";
 
 const router = Router();
@@ -564,12 +564,19 @@ router.post("/admin/wa-bookings/:orderNumber/auto-allocate-vis", adminMiddleware
   const adminEmail = String(admin?.email ?? "").trim();
   if (!adminEmail) { res.status(403).json({ error: "Identitas admin tidak tersedia." }); return; }
   try {
-    const assigned = await autoReserveVisAfterFundsVerified({
-      orderNumber: String(req.params.orderNumber),
-      officialBankReference: String(req.body?.officialBankReference ?? ""),
-      officialFundsChecked: req.body?.officialFundsChecked === true,
-      verifiedBy: adminEmail,
-    });
+    const confirmedPaymentId = Number(req.body?.confirmedPaymentId ?? 0);
+    const assigned = Number.isSafeInteger(confirmedPaymentId) && confirmedPaymentId > 0
+      ? await reserveVisAfterAdminPaymentConfirmation({
+          orderNumber: String(req.params.orderNumber),
+          paymentId: confirmedPaymentId,
+          confirmedBy: adminEmail,
+        })
+      : await autoReserveVisAfterFundsVerified({
+          orderNumber: String(req.params.orderNumber),
+          officialBankReference: String(req.body?.officialBankReference ?? ""),
+          officialFundsChecked: req.body?.officialFundsChecked === true,
+          verifiedBy: adminEmail,
+        });
     if (assigned.newReservation) {
       const [booking] = await db.select().from(bookingsTable)
         .where(eq(bookingsTable.orderNumber, String(req.params.orderNumber))).limit(1);

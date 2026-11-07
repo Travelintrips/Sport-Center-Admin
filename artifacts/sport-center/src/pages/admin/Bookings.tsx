@@ -1443,6 +1443,14 @@ function BookingDetailDrawer({
         : booking.payment
           ? [booking.payment]
           : [];
+  const systemRepairPayments = allPayments.filter((payment: any) =>
+    (payment?.status === "rejected" || payment?.status === "cancelled") &&
+    String(payment?.notes ?? "").includes("UAT reversal"),
+  );
+  const operationalPayments = allPayments.filter((payment: any) =>
+    !((payment?.status === "rejected" || payment?.status === "cancelled") &&
+      String(payment?.notes ?? "").includes("UAT reversal")),
+  );
   const editablePayment =
     [...allPayments]
       .sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))
@@ -1521,6 +1529,30 @@ function BookingDetailDrawer({
   const [newPaymentError, setNewPaymentError] = useState("");
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
+  const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
+  const allocateGymVisMutation = useMutation({
+    mutationFn: async () => {
+      if (!confirmedGymPayment?.id) throw new Error("Pembayaran confirmed tidak ditemukan");
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/auto-allocate-vis`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`,
+        },
+        body: JSON.stringify({ confirmedPaymentId: confirmedGymPayment.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (payload: any) => {
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      paymentToast.toast({ title: "Kartu VIS dialokasikan", description: `${payload?.cardCode ?? "Kartu"} sekarang menjadi kartu yang harus diserahkan.` });
+    },
+    onError: (error: any) => {
+      paymentToast.toast({ title: "Alokasi kartu VIS belum berhasil", description: String(error?.message ?? error), variant: "destructive" });
+    },
+  });
   async function submitNewPaymentProof() {
     if (!newPaymentProof || savingNewPayment || !booking.id) return;
     setSavingNewPayment(true);
@@ -1847,7 +1879,19 @@ function BookingDetailDrawer({
               ) : gymIdentityRoute === "registered" ? (
                 <div className="mt-2 text-xs">Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN sebelum pembayaran dan kepemilikan identitas sah.</div>
               ) : (
-                <div className="mt-2 text-xs">Belum ada kartu VIS yang dialokasikan. Setelah pembayaran benar-benar diverifikasi Admin/Finance, sistem harus otomatis memilih satu VIS001–VIS006 yang tersedia.</div>
+                <>
+                  <div className="mt-2 text-xs">Belum ada kartu VIS yang dialokasikan. Setelah pembayaran benar-benar diverifikasi Admin/Finance, sistem harus otomatis memilih satu VIS001–VIS006 yang tersedia.</div>
+                  {booking.status === "confirmed" && confirmedGymPayment && (
+                    <button
+                      type="button"
+                      onClick={() => allocateGymVisMutation.mutate()}
+                      disabled={allocateGymVisMutation.isPending}
+                      className="mt-3 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {allocateGymVisMutation.isPending ? "Mengalokasikan..." : "Alokasikan Kartu VIS"}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -2220,7 +2264,7 @@ function BookingDetailDrawer({
                     </div>
                   </div>
                 )}
-                {allPayments.map((pmt: any) => {
+                {operationalPayments.map((pmt: any) => {
                   const typeLabel =
                     pmt.paymentType === "dp"
                       ? "DP"
@@ -2530,6 +2574,11 @@ function BookingDetailDrawer({
                     </div>
                   );
                 })}
+                {systemRepairPayments.length > 0 && (
+                  <div className="m-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                    Riwayat sistem: {systemRepairPayments.length} transaksi repair tersimpan untuk audit dan tidak termasuk pembayaran aktif customer.
+                  </div>
+                )}
               </div>
             </div>
           )}
