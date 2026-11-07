@@ -8,17 +8,18 @@ const admin = read("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
 
 test("public Gym never allows arbitrary unverified PIN self-selection",()=>{
  assert.doesNotMatch(form,/Pencocokan Identitas Gym X904/);
- assert.match(form,/Verifikasi PIN X904 untuk nama terdaftar/);
- assert.match(form,/type="password" inputMode="numeric"/);
+ assert.doesNotMatch(form,/id="guest-x904-pin"/);
+ assert.doesNotMatch(form,/requestedX904Pin: guestPin/);
  assert.match(form,/font-bold text-green-700 border-green-300/);
  assert.doesNotMatch(form,/PIN Mesin X904 \(Opsional\)/);
  assert.match(form,/publicGymGuest \|\| !dedicatedNonmember \|\| !x904IdentityValue\.trim\(\)/);
  assert.match(form,/\/api\/wa\/gym-name-route/);
  assert.doesNotMatch(form,/requestedX904Pin: x904IdentityValue/);
 });
-test("typed PIN and registered name create review-only grant, never a machine command",()=>{
+test("server-resolved registered name creates review-only grant, never a machine command",()=>{
  const bookingRoute=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('router.get("/wa/status/:orderNumber"'));
  assert.match(bookingRoute,/guestSubmittedPin/);
+ assert.match(bookingRoute,/guestSubmittedPin && guestNameRoute\?\.route === "registered"/);
  assert.match(bookingRoute,/guestSubmittedPin !== guestNameRoute\.userPin/);
  assert.match(bookingRoute,/resolveGymGuestName\(bookingCustomerName\)/);
  assert.match(bookingRoute,/status review_required/);
