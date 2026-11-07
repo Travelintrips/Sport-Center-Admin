@@ -2007,6 +2007,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     // existing behavior. The customer-facing regular personal booking is the
     // only flow changed here.
     const autoConfirmEligible =
+      booking.source !== "gym_public_guest" &&
       booking.status === "pending_payment" &&
       (booking.payerType == null || booking.payerType === "personal") &&
       booking.paymentRequiredNow !== false &&
