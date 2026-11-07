@@ -52,12 +52,12 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
    const row=await api(endpoint(employee.employeeId)+(isCreate?"":"/"+editing),isCreate?"POST":"PATCH",payload);
-   if(!isCreate)return {row,created:false,pool:null,salary:null};
-   // Save first, then independently verify each integration. A Sheets failure must
-   // NEVER re-submit the create request or misreport KB as missing.
+   if(!isCreate)return {row,created:false,pool:null};
+   // Simpan / Sync only targets the per-transaction Kasbon POOL outbox.
+   // Total Kasbon payroll (kolom G) is exclusively updated by Sync Total.
+   // Never retry the create request if POOL fails: the KB row already exists.
    const pool=await api(endpoint(employee.employeeId)+"/"+row.id+"/pool-sync","POST",{}).catch((e:Error)=>({status:"needs_review",errorCode:e.message}));
-   const salary=await api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}).catch((e:Error)=>({status:"failed",errorCode:e.message}));
-   return {row,created:true,pool,salary};
+   return {row,created:true,pool};
   },
   retry:false,
   onSuccess:(result)=>{
@@ -67,12 +67,11 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     toast({title:"Kasbon berhasil diperbarui",description:"Data perubahan disimpan. Periksa kebutuhan rekonsiliasi Sheets."});return;
    }
    const poolOk=result.pool?.status==="synced";
-   const salaryOk=result.salary?.status==="synced";
-   if(poolOk&&salaryOk){
-    toast({title:"Kasbon tersimpan dan kedua Sheets tersinkron",description:"KB-"+String(result.row.id).padStart(5,"0")+" · Kasbon POOL dan Total Kasbon G berhasil dibaca ulang."});
+   if(poolOk){
+    toast({title:"Kasbon tersimpan dan Kasbon POOL tersinkron",description:"KB-"+String(result.row.id).padStart(5,"0")+" · Insert ke Kasbon POOL telah terverifikasi. Gunakan Sync Total secara terpisah untuk laporan gaji."});
    }else{
-    toast({title:"Kasbon tersimpan, sinkronisasi belum lengkap",
-     description:"KB-"+String(result.row.id).padStart(5,"0")+" · POOL: "+String(result.pool?.status??"gagal")+" ("+String(result.pool?.errorCode??"-")+") · Gaji: "+String(result.salary?.status??"gagal")+" ("+String(result.salary?.errorCode??"-")+")",
+    toast({title:"Kasbon tersimpan, Sync Kasbon POOL belum berhasil",
+     description:"KB-"+String(result.row.id).padStart(5,"0")+" · POOL: "+String(result.pool?.status??"gagal")+" ("+String(result.pool?.errorCode??"-")+"). Sync Total laporan gaji tidak dijalankan.",
      variant:"destructive"});
    }
   },
@@ -100,7 +99,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  });
  const syncSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}),
-  onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});toast({title:"Kasbon berhasil Sync ke Google Sheets",description:result.cell+" — "+currency(result.amount)});},
+  onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});toast({title:"Total Kasbon berhasil Sync ke laporan gaji",description:result.cell+" — "+currency(result.amount)});},
   onError:(e:Error)=>{setSalaryPreview(null);setSalaryCheck(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
  });
  const uploadProof=async (file:File)=>{
@@ -123,7 +122,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   </div>
   <div className="rounded-xl border bg-background px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><p className="font-semibold">Check Sync</p><p className="text-xs text-muted-foreground">Lihat hanya baris karyawan ini dari Google Sheets Gaji November 2026.</p></div>
+      <div><p className="font-semibold">Check Sync</p><p className="text-xs text-muted-foreground">Lihat baris karyawan pada laporan gaji (bukan Kasbon POOL).</p></div>
       <Button variant="outline" disabled={checkSalary.isPending||isLoading||isError} onClick={()=>{if(checkOpen){setCheckOpen(false);}else{checkSalary.mutate();}}}>
         <RefreshCw className="mr-2 h-4 w-4"/>{checkSalary.isPending?"Memeriksa...":checkOpen?"Tutup":"Check Sync"}
       </Button>
@@ -139,7 +138,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
    <CardTitle>Histori Kasbon ({records.length})</CardTitle>
    <div className="flex flex-wrap items-center gap-2">
-    <Button variant="outline" disabled={isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon seluruh transaksi ke Google Sheets"} onClick={()=>previewSalary.mutate()}>
+    <Button variant="outline" disabled={isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
       {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
       {previewSalary.isPending?"Memeriksa...":isSalarySynced?"Synced":"Sync Total"}
     </Button>
@@ -166,7 +165,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
      <p>Tujuan: Gaji November 2026 — <strong>{salaryPreview?.cell}</strong> (kolom G)</p>
      <p>Transaksi yang akan dicakup: <strong>{records.length} transaksi kasbon</strong></p>
      <p>Total seluruh kasbon karyawan: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
-     <p className="text-muted-foreground">Sync mengganti total kasbon karyawan pada satu sel G. Setelah read-back berhasil, setiap transaksi yang tercakup dicatat dalam bukti sinkronisasi. Jika data berubah, jalankan Sync Total kembali.</p>
+     <p className="text-muted-foreground">Sync Total hanya mengganti total kasbon karyawan pada kolom G laporan gaji. Setelah read-back berhasil, setiap transaksi yang tercakup dicatat dalam bukti sinkronisasi. Jika data berubah, jalankan Sync Total kembali.</p>
     </div>
     <div className="flex justify-end gap-2">
      <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
