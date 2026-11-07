@@ -34,3 +34,11 @@ export function hasBookingSessionStarted(
   if (Number.isNaN(start.getTime())) return false;
   return now.getTime() >= start.getTime();
 }
+/** An admin may close an ended booking without recording a fictitious check-in.
+ * The reason is a mandatory audit statement, not attendance evidence. */
+export function normalizeBookingCompletionExceptionReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (normalized.length < 12 || normalized.length > 1000) return null;
+  return normalized;
+}
