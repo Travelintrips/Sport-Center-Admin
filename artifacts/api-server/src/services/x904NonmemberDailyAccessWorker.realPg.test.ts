@@ -839,3 +839,41 @@ test("unrestricted role-0 rollout handles two fresh PINs and protects special, m
     delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
   }
 });
+
+
+test("collector outage does not freeze later enrollment; no duplicate on retry", async () => {
+  process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED="true";
+  process.env.GYM_X904_NEW_USER_BASELINE_AT="2026-11-08T23:59:00.000Z";
+  delete process.env.GYM_X904_NEW_USER_ONLY_PIN;
+  try {
+    await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
+      VALUES('TDBD234200545','670',670,'POST GAP VISITOR',0)`);
+    // A 15-minute collection gap follows earlier complete snapshots. A clean
+    // baseline after recovery must permit NEW enrollments, not old PINs.
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:20:00Z',user_count,users
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:21:00Z',user_count+1,
+        users || '[{"pin":"670","name":"POST GAP VISITOR","role":0,"group":1,"enabled":true}]'::jsonb
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    const time=new Date("2026-11-09T00:22:00.000Z");
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,time);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,time);
+    const matches=(await run(`SELECT user_pin,command_type,state,payload FROM sport_center.x904_user_commands
+      WHERE user_pin='670' AND payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({user_pin:"670",command_type:"SUSPEND_USER",state:"queued",
+      payload:{expectedUid:670,expectedRole:0,firstObservedAt:"2026-11-09T00:21:00.000Z",
+        suspendDeadlineAt:"2026-11-09T00:51:00.000Z"}});
+    const old=(await run(`SELECT user_pin FROM sport_center.x904_user_commands
+      WHERE user_pin IN ('662','663','664','665','668') AND
+        payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;
+    expect(old).toHaveLength(0);
+  } finally {
+    delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
+    delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
+  }
+});
