@@ -3230,7 +3230,7 @@ function InlineCheckInSelect({
           <SelectItem value="complete" className="text-xs">
             <span className="flex items-center gap-1.5">
               <CheckCircle2 size={11} className="text-emerald-600" />
-              Tandai Selesai
+              Selesaikan tanpa check-in...
             </span>
           </SelectItem>
         </SelectContent>
@@ -3244,10 +3244,7 @@ function InlineCheckInSelect({
     return (
       <Select
         value=""
-        onValueChange={(val) => {
-          if (val === "checkin") onCheckIn(booking.id);
-          else if (val === "complete") onComplete(booking.id);
-        }}
+        onValueChange={(val) => { if (val === "checkin") onCheckIn(booking.id); }}
         disabled={isLoading}
       >
         <SelectTrigger
@@ -3264,12 +3261,6 @@ function InlineCheckInSelect({
               Check-in Sekarang
             </span>
           </SelectItem>
-          <SelectItem value="complete" className="text-xs">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={11} className="text-blue-600" />
-              Tandai Selesai
-            </span>
-          </SelectItem>
         </SelectContent>
       </Select>
     );
@@ -3280,10 +3271,7 @@ function InlineCheckInSelect({
     return (
       <Select
         value=""
-        onValueChange={(val) => {
-          if (val === "checkin") onCheckIn(booking.id);
-          else if (val === "complete") onComplete(booking.id);
-        }}
+        onValueChange={(val) => { if (val === "checkin") onCheckIn(booking.id); }}
         disabled={isLoading}
       >
         <SelectTrigger
@@ -3300,12 +3288,6 @@ function InlineCheckInSelect({
               Check-in (mulai {booking.startTime?.slice(0, 5)})
             </span>
           </SelectItem>
-          <SelectItem value="complete" className="text-xs">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={11} className="text-blue-600" />
-              Tandai Selesai
-            </span>
-          </SelectItem>
         </SelectContent>
       </Select>
     );
@@ -3319,7 +3301,7 @@ function InlineCheckInSelect({
         value=""
         onValueChange={(val) => {
           if (val === "checkin") onCheckIn(booking.id);
-          else if (val === "complete") onComplete(booking.id);
+          else if (val === "complete" && hasEnded) onComplete(booking.id);
         }}
         disabled={isLoading}
       >
@@ -3337,12 +3319,14 @@ function InlineCheckInSelect({
               Check-in Manual
             </span>
           </SelectItem>
-          <SelectItem value="complete" className="text-xs">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={11} className="text-blue-600" />
-              Tandai Selesai
-            </span>
-          </SelectItem>
+          {hasEnded && (
+            <SelectItem value="complete" className="text-xs">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 size={11} className="text-blue-600" />
+                Selesaikan tanpa check-in...
+              </span>
+            </SelectItem>
+          )}
         </SelectContent>
       </Select>
     );
