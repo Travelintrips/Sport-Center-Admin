@@ -3795,7 +3795,9 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     }
 
     if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {
-      const completion = await completeBooking(id, getUserFromReq(req));
+      const completion = await completeBooking(id, getUserFromReq(req), new Date(), {
+        withoutCheckInReason: req.body?.withoutCheckInReason,
+      });
       if (!completion.ok) {
         res.status(400).json({ error: completion.reason });
         return;
