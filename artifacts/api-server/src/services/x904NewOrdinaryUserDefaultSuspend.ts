@@ -62,41 +62,91 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
 
+  // Read-only SLA monitor. A queued command or completed command without
+  // device read-back is never counted as successful suspension.
+  const overdue = await store.execute(sql`SELECT count(*)::int AS overdue_count
+    FROM sport_center.x904_user_commands c
+    WHERE c.device_serial=${DEVICE}
+      AND c.payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
+      AND (c.payload->>'suspendDeadlineAt')::timestamptz <= ${now}
+      AND NOT (c.command_type='SUSPEND_USER' AND c.state='completed'
+        AND c.result->>'readBackConfirmed'='true'
+        AND c.result->>'afterGroup'='2')`);
+  const count = Number(overdue.rows[0]?.overdue_count ?? 0);
+  if (count > 0) {
+    console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
+      overdueCount: count, action: "investigate_vmsc_and_device",
+    }));
+  }
+
+  // A snapshot arrives about every three minutes. Retain the transition for
+  // 75 minutes so skipped worker ticks never silently lose a newly enrolled PIN.
+  // The 30 minute deadline is measured from FIRST OBSERVATION, not an invented
+  // device creation timestamp. Physical completion still requires ACK/read-back.
   const snapshots = await store.execute(sql`SELECT snapshot_id, observed_at, user_count, users
     FROM sport_center.gym_x904_access_snapshots
-    WHERE device_serial=${DEVICE} AND observed_at >= ${new Date(baseline)}
-    ORDER BY snapshot_id DESC LIMIT 2`);
-  if (snapshots.rows.length !== 2) return;
-  const [latest, previous] = snapshots.rows as any[];
+    WHERE device_serial=${DEVICE}
+      AND observed_at >= ${new Date(baseline)}
+      AND observed_at >= ${new Date(now.getTime() - 75 * 60_000)}
+    ORDER BY snapshot_id DESC LIMIT 80`);
+  if (snapshots.rows.length < 2) return;
+  const history = (snapshots.rows as any[]).reverse();
+  const latest = history[history.length - 1];
   const latestTime = new Date(String(latest.observed_at)).getTime();
-  const previousTime = new Date(String(previous.observed_at)).getTime();
-  if (!Number.isFinite(latestTime) || !Number.isFinite(previousTime) ||
-      previousTime >= latestTime || latestTime - previousTime > 10 * 60_000 ||
-      latestTime > now.getTime() ||
+  if (!Number.isFinite(latestTime) || latestTime > now.getTime() ||
       now.getTime() - latestTime > SNAPSHOT_MAX_AGE_MS) return;
-  const currentUsers: SnapshotUser[] = Array.isArray(latest.users) ? latest.users : [];
-  const priorUsers: SnapshotUser[] = Array.isArray(previous.users) ? previous.users : [];
-  if (currentUsers.length !== Number(latest.user_count) ||
-      priorUsers.length !== Number(previous.user_count) ||
-      currentUsers.length < priorUsers.length) return;
-  const previousPins = new Set(priorUsers.map(u => String(u.pin ?? "")));
-  const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, previousPins));
+
+  // An incomplete or discontinuous snapshot history cannot prove a new PIN.
+  for (let i = 0; i < history.length; i++) {
+    const row = history[i];
+    const time = new Date(String(row.observed_at)).getTime();
+    if (!Number.isFinite(time) || !Array.isArray(row.users) ||
+        row.users.length !== Number(row.user_count)) return;
+    if (i > 0) {
+      const before = new Date(String(history[i - 1].observed_at)).getTime();
+      if (time <= before || time - before > 10 * 60_000) return;
+    }
+  }
+  const currentUsers: SnapshotUser[] = latest.users;
+  const firstUsers: SnapshotUser[] = history[0].users;
+  if (currentUsers.length < firstUsers.length) return;
+  const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
+  const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
   if (!newCandidates.length) return;
 
   for (const candidate of newCandidates) {
     const pin = String(candidate.pin);
     const name = String(candidate.name).trim().replace(/\s+/g, " ");
+    const firstIndex = history.findIndex(row =>
+      (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
+    if (firstIndex <= 0) continue;
+    // The preceding snapshot must prove absence; all subsequent snapshots
+    // must continue to refer to exactly the same ordinary identity.
+    const observedFirst = history[firstIndex];
+    const firstSeen = new Date(String(observedFirst.observed_at));
+    const deadline = new Date(firstSeen.getTime() + 30 * 60_000);
+    if (!Number.isFinite(firstSeen.getTime())) continue;
+    if (history.slice(firstIndex).some(row =>
+      (row.users as SnapshotUser[]).filter(u =>
+        String(u.pin ?? "") === pin &&
+        String(u.name ?? "").trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") ===
+          name.toLocaleUpperCase("id-ID") &&
+        Number(u.role) === 0).length !== 1)) continue;
     const onlyPin = process.env.GYM_X904_NEW_USER_ONLY_PIN;
     if (onlyPin && pin !== onlyPin) continue;
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904215)`);
-      // A second snapshot refresh, claim or registration may have happened.
-      const check = await tx.execute(sql`SELECT snapshot_id,observed_at,user_count,users
-        FROM sport_center.gym_x904_access_snapshots
-        WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 2`);
-      if (check.rows.length !== 2 ||
-          Number(check.rows[0].snapshot_id) !== Number(latest.snapshot_id) ||
-          Number(check.rows[1].snapshot_id) !== Number(previous.snapshot_id)) return;
+      // Fail closed if a new snapshot appeared or if the PIN had existed in
+      // any historical snapshot, including before our activation baseline.
+      const check = await tx.execute(sql`SELECT snapshot_id FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
+      if (check.rows.length !== 1 ||
+          Number(check.rows[0].snapshot_id) !== Number(latest.snapshot_id)) return;
+      const everSeen = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial=${DEVICE} AND snapshot_id < ${Number(observedFirst.snapshot_id)}
+          AND users @> jsonb_build_array(jsonb_build_object('pin', ${pin}::text))
+        LIMIT 1`);
+      if (everSeen.rows.length) return;
       const inventory = await tx.execute(sql`SELECT device_uid,display_name,device_role
         FROM sport_center.gym_x904_lan_users
         WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
@@ -126,12 +176,14 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       if (registry.rows.length) return;
 
       const key = x904AutomaticCommandKey(
-        `new-ordinary-user:${latest.snapshot_id}:${pin}:${uid}`, "SUSPEND_USER", pin);
+        `new-ordinary-user:${observedFirst.snapshot_id}:${pin}:${uid}`, "SUSPEND_USER", pin);
       const payload = JSON.stringify({
         source: "AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND",
         expectedUid: uid, expectedName: name, expectedRole: 0,
-        previousSnapshotId: Number(previous.snapshot_id),
-        observedSnapshotId: Number(latest.snapshot_id),
+        previousSnapshotId: Number(history[firstIndex - 1].snapshot_id),
+        observedSnapshotId: Number(observedFirst.snapshot_id),
+        firstObservedAt: firstSeen.toISOString(),
+        suspendDeadlineAt: deadline.toISOString(),
         attempt: 1,
       });
       await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
@@ -140,6 +192,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         ON CONFLICT (idempotency_key) DO NOTHING`);
     });
   }
+
 }
 
 export function startX904NewOrdinaryUserDefaultSuspend(): void {
