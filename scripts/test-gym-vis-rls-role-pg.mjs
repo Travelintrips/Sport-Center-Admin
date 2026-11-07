@@ -19,8 +19,10 @@ test('real PostgreSQL RLS: idempotency, drift, valid and invalid DML', async () 
   await db.query("CREATE ROLE sport_center_app NOLOGIN");
   await db.query("CREATE SCHEMA sport_center");
   await db.query("GRANT USAGE ON SCHEMA sport_center TO sport_center_app");
-  await db.query(`CREATE TABLE sport_center.sport_bookings (id integer PRIMARY KEY,source text,status text);
-    CREATE TABLE sport_center.sport_payments (id integer PRIMARY KEY,booking_id integer,status text);
+  await db.query(`CREATE TYPE sport_center.booking_status AS ENUM ('pending','confirmed');
+    CREATE TYPE sport_center.payment_status AS ENUM ('pending','confirmed');
+    CREATE TABLE sport_center.sport_bookings (id integer PRIMARY KEY,source text,status sport_center.booking_status);
+    CREATE TABLE sport_center.sport_payments (id integer PRIMARY KEY,booking_id integer,status sport_center.payment_status);
     CREATE TABLE sport_center.gym_vis_card_reservations (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,booking_id integer,payment_id integer,
       device_serial text DEFAULT 'TDBD234200545',card_code text,user_pin text,
