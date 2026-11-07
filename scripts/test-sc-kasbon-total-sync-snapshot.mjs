@@ -21,7 +21,7 @@ assert.deepEqual(getKasbonReceiptStatus([two[0]],receipt,false).syncedRecordIds,
 assert.equal(getKasbonReceiptStatus(two,receipt,false).allSynced,false,"Sheets readback mismatch keeps Sync enabled");
 const ui=readFileSync("artifacts/sport-center/src/pages/admin/SCEmployeeKasbon.tsx","utf8");
 assert.match(ui,/Sync Total/);
-assert.match(ui,/disabled=\{isSalarySynced/);
+assert.match(ui,/disabled=\{isSalaryChecking\|\|isSalaryCheckError\|\|checkSalary\.isPending\|\|isSalarySynced/);
 assert.match(ui,/syncedRecordIds\.has\(r\.id\)/);
 assert.doesNotMatch(ui,/setSyncRecordId\(/);
 console.log("PASS: one Sync Total, durable per-record receipts, append/edit/delete/readback, no Sheets writes");
