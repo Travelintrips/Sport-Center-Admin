@@ -1144,6 +1144,12 @@ export default function AdminCheckoutForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Combined membership uses the dedicated proof/allocation transaction,
+    // never the regular single-booking submission path.
+    if (bookingKind === "membership_combined") {
+      setCombinedOpen(true);
+      return;
+    }
     if (bookingKind === "membership") {
       setLocation("/admin/memberships");
       return;
