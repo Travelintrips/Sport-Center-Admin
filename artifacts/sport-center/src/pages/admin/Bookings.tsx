@@ -1633,7 +1633,13 @@ function BookingDetailDrawer({
     endTimeDirty,
   ]);
 
-  const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
+  const hasPendingProofForVerification =
+    booking.status === "pending_payment" &&
+    allPayments.some((payment) => payment?.status === "pending" && Boolean(payment?.proofUrl));
+  const effectiveBookingStatus: BookingStatus = hasPendingProofForVerification
+    ? "waiting_confirmation"
+    : (booking.status as BookingStatus);
+  const cfg = STATUS_CONFIG[effectiveBookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
   const bookingTax = getBookingInvoiceTax(booking);
   const isMultiSessionGroup = Boolean(booking.groupRef && groupBookings.length > 1);
@@ -1807,7 +1813,8 @@ function BookingDetailDrawer({
             <div>
               <div className={`text-sm font-bold ${cfg.color}`}>{cfg.label}</div>
               <div className="text-xs text-slate-500">
-                {booking.status === "pending_payment" && "Menunggu customer upload bukti pembayaran"}
+                {booking.status === "pending_payment" && hasPendingProofForVerification && "Bukti pembayaran sudah diterima — menunggu verifikasi Admin/Finance"}
+                {booking.status === "pending_payment" && !hasPendingProofForVerification && "Menunggu customer upload bukti pembayaran"}
                 {membershipPaymentBooking && (booking.status === "waiting_confirmation" || booking.status === "paid") &&
                   "Bukti pembayaran membership diterima — perlu verifikasi admin"}
                 {!membershipPaymentBooking && booking.status === "paid" && "Bukti transfer diterima — perlu verifikasi admin"}
@@ -2232,12 +2239,17 @@ function BookingDetailDrawer({
                       : pmt.status === "rejected" || pmt.status === "cancelled"
                       ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                       : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
+                  const isSystemRepairPayment =
+                    (pmt.status === "rejected" || pmt.status === "cancelled") &&
+                    String(pmt.notes ?? "").includes("UAT reversal");
                   const statusLabel =
                     pmt.status === "confirmed"
                       ? "Dikonfirmasi"
-                      : pmt.status === "rejected" || pmt.status === "cancelled"
-                      ? "Ditolak"
-                      : "Menunggu";
+                      : isSystemRepairPayment
+                        ? "Dibatalkan Sistem (Repair)"
+                        : pmt.status === "rejected" || pmt.status === "cancelled"
+                          ? "Ditolak"
+                          : "Menunggu Verifikasi";
                   const recurringSeriesId =
                     pmt.recurringSeriesId ??
                     pmt.recurring_series_id ??
@@ -2273,9 +2285,11 @@ function BookingDetailDrawer({
                     ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status);
                   const confirmLabel = isRepairingBooking
                     ? "Sinkronkan Booking"
-                    : pmt.paymentType === "dp"
-                      ? "Konfirmasi DP"
-                      : "Konfirmasi → Selesai";
+                    : booking.source === "gym_public_guest" && pmt.status === "pending"
+                      ? "Konfirmasi Pembayaran & Alokasikan Kartu"
+                      : pmt.paymentType === "dp"
+                        ? "Konfirmasi DP"
+                        : "Konfirmasi → Selesai";
                    const isSyntheticPayment =
                      Boolean(pmt.isMembershipPayment || pmt.isCompanyInvoicePayment);
                    const paymentDate = pmt.paidAt ?? pmt.confirmedAt ?? pmt.submittedAt;
@@ -2482,6 +2496,11 @@ function BookingDetailDrawer({
                             <CheckCircle2 size={13} />
                             {confirmLabel}
                           </button>
+                          {booking.source === "gym_public_guest" && pmt.status === "pending" && (
+                            <div className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-800">
+                              Setelah dikonfirmasi, sistem otomatis mengalokasikan satu kartu VIS001–VIS006 yang tersedia. Serahkan hanya kartu yang muncul di panel Akses Gym Mandiri.
+                            </div>
+                          )}
                           {!pmt.isCompanyInvoicePayment && (
                             <button
                               onClick={() =>
