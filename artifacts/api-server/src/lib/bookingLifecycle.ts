@@ -10,6 +10,7 @@ export {
 import {
   hasBookingSessionEnded,
   hasBookingSessionStarted,
+  normalizeBookingCompletionExceptionReason,
 } from "./bookingLifecycleRules";
 
 export type BookingLifecycleActor = {
@@ -46,7 +47,9 @@ export async function completeBooking(
   bookingId: number,
   actor: BookingLifecycleActor,
   now: Date = new Date(),
+  options: { withoutCheckInReason?: unknown } = {},
 ): Promise<LifecycleResult> {
+  const exceptionReason = normalizeBookingCompletionExceptionReason(options.withoutCheckInReason);
   const result = await db.transaction(async (tx): Promise<LifecycleResult> => {
     const [booking] = await tx
       .select()
@@ -64,8 +67,8 @@ export async function completeBooking(
     if (booking.status !== "confirmed") {
       return { ok: false, reason: "Booking harus berstatus confirmed sebelum diselesaikan" };
     }
-    if (!booking.checkedInAt) {
-      return { ok: false, reason: "Booking belum check-in" };
+    if (!booking.checkedInAt && !exceptionReason) {
+      return { ok: false, reason: "Booking belum check-in. Gunakan Selesaikan tanpa check-in dengan alasan minimal 12 karakter." };
     }
     if (booking.bookingType === "event") {
       const [proof] = await tx.select({ id: usageProofsTable.id }).from(usageProofsTable)
@@ -92,7 +95,9 @@ export async function completeBooking(
       toStatus: "completed",
       changedBy: actor.userId ?? null,
       changedByName: actor.userName ?? "system",
-      note: "Booking completed setelah check-in dan waktu sesi berakhir",
+      note: booking.checkedInAt
+        ? "Booking completed setelah check-in dan waktu sesi berakhir"
+        : `Selesai administratif tanpa check-in (bukan bukti kehadiran): ${exceptionReason}`,
     });
     return { ok: true, bookingId, alreadyCompleted: false };
   });
@@ -104,7 +109,10 @@ export async function completeBooking(
       entity: "booking",
       entityId: bookingId,
       before: { status: "confirmed" },
-      after: { status: "completed", completedAt: now.toISOString(), reason: "checked_in_and_session_ended" },
+      after: { status: "completed", completedAt: now.toISOString(),
+        reason: exceptionReason && !result.alreadyCompleted ? "admin_close_without_checkin" : "checked_in_and_session_ended",
+        withoutCheckInReason: exceptionReason ?? undefined,
+        checkedInAtUntouched: true },
     });
   }
   return result;
