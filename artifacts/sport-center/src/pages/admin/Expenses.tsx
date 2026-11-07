@@ -63,6 +63,19 @@ function formatIDR(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
+// UI displays digit grouping, but database payload stays an unformatted number.
+export function normalizeExpenseRupiahInput(value: string): string {
+  const compact = value.trim().replace(/\s/g, "").replace(/^Rp/i, "");
+  // Bank screenshot formats: 100.000,00 or 100,000.00; strip cents.
+  const noCents = /[.,]\d{2}$/.test(compact)
+    ? compact.replace(/[.,]\d{2}$/, "") : compact;
+  return noCents.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 15);
+}
+export function formatExpenseRupiahInput(value: string): string {
+  const digits = normalizeExpenseRupiahInput(value);
+  return digits ? new Intl.NumberFormat("id-ID").format(Number(digits)) : "";
+}
+
 const EMPTY_FORM = {
   expenseDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
   coaAccountId: "",
@@ -121,7 +134,7 @@ export default function AdminExpenses() {
 
   const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
-    amount: number | null; date: string | null; recipient: string | null;
+    amount: number | null; date: string | null; bankReference: string | null; recipient: string | null;
     paymentMethod: string; engine: string; verified: boolean;
   } | null>(null);
   const [scanningProof, setScanningProof] = useState(false);
@@ -171,7 +184,7 @@ export default function AdminExpenses() {
           });
           if (!response.ok) throw new Error("OCR unavailable");
           const preview = await response.json();
-          if (preview.amount != null || preview.date || preview.recipient) setProofPreview(preview);
+          if (preview.amount != null || preview.date || preview.recipient || preview.bankReference) setProofPreview(preview);
           else toast({ title: "Bukti tersimpan", description: "Data bukti belum terbaca, silakan isi form manual." });
         } catch {
           toast({ title: "Bukti tersimpan", description: "Pratinjau otomatis tidak tersedia; isikan detail secara manual." });
@@ -192,12 +205,13 @@ export default function AdminExpenses() {
       ...prev,
       expenseDate: proofPreview.date && /^\d{4}-\d{2}-\d{2}$/.test(proofPreview.date)
         ? proofPreview.date : prev.expenseDate,
-      amount: proofPreview.amount != null && Number.isFinite(proofPreview.amount) && proofPreview.amount > 0
+      amount: proofPreview.amount != null && Number.isSafeInteger(proofPreview.amount) && proofPreview.amount > 0
         ? String(proofPreview.amount) : prev.amount,
-      paymentMethod: proofPreview.paymentMethod === "QRIS" ? "QRIS"
-        : proofPreview.paymentMethod === "Transfer Bank" ? "Transfer Bank" : prev.paymentMethod,
+      bankReference: proofPreview.bankReference ?? prev.bankReference,
+      paymentMethod: PAYMENT_METHODS.includes(proofPreview.paymentMethod)
+        ? proofPreview.paymentMethod : prev.paymentMethod,
     }));
-    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, dan metode sebelum membuat pengeluaran." });
+    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, nomor referensi, dan metode sebelum menyimpan." });
     setProofPreview(null);
   }
 
@@ -415,7 +429,7 @@ export default function AdminExpenses() {
       vendorId: form.vendorId ? Number(form.vendorId) : null,
       vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
-      amount: Number(form.amount),
+      amount: Number(normalizeExpenseRupiahInput(form.amount)),
       ppnAmount: Number(form.ppnAmount || 0),
       paymentMethod: form.paymentMethod || null,
       paymentAccount: form.paymentAccount || null,
@@ -430,7 +444,7 @@ export default function AdminExpenses() {
     }
   }
 
-  const totalNum = Number(form.amount || 0) + Number(form.ppnAmount || 0);
+  const totalNum = Number(normalizeExpenseRupiahInput(form.amount) || 0) + Number(form.ppnAmount || 0);
 
   return (
     <div className="p-6 space-y-6">
@@ -667,6 +681,7 @@ export default function AdminExpenses() {
                 <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
                   <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>
                   <p>Nominal: {proofPreview.amount == null ? "Tidak terbaca" : formatIDR(proofPreview.amount)} • Tanggal: {proofPreview.date ?? "Tidak terbaca"}</p>
+                  <p>Referensi blu: {proofPreview.bankReference ?? "Tidak terbaca"}</p>
                   <p>Penerima terdeteksi: {proofPreview.recipient ?? "Tidak terbaca"} • Metode: {proofPreview.paymentMethod}</p>
                   <div className="flex items-center gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={applyProofPreview}>Terapkan saran ke form</Button>
@@ -736,8 +751,10 @@ export default function AdminExpenses() {
               </div>
               <div className="space-y-1">
                 <Label>Nominal (Rp) <span className="text-red-500">*</span></Label>
-                <Input type="number" min="0.01" step="0.01" value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="Contoh: 200000" required />
+                <Input type="text" inputMode="numeric" value={formatExpenseRupiahInput(form.amount)}
+                  onChange={(e) => setForm({ ...form, amount: normalizeExpenseRupiahInput(e.target.value) })}
+                  placeholder="Contoh: 100.000" required />
+                <p className="text-xs text-gray-500">Rupiah tanpa desimal — contoh 1.000, 2.500, 10.000, 100.000.</p>
               </div>
             </div>
             <div className="space-y-1">
