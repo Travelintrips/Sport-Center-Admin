@@ -6387,7 +6387,7 @@ export default function AdminBookings() {
                 Batal
               </Button>
               <Button disabled={!completionWithoutCheckin ||
-                completionWithoutCheckinReason.trim().replace(/\\s+/g, " ").length < 12 ||
+                completionWithoutCheckinReason.trim().replace(/\s+/g, " ").length < 12 ||
                 updateBookingMutation.isPending}
                 onClick={() => {
                   if (!completionWithoutCheckin) return;
