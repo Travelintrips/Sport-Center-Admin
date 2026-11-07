@@ -44,22 +44,29 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).toContain('guestPin.trim() && guestPinMatch === false');
     expect(form).toContain('Pemeriksaan PIN X904 belum selesai');
     expect(form).toContain('Nama dan PIN X904 tidak cocok. Periksa kembali sebelum membuat booking.');
-    expect(form).toContain('PIN X904 yang Anda masukkan');
-    expect(form).toContain('{guestPin}');
-    expect(form).toContain('publicGymGuest && guestPin.trim() && guestPinMatch === true');
+    expect(form).toContain('type="password" inputMode="numeric"');
+    expect(form).toContain('font-bold text-green-700 border-green-300');
+    expect(form).not.toContain('PIN X904 yang Anda masukkan</span>');
+    expect(form).toContain('guestPinMatch === true');
   });
 
-  test("PIN lookup is on-demand, handles rate limits and does not unlock the checkout on API errors", () => {
-    expect(form).toContain('async function checkGuestPinIdentity()');
+  test("verified nonmember names get compact green styling; ordinary names stay unchanged", () => {
+    expect(form).toContain('className={publicGymGuest && guestIdentityRoute === "registered"');
+    expect(form).toContain('font-bold text-green-700 border-green-300');
+    expect(form).toContain('Terdaftar di X904. Verifikasi PIN pribadi sebelum booking.');
+    expect(form).toContain('<details className="rounded-lg border border-slate-200');
+    expect(form).toContain('type="password" inputMode="numeric"');
+    expect(form).toContain('Cocokkan PIN');
+    expect(form).not.toContain('Pencocokan Identitas Gym X904');
+    expect(form).not.toContain('<span className="font-semibold">{guestPin}</span>');
+  });
+  test("name check is debounced, PIN checks remain explicit and checkout stays fail-closed", () => {
+    expect(form).toContain('body:JSON.stringify({customerName:name})');
+    expect(form).toContain('},1600)');
     expect(form).toContain('onClick={() => void checkGuestPinIdentity()}');
-    expect(form).toContain('response.status === 429');
-    expect(form).toContain('response.status === 503');
+    expect(form).toContain('response.status===429');
     expect(form).toContain('guestLookupAbort.current?.abort()');
     expect(form).toContain('guestPin.trim() && (guestIdentityRoute !== "registered" || guestPinMatch !== true)');
-    const start = form.indexOf('// Identity preview runs only on demand.');
-    const end = form.indexOf('async function checkGuestPinIdentity()', start);
-    expect(start).toBeGreaterThan(-1);
-    expect(form.slice(start,end)).not.toContain('fetch("/api/wa/gym-name-route"');
   });
 
 });
