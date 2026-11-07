@@ -127,9 +127,6 @@ export default function WaBookingForm() {
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
   const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "visitor_card" | "staff_review" | "unavailable">("idle");
-  const [guestPin, setGuestPin] = useState("");
-  const [guestPinMatch, setGuestPinMatch] = useState<boolean | null>(null);
-  const [guestPinChecking, setGuestPinChecking] = useState(false);
   const [guestLookupError, setGuestLookupError] = useState("");
   const guestLookupAbort = useRef<AbortController | null>(null);
 
@@ -182,7 +179,6 @@ export default function WaBookingForm() {
     if (!publicGymGuest) return;
     guestLookupAbort.current?.abort();
     setGuestIdentityRoute("idle");
-    setGuestPinMatch(null);
     setGuestLookupError("");
     const name=form.customerName.trim();
     if(name.length<3)return;
@@ -215,55 +211,6 @@ export default function WaBookingForm() {
     },1600);
     return ()=>{window.clearTimeout(timer);controller.abort();};
   },[publicGymGuest,form.customerName]);
-
-  useEffect(()=>{setGuestPinMatch(null);},[guestPin]);
-
-  async function checkGuestPinIdentity() {
-    if (!publicGymGuest || guestPinChecking || guestIdentityRoute !== "registered") return;
-    const name = form.customerName.trim();
-    const pin = guestPin.trim();
-    if (name.length < 2) {
-      setGuestLookupError("Masukkan nama lengkap terlebih dahulu.");
-      return;
-    }
-    if (pin && !/^[0-9]{1,8}$/.test(pin)) {
-      setGuestLookupError("PIN X904 harus berisi 1 sampai 8 angka.");
-      return;
-    }
-    guestLookupAbort.current?.abort();
-    const controller = new AbortController();
-    guestLookupAbort.current = controller;
-    setGuestPinChecking(true);
-    setGuestPinMatch(null);
-    setGuestLookupError("");
-    try {
-      const response = await fetch("/api/wa/gym-name-route", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerName: name, ...(pin ? { requestedX904Pin: pin } : {}) }),
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) return;
-      if (!response.ok) {
-        setGuestLookupError(response.status === 429
-          ? "Batas pemeriksaan identitas tercapai (8 kali dalam 15 menit). Coba lagi setelah 15 menit atau minta bantuan petugas."
-          : response.status === 503
-            ? "Layanan pencocokan X904 sedang bermasalah. Coba kembali atau minta bantuan petugas."
-            : "Pemeriksaan identitas gagal. Periksa nama dan PIN sebelum mencoba lagi.");
-        return;
-      }
-      const outcome = await response.json();
-      if (controller.signal.aborted) return;
-      setGuestIdentityRoute(["registered","visitor_card","staff_review"].includes(outcome.route)
-        ? outcome.route : "unavailable");
-      setGuestPinMatch(typeof outcome.pinMatch === "boolean" ? outcome.pinMatch : null);
-    } catch {
-      if (!controller.signal.aborted) {
-        setGuestLookupError("Tidak dapat menghubungi pemeriksaan X904. Periksa koneksi atau minta bantuan petugas.");
-      }
-    } finally {
-      setGuestPinChecking(false);
-    }
-  }
 
   // Manual payment options are read from the public production settings.
   // This flow does not use the Paylabs/sandbox configuration.
@@ -529,30 +476,8 @@ export default function WaBookingForm() {
       setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
       return;
     }
-    if (publicGymGuest && guestIdentityRoute === "registered" && !guestPin.trim()) {
-      setError("Masukkan PIN X904 milik Anda untuk mencocokkan dengan nama terdaftar.");
-      return;
-    }
-    if (publicGymGuest && guestPin.trim() && !/^[0-9]{1,8}$/.test(guestPin.trim())) {
-      setError("PIN X904 harus berisi 1 sampai 8 angka.");
-      return;
-    }
-    // Reject mismatched or unchecked registered PINs before creating a booking
-    // or accepting a proof. The API repeats this check authoritatively.
-    if (publicGymGuest && guestIdentityRoute === "registered" && guestPinMatch !== true) {
-      setError(guestPinMatch === false
-        ? "Nama dan PIN X904 tidak cocok. Periksa kembali sebelum membuat booking."
-        : "Pemeriksaan PIN X904 belum selesai. Pastikan nama dan PIN sudah cocok.");
-      return;
-    }
-    if (publicGymGuest && guestPin.trim() && guestPinMatch === false) {
-      setError("PIN X904 yang Anda masukkan tidak cocok dengan nama terdaftar.");
-      return;
-    }
-    if (publicGymGuest && guestPin.trim() && (guestIdentityRoute !== "registered" || guestPinMatch !== true)) {
-      setError("Periksa nama dan PIN X904 sampai cocok sebelum membuat booking.");
-      return;
-    }
+    // The public form never requires or knows the X904 PIN.
+    // The server resolves identity and holds any grant for physical staff review.
     if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
       return;
@@ -769,8 +694,8 @@ export default function WaBookingForm() {
         {publicGymGuest && (
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
             <strong>Booking mandiri tanpa login.</strong> Isi nama asli dan nomor WhatsApp, pilih QRIS atau transfer, lalu unggah bukti.
-            Pembayaran harus dikonfirmasi petugas sebelum akses diberikan. Nama nonmember yang terdaftar di X904 ditandai hijau. Pemilik PIN memasukkan PIN pribadi dalam bagian kecil di bawah nama.
-            Petugas tetap memverifikasi identitas dan pembayaran sebelum akses pintu diberikan.
+            Pembayaran harus dikonfirmasi petugas sebelum akses diberikan. Nama nonmember yang telah terverifikasi di X904 ditandai hijau tanpa menampilkan PIN mesin.
+            Petugas memeriksa identitas dan pembayaran resmi sebelum akses pintu diaktifkan.
           </div>
         )}
         <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
@@ -797,13 +722,12 @@ export default function WaBookingForm() {
                     className={publicGymGuest && guestIdentityRoute === "registered" ? "font-bold text-green-700 border-green-300 focus-visible:ring-green-400" : undefined}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, customerName: e.target.value }));
-                      setGuestPin("");
                     }}
                     required
                   />
                   {publicGymGuest && guestIdentityRoute === "checking" && <p className="text-xs text-slate-500" role="status">Memeriksa nama...</p>}
                   {publicGymGuest && guestLookupError && <p className="text-xs text-amber-700" role="status">{guestLookupError}</p>}
-                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Terdaftar di X904. Verifikasi PIN pribadi sebelum booking.</p>}
+                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Terdaftar sebagai nonmember X904. Akses menunggu verifikasi petugas.</p>}
                 </div>
               )}
               <div className="space-y-1">
@@ -821,25 +745,6 @@ export default function WaBookingForm() {
                 </div>
                 <p className="text-xs text-gray-500">Format: 628xxx (tanpa + atau 0 di depan)</p>
               </div>
-              {publicGymGuest && guestIdentityRoute === "registered" && (
-                <details className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                  <summary className="cursor-pointer font-medium text-slate-700">Verifikasi PIN X904 untuk nama terdaftar</summary>
-                  <div className="mt-3 space-y-2">
-                    <Label htmlFor="guest-x904-pin" className="text-xs font-semibold">PIN X904 milik Anda</Label>
-                    <Input id="guest-x904-pin" type="password" inputMode="numeric" autoComplete="off" maxLength={8}
-                      placeholder="Masukkan PIN pribadi" value={guestPin}
-                      onChange={(event) => setGuestPin(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))} />
-                    <Button type="button" variant="outline" size="sm" onClick={() => void checkGuestPinIdentity()}
-                      disabled={guestPinChecking || !guestPin.trim()}>
-                      {guestPinChecking ? "Mencocokkan..." : "Cocokkan PIN"}
-                    </Button>
-                    {guestPinMatch === true && <p className="text-xs font-semibold text-green-700" role="status">Nama dan PIN cocok. Akses tetap menunggu persetujuan petugas.</p>}
-                    {guestPinMatch === false && <p className="text-xs text-red-700" role="alert">PIN tidak cocok dengan nama.</p>}
-                    {guestLookupError && <p className="text-xs text-amber-700" role="alert">{guestLookupError}</p>}
-                    <p className="text-xs text-slate-500">PIN tidak ditampilkan otomatis. Pencocokan tidak membuka pintu; pembayaran dan identitas wajib diverifikasi petugas.</p>
-                  </div>
-                </details>
-              )}
               {gymWalkIn && !publicGymGuest && (
                 <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50/50 p-3">
                   <div>
@@ -1233,10 +1138,6 @@ export default function WaBookingForm() {
                 availabilityLoading ||
                 !availabilitySlots ||
                 !timeSlots.includes(form.startTime)
-              )) ||
-              (publicGymGuest && (
-                (guestIdentityRoute === "registered" && (!guestPin.trim() || guestPinMatch !== true)) ||
-                (guestPin.trim() && (guestIdentityRoute !== "registered" || guestPinMatch !== true))
               )) ||
               !form.customerName ||
               !form.customerPhone ||
