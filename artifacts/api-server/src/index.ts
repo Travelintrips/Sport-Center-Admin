@@ -8,6 +8,7 @@ import { startKasbonPoolAutoWorker } from "./lib/scKasbonPoolAutoWorker";
 import { startBookingSheetsPaymentEventWorker } from "./lib/bookingSheetsPaymentEventWorker";
 import { startX904AutomaticCommandWorker } from "./services/x904AutomaticCommandWorker";
 import { startX904NonmemberAccessWorker } from "./services/x904NonmemberDailyAccessWorker";
+import { startX904NewOrdinaryUserDefaultSuspend } from "./services/x904NewOrdinaryUserDefaultSuspend";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
@@ -1364,6 +1365,7 @@ export async function initializeRuntime(): Promise<void> {
     startX904AutomaticCommandWorker();
     // Separate paid nonmember 12-hour access worker; inert unless explicitly enabled.
     startX904NonmemberAccessWorker();
+    startX904NewOrdinaryUserDefaultSuspend();
   }
   startBookingSheetsPaymentEventWorker();
 }
