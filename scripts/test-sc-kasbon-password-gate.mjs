@@ -21,5 +21,15 @@ assert.match(ui,/x-sc-kasbon-authorization/);
 assert.match(ui,/setActionPassword\(""/);
 assert.match(ui,/actionPassword.length===0/,"filled password should enable submit regardless of length");
 assert.doesNotMatch(ui,/actionPassword.length<12/,"UI should not block already configured shorter password");
+const unlockDialog=ui.slice(ui.indexOf('<Dialog open={unlockRecord!==null}'),ui.indexOf('<Dialog open={toDelete!==null}'));
+assert.ok(!unlockDialog.includes("<form"),"unlock must not resemble a login form");
+assert.ok(unlockDialog.includes('name="kasbon-action-authorization-only"'));
+assert.ok(unlockDialog.includes('type="password"'),"input must remain masked");
+assert.ok(unlockDialog.includes('autoComplete="off"'));
+assert.ok(unlockDialog.includes('data-lpignore="true"'));
+assert.ok(unlockDialog.includes('type="button" disabled={unlockAction.isPending||actionPassword.length===0} onClick={()=>unlockAction.mutate()}'));
+assert.ok(unlockDialog.includes('onKeyDown={e=>{if(e.key==="Enter")'),"Enter still submits unlock");
+assert.ok(!unlockDialog.includes('type="submit"'),"no password form submit");
+
 assert.doesNotMatch(route,/admin\|owner\|super_admin.*unlock/i);
 console.log("PASS: password gate required on PATCH and DELETE, role cannot bypass, UI locked and short-lived scoped authorization");
