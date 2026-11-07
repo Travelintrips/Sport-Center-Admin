@@ -672,4 +672,85 @@ router.post("/admin/wa-bookings/:orderNumber/return-vis", adminMiddleware, async
   }
 });
 
+router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, async (req, res) => {
+  try {
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
+    if (!booking || booking.source !== 'gym_public_guest') {
+      res.status(404).json({ error: 'Booking Gym mandiri tidak ditemukan.' }); return;
+    }
+    const detail = await db.execute(sql`SELECT r.card_code,r.state AS card_state,r.user_pin,r.device_uid,
+        r.reserved_at,r.collected_at,r.returned_at,a.access_id,a.verification_state,a.access_state,a.activated_at,a.expires_at
+      FROM sport_center.gym_vis_card_reservations r
+      LEFT JOIN sport_center.x904_nonmember_daily_access a
+        ON a.booking_id=r.booking_id AND a.payment_id=r.payment_id AND a.identity_type='card'
+      WHERE r.booking_id=${booking.id}
+      ORDER BY a.access_id DESC NULLS LAST LIMIT 1`);
+    const row = detail.rows[0] as any;
+    let latestCommand: any = null;
+    if (row?.access_id) {
+      const commands = await db.execute(sql`SELECT command_id,command_type,state,attempts,created_at,completed_at,result
+        FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND payload->>'accessId'=${String(row.access_id)}
+        ORDER BY created_at DESC,command_id DESC LIMIT 1`);
+      latestCommand = commands.rows[0] ?? null;
+    }
+    const latest = await db.execute(sql`SELECT observed_at,users
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    const snap = latest.rows[0] as any;
+    const users = Array.isArray(snap?.users) ? snap.users : [];
+    const currentUser = row ? users.find((u:any) => String(u?.pin) === String(row.user_pin)) : null;
+    const commandResult = latestCommand?.result ?? null;
+    const terminal = ['completed','cancelled','refunded','expired','rejected'].includes(String(booking.status));
+    const returnReady = Boolean(row && row.card_state === 'collected' && terminal &&
+      !['pending','active','review_required'].includes(String(row.access_state)) &&
+      currentUser && Number(currentUser.group) === 2 && Number(currentUser.role) === 0 &&
+      latestCommand?.command_type === 'SUSPEND_USER' && latestCommand?.state === 'completed' &&
+      commandResult?.readBackConfirmed === true && Number(commandResult?.afterGroup) === 2 &&
+      Number(commandResult?.deviceUid) === Number(row.device_uid));
+    const cards = [['VIS001','78',338],['VIS002','90',339],['VIS003','13',13],['VIS004','17',17],['VIS005','11',11],['VIS006','15',15]] as const;
+    const busy = await db.execute(sql`SELECT r.card_code,NULL::text AS pin,'reservation'::text AS kind
+      FROM sport_center.gym_vis_card_reservations r
+      WHERE r.device_serial='TDBD234200545' AND r.state IN ('reserved','collected')
+      UNION ALL
+      SELECT NULL::text,a.user_pin,'access'::text AS kind
+      FROM sport_center.x904_nonmember_daily_access a
+      WHERE a.device_serial='TDBD234200545' AND a.access_state IN ('pending','active')`);
+    const fresh = Boolean(snap?.observed_at && Date.now()-new Date(String(snap.observed_at)).getTime() <= 300000);
+    const pool = cards.map(([cardCode,userPin,deviceUid]) => {
+      const u = users.find((item:any) => String(item?.pin) === userPin);
+      const reserved = busy.rows.some((b:any) => b.kind === 'reservation' && b.card_code === cardCode);
+      const accessBusy = busy.rows.some((b:any) => b.kind === 'access' && b.pin === userPin);
+      const group = u?.group == null ? null : Number(u.group);
+      const available = Boolean(fresh && group === 2 && Number(u?.role) === 0 && u?.enabled === true && !reserved && !accessBusy);
+      return { cardCode,userPin,deviceUid,group,snapshotAt:snap?.observed_at ?? null,available,
+        status:reserved?'reserved':accessBusy?'access_busy':!fresh?'snapshot_stale':group!==2?'not_group2':available?'available':'review' };
+    });
+    res.json({
+      bookingStatus: booking.status,
+      pool,
+      reservation: row ? {
+        cardCode:String(row.card_code),state:String(row.card_state),userPin:String(row.user_pin),deviceUid:Number(row.device_uid),
+        reservedAt:row.reserved_at ?? null,collectedAt:row.collected_at ?? null,returnedAt:row.returned_at ?? null,
+      } : null,
+      access: row?.access_id ? {
+        accessId:Number(row.access_id),verificationState:String(row.verification_state),accessState:String(row.access_state),
+        activatedAt:row.activated_at ?? null,expiresAt:row.expires_at ?? null,returnReady,
+        latestCommand: latestCommand ? {
+          id:String(latestCommand.command_id),type:String(latestCommand.command_type),state:String(latestCommand.state),
+          attempts:Number(latestCommand.attempts ?? 0),completedAt:latestCommand.completed_at ?? null,
+          readBackConfirmed:commandResult?.readBackConfirmed === true,afterGroup:commandResult?.afterGroup ?? null,deviceUid:commandResult?.deviceUid ?? null,
+        } : null,
+        latestSnapshot: currentUser ? {
+          observedAt:snap.observed_at,group:Number(currentUser.group),role:Number(currentUser.role),enabled:currentUser.enabled === true,
+        } : null,
+      } : null,
+    });
+  } catch (error) {
+    console.error('[gym-vis] monitoring failed',error);
+    res.status(503).json({ error: 'Monitoring X904 belum tersedia.' });
+  }
+});
+
 export default router;

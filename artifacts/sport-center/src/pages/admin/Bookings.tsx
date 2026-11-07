@@ -1517,7 +1517,25 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? null;
+  const { data: gymX904Monitoring } = useQuery({
+    queryKey: ["admin-gym-x904-monitoring", booking.orderNumber],
+    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    staleTime: 0,
+    refetchInterval: 15000,
+    queryFn: async () => {
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/x904-monitoring`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+  });
+  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? gymX904Monitoring?.reservation ?? null;
+  const gymVisAccess = gymX904Monitoring?.access ?? null;
+  const gymVisPool = gymX904Monitoring?.pool ?? [];
+  const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
   const gymIdentityRoute = gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
 
   const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
@@ -1536,6 +1554,7 @@ function BookingDetailDrawer({
   const [newPaymentProof, setNewPaymentProof] = useState<File | null>(null);
   const [savingNewPayment, setSavingNewPayment] = useState(false);
   const [newPaymentError, setNewPaymentError] = useState("");
+  const [visPhysicalReturned, setVisPhysicalReturned] = useState(false);
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
   const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
@@ -1587,7 +1606,38 @@ function BookingDetailDrawer({
     onError: (error: any) => {
       paymentToast.toast({ title: "Serah-terima kartu belum berhasil", description: String(error?.message ?? error), variant: "destructive" });
     },
+  })
+  const returnGymVisMutation = useMutation({
+    mutationFn: async () => {
+      if (!gymVisAccess?.returnReady) throw new Error("Suspend/read-back Group 2 belum terbukti");
+      const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/return-vis`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`,
+        },
+        body: JSON.stringify({ physicalCardReturned: true, x904ReadbackChecked: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (payload: any) => {
+      setVisPhysicalReturned(false);
+      await Promise.all([
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] }),
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] }),
+      ]);
+      paymentToast.toast({
+        title: `${payload?.cardCode ?? "Kartu VIS"} kembali ke pool`,
+        description: "Pengembalian diterima setelah suspend dan read-back Group 2 terbukti.",
+      });
+    },
+    onError: (error: any) => {
+      paymentToast.toast({ title: "Pengembalian kartu belum aman", description: String(error?.message ?? error), variant: "destructive" });
+    },
   });
+;
   async function submitNewPaymentProof() {
     if (!newPaymentProof || savingNewPayment || !booking.id) return;
     setSavingNewPayment(true);
@@ -1924,13 +1974,55 @@ function BookingDetailDrawer({
                     </button>
                   )}
                   {gymVisReservation.state === "collected" && (
-                    <div className="mt-3 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs font-semibold">
-                      Kartu sudah diserahkan. Menunggu worker, ACK dan read-back X904.
+                    <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">
+                      <div className="font-semibold">
+                        {gymVisAccess?.accessState === "active" ? "Akses aktif — read-back X904 sudah diterima." :
+                          gymVisAccess?.returnReady ? "Akses sudah disuspend — kartu siap dikembalikan ke pool." :
+                          "Kartu sudah diserahkan. Menunggu worker / suspend / ACK dan read-back X904."}
+                      </div>
+                      {gymVisAccess && (
+                        <div className="grid grid-cols-2 gap-1 text-[11px]">
+                          <span>Access ID</span><strong>{gymVisAccess.accessId}</strong>
+                          <span>Status akses</span><strong>{gymVisAccess.accessState}</strong>
+                          <span>Verifikasi</span><strong>{gymVisAccess.verificationState}</strong>
+                          <span>Expiry</span><strong>{gymVisAccess.expiresAt ? new Date(gymVisAccess.expiresAt).toLocaleString("id-ID") : "-"}</strong>
+                          <span>Command</span><strong>{gymVisAccess.latestCommand ? `${gymVisAccess.latestCommand.type} / ${gymVisAccess.latestCommand.state}` : "-"}</strong>
+                          <span>ACK / read-back</span><strong>{gymVisAccess.latestCommand?.readBackConfirmed ? "PASS" : "Menunggu"}</strong>
+                          <span>Group mesin</span><strong>{gymVisAccess.latestSnapshot?.group ?? "-"}</strong>
+                        </div>
+                      )}
+                      {gymVisAccess?.returnReady && (
+                        <div className="space-y-2 rounded border border-sky-200 bg-sky-50 p-2 text-sky-900">
+                          <label className="flex items-start gap-2">
+                            <input type="checkbox" checked={visPhysicalReturned} onChange={(e) => setVisPhysicalReturned(e.target.checked)} />
+                            Kartu fisik sudah benar-benar kembali ke petugas.
+                          </label>
+                          <button type="button" disabled={!visPhysicalReturned || returnGymVisMutation.isPending}
+                            onClick={() => returnGymVisMutation.mutate()}
+                            className="rounded bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-50">
+                            {returnGymVisMutation.isPending ? "Memverifikasi..." : "Kembalikan Kartu ke Pool"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {gymVisReservation.state === "returned" && (
+                    <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900">
+                      Kartu sudah returned dan tersedia kembali untuk alokasi berikutnya.
                     </div>
                   )}
                 </>
               ) : gymIdentityRoute === "registered" ? (
-                <div className="mt-2 text-xs">Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN sebelum pembayaran dan kepemilikan identitas sah.</div>
+                <div className="mt-2 space-y-2 text-xs">
+  <div>Nama ditemukan di X904. Jalur PIN harus diverifikasi petugas; jangan serahkan kartu VIS atau aktifkan PIN hanya karena pembayaran confirmed.</div>
+  {gymPinGrant && (
+    <div className="rounded border border-sky-200 bg-sky-50 p-2 text-sky-900">
+      <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
+      <div>Pembayaran: <strong>{gymPinGrant.paymentStatus ?? "-"}</strong> · Verifikasi: <strong>{gymPinGrant.verificationState}</strong> · Akses: <strong>{gymPinGrant.accessState}</strong></div>
+      <div className="mt-1">Pengesahan PIN memerlukan pemeriksaan identitas fisik + dana resmi dan tetap menunggu worker serta ACK/read-back X904.</div>
+    </div>
+  )}
+</div>
               ) : (
                 <>
                   <div className="mt-2 text-xs">Belum ada kartu VIS yang dialokasikan. Setelah pembayaran benar-benar diverifikasi Admin/Finance, sistem harus otomatis memilih satu VIS001–VIS006 yang tersedia.</div>
@@ -1945,6 +2037,20 @@ function BookingDetailDrawer({
                     </button>
                   )}
                 </>
+              )}
+              {gymVisPool.length > 0 && (
+                <div className="mt-4 border-t border-emerald-200 pt-3">
+                  <div className="mb-2 text-xs font-bold">Pool VIS / X904</div>
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                    {gymVisPool.map((card: any) => (
+                      <div key={card.cardCode} className={`rounded border px-2 py-1 text-[11px] ${card.available ? "border-emerald-300 bg-white" : "border-slate-200 bg-slate-50"}`}>
+                        <div className="font-bold">{card.cardCode} · PIN {card.userPin}</div>
+                        <div>Group {card.group ?? "-"} · {card.available ? "AVAILABLE" : card.status}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 text-[10px] text-slate-600">AVAILABLE hanya jika snapshot X904 ≤5 menit, role 0, enabled, Group 2, dan tidak sedang reserved/active.</div>
+                </div>
               )}
             </div>
           )}

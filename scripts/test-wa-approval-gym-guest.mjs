@@ -28,5 +28,7 @@ test("new guest entries cannot use unverified one-click Lunas even by direct API
 
 test("existing WA administration actions are retained, Gym X904 commands are untouched",()=>{
   for(const action of ["approve","reject","paid","resend"])assert.ok(api.includes('/admin/wa-bookings/:orderNumber/'+action));
-  assert.doesNotMatch(api,/ACTIVATE_USER|SUSPEND_USER/);
+  const monitoring=api.slice(api.indexOf("router.get('/admin/wa-bookings/:orderNumber/x904-monitoring'"),api.indexOf("export default router;"));
+  assert.match(monitoring,/SELECT command_id,command_type,state/);
+  assert.doesNotMatch(monitoring,/INSERT INTO sport_center\.x904_user_commands|UPDATE sport_center\.x904_user_commands|enqueue.*command/i);
 });
