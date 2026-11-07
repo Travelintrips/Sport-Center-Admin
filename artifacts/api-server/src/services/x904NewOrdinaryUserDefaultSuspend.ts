@@ -62,6 +62,23 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
 
+  // Read-only SLA monitor. A queued command or completed command without
+  // device read-back is never counted as successful suspension.
+  const overdue = await store.execute(sql`SELECT count(*)::int AS overdue_count
+    FROM sport_center.x904_user_commands c
+    WHERE c.device_serial=${DEVICE}
+      AND c.payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
+      AND (c.payload->>'suspendDeadlineAt')::timestamptz <= ${now}
+      AND NOT (c.command_type='SUSPEND_USER' AND c.state='completed'
+        AND c.result->>'readBackConfirmed'='true'
+        AND c.result->>'afterGroup'='2')`);
+  const count = Number(overdue.rows[0]?.overdue_count ?? 0);
+  if (count > 0) {
+    console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
+      overdueCount: count, action: "investigate_vmsc_and_device",
+    }));
+  }
+
   // A snapshot arrives about every three minutes. Retain the transition for
   // 75 minutes so skipped worker ticks never silently lose a newly enrolled PIN.
   // The 30 minute deadline is measured from FIRST OBSERVATION, not an invented
@@ -176,22 +193,6 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     });
   }
 
-  // Read-only SLA monitor. A queued command or completed command without
-  // device read-back is never counted as successful suspension.
-  const overdue = await store.execute(sql`SELECT count(*)::int AS overdue_count
-    FROM sport_center.x904_user_commands c
-    WHERE c.device_serial=${DEVICE}
-      AND c.payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
-      AND (c.payload->>'suspendDeadlineAt')::timestamptz <= ${now}
-      AND NOT (c.command_type='SUSPEND_USER' AND c.state='completed'
-        AND c.result->>'readBackConfirmed'='true'
-        AND c.result->>'afterGroup'='2')`);
-  const count = Number(overdue.rows[0]?.overdue_count ?? 0);
-  if (count > 0) {
-    console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
-      overdueCount: count, action: "investigate_vmsc_and_device",
-    }));
-  }
 }
 
 export function startX904NewOrdinaryUserDefaultSuspend(): void {
