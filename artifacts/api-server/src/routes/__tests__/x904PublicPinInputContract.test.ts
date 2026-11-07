@@ -41,7 +41,7 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).toContain('customerPhone: form.customerPhone,');
     expect(form).toContain('/^628[0-9]{7,13}$/.test(form.customerPhone.trim())');
     expect(form).toContain('if (digits.startsWith("628")) return digits.slice(2)');
-    expect(form).toContain('if (digits.startsWith("08")) return digits.slice(1)');
+    expect(form).toContain('if (digits.startsWith("0")) return digits.slice(1)');
     expect(form).toContain('local ? `62${local}` : ""');
   });
 
