@@ -561,6 +561,18 @@ test("VIS concurrency and failure guards: no double allocation, cross-payment re
   })).rejects.toMatchObject({code:"vis_pool_exhausted"});
   expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=9332")).rows[0].n).toBe(0);
   expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9332")).rows[0].n).toBe(0);
+
+  const orderD="SC-CI-BUSY-9333";
+  await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES (9333,$1,'07:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI BUSY',30000)",[futureDate,orderD]);
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES (9433,9333,'confirmed',now(),30000,'ci://busy')");
+  await run("INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users) VALUES('TDBD234200545',now(),2,$1::jsonb)",[users]);
+  await expect(autoReserveVisAfterFundsVerified({
+    orderNumber:orderD,officialBankReference:"ADMINPAY-9433",verifiedBy:"CI_ADMIN",
+    officialFundsChecked:true,confirmedPaymentId:9433,
+  })).rejects.toMatchObject({code:"vis_pool_exhausted"});
+  expect((await run("SELECT status FROM sport_center.sport_bookings WHERE id=9333")).rows[0].status).toBe("confirmed");
+  expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=9333")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9333")).rows[0].n).toBe(0);
 });
 
 test("public PIN review gate: checkout and confirmed payment alone never activate; staff approval permits verified ACK", async () => {
