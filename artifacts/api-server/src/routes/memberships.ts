@@ -1251,7 +1251,7 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
       if(receipt.status==="photo_approved") {
         if(details.rows.some((a:any)=>a.status!=="confirmed" || a.membership_payment_id==null))
           throw new MembershipProofError(409,"Persetujuan sebelumnya belum konsisten; diperlukan audit.");
-        return {fresh:false,results:details.rows.map((a:any)=>({
+        return {fresh:false,combinedReceiptTotal:Number(receipt.amount),results:details.rows.map((a:any)=>({
           pin:String(a.user_pin),membershipId:Number(a.membership_id),
           paymentId:Number(a.membership_payment_id),name:String(a.device_name)
         })),completed:[] as any[]};
