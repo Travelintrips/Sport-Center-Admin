@@ -215,6 +215,9 @@ jobs:
       - name: Verify Kasbon aggregate Sync receipts and transaction badges
         run: node --experimental-strip-types scripts/test-sc-kasbon-total-sync-snapshot.mjs
 
+      - name: Verify Kasbon create Simpan/Sync without duplicate writes
+        run: node scripts/test-sc-kasbon-save-sync.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

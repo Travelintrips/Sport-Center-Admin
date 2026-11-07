@@ -15,6 +15,22 @@ const num=(s:unknown):number=>{
 };
 const money=(s:unknown)=>typeof s==="string"?num(s):num(s);
 const norm=(s:string)=>s.replace(/\s/g,"").toUpperCase();
+/** A shortened legacy SUM may be safely expanded only if its exact range is
+ * entirely inside the expected range AND the live displayed subtotal equals
+ * the full recomputed sum. Unknown/arbitrary formulas are never overwritten.
+ */
+const sumArea=(formula:string)=>{
+ const m=norm(formula).match(/^=SUM\\(([A-Z]+)(\\d+):([A-Z]+)(\\d+)\\)$/);
+ if(!m)return null;
+ const column=(col:string)=>[...col].reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0);
+ return {firstCol:column(m[1]),firstRow:Number(m[2]),lastCol:column(m[3]),lastRow:Number(m[4])};
+};
+const safeSubsetSum=(current:string,expected:string)=>{
+ const old=sumArea(current),target=sumArea(expected);
+ return !!old&&!!target && old.firstCol>=target.firstCol && old.lastCol<=target.lastCol &&
+  old.firstRow>=target.firstRow && old.lastRow<=target.lastRow &&
+  old.firstCol<=old.lastCol && old.firstRow<=old.lastRow;
+};
 const safeSubtotal=(
  currentFormula:string, numericValue:number, expectedNumber:number,
  expectedFormula:string, cell:string, acceptable:(f:string)=>boolean
@@ -22,8 +38,12 @@ const safeSubtotal=(
  if(Math.abs(numericValue-expectedNumber)>0.001)
   return {error:"KASBON_SUBTOTAL_INCONSISTENT"};
  if(currentFormula.startsWith("=")) {
-  if(!acceptable(norm(currentFormula)))return {error:"KASBON_SUBTOTAL_FORMULA_INCOMPLETE"};
-  return {};
+  if(acceptable(norm(currentFormula)))return {};
+  // Never silently extend a legacy formula unless both SUM area and numeric
+  // completeness are proven. numericValue===expectedNumber is checked above.
+  if(safeSubsetSum(currentFormula,expectedFormula))
+   return {repair:{cell,formula:expectedFormula}};
+  return {error:"KASBON_SUBTOTAL_FORMULA_INCOMPLETE"};
  }
  return {repair:{cell,formula:expectedFormula}};
 };

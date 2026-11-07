@@ -2,6 +2,7 @@ import { Router } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { snapshotKasbonRecords, getKasbonReceiptStatus, type SalarySyncReceipt } from "../lib/scKasbonSalarySnapshot";
 import { syncEmployeeKasbonToSalary } from "../lib/scKasbonSalaryGoogle";
+import { kasbonPoolTick } from "../lib/scKasbonPoolAutoWorker";
 import { db, scEmployeesTable, scEmployeeKasbonTable, auditLogsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -90,6 +91,45 @@ router.delete("/admin/sc-employees/:employeeId/kasbon/:id", adminMiddleware, asy
  } catch (error) {
    console.error("[SC_KASBON_DELETE] Failed to delete with audit", error);
    res.status(500).json({ error: "Gagal menghapus kasbon. Data tidak diubah bila audit gagal." });
+ }
+});
+
+
+/** Manual one-record trigger for the EXISTING idempotent Kasbon POOL outbox.
+ * It must never bypass the production kill switch or infer Sheets insertion from a DB save.
+ */
+router.post("/admin/sc-employees/:employeeId/kasbon/:id/pool-sync",adminMiddleware,async(req,res)=>{
+ const employeeId=String(req.params.employeeId||"").toUpperCase(), id=Number(req.params.id);
+ if(!employeePattern.test(employeeId)||!Number.isSafeInteger(id)||id<1){
+  res.status(400).json({error:"ID kasbon tidak valid"});return;
+ }
+ try{
+  const [record]=await db.select({id:scEmployeeKasbonTable.id}).from(scEmployeeKasbonTable)
+   .where(and(eq(scEmployeeKasbonTable.id,id),eq(scEmployeeKasbonTable.employeeId,employeeId))).limit(1);
+  if(!record){res.status(404).json({error:"Kasbon tidak ditemukan"});return;}
+  const readStatus=async()=>{
+   const ledger=await db.execute(sql`SELECT sheet_cell,amount,synced_at
+    FROM sport_center.sc_kasbon_pool_sync_ledger WHERE kasbon_id=${id} LIMIT 1`);
+   const linked=Array.isArray(ledger)?ledger[0]:(ledger as unknown as {rows?:Record<string,unknown>[]}).rows?.[0];
+   if(linked)return {status:"synced",cell:String(linked.sheet_cell),amount:Number(linked.amount)};
+   const events=await db.execute(sql`SELECT status,last_error_code,event_type FROM sport_center.sc_kasbon_pool_sync_events
+    WHERE kasbon_id=${id} ORDER BY id DESC LIMIT 1`);
+   const event=Array.isArray(events)?events[0]:(events as unknown as {rows?:Record<string,unknown>[]}).rows?.[0];
+   return event?{status:String(event.status),errorCode:event.last_error_code??null,eventType:event.event_type}:
+    {status:"needs_review",errorCode:"POOL_OUTBOX_EVENT_MISSING"};
+  };
+  if(process.env.SC_KASBON_POOL_SYNC_ENABLED!=="true"){
+   res.json({status:"disabled",errorCode:"POOL_SYNC_NOT_ENABLED",message:"Kasbon tersimpan, tetapi sync Kasbon POOL belum diaktifkan."});return;
+  }
+  const initial=await readStatus();
+  if(initial.status==="synced" || initial.status==="needs_review"){
+   res.json(initial);return;
+  }
+  if(initial.status==="pending")await kasbonPoolTick(id);
+  res.json(await readStatus());
+ }catch(error){
+  console.error("[SC_KASBON_POOL_MANUAL_SYNC]",error);
+  res.status(409).json({error:"POOL_SYNC_STATUS_UNAVAILABLE",detail:error instanceof Error?error.message:"UNKNOWN"});
  }
 });
 

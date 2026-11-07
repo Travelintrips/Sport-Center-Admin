@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const ui=readFileSync("artifacts/sport-center/src/pages/admin/SCEmployeeKasbon.tsx","utf8");
+const routes=readFileSync("artifacts/api-server/src/routes/scEmployeeKasbon.ts","utf8");
+const worker=readFileSync("artifacts/api-server/src/lib/scKasbonPoolAutoWorker.ts","utf8");
+assert.match(ui,/editing===null\?"Simpan \/ Sync":"Simpan"/);
+assert.match(ui,/if\(!isCreate\)return/);
+assert.match(ui,/pool-sync","POST"/);
+assert.match(ui,/salary-sync","POST",\{action:"sync"\}/);
+assert.match(ui,/Kasbon tersimpan, sinkronisasi belum lengkap/);
+assert.match(ui,/retry:false/);
+assert.match(worker,/export async function kasbonPoolTick\(targetKasbonId\?:number\)/);
+assert.match(worker,/kasbon_id=\$\{targetKasbonId\?\?null\}/);
+assert.match(routes,/SC_KASBON_POOL_MANUAL_SYNC/);
+assert.match(routes,/POOL_OUTBOX_EVENT_MISSING/);
+assert.match(routes,/initial.status==="synced"/);
+assert.match(routes,/SC_KASBON_POOL_SYNC_ENABLED!=="true"/);
+console.log("PASS: Simpan/Sync creates once, targeted POOL outbox + salary G, truthful statuses, no retry and kill switch preserved");

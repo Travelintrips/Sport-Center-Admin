@@ -48,9 +48,36 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const syncEvidence=salaryCheck??initialSalaryCheck;
  const isSalarySynced=Boolean(syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
- const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
-  onSuccess:()=>{setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
-  onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
+ const save=useMutation({
+  mutationFn:async(payload:Form)=>{
+   const isCreate=editing===null;
+   const row=await api(endpoint(employee.employeeId)+(isCreate?"":"/"+editing),isCreate?"POST":"PATCH",payload);
+   if(!isCreate)return {row,created:false,pool:null,salary:null};
+   // Save first, then independently verify each integration. A Sheets failure must
+   // NEVER re-submit the create request or misreport KB as missing.
+   const pool=await api(endpoint(employee.employeeId)+"/"+row.id+"/pool-sync","POST",{}).catch((e:Error)=>({status:"needs_review",errorCode:e.message}));
+   const salary=await api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}).catch((e:Error)=>({status:"failed",errorCode:e.message}));
+   return {row,created:true,pool,salary};
+  },
+  retry:false,
+  onSuccess:(result)=>{
+   setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});
+   setOpen(false);setEditing(null);setForm(blank());
+   if(!result.created){
+    toast({title:"Kasbon berhasil diperbarui",description:"Data perubahan disimpan. Periksa kebutuhan rekonsiliasi Sheets."});return;
+   }
+   const poolOk=result.pool?.status==="synced";
+   const salaryOk=result.salary?.status==="synced";
+   if(poolOk&&salaryOk){
+    toast({title:"Kasbon tersimpan dan kedua Sheets tersinkron",description:"KB-"+String(result.row.id).padStart(5,"0")+" · Kasbon POOL dan Total Kasbon G berhasil dibaca ulang."});
+   }else{
+    toast({title:"Kasbon tersimpan, sinkronisasi belum lengkap",
+     description:"KB-"+String(result.row.id).padStart(5,"0")+" · POOL: "+String(result.pool?.status??"gagal")+" ("+String(result.pool?.errorCode??"-")+") · Gaji: "+String(result.salary?.status??"gagal")+" ("+String(result.salary?.errorCode??"-")+")",
+     variant:"destructive"});
+   }
+  },
+  onError:(e:Error)=>toast({title:"Gagal menyimpan kasbon",description:e.message,variant:"destructive"})
+ });
  const remove = useMutation({
   mutationFn: (record: Kasbon) => api(endpoint(employee.employeeId)+"/"+record.id,"DELETE"),
   onSuccess: () => {
@@ -168,7 +195,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <div className="space-y-1"><Label htmlFor="kb-amount">Nominal (Rp)</Label><Input id="kb-amount" type="text" inputMode="numeric" autoComplete="off" required placeholder="Contoh: 1.000.000" value={formatKasbonAmount(form.amount)} onChange={e=>setForm({...form,amount:normalizeKasbonAmount(e.target.value)})}/></div>
     <div className="space-y-1"><Label htmlFor="kb-notes">Keterangan</Label><Textarea id="kb-notes" maxLength={2000} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></div>
     <div className="space-y-1"><Label htmlFor="kb-proof">Upload Bukti Transfer (opsional)</Label><Input id="kb-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={uploading} onChange={e=>{const f=e.target.files?.[0];if(f)void uploadProof(f);}}/><p className="text-xs text-muted-foreground">JPG, PNG, WebP, atau PDF; maksimal 10 MB.</p>{form.proofUrl&&<div className="flex items-center gap-3"><a className="text-sm text-primary underline" href={form.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti terunggah</a><Button type="button" size="sm" variant="outline" onClick={()=>setForm({...form,proofUrl:null})}>Hapus lampiran</Button></div>}</div>
-    <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpen(false)}>Batal</Button><Button type="submit" disabled={save.isPending||uploading||!form.kasbonDate||Number(form.amount)<=0}>{save.isPending?"Menyimpan...":"Simpan"}</Button></div>
+    <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpen(false)}>Batal</Button><Button type="submit" disabled={save.isPending||uploading||!form.kasbonDate||Number(form.amount)<=0}>{save.isPending?"Menyimpan / Sync...":editing===null?"Simpan / Sync":"Simpan"}</Button></div>
    </form>
   </DialogContent></Dialog>
  </div>;
