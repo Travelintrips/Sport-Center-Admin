@@ -48,6 +48,19 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(api).not.toContain('!/^628[0-9]{7,13}$/.test(guestPhone)');
   });
 
+  test("public booking success separates booking, payment review and X904 access", () => {
+    expect(form).toContain("Booking Berhasil Dibuat!");
+    expect(form).toContain("Salin nomor booking");
+    expect(form).toContain("Status Booking Gym");
+    expect(form).toContain("Berhasil Dibuat");
+    expect(form).toContain("Menunggu Verifikasi Admin");
+    expect(form).toContain("Belum Aktif");
+    expect(form).toContain("aktivasi mesin serta read-back berhasil");
+    expect(form).toContain("Cek Status Booking");
+    expect(form).not.toContain("Booking Dikonfirmasi!");
+    expect(form).not.toContain("Bukti pembayaran cocok dan booking otomatis dikonfirmasi.");
+  });
+
   test("VIS path remains separate and anonymous cannot force a PIN/UID", () => {
     expect(api).toContain('guestNameRoute?.route === "visitor_card"');
     expect(api).toContain('verifiedX904Identity?.identityType === "card"');
