@@ -40,5 +40,5 @@ test("no broad or duplicate commands; identity ownership and grants are protecte
 test("no role4 or role14 suspension and active access 12h policy unchanged", () => {
   assert.match(policy, /NONMEMBER_ACCESS_MS = 12 \* 60 \* 60 \* 1000/);
   assert.match(policy, /X904_GYM_CLOSE_HOUR_WIB = 23/);
-  assert.match(policy, /isX904AutoSuspendExempt\(input\.userPin, input\.deviceRole\)/);
+  assert.match(policy, /if \(isX904AutoSuspendExempt\(input\.userPin,input\.deviceRole\)\) return/);
 });
