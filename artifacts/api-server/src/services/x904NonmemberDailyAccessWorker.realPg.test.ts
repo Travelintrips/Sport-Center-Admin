@@ -671,7 +671,9 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
   // Isolated local PostgreSQL; never send machine commands to a real X904.
   process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED = "true";
   process.env.GYM_X904_NEW_USER_BASELINE_AT = "2026-11-08T23:59:00.000Z";
-  const at = new Date("2026-11-09T00:02:00.000Z");
+  // First sighting at 00:01; worker only processes at 00:03, after a new
+  // snapshot replaced the immediately preceding snapshot.
+  const at = new Date("2026-11-09T00:03:00.000Z");
   try {
     await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
       VALUES ('TDBD234200545','650',650,'NEW ROLE ZERO',0),
@@ -689,6 +691,11 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
           {"pin":"650","name":"NEW ROLE ZERO","role":0,"group":1,"enabled":true},
           {"pin":"651","name":"NEW ROLE FOUR","role":4,"group":1,"enabled":true},
           {"pin":"652","name":"NEW ROLE FOURTEEN","role":14,"group":1,"enabled":true}]'::jsonb)`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots
+      (device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:02:00Z',user_count,users
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
     await processX904NewOrdinaryUserDefaultSuspend(db as any, at);
     await processX904NewOrdinaryUserDefaultSuspend(db as any, at);
     const cmds = (await run(`SELECT user_pin,command_type,payload,state
@@ -697,7 +704,9 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
     expect(cmds).toHaveLength(1);
     expect(cmds[0]).toMatchObject({
       user_pin:"650",command_type:"SUSPEND_USER",state:"queued",
-      payload:{expectedUid:650,expectedName:"NEW ROLE ZERO",expectedRole:0}
+      payload:{expectedUid:650,expectedName:"NEW ROLE ZERO",expectedRole:0,
+        firstObservedAt:"2026-11-09T00:01:00.000Z",
+        suspendDeadlineAt:"2026-11-09T00:31:00.000Z"}
     });
     // No automatic commands for 651 role4, 652 role14 or existing 653.
     expect(cmds.some((c:any) => ["651","652","653"].includes(c.user_pin))).toBe(false);
