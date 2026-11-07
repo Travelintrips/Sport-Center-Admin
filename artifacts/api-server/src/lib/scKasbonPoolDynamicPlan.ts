@@ -20,7 +20,7 @@ const norm=(s:string)=>s.replace(/\s/g,"").toUpperCase();
  * the full recomputed sum. Unknown/arbitrary formulas are never overwritten.
  */
 const sumArea=(formula:string)=>{
- const m=norm(formula).match(/^=SUM\\(([A-Z]+)(\\d+):([A-Z]+)(\\d+)\\)$/);
+ const m=norm(formula).match(/^=SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)$/);
  if(!m)return null;
  const column=(col:string)=>[...col].reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0);
  return {firstCol:column(m[1]),firstRow:Number(m[2]),lastCol:column(m[3]),lastRow:Number(m[4])};
