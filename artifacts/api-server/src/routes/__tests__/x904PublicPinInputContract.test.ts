@@ -54,14 +54,14 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
   });
   test("fully expired mapped member is eligible for daily booking but never gets former PIN access", () => {
     const routing = readFileSync(join(process.cwd(), "src/services/x904GymGuestNameRouting.ts"), "utf8");
-    expect(routing).toContain('member.membership_status === "expired"');
-    expect(routing).toContain('member.mapping_status === "verified"');
-    expect(routing).toContain("isPastGrace");
+    expect(routing).toContain('membership_status) === "expired"');
+    expect(routing).toContain("m.status::text='active'");
+    expect(routing).toContain('route: "recognized_review"');
     expect(routing).toContain('route: "expired_member", userPin: null, deviceUid: null');
     expect(api).toContain('guestNameRoute?.route === "expired_member"');
     expect(api).toContain("PIN membership lama tidak diberikan hak akses");
     expect(form).toContain('guestIdentityRoute === "expired_member"');
-    expect(form).toContain("Boleh booking harian");
+    expect(form).toContain("tiket harian boleh dipesan");
   });
 
 });
