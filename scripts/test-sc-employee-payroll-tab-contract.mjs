@@ -29,7 +29,7 @@ assert.match(routes,/restore-december-preview/);
 assert.match(routes,/restore-december"/);
 assert.match(dialog,/Pratinjau Pemulihan Desember/);
 assert.match(dialog,/Pulihkan Data Desember/);
-assert.match(routes,/PAYROLL_DRAFT_READBACK_FAILED/);
+assert.match(routes,/PAYROLL_FULL_COPY_READBACK_FAILED/);
 assert.match(routes,/SC_PAYROLL_MONTHLY_TAB_CREATED/);
 assert.match(registered,/router\.use\(scEmployeePayrollTabsRouter\)/);
 assert.doesNotMatch(routes,/SC_KASBON_POOL_SPREADSHEET_ID/);
