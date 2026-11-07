@@ -93,18 +93,45 @@ function extractProofToken(uploadProofUrl: string): string | null {
   }
 }
 
-// The visitor enters only the local number; the API always receives 628...
-// Accept pasted +62 / 62 / 08 numbers without duplicating the country code.
-function localWhatsappDigits(value: string): string {
+// Indonesia stays the default; visitors with a foreign WhatsApp can opt into another dial code.
+const WHATSAPP_COUNTRIES = [
+  { code: "62", label: "🇮🇩 Indonesia (+62)" },
+  { code: "65", label: "🇸🇬 Singapura (+65)" },
+  { code: "60", label: "🇲🇾 Malaysia (+60)" },
+  { code: "1", label: "🇺🇸/🇨🇦 AS/Kanada (+1)" },
+  { code: "44", label: "🇬🇧 Inggris (+44)" },
+  { code: "61", label: "🇦🇺 Australia (+61)" },
+  { code: "81", label: "🇯🇵 Jepang (+81)" },
+  { code: "82", label: "🇰🇷 Korea Selatan (+82)" },
+  { code: "86", label: "🇨🇳 Tiongkok (+86)" },
+  { code: "91", label: "🇮🇳 India (+91)" },
+  { code: "66", label: "🇹🇭 Thailand (+66)" },
+  { code: "63", label: "🇵🇭 Filipina (+63)" },
+  { code: "971", label: "🇦🇪 UEA (+971)" },
+  { code: "966", label: "🇸🇦 Arab Saudi (+966)" },
+] as const;
+
+function initialWhatsappCountry(value: string): string {
   const digits = value.replace(/\D/g, "");
-  if (digits.startsWith("628")) return digits.slice(2);
-  if (digits.startsWith("0")) return digits.slice(1);
-  return digits;
+  if (!value.trim() || digits.startsWith("0")) return "62";
+  return [...WHATSAPP_COUNTRIES].sort((a, b) => b.code.length - a.code.length)
+    .find(({ code }) => digits.startsWith(code))?.code ?? "62";
 }
 
-function normalizedWhatsappNumber(value: string): string {
-  const local = localWhatsappDigits(value).slice(0, 14);
-  return local ? `62${local}` : "";
+function localWhatsappDigits(value: string, countryCode: string): string {
+  const digits = value.replace(/\D/g, "");
+  const withoutCountry = (value.trim().startsWith("+") || digits.startsWith(countryCode))
+    && digits.startsWith(countryCode) ? digits.slice(countryCode.length) : digits;
+  return withoutCountry.replace(/^0+/, "");
+}
+
+function normalizedWhatsappNumber(value: string, countryCode: string): string {
+  const local = localWhatsappDigits(value, countryCode).slice(0, 14);
+  return local ? `${countryCode}${local}` : "";
+}
+
+function validWhatsappNumber(value: string): boolean {
+  return /^[1-9][0-9]{7,14}$/.test(value);
 }
 
 export default function WaBookingForm() {
@@ -112,6 +139,7 @@ export default function WaBookingForm() {
   const search = useSearch();
   const searchParams = new URLSearchParams(search);
   const phoneFromWA = searchParams.get("phone") ?? "";
+  const initialCountryCode = initialWhatsappCountry(phoneFromWA);
   const dedicatedNonmember = searchParams.get("nonmember") === "1";
   const publicGymGuest = dedicatedNonmember && searchParams.get("self") === "1";
   const dateFromWA = searchParams.get("date") ?? "";
@@ -144,9 +172,10 @@ export default function WaBookingForm() {
   const [guestLookupError, setGuestLookupError] = useState("");
   const guestLookupAbort = useRef<AbortController | null>(null);
 
+  const [whatsappCountryCode, setWhatsappCountryCode] = useState(initialCountryCode);
   const [form, setForm] = useState({
     customerName: "",
-    customerPhone: normalizedWhatsappNumber(phoneFromWA),
+    customerPhone: normalizedWhatsappNumber(phoneFromWA, initialCountryCode),
     bookingDate: dateFromWA,
     startTime: startTimeFromWA,
     durationHours: durationFromWA,
@@ -486,8 +515,8 @@ export default function WaBookingForm() {
       setError("Halaman ini hanya untuk akses harian Gym nonmember.");
       return;
     }
-    if (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim())) {
-      setError("Nomor WhatsApp wajib dimulai dengan 8 (contoh: 8123456789).");
+    if (dedicatedNonmember && !validWhatsappNumber(form.customerPhone.trim())) {
+      setError("Masukkan nomor WhatsApp internasional yang valid sesuai kode negara.");
       return;
     }
     // The public form never requires or knows the X904 PIN.
@@ -746,23 +775,34 @@ export default function WaBookingForm() {
               <div className="space-y-1">
                 <Label htmlFor="phone" className="text-sm font-semibold">Nomor WhatsApp *</Label>
                 <div className="flex overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-400">
-                  <span className="inline-flex items-center gap-2 border-r border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-700" aria-label="Kode negara Indonesia, plus enam dua">
-                    <Phone className="h-4 w-4 text-gray-500" /> +62
-                  </span>
+                  <Select value={whatsappCountryCode} onValueChange={(code) => {
+                    setWhatsappCountryCode(code);
+                    setForm((f) => ({ ...f, customerPhone: normalizedWhatsappNumber(localWhatsappDigits(f.customerPhone, whatsappCountryCode), code) }));
+                  }}>
+                    <SelectTrigger aria-label="Pilih kode negara WhatsApp" className="w-[110px] shrink-0 rounded-none border-0 border-r border-gray-200 bg-gray-50 px-2 shadow-none focus:ring-0">
+                      <Phone className="mr-1 h-4 w-4 shrink-0 text-gray-500" />
+                      <SelectValue>{whatsappCountryCode === "62" ? "🇮🇩 +62" : `+${whatsappCountryCode}`}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WHATSAPP_COUNTRIES.map(({ code, label }) => (
+                        <SelectItem key={code} value={code}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Input
                     id="phone"
                     type="tel"
                     inputMode="numeric"
                     autoComplete="tel-national"
                     className="min-w-0 flex-1 rounded-none border-0 shadow-none focus-visible:ring-0"
-                    placeholder="8123456789"
+                    placeholder={whatsappCountryCode === "62" ? "8123456789" : "Nomor tanpa kode negara"}
                     maxLength={14}
-                    value={localWhatsappDigits(form.customerPhone)}
-                    onChange={(e) => setForm((f) => ({ ...f, customerPhone: normalizedWhatsappNumber(e.target.value) }))}
+                    value={localWhatsappDigits(form.customerPhone, whatsappCountryCode)}
+                    onChange={(e) => setForm((f) => ({ ...f, customerPhone: normalizedWhatsappNumber(e.target.value, whatsappCountryCode) }))}
                     required
                   />
                 </div>
-                <p className="text-xs text-gray-500">Kode negara +62 sudah otomatis. Cukup ketik 8xxxxxxxx, tanpa 0 di depan.</p>
+                <p className="text-xs text-gray-500">Default +62 Indonesia. Pilih kode negara lain hanya jika nomor WhatsApp Anda dari luar negeri. Ketik tanpa 0 di depan.</p>
               </div>
               {gymWalkIn && !publicGymGuest && (
                 <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50/50 p-3">
@@ -1130,7 +1170,7 @@ export default function WaBookingForm() {
             const missing: string[] = [];
             if (dedicatedNonmember && !publicGymGuest && !x904VerifiedName) missing.push(x904Verifying ? "Verifikasi PIN/kartu sedang berlangsung" : "PIN/kartu X904 belum terverifikasi");
             if (!form.customerName) missing.push("Nama pemesan belum tersedia");
-            if (!form.customerPhone.trim() || (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim()))) missing.push("Isi nomor WhatsApp valid (8xxxxxxx)");
+            if (!form.customerPhone.trim() || (dedicatedNonmember && !validWhatsappNumber(form.customerPhone.trim()))) missing.push("Isi nomor WhatsApp yang valid sesuai kode negara");
             if (!form.bookingDate) missing.push("Pilih tanggal kunjungan");
             if (!form.startTime) missing.push("Pilih jam kunjungan");
             if (!gymWalkIn && (availabilityLoading || !availabilitySlots || !timeSlots.includes(form.startTime))) missing.push("Pilih slot yang tersedia");
