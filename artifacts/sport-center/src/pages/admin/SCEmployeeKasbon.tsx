@@ -208,15 +208,22 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    <DialogContent className="max-w-sm">
     <DialogHeader><DialogTitle>Insert Password — Edit / Hapus Kasbon</DialogTitle></DialogHeader>
     <p className="text-sm text-muted-foreground">Verifikasi khusus untuk KB-{String(unlockRecord?.id??0).padStart(5,"0")}. Role admin, owner, atau super_admin tidak dapat melewati verifikasi ini.</p>
-    <form className="space-y-3" onSubmit={e=>{e.preventDefault();unlockAction.mutate();}}>
+    {/* This is a second-factor action gate, NOT a login or password-change form.
+        Avoid a credential-form submit event, which may prompt browser password
+        managers to overwrite the administrator's saved login credentials. */}
+    <div className="space-y-3">
      <div className="space-y-1"><Label htmlFor="kasbon-action-password">Password Otorisasi</Label>
-      <Input id="kasbon-action-password" type="password" autoComplete="off" minLength={1} maxLength={256} required value={actionPassword}
-       onChange={e=>setActionPassword(e.target.value)} placeholder="Masukkan password khusus Kasbon"/></div>
+      <Input id="kasbon-action-password" name="kasbon-action-authorization-only" type="password"
+       autoComplete="off" data-lpignore="true" data-1p-ignore="true"
+       minLength={1} maxLength={256} required value={actionPassword}
+       onChange={e=>setActionPassword(e.target.value)}
+       onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();if(!unlockAction.isPending&&actionPassword.length>0)unlockAction.mutate();}}}
+       placeholder="Masukkan password khusus Kasbon"/></div>
      <div className="flex justify-end gap-2">
       <Button type="button" variant="outline" disabled={unlockAction.isPending} onClick={()=>{setUnlockRecord(null);setActionPassword("");}}>Batal</Button>
-      <Button type="submit" disabled={unlockAction.isPending||actionPassword.length===0}>{unlockAction.isPending?"Memverifikasi...":"Buka Edit / Hapus"}</Button>
+      <Button type="button" disabled={unlockAction.isPending||actionPassword.length===0} onClick={()=>unlockAction.mutate()}>{unlockAction.isPending?"Memverifikasi...":"Buka Edit / Hapus"}</Button>
      </div>
-    </form>
+    </div>
    </DialogContent>
   </Dialog>
   <Dialog open={toDelete!==null} onOpenChange={value=>{if(!value&&!remove.isPending)setToDelete(null);}}>
