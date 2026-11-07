@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import * as _pinoHttpModule from "pino-http";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,10 +165,36 @@ if (process.env.NODE_ENV === "production") {
     // redirect: false — prevent express.static from issuing 301 redirects for
     // /facilities → /facilities/ when a directory exists. The custom route
     // handler below serves the correct prerendered index.html directly.
-    app.use(express.static(frontendDist, { redirect: false }));
+    // Hashed Vite assets are immutable within a deployment. Old hashes from a
+    // previous release MUST return 404, never the HTML SPA fallback. Otherwise
+    // browser module imports fail as misleading HTTP 200 / text/html.
+    app.use("/assets", express.static(path.join(frontendDist, "assets"), {
+      redirect: false,
+      immutable: true,
+      maxAge: "1y",
+      fallthrough: false,
+    }));
+    app.use("/assets", (_err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.status(404).type("text/plain").send("Asset not found");
+    });
+    app.use(express.static(frontendDist, {
+      redirect: false,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith(".html")) res.setHeader("Cache-Control", "no-cache, must-revalidate");
+      },
+    }));
     // Serve prerendered per-route index.html when it exists (Phase 2 SEO),
     // fall back to root index.html only for routes without a dedicated file.
     app.get("/{*path}", (req, res) => {
+      // Always revalidate the SPA shell after deployments. Do not serve index.html
+      // for requests that look like missing static files (JS, CSS, images, maps).
+      if (/\.[a-z0-9]{1,8}$/i.test(req.path)) {
+        res.setHeader("Cache-Control", "no-store");
+        res.status(404).type("text/plain").send("Static file not found");
+        return;
+      }
+      res.setHeader("Cache-Control", "no-cache, must-revalidate");
       const routeSegment = req.path === "/" ? "" : req.path.replace(/^\//, "").split("/")[0];
       const specificFile =
         routeSegment
