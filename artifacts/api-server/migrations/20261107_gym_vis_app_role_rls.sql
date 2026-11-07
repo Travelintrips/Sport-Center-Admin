@@ -1,6 +1,8 @@
 -- Persist actual PROD RLS contract for backend role; Issue #682.
 -- Generated from reviewed pg_policies; only apply after isolated-role tests.
 -- Never create policy for anon, authenticated or PUBLIC.
+ALTER TABLE sport_center.gym_vis_card_reservations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sport_center.x904_nonmember_daily_access ENABLE ROW LEVEL SECURITY;
 GRANT SELECT ON sport_center.sport_bookings, sport_center.sport_payments TO sport_center_app;
 GRANT SELECT,INSERT,UPDATE ON sport_center.gym_vis_card_reservations, sport_center.x904_nonmember_daily_access TO sport_center_app;
 GRANT USAGE,SELECT ON SEQUENCE sport_center.gym_vis_card_reservations_id_seq TO sport_center_app;
