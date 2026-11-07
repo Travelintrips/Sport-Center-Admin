@@ -1144,6 +1144,12 @@ export default function AdminCheckoutForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Combined membership uses the dedicated proof/allocation transaction,
+    // never the regular single-booking submission path.
+    if (bookingKind === "membership_combined") {
+      setCombinedOpen(true);
+      return;
+    }
     if (bookingKind === "membership") {
       setLocation("/admin/memberships");
       return;
@@ -1542,18 +1548,20 @@ export default function AdminCheckoutForm() {
       <form onSubmit={handleSubmit} className={isMembership ? "" : "grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(310px,1fr)] xl:items-start"}>
         <Card className="min-w-0 shadow-sm">
           <CardHeader>
-            <CardTitle>{isMembership && memberAction === "new" ? "Pendaftaran Member Gym Baru" : "Buat Booking Baru"}</CardTitle>
+            <CardTitle>{bookingKind === "membership_combined" ? "Booking Membership Gym — Pembayaran Gabungan" : isMembership && memberAction === "new" ? "Pendaftaran Member Gym Baru" : "Buat Booking Baru"}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
 
             <div className="space-y-2">
               <Label>Jenis pemesanan</Label>
-              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); setMultiPatterns([]); setRepeatEnabled(false); setSuppressCustomerWhatsApp(false); }}>
+              <Select value={bookingKind} onValueChange={(value) => { setBookingKind(value); if(value === "membership_combined") setCombinedOpen(true); setMultiPatterns([]); setRepeatEnabled(false); setSuppressCustomerWhatsApp(false); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="personal">Personal / Umum</SelectItem>
                   <SelectItem value="corporate">Perusahaan / Corporate</SelectItem>
                   <SelectItem value="membership">Membership Gym</SelectItem>
+                  {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "") &&
+                    <SelectItem value="membership_combined">Membership Gym — Pembayaran Gabungan</SelectItem>}
                   <SelectItem value="event">Event / Kegiatan Khusus</SelectItem>
                 </SelectContent>
               </Select>
@@ -1564,11 +1572,18 @@ export default function AdminCheckoutForm() {
                   <SelectItem value="corporate">Dibayar perusahaan</SelectItem>
                 </SelectContent>
               </Select>}
-              {!isMembership && <p className="text-xs text-muted-foreground">{isCompanyPayer ? "Penagihan mengikuti status approval dan konfigurasi invoice perusahaan; bukan otomatis menunggu pembayaran." : "Booking belum dianggap lunas. Bukti pembayaran perlu diverifikasi sebelum konfirmasi."}</p>}
+              {bookingKind === "membership_combined" && (
+                <p role="status" className="rounded-md border border-blue-200 p-3 text-sm">
+                  Buat 2–10 alokasi member dengan satu bukti pembayaran di bagian Pembayaran Gabungan Membership Gym di bawah.
+                  Setiap member mendapat booking sendiri. Satu bukti bukan verifikasi settlement bank.
+                </p>
+              )}
+              {!isMembership && bookingKind !== "membership_combined" && <p className="text-xs text-muted-foreground">{isCompanyPayer ? "Penagihan mengikuti status approval dan konfigurasi invoice perusahaan; bukan otomatis menunggu pembayaran." : "Booking belum dianggap lunas. Bukti pembayaran perlu diverifikasi sebelum konfirmasi."}</p>}
               {bookingKind === "event" && <p className="text-xs text-amber-700">Alur ini untuk satu sesi event. Booking grup multi-sesi harus menggunakan alur grup khusus.</p>}
               {isMembership && <p className="text-xs text-muted-foreground">Kelola pendaftaran, perpanjangan, pembayaran, atau kunjungan member langsung dari halaman ini.</p>}
             </div>
 
+            {bookingKind !== "membership_combined" && <>
             {!hideRegularBookingFields && <>
             {/* Customer */}
             <div className="space-y-2">
@@ -2308,9 +2323,10 @@ export default function AdminCheckoutForm() {
               </Button>}
               {(!membershipPaymentTarget || membershipPaymentDone) && <Button type="button" variant="outline" className="w-full" onClick={() => setLocation("/admin/memberships")}>Lihat Riwayat Membership & Pembayaran</Button>}
             </div>}
+            </>}
           </CardContent>
 
-          <CardFooter className="border-t pt-5">
+          {bookingKind !== "membership_combined" && <CardFooter className="border-t pt-5">
             {!isMembership && <div className="w-full space-y-2">
               {isCompanyPayer && multiPatterns.length === 0 && corporateSubmitBlockers.length > 0 && (
                 <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -2348,9 +2364,9 @@ export default function AdminCheckoutForm() {
               }
               </Button>
             </div>}
-          </CardFooter>
+          </CardFooter>}
         </Card>
-        {!isMembership && (
+        {!isMembership && bookingKind !== "membership_combined" && (
           <aside className="min-w-0 xl:sticky xl:top-6" aria-label="Ringkasan booking">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
@@ -2451,7 +2467,7 @@ export default function AdminCheckoutForm() {
       )}
 
       {["owner","super_admin","admin","finance","admin_booking"].includes(getCurrentRole() ?? "") && (
-        <Card className="mt-6 border-blue-200 shadow-sm">
+        <Card id="gym-combined-payment-card" className="mt-6 border-blue-200 shadow-sm">
           <CardHeader className="p-0">
             <button type="button" className="flex w-full items-center justify-between gap-3 rounded-t-lg p-5 text-left font-semibold hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-expanded={combinedOpen} aria-controls="gym-combined-payment-content"

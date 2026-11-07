@@ -261,7 +261,10 @@ async function getGymFacility(executor: DbExecutor = db) {
   return gymFacility;
 }
 
-async function syncBookingRecordToBizportal(booking: typeof bookingsTable.$inferSelect) {
+async function syncBookingRecordToBizportal(
+  booking: typeof bookingsTable.$inferSelect,
+  combinedReceipt?: {id:number; total:number},
+) {
   const [facility] = await db
     .select({ name: facilitiesTable.name, category: facilitiesTable.category })
     .from(facilitiesTable)
@@ -272,6 +275,12 @@ async function syncBookingRecordToBizportal(booking: typeof bookingsTable.$infer
     booking,
     facilityName: facility.name,
     facilityCategory: facility.category,
+    // Read-only BizPortal booking mirror: same parent ref for each allocation.
+    // No bank mutation, sport_payment or accounting journal is inserted here.
+    ...(combinedReceipt ? {
+      groupRef: `GYM-GAB-${combinedReceipt.id}`,
+      groupTotal: combinedReceipt.total,
+    } : {}),
   });
 }
 
@@ -1242,7 +1251,7 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
       if(receipt.status==="photo_approved") {
         if(details.rows.some((a:any)=>a.status!=="confirmed" || a.membership_payment_id==null))
           throw new MembershipProofError(409,"Persetujuan sebelumnya belum konsisten; diperlukan audit.");
-        return {fresh:false,results:details.rows.map((a:any)=>({
+        return {fresh:false,combinedReceiptTotal:Number(receipt.amount),results:details.rows.map((a:any)=>({
           pin:String(a.user_pin),membershipId:Number(a.membership_id),
           paymentId:Number(a.membership_payment_id),name:String(a.device_name)
         })),completed:[] as any[]};
@@ -1378,7 +1387,7 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
         (receipt_id,actor,decision,allocation_count,total_amount)
         VALUES (${receiptId},${actor},'PHOTO_APPROVED_NOT_BANK_VERIFIED',
           ${details.rows.length},${receipt.amount})`);
-      return {fresh:true,completed,results:completed.map(x=>({
+      return {fresh:true,completed,combinedReceiptTotal:Number(receipt.amount),results:completed.map(x=>({
         pin:x.pin,name:x.name,membershipId:x.membership.id,paymentId:x.payment.id
       }))};
     });
@@ -1387,7 +1396,9 @@ router.post("/memberships/admin-combined-receipts/:id/approve-photo", adminMiddl
     if(result.fresh) {
       for(const item of result.completed) {
         syncMembershipToBizportal(item.membership).catch(err=>req.log.error({err},"Combined membership sync failed"));
-        syncBookingRecordToBizportal(item.booking).catch(err=>req.log.error({err},"Combined booking sync failed"));
+        syncBookingRecordToBizportal(item.booking, {
+          id:receiptId, total:result.combinedReceiptTotal,
+        }).catch(err=>req.log.error({err},"Combined booking sync failed"));
         reportGymPayment(item.membership,item.payment,item.booking,"confirmed",undefined,
           item.action==="new"?"new":"renew").catch(err=>req.log.error({err},"Combined WA notification failed"));
         syncToPublic(item.membership).catch(err=>req.log.error({err},"Combined membership public sync failed"));
