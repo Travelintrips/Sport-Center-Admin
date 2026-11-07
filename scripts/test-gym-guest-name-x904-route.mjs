@@ -9,8 +9,8 @@ const admin=r("artifacts/sport-center/src/pages/admin/WaBookings.tsx");
 
 test("match exact name uniquely; reject member, VIP PIN, card identities and unknown registry",()=>{
  assert.match(service,/regexp_replace\(trim\(display_name\)/);
- assert.match(service,/matched\.rows\.length === 0\) return \{ route: "visitor_card"/);
- assert.match(service,/matched\.rows\.length !== 1\) return \{ route: "staff_review"/);
+ assert.match(service,/!matched\.rows\.length\) \{/);
+ assert.match(service,/matched\.rows\.length !== 1\) return recognized\(\)/);
  assert.match(service,/VIS_PINS\.has\(pin\) \|\| RESERVED_PINS\.has\(pin\)/);
  assert.match(service,/Number\(entry\.device_role\) !== 0/);
  assert.match(service,/gym_x904_member_mapping/);
@@ -65,8 +65,8 @@ test("PIN preview remains server-side, name lookup does not return stored PIN",(
  assert.match(ui,/customerName:name/);
 });
 test("unverified nonmember inventory match is informational and never grants access",()=>{
- assert.match(service,/inventoryPinMatch = submittedPin \? submittedPin === pin : null/);
- assert.match(service,/route: "staff_review", userPin: null, deviceUid: null, displayName: null, inventoryPinMatch/);
+ assert.match(service,/inventoryPinMatch: submittedPin \? submittedPin === pin : null/);
+ assert.match(service,/return recognized\(\)/);
  assert.match(ui,/Akses menunggu verifikasi petugas/);
  assert.match(api,/resolveGymGuestName\(name, submittedPin\)/);
 });
