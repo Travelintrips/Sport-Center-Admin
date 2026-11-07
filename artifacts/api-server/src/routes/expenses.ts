@@ -77,6 +77,7 @@ async function syncToPublic(expense: typeof expensesTable.$inferSelect, facility
         totalAmount: expense.totalAmount,
         paymentMethod: expense.paymentMethod,
         paymentAccount: expense.paymentAccount,
+        bankReference: expense.bankReference,
         paymentStatus: expense.paymentStatus,
         receiptUrl: expense.receiptUrl,
         receiptUrls: expense.receiptUrls ?? [],
@@ -102,6 +103,7 @@ async function syncToPublic(expense: typeof expensesTable.$inferSelect, facility
           totalAmount: expense.totalAmount,
           paymentMethod: expense.paymentMethod,
           paymentAccount: expense.paymentAccount,
+          bankReference: expense.bankReference,
           paymentStatus: expense.paymentStatus,
           receiptUrl: expense.receiptUrl,
           receiptUrls: expense.receiptUrls ?? [],
@@ -372,7 +374,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     const { ipAddress, userAgent } = getClientInfo(req);
     const {
       expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
-      amount, ppnAmount = 0, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
+      amount, ppnAmount = 0, paymentMethod, paymentAccount, bankReference, receiptUrl, receiptUrls, notes,
     } = req.body;
 
     if (!expenseDate || !description || !amount) {
@@ -380,6 +382,10 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       return;
     }
 
+    if (typeof bankReference !== "undefined" && (typeof bankReference !== "string" || bankReference.length > 120)) {
+      res.status(400).json({ error: "Referensi bank maksimal 120 karakter" });
+      return;
+    }
     if (typeof notes !== "string" || notes.trim().length < 3) {
       res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
       return;
@@ -426,6 +432,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       totalAmount: String(totalNum),
       paymentMethod: paymentMethod || null,
       paymentAccount: paymentAccount || null,
+      bankReference: typeof bankReference === "string" ? bankReference.trim() || null : null,
       paymentStatus: "draft",
       receiptUrl: receiptUrl || null,
       receiptUrls: Array.isArray(receiptUrls) ? receiptUrls : [],
@@ -485,9 +492,13 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
 
     const {
       expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
-      amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
+      amount, ppnAmount, paymentMethod, paymentAccount, bankReference, receiptUrl, receiptUrls, notes,
     } = req.body;
 
+    if (bankReference !== undefined && (typeof bankReference !== "string" || bankReference.length > 120)) {
+      res.status(400).json({ error: "Referensi bank maksimal 120 karakter" });
+      return;
+    }
     if (notes !== undefined && (typeof notes !== "string" || notes.trim().length < 3)) {
       res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
       return;
@@ -527,6 +538,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       totalAmount: String(totalNum),
       paymentMethod: paymentMethod !== undefined ? paymentMethod || null : existing.paymentMethod,
       paymentAccount: paymentAccount !== undefined ? paymentAccount || null : existing.paymentAccount,
+      bankReference: bankReference !== undefined ? bankReference.trim() || null : existing.bankReference,
       receiptUrl: receiptUrl !== undefined ? receiptUrl || null : existing.receiptUrl,
       receiptUrls: receiptUrls !== undefined ? (Array.isArray(receiptUrls) ? receiptUrls : []) : (existing.receiptUrls ?? []),
       notes: notes !== undefined ? notes || null : existing.notes,

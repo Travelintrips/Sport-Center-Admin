@@ -43,6 +43,7 @@ export const expensesTable = scSchema.table("sport_expenses", {
   totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull(),
   paymentMethod: text("payment_method"),
   paymentAccount: text("payment_account"),
+  bankReference: text("bank_reference"),
   paymentStatus: expenseStatusEnum("payment_status").notNull().default("draft"),
   receiptUrl: text("receipt_url"),
   receiptUrls: jsonb("receipt_urls").$type<string[]>().default([]),

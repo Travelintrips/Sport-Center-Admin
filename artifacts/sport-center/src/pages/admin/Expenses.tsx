@@ -10,13 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ChevronsUpDown, Check } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Search, TrendingDown, Clock, CheckCircle2,
   Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
-  Upload, Loader2, Trash2, BookOpen, Building2,
+  Upload, Loader2, Trash2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -76,6 +76,7 @@ const EMPTY_FORM = {
   paymentAccount: "",
   receiptUrls: [] as string[],
   notes: "",
+  bankReference: "",
 };
 
 interface Vendor {
@@ -103,8 +104,8 @@ export default function AdminExpenses() {
   const [endDate, setEndDate] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
-  const [coaOpen, setCoaOpen] = useState(false);
-  const [vendorOpen, setVendorOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [recipientFocused, setRecipientFocused] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
@@ -237,6 +238,13 @@ export default function AdminExpenses() {
         .then((d) => (Array.isArray(d) ? d.filter((v: any) => v.isActive) : [])),
   });
 
+  const { data: employees = [] } = useQuery<Array<{ employeeId: string; fullName: string; isActive: boolean }>>({
+    queryKey: ["sc-employees-expense-recipient"],
+    queryFn: () => fetch(`${API}/admin/sc-employees`, { headers: authHeaders() })
+      .then((r) => { if (!r.ok) throw new Error("Daftar karyawan gagal dimuat"); return r.json(); })
+      .then((rows) => Array.isArray(rows) ? rows.filter((e) => e.isActive) : []),
+  });
+
   const { data: detail } = useQuery({
     queryKey: ["expense-detail", detailId],
     queryFn: () =>
@@ -343,17 +351,15 @@ export default function AdminExpenses() {
   const summary = data?.summary ?? { totalThisMonth: 0, pendingApproval: 0, paid: 0, unpaid: 0 };
   const allExpenses: any[] = data?.expenses ?? [];
 
-  // Group COA accounts by type for display
-  const coaByType = (coaAccounts as CoaAccount[]).reduce((acc, a) => {
-    if (!acc[a.accountType]) acc[a.accountType] = [];
-    acc[a.accountType]!.push(a);
-    return acc;
-  }, {} as Record<string, CoaAccount[]>);
-
   // Get selected COA account info
   const selectedCoa = form.coaAccountId
     ? (coaAccounts as CoaAccount[]).find((a) => a.id === Number(form.coaAccountId)) ?? null
     : null;
+
+  const recipientSuggestions = [
+    ...employees.map((e) => ({ key: `staff-${e.employeeId}`, name: e.fullName, kind: "Karyawan SC", vendorId: "" })),
+    ...vendors.map((v) => ({ key: `vendor-${v.id}`, name: v.name, kind: "Vendor", vendorId: String(v.id) })),
+  ].filter((entry) => entry.name.toLowerCase().includes(form.vendorName.trim().toLowerCase())).slice(0, 8);
 
   const filtered = allExpenses.filter((e: any) => {
     if (!search) return true;
@@ -371,6 +377,7 @@ export default function AdminExpenses() {
   function openCreate() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM });
+    setShowAdvanced(false);
     setProofPreview(null);
     setAutoReadProof(false);
     setFormOpen(true);
@@ -392,7 +399,8 @@ export default function AdminExpenses() {
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
-      notes: expense.notes ?? "",
+      notes: expense.notes || expense.description || "",
+      bankReference: expense.bankReference ?? "",
     });
     setProofPreview(null);
     setFormOpen(true);
@@ -408,7 +416,7 @@ export default function AdminExpenses() {
     const body = {
       expenseDate: form.expenseDate,
       coaAccountId: form.coaAccountId ? Number(form.coaAccountId) : null,
-      description: form.description,
+      description: form.notes.trim(),
       vendorId: form.vendorId ? Number(form.vendorId) : null,
       vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
@@ -418,6 +426,7 @@ export default function AdminExpenses() {
       paymentAccount: form.paymentAccount || null,
       receiptUrls: form.receiptUrls,
       notes: form.notes.trim(),
+      bankReference: form.bankReference.trim(),
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, body });
@@ -648,207 +657,15 @@ export default function AdminExpenses() {
           </DialogHeader>
           <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
             <p className="font-semibold">Pencatatan Pengeluaran Sport Center</p>
-            <p className="mt-1">Isi data dan catatan tujuan transaksi, lalu lampirkan bukti transfer/QRIS (termasuk blu). Data tersimpan sebagai pencatatan operasional, bukan jurnal atau mutasi bank terverifikasi. BizPortal tetap menangani rekonsiliasi Google Sheets kas besar sc.</p>
+            <p className="mt-1">Catat transaksi yang sudah dilakukan. Catatan tujuan wajib; bukti dapat dilampirkan untuk membantu pencocokan mutasi.</p>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Tanggal <span className="text-red-500">*</span></Label>
-                <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
-              </div>
-              <div className="space-y-1">
-                <Label className="flex items-center gap-1">
-                  <BookOpen className="w-3.5 h-3.5 text-orange-500" />
-                  Kategori internal / COA referensi (opsional)
-                </Label>
-                <Popover open={coaOpen} onOpenChange={setCoaOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {selectedCoa
-                        ? <span><span className="font-mono text-xs text-gray-500 mr-1">{selectedCoa.code}</span>{selectedCoa.name}</span>
-                        : <span className="text-muted-foreground">Pilih akun COA...</span>
-                      }
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[320px] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Cari akun COA..." />
-                      <CommandList className="max-h-64">
-                        <CommandEmpty>Akun tidak ditemukan.</CommandEmpty>
-                        {Object.entries(coaByType).map(([type, accounts]) => (
-                          <CommandGroup key={type} heading={ACCOUNT_TYPE_LABELS[type] ?? type}>
-                            {accounts.map((acc) => (
-                              <CommandItem
-                                key={acc.id}
-                                value={`${acc.code} ${acc.name}`}
-                                onSelect={() => {
-                                  setForm({ ...form, coaAccountId: String(acc.id) });
-                                  setCoaOpen(false);
-                                }}
-                              >
-                                <Check className={`mr-2 h-4 w-4 ${form.coaAccountId === String(acc.id) ? "opacity-100" : "opacity-0"}`} />
-                                <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
-                                {acc.name}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        ))}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                {selectedCoa && (
-                  <div className="text-xs mt-1 p-2 rounded-md bg-orange-50 border border-orange-100 flex items-center gap-2">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${ACCOUNT_TYPE_COLORS[selectedCoa.accountType] ?? "bg-gray-100"}`}>
-                      {ACCOUNT_TYPE_LABELS[selectedCoa.accountType] ?? selectedCoa.accountType}
-                    </span>
-                    <span className="text-gray-600">
-                      Hanya klasifikasi internal. Jurnal dikelola BizPortal.
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Deskripsi <span className="text-red-500">*</span></Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="Deskripsi pengeluaran..."
-                rows={2}
-                required
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label>Catatan tujuan transaksi <span className="text-red-500">*</span></Label>
-              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Wajib: barang/jasa yang dibeli, tujuan pembayaran, atau alasan transfer..." rows={2} required minLength={3} />
-              <p className="text-xs text-gray-500">Berbeda dari deskripsi bank; catatan ini menjadi keterangan pembukuan Sport Center.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label className="flex items-center gap-1">
-                  <Building2 className="w-3.5 h-3.5 text-orange-500" />
-                  Vendor / Supplier
-                </Label>
-                <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {form.vendorId
-                        ? <span className="font-medium">{vendors.find((v) => v.id === Number(form.vendorId))?.name ?? "Pilih vendor..."}</span>
-                        : <span className="text-muted-foreground">Pilih vendor...</span>
-                      }
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[280px] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Cari vendor..." />
-                      <CommandList className="max-h-56">
-                        <CommandEmpty>
-                          <div className="text-center py-2">
-                            <p className="text-sm text-gray-500">Vendor tidak ditemukan.</p>
-                            <a href="/admin/vendors" className="text-xs text-orange-500 underline" target="_blank">
-                              Tambah vendor baru →
-                            </a>
-                          </div>
-                        </CommandEmpty>
-                        <CommandGroup>
-                          {vendors.map((v) => (
-                            <CommandItem
-                              key={v.id}
-                              value={v.name}
-                              onSelect={() => {
-                                setForm({ ...form, vendorId: String(v.id), vendorName: v.name });
-                                setVendorOpen(false);
-                              }}
-                            >
-                              <Check className={`mr-2 h-4 w-4 ${form.vendorId === String(v.id) ? "opacity-100" : "opacity-0"}`} />
-                              {v.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                {vendors.length === 0 && (
-                  <p className="text-xs text-amber-600">Belum ada vendor aktif. <a href="/admin/vendors" className="underline" target="_blank">Tambah vendor</a></p>
-                )}
-              </div>
-              <div className="space-y-1">
-                <Label>Fasilitas Terkait</Label>
-                <Select value={form.facilityId || "none"} onValueChange={(v) => setForm({ ...form, facilityId: v === "none" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="Pilih fasilitas (opsional)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tidak terkait fasilitas</SelectItem>
-                    {(facilities as any[]).map((f: any) => (
-                      <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <Label>Nominal (Rp) <span className="text-red-500">*</span></Label>
-                <Input
-                  type="number" min="0" step="1000"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  placeholder="0"
-                  required
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>PPN Masukan (Rp)</Label>
-                <Input
-                  type="number" min="0" step="1000"
-                  value={form.ppnAmount}
-                  onChange={(e) => setForm({ ...form, ppnAmount: e.target.value })}
-                  placeholder="0"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Total</Label>
-                <Input value={formatIDR(totalNum)} disabled className="bg-gray-50 font-bold" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Metode Pembayaran</Label>
-                <Select value={form.paymentMethod || "none"} onValueChange={(v) => setForm({ ...form, paymentMethod: v === "none" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="Pilih metode" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tidak ditentukan</SelectItem>
-                    {PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Rekening sumber pembayaran (keterangan)</Label>
-                <p className="text-xs text-gray-500">Misalnya: blu by BCA Digital, Mandiri, atau kas tunai. Bukan pemetaan COA otomatis.</p>
-                <Input value={form.paymentAccount} onChange={(e) => setForm({ ...form, paymentAccount: e.target.value })} placeholder="Nama bank / no. rekening" />
-              </div>
-            </div>
-
             <div className="space-y-2">
               <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
-              <p className="text-xs text-gray-500">Unggah screenshot atau bukti transaksi blu (seperti bukti yang dibagikan dari aplikasi). Periksa isian tanggal, nominal dan penerima secara manual.</p>
+              <p className="text-xs text-gray-500">Boleh unggah bukti dulu, lalu isi formulir. Periksa hasil pembacaan sebelum menyimpan.</p>
               <label className="flex items-start gap-2 text-xs text-gray-700">
                 <input type="checkbox" checked={autoReadProof} onChange={(e) => setAutoReadProof(e.target.checked)} className="mt-0.5" />
-                <span>Baca bukti otomatis (opsional). Jika diaktifkan, foto diproses oleh OCR server yang dapat memakai layanan AI terkonfigurasi sebagai cadangan; admin tetap harus memeriksa hasilnya.</span>
+                <span>Isi otomatis dari bukti (opsional, memerlukan persetujuan pemrosesan AI). Admin tetap memeriksa hasilnya.</span>
               </label>
               {scanningProof && <p className="text-xs text-teal-700">Membaca bukti pembayaran untuk saran isian...</p>}
               {proofPreview && (
@@ -915,6 +732,111 @@ export default function AdminExpenses() {
               </button>
             </div>
 
+
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Tanggal transaksi <span className="text-red-500">*</span></Label>
+                <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
+              </div>
+              <div className="space-y-1">
+                <Label>Nominal (Rp) <span className="text-red-500">*</span></Label>
+                <Input type="number" min="0.01" step="0.01" value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="Contoh: 200000" required />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Catatan / Tujuan Pengeluaran <span className="text-red-500">*</span></Label>
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Contoh: Reimburse pengisian daya kendaraan operasional" rows={3} minLength={3} required />
+              <p className="text-xs text-gray-500">Jelaskan kegunaan dana. Untuk kasbon atau talangan, tuliskan secara jelas agar tidak dianggap beban biasa.</p>
+            </div>
+            <div className="space-y-1 relative">
+              <Label>Penerima Pembayaran (opsional)</Label>
+              <Input value={form.vendorName} onFocus={() => setRecipientFocused(true)}
+                onBlur={() => window.setTimeout(() => setRecipientFocused(false), 150)}
+                onChange={(e) => setForm({ ...form, vendorName: e.target.value, vendorId: "" })}
+                placeholder="Ketik nama karyawan, toko, PLN, atau penerima lainnya" autoComplete="off" />
+              {recipientFocused && form.vendorName.trim().length > 0 && recipientSuggestions.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 top-full mt-1 rounded-md border bg-white shadow-md max-h-48 overflow-y-auto">
+                  {recipientSuggestions.map((entry) => (
+                    <button key={entry.key} type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-orange-50 text-sm flex justify-between gap-2"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => { setForm({ ...form, vendorName: entry.name, vendorId: entry.vendorId }); setRecipientFocused(false); }}>
+                      <span>{entry.name}</span><span className="text-gray-400 text-xs">{entry.kind}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-gray-500">Boleh pilih dari karyawan/vendor atau gunakan teks sendiri, tanpa membuat master baru.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Metode Pembayaran</Label>
+                <Select value={form.paymentMethod || "none"} onValueChange={(v) => setForm({ ...form, paymentMethod: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="Pilih metode" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Tidak ditentukan</SelectItem>
+                    {PAYMENT_METHODS.map((method) => <SelectItem key={method} value={method}>{method}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Sumber Dana (hanya keterangan)</Label>
+                <Select value={["blu by BCA Digital", "Mandiri", "Kas Tunai", "Lainnya"].includes(form.paymentAccount) ? form.paymentAccount : form.paymentAccount ? "Lainnya" : "none"}
+                  onValueChange={(value) => setForm({ ...form, paymentAccount: value === "none" ? "" : value })}>
+                  <SelectTrigger><SelectValue placeholder="Pilih sumber dana" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Tidak ditentukan</SelectItem>
+                    <SelectItem value="blu by BCA Digital">blu by BCA Digital</SelectItem>
+                    <SelectItem value="Mandiri">Mandiri</SelectItem>
+                    <SelectItem value="Kas Tunai">Kas Tunai</SelectItem>
+                    <SelectItem value="Lainnya">Lainnya (isi manual)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.paymentAccount === "Lainnya" && <Input className="mt-2" placeholder="Nama sumber dana lainnya"
+                  onChange={(e) => setForm({ ...form, paymentAccount: e.target.value ? `Lainnya: ${e.target.value}` : "Lainnya" })} />}
+                {form.paymentAccount.startsWith("Lainnya: ") && <Input className="mt-2" placeholder="Nama sumber dana lainnya"
+                  value={form.paymentAccount.slice(9)}
+                  onChange={(e) => setForm({ ...form, paymentAccount: e.target.value ? `Lainnya: ${e.target.value}` : "Lainnya" })} />}
+                <p className="text-xs text-gray-500">Tidak memetakan COA, tidak membuat jurnal, dan bukan bank tujuan penerima.</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Nomor Referensi Bank (opsional)</Label>
+              <Input value={form.bankReference} maxLength={120}
+                onChange={(e) => setForm({ ...form, bankReference: e.target.value })}
+                placeholder="Nomor referensi pada bukti transfer / QRIS" />
+              <p className="text-xs text-gray-500">Digunakan sebagai informasi pemeriksaan, bukan konfirmasi otomatis ke bank.</p>
+            </div>
+            <div className="rounded-lg border">
+              <button type="button" className="w-full text-left p-3 flex justify-between items-center text-sm font-medium"
+                onClick={() => setShowAdvanced(!showAdvanced)}>
+                <span>Pengaturan tambahan (fasilitas, pajak, kategori)</span>
+                <ChevronsUpDown className="h-4 w-4 text-gray-400" />
+              </button>
+              {showAdvanced && (
+                <div className="p-3 pt-0 space-y-3">
+                  <div className="space-y-1">
+                    <Label>Fasilitas terkait</Label>
+                    <Select value={form.facilityId || "none"} onValueChange={(v) => setForm({ ...form, facilityId: v === "none" ? "" : v })}>
+                      <SelectTrigger><SelectValue placeholder="Pilih fasilitas (opsional)" /></SelectTrigger>
+                      <SelectContent><SelectItem value="none">Tidak terkait fasilitas</SelectItem>
+                        {(facilities as any[]).map((f: any) => <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>PPN Masukan (Rp)</Label>
+                    <Input type="number" min="0" step="0.01" value={form.ppnAmount}
+                      onChange={(e) => setForm({ ...form, ppnAmount: e.target.value })} placeholder="0" />
+                    <p className="text-xs text-gray-500">Jika diisi, PPN ditambahkan di atas nominal dasar. Biaya admin pada bukti bank dicatat sebagai transaksi terpisah bila merupakan mutasi terpisah.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
 
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
@@ -993,8 +915,9 @@ export default function AdminExpenses() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-gray-500">Tanggal</span><p className="font-semibold">{detail.expenseDate}</p></div>
                 <div><span className="text-gray-500">Kategori</span><p className="font-semibold">{detail.category}</p></div>
-                <div className="col-span-2"><span className="text-gray-500">Deskripsi</span><p className="font-semibold">{detail.description}</p></div>
-                {detail.vendorName && <div><span className="text-gray-500">Vendor</span><p className="font-semibold">{detail.vendorName}</p></div>}
+                <div className="col-span-2"><span className="text-gray-500">Catatan / Tujuan</span><p className="font-semibold">{detail.description}</p></div>
+                {detail.vendorName && <div><span className="text-gray-500">Penerima</span><p className="font-semibold">{detail.vendorName}</p></div>}
+                {detail.bankReference && <div className="col-span-2"><span className="text-gray-500">Referensi bank</span><p className="font-mono break-all">{detail.bankReference}</p></div>}
                 {detail.facilityName && <div><span className="text-gray-500">Fasilitas</span><p className="font-semibold">{detail.facilityName}</p></div>}
                 <div><span className="text-gray-500">Nominal</span><p className="font-semibold">{formatIDR(detail.amount)}</p></div>
                 {detail.ppnAmount > 0 && <div><span className="text-gray-500">PPN Masukan</span><p className="font-semibold">{formatIDR(detail.ppnAmount)}</p></div>}
