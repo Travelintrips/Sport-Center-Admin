@@ -68,7 +68,9 @@ beforeAll(async () => {
       ('TDBD234200545','602',602,'TEST REVOKED',0),
       ('TDBD234200545','603',603,'TEST RACE',0),
       ('TDBD234200545','13',13,'VIS 003',0),
-      ('TDBD234200545','17',17,'VIS 004',0);`);
+      ('TDBD234200545','17',17,'VIS 004',0),
+      ('TDBD234200545','90',339,'VIS 002',0),
+      ('TDBD234200545','15',15,'VIS 006',0);`);
   await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
     INSERT INTO sport_center.sport_bookings(id) VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
