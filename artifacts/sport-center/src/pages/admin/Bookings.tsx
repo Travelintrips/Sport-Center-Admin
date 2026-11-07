@@ -5706,6 +5706,14 @@ export default function AdminBookings() {
                               ) : (
                                 <span className="text-xs font-semibold text-slate-500">Status booking campuran</span>
                               )
+                            ) : b.source === "gym_public_guest" && tableHasPendingProofForVerification ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                                title="Bukti pembayaran sudah diterima. Verifikasi pembayaran dan alokasi kartu hanya dilakukan dari Detail Booking."
+                              >
+                                <CreditCard size={11} />
+                                Menunggu Verifikasi
+                              </span>
                             ) : (
                               <InlineStatusSelect
                                 bookingId={b.id}
