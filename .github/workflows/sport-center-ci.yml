@@ -224,6 +224,9 @@ jobs:
       - name: Verify Sync Total disabled during Sheets checks
         run: node scripts/test-sc-kasbon-sync-button-loading.mjs
 
+      - name: Verify Kasbon Edit and Hapus password gate
+        run: node scripts/test-sc-kasbon-password-gate.mjs
+
       - name: Verify Kasbon create Simpan/Sync without duplicate writes
         run: node scripts/test-sc-kasbon-save-sync.mjs
 
