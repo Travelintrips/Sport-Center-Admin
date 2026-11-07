@@ -22,7 +22,7 @@ const salaryRows=[
  [3,'FEBRIANSYAH','','','','','',''],
  [4,'SENO','','','','','',''],
  ['TOTAL','','','','','','TOTAL',10020000],
- [],[],[],
+ [],[],[],[],
  ['NO','NAMA','UANG MAKAN','Hari Kerja','PERSENTASE','Total Salary','kasbon','Sisa Gaji'],
  [1,'ROBBY','','','','','',''],
  [2,'MELSA','','','','','',''],
