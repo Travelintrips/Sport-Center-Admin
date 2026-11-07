@@ -485,3 +485,83 @@ test("real VIS reservation service: admin-confirmed payment creates one held gra
   const replay=await collectReservedVisCard({orderNumber:order,physicalCardHandedOver:true,collectedBy:"CI_STAFF"});
   expect(replay.state).toBe("collected");
 });
+
+test("public PIN review gate: checkout and confirmed payment alone never activate; staff approval permits verified ACK", async () => {
+  // Mirror the current production payment trigger on disposable PostgreSQL.
+  // The historical base migration did not distinguish guest PINs; production does.
+  await run(`CREATE OR REPLACE FUNCTION sport_center.link_x904_nonmember_daily_payment()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO sport_center, pg_temp AS $fn$
+    DECLARE changed boolean := TG_OP = 'INSERT'; is_guest boolean;
+    BEGIN
+      IF TG_OP = 'UPDATE' THEN changed := OLD.status::text IS DISTINCT FROM NEW.status::text; END IF;
+      IF NEW.status::text = 'confirmed' AND changed THEN
+        SELECT EXISTS(SELECT 1 FROM sport_center.sport_bookings b
+          JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=b.id
+          WHERE b.id=NEW.booking_id AND b.source='gym_public_guest' AND a.identity_type='pin')
+          INTO is_guest;
+        UPDATE sport_center.x904_nonmember_daily_access a
+           SET payment_id=NEW.id,
+               confirmed_at=COALESCE(NEW.confirmed_at,NEW.paid_at,now()),
+               expires_at=COALESCE(NEW.confirmed_at,NEW.paid_at,now()) + interval '12 hours',
+               access_state=CASE WHEN is_guest THEN 'review_required' ELSE 'pending' END,
+               verification_state=CASE WHEN is_guest THEN 'review_required' ELSE 'verified' END
+         WHERE a.booking_id=NEW.booking_id AND a.payment_id IS NULL;
+      ELSIF NEW.status::text IN ('cancelled','rejected','refunded') AND changed THEN
+        UPDATE sport_center.x904_nonmember_daily_access
+          SET access_state=CASE WHEN access_state IN ('active','expired') THEN 'pending' ELSE access_state END
+          WHERE payment_id=NEW.id;
+      END IF;
+      RETURN NEW;
+    END; $fn$`);
+  const pin="605", uid=605, name="CI PUBLIC PIN REVIEW", bookingId=9605, paymentId=9705;
+  const t=new Date("2026-11-06T01:00:00Z");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  try {
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+      VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+    // Same initial identity/access states as the anonymous POST /wa/booking route.
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+      VALUES($1,'2026-11-06','08:00','gym_public_guest','review_required PIN',
+      'pending_payment','SC-CI-PIN-9605',$2,30000)`,[bookingId,name]);
+    await run(`INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+      booking_id,verification_state,access_state)
+      VALUES('TDBD234200545','pin','PIN VERIFIED',$1,$2,$3,$4,
+      'review_required','review_required')`,[pin,uid,name,bookingId]);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].access_id);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES($1,$2,'pending')",[paymentId,bookingId]);
+    await addSnapshot(new Date(t.getTime()-1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,t);
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+
+    await run("UPDATE sport_center.sport_bookings SET status='confirmed' WHERE id=$1",[bookingId]);
+    await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=$2 WHERE id=$1",[paymentId,t]);
+    const beforeReview=(await run("SELECT payment_id,verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(beforeReview).toMatchObject({payment_id:paymentId,verification_state:"review_required",access_state:"review_required"});
+    await addSnapshot(new Date(t.getTime()+1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(t.getTime()+2000));
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+
+    // Simulate an authenticated staff identity check; a bank approval alone cannot do this.
+    await run(`UPDATE sport_center.x904_nonmember_daily_access
+      SET verification_state='verified',access_state='pending'
+      WHERE access_id=$1 AND payment_id=$2`,[accessId,paymentId]);
+    await addSnapshot(new Date(t.getTime()+3000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(t.getTime()+4000));
+    const activate=await commandFor("ACTIVATE_USER",accessId);
+    expect(activate?.payload).toMatchObject({expectedUid:uid,source:"AUTO_NONMEMBER_GYM_12H",accessId});
+    const ackAt=new Date(t.getTime()+5500);
+    await ack(String(activate.command_id),ackAt,pin,name,uid,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(t.getTime()+8000));
+    const activated=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(activated.access_state).toBe("active");
+    expect(new Date(activated.activated_at).getTime()).toBe(ackAt.getTime());
+    expect(new Date(activated.expires_at).getTime()-ackAt.getTime()).toBe(12*60*60*1000);
+  } finally {
+    delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  }
+});
