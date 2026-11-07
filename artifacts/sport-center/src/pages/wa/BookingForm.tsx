@@ -129,6 +129,7 @@ export default function WaBookingForm() {
   const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "visitor_card" | "staff_review" | "unavailable">("idle");
   const [guestPin, setGuestPin] = useState("");
   const [guestPinMatch, setGuestPinMatch] = useState<boolean | null>(null);
+  const [guestPinChecking, setGuestPinChecking] = useState(false);
   const [guestLookupError, setGuestLookupError] = useState("");
   const guestLookupAbort = useRef<AbortController | null>(null);
 
@@ -218,7 +219,7 @@ export default function WaBookingForm() {
   useEffect(()=>{setGuestPinMatch(null);},[guestPin]);
 
   async function checkGuestPinIdentity() {
-    if (!publicGymGuest || guestIdentityRoute === "checking") return;
+    if (!publicGymGuest || guestPinChecking || guestIdentityRoute !== "registered") return;
     const name = form.customerName.trim();
     const pin = guestPin.trim();
     if (name.length < 2) {
@@ -232,7 +233,7 @@ export default function WaBookingForm() {
     guestLookupAbort.current?.abort();
     const controller = new AbortController();
     guestLookupAbort.current = controller;
-    setGuestIdentityRoute("checking");
+    setGuestPinChecking(true);
     setGuestPinMatch(null);
     setGuestLookupError("");
     try {
@@ -243,7 +244,6 @@ export default function WaBookingForm() {
       });
       if (controller.signal.aborted) return;
       if (!response.ok) {
-        setGuestIdentityRoute("unavailable");
         setGuestLookupError(response.status === 429
           ? "Batas pemeriksaan identitas tercapai (8 kali dalam 15 menit). Coba lagi setelah 15 menit atau minta bantuan petugas."
           : response.status === 503
@@ -258,9 +258,10 @@ export default function WaBookingForm() {
       setGuestPinMatch(typeof outcome.pinMatch === "boolean" ? outcome.pinMatch : null);
     } catch {
       if (!controller.signal.aborted) {
-        setGuestIdentityRoute("unavailable");
         setGuestLookupError("Tidak dapat menghubungi pemeriksaan X904. Periksa koneksi atau minta bantuan petugas.");
       }
+    } finally {
+      setGuestPinChecking(false);
     }
   }
 
@@ -829,11 +830,12 @@ export default function WaBookingForm() {
                       placeholder="Masukkan PIN pribadi" value={guestPin}
                       onChange={(event) => setGuestPin(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))} />
                     <Button type="button" variant="outline" size="sm" onClick={() => void checkGuestPinIdentity()}
-                      disabled={guestIdentityRoute === "checking" || !guestPin.trim()}>
-                      Cocokkan PIN
+                      disabled={guestPinChecking || !guestPin.trim()}>
+                      {guestPinChecking ? "Mencocokkan..." : "Cocokkan PIN"}
                     </Button>
                     {guestPinMatch === true && <p className="text-xs font-semibold text-green-700" role="status">Nama dan PIN cocok. Akses tetap menunggu persetujuan petugas.</p>}
                     {guestPinMatch === false && <p className="text-xs text-red-700" role="alert">PIN tidak cocok dengan nama.</p>}
+                    {guestLookupError && <p className="text-xs text-amber-700" role="alert">{guestLookupError}</p>
                     <p className="text-xs text-slate-500">PIN tidak ditampilkan otomatis. Pencocokan tidak membuka pintu; pembayaran dan identitas wajib diverifikasi petugas.</p>
                   </div>
                 </details>
