@@ -25,6 +25,13 @@ describe("Kasbon dedicated action gate",()=>{
   expect((await verifyKasbonPassword("wrong-but-long-enough",101,"unit-b")).status).toBe("invalid");
   expect((await verifyKasbonPassword(testPassword,101,"unit-b")).status).toBe("ok");
  });
+ it("accepts a shorter user-configured password but still checks bcrypt hash",async()=>{
+  const configured="Kasbon#9";
+  process.env.SC_KASBON_ACTION_PASSWORD_HASH=bcrypt.hashSync(configured,5);
+  expect((await verifyKasbonPassword(configured,114,"unit-short")).status).toBe("ok");
+  expect((await verifyKasbonPassword("not-the-password",114,"unit-short")).status).toBe("invalid");
+  expect((await verifyKasbonPassword("",114,"unit-short")).status).toBe("invalid");
+ });
  it("binds token to account, employee and single record; rejects tampering",async()=>{
   const token=issueKasbonGrant(101,"SC003",4);
   expect(checkKasbonGrant(token,101,"SC003",4)).toBe(true);

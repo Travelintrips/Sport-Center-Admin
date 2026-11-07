@@ -210,11 +210,11 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <p className="text-sm text-muted-foreground">Verifikasi khusus untuk KB-{String(unlockRecord?.id??0).padStart(5,"0")}. Role admin, owner, atau super_admin tidak dapat melewati verifikasi ini.</p>
     <form className="space-y-3" onSubmit={e=>{e.preventDefault();unlockAction.mutate();}}>
      <div className="space-y-1"><Label htmlFor="kasbon-action-password">Password Otorisasi</Label>
-      <Input id="kasbon-action-password" type="password" autoComplete="off" minLength={12} maxLength={256} required value={actionPassword}
+      <Input id="kasbon-action-password" type="password" autoComplete="off" minLength={1} maxLength={256} required value={actionPassword}
        onChange={e=>setActionPassword(e.target.value)} placeholder="Masukkan password khusus Kasbon"/></div>
      <div className="flex justify-end gap-2">
       <Button type="button" variant="outline" disabled={unlockAction.isPending} onClick={()=>{setUnlockRecord(null);setActionPassword("");}}>Batal</Button>
-      <Button type="submit" disabled={unlockAction.isPending||actionPassword.length<12}>{unlockAction.isPending?"Memverifikasi...":"Buka Edit / Hapus"}</Button>
+      <Button type="submit" disabled={unlockAction.isPending||actionPassword.length===0}>{unlockAction.isPending?"Memverifikasi...":"Buka Edit / Hapus"}</Button>
      </div>
     </form>
    </DialogContent>
