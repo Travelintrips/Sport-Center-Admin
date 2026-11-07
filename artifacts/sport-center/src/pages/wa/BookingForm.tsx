@@ -512,10 +512,7 @@ export default function WaBookingForm() {
           durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
           notes: form.notes,
           paymentMethod: form.paymentMethod || undefined,
-          ...(publicGymGuest ? {
-            publicGymGuest: true,
-            ...(guestPin.trim() ? { requestedX904Pin: guestPin.trim() } : {}),
-          } : {}),
+          ...(publicGymGuest ? { publicGymGuest: true } : {}),
           ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
             ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
         }),
