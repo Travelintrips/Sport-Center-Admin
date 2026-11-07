@@ -33,6 +33,21 @@ function getTodayWIB(): string {
   return getWIBNow().toISOString().split("T")[0];
 }
 
+async function hasPendingProofAwaitingVerification(bookingId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT EXISTS (
+      SELECT 1
+      FROM sport_center.sport_payments p
+      WHERE p.booking_id = ${bookingId}
+        AND p.status = 'pending'
+        AND p.proof_url IS NOT NULL
+        AND BTRIM(p.proof_url) <> ''
+    ) AS protected
+  `);
+  const row = (((result as any).rows ?? result) as Array<{ protected?: boolean }>)[0];
+  return row?.protected === true;
+}
+
 async function expireOverdueMemberships(): Promise<void> {
   try {
     const todayWIB = getTodayWIB();
@@ -279,6 +294,13 @@ async function expireOverdueBookings(): Promise<void> {
     const reconProtectedIds = new Set((reconRows as any[]).map((r) => Number(r.booking_id)));
 
     for (const booking of overdue) {
+      // Bukti pembayaran sudah diterima dan masih pending verifikasi Admin/Finance:
+      // jangan expire slot atau kirim notifikasi expired seolah customer belum bayar.
+      if (await hasPendingProofAwaitingVerification(booking.id)) {
+        logger.info(`[scheduler] Booking ${booking.orderNumber} overdue tetapi bukti pembayaran sedang menunggu verifikasi — expiry dilewati`);
+        continue;
+      }
+
       // Skip booking yang ada kandidat rekonsiliasi aktif — biarkan admin konfirmasi dulu
       if (reconProtectedIds.has(booking.id)) {
         logger.info(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
@@ -471,6 +493,13 @@ async function sendPaymentReminder(): Promise<void> {
 
     for (const booking of pending) {
       if (!booking.paymentDeadline) continue;
+
+      // Customer sudah mengirim bukti; status operasionalnya menunggu verifikasi,
+      // sehingga jangan kirim reminder "belum bayar" lagi.
+      if (await hasPendingProofAwaitingVerification(booking.id)) {
+        logger.info(`[scheduler] Payment reminder skipped for ${booking.orderNumber}: proof awaiting verification`);
+        continue;
+      }
 
       const msLeft = booking.paymentDeadline.getTime() - now.getTime();
       if (msLeft <= 0) continue; // sudah expired, biarkan expireOverdueBookings yang handle
