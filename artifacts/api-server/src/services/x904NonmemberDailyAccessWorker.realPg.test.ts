@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { pool as appDatabasePool } from "@workspace/db";
 import { readFileSync } from "node:fs";
 import { processX904NonmemberDailyAccess } from "./x904NonmemberDailyAccessWorker";
+import { processX904NewOrdinaryUserDefaultSuspend } from "./x904NewOrdinaryUserDefaultSuspend";
 import { autoReserveVisAfterFundsVerified, collectReservedVisCard } from "./x904GymVisitorCardReservations";
 
 // All paid access scenarios use 08:00 WIB on 2026-11-06 as a stable
@@ -13,7 +14,7 @@ if (!url || !/^postgres(?:ql)?:\/\/[^@/]+@127\.0\.0\.1:5544[45]\/x904_nonmember(
 const pool = new pg.Pool({ connectionString: url, max: 2 });
 const db = drizzle(pool);
 const run = (query: string, params?: unknown[]) => pool.query(query, params);
-const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY","GYM_X904_NONMEMBER_ONLY_PIN","GYM_X904_NONMEMBER_ALLOWED_PINS"] as const;
+const envKeys = ["GYM_X904_NONMEMBER_ACCESS_ENABLED","GYM_X904_MANUAL_ACCESS_ENABLED","GYM_X904_USER_WRITE_ENABLED","GYM_X904_AUTOMATIC_REQUESTED_BY","GYM_X904_NONMEMBER_ONLY_PIN","GYM_X904_NONMEMBER_ALLOWED_PINS","GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED","GYM_X904_NEW_USER_BASELINE_AT","GYM_X904_NEW_USER_ONLY_PIN"] as const;
 const oldEnv = envKeys.map(key => process.env[key]);
 const migration = readFileSync("migrations/20261031_x904_nonmember_daily_access.sql","utf8");
 const activationClockMigration = readFileSync("migrations/20261102_x904_nonmember_verified_activation_clock.sql","utf8");
@@ -655,4 +656,45 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
       expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("review_required");
     }
   } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
+
+test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and historical pins untouched", async () => {
+  // Isolated local PostgreSQL; never send machine commands to a real X904.
+  process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED = "true";
+  process.env.GYM_X904_NEW_USER_BASELINE_AT = "2026-11-08T23:59:00.000Z";
+  const at = new Date("2026-11-09T00:02:00.000Z");
+  try {
+    await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
+      VALUES ('TDBD234200545','650',650,'NEW ROLE ZERO',0),
+             ('TDBD234200545','651',651,'NEW ROLE FOUR',4),
+             ('TDBD234200545','652',652,'NEW ROLE FOURTEEN',14),
+             ('TDBD234200545','653',653,'OLDER USER',0)`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots
+      (device_serial,observed_at,user_count,users)
+      VALUES ('TDBD234200545','2026-11-09T00:00:00Z',1,
+        '[{"pin":"653","name":"OLDER USER","role":0,"group":1,"enabled":true}]'::jsonb)`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots
+      (device_serial,observed_at,user_count,users)
+      VALUES ('TDBD234200545','2026-11-09T00:01:00Z',4,
+        '[{"pin":"653","name":"OLDER USER","role":0,"group":1,"enabled":true},
+          {"pin":"650","name":"NEW ROLE ZERO","role":0,"group":1,"enabled":true},
+          {"pin":"651","name":"NEW ROLE FOUR","role":4,"group":1,"enabled":true},
+          {"pin":"652","name":"NEW ROLE FOURTEEN","role":14,"group":1,"enabled":true}]'::jsonb)`);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any, at);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any, at);
+    const cmds = (await run(`SELECT user_pin,command_type,payload,state
+      FROM sport_center.x904_user_commands
+      WHERE payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;
+    expect(cmds).toHaveLength(1);
+    expect(cmds[0]).toMatchObject({
+      user_pin:"650",command_type:"SUSPEND_USER",state:"queued",
+      payload:{expectedUid:650,expectedName:"NEW ROLE ZERO",expectedRole:0}
+    });
+    // No automatic commands for 651 role4, 652 role14 or existing 653.
+    expect(cmds.some((c:any) => ["651","652","653"].includes(c.user_pin))).toBe(false);
+  } finally {
+    delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
+    delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
+  }
 });
