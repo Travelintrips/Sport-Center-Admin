@@ -39,15 +39,17 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   queryKey:syncKey,
   queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
   enabled:!isLoading&&!isError&&records.length>0,
-  staleTime:60_000,
-  refetchOnWindowFocus:false,
+  staleTime:0,
+  refetchOnWindowFocus:true,
   retry:false,
  });
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
  const syncEvidence=salaryCheck??initialSalaryCheck;
  const isSalarySynced=Boolean(syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
+ // Historical receipt alone cannot prove the current payroll G cell matches.
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
+ const payrollMatches=Boolean(syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
  const save=useMutation({
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
@@ -89,7 +91,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
 
  const checkSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
-  onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);setCheckOpen(true);},
+  onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
   onError:(e:Error)=>{setSalaryCheck(null);toast({title:"Check Sync gagal",description:e.message,variant:"destructive"});}
  });
  const previewSalary=useMutation({
@@ -151,7 +153,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
-    <td className="p-3">{syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
+    <td className="p-3">{payrollMatches&&syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:syncedRecordIds.has(r.id)?<span className="text-xs font-medium text-amber-700">Perlu Sync Total</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
     <Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
