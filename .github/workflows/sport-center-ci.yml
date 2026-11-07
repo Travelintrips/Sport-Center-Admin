@@ -221,6 +221,9 @@ jobs:
       - name: Verify green payroll badge requires current Sheets G match
         run: node scripts/test-sc-kasbon-total-badge-live-match.mjs
 
+      - name: Verify Sync Total disabled during Sheets checks
+        run: node scripts/test-sc-kasbon-sync-button-loading.mjs
+
       - name: Verify Kasbon create Simpan/Sync without duplicate writes
         run: node scripts/test-sc-kasbon-save-sync.mjs
 
