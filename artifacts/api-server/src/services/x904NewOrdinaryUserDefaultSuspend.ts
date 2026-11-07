@@ -113,6 +113,16 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
   if (!newCandidates.length) return;
+  // An implausibly large simultaneous inventory expansion could indicate
+  // sync corruption or a partial/device restore. Fail closed rather than
+  // sending bulk access commands; an operator must review the snapshot.
+  if (newCandidates.length > 10) {
+    console.error("[x904-new-user-default-suspend] unexpected-bulk-enrollment", JSON.stringify({
+      candidates: newCandidates.length, maximumPerSnapshot: 10,
+      action: "review_snapshot_before_automatic_commands",
+    }));
+    return;
+  }
 
   for (const candidate of newCandidates) {
     const pin = String(candidate.pin);
@@ -129,7 +139,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     if (history.slice(firstIndex).some(row =>
       (row.users as SnapshotUser[]).filter(u =>
         String(u.pin ?? "") === pin &&
-        String(u.name ?? "").trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") ===
+        String(u.name ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") ===
           name.toLocaleUpperCase("id-ID") &&
         Number(u.role) === 0).length !== 1)) continue;
     const onlyPin = process.env.GYM_X904_NEW_USER_ONLY_PIN;
