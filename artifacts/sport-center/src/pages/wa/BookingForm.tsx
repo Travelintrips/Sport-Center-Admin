@@ -210,6 +210,7 @@ export default function WaBookingForm() {
         body: JSON.stringify({ customerName: name, ...(pin ? { requestedX904Pin: pin } : {}) }),
         signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (!response.ok) {
         setGuestIdentityRoute("unavailable");
         setGuestLookupError(response.status === 429
@@ -510,6 +511,10 @@ export default function WaBookingForm() {
       setError(guestPinMatch === false
         ? "Nama dan PIN X904 tidak cocok. Periksa kembali sebelum membuat booking."
         : "Pemeriksaan PIN X904 belum selesai. Pastikan nama dan PIN sudah cocok.");
+      return;
+    }
+    if (publicGymGuest && guestPin.trim() && guestPinMatch === false) {
+      setError("PIN X904 yang Anda masukkan tidak cocok dengan nama terdaftar.");
       return;
     }
     if (publicGymGuest && guestPin.trim() && (guestIdentityRoute !== "registered" || guestPinMatch !== true)) {
