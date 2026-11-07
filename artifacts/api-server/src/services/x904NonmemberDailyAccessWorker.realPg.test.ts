@@ -650,6 +650,37 @@ test("public PIN review gate: checkout and confirmed payment alone never activat
     expect(activated.access_state).toBe("active");
     expect(new Date(activated.activated_at).getTime()).toBe(ackAt.getTime());
     expect(new Date(activated.expires_at).getTime()-ackAt.getTime()).toBe(12*60*60*1000);
+
+    // End-to-end completion for the anonymous-booking identity review path:
+    // expiry must suspend through the same worker, with a matching X904 ACK,
+    // never by writing a group or changing the real machine directly.
+    const expiryAt = new Date(new Date(activated.expires_at).getTime() + 3000);
+    await addSnapshot(new Date(expiryAt.getTime() - 1000), pin, name, 1);
+    await processX904NonmemberDailyAccess(db as any, expiryAt);
+    const suspension = await commandFor("SUSPEND_USER", accessId);
+    expect(suspension?.payload).toMatchObject({
+      source: "AUTO_NONMEMBER_GYM_12H", accessId, expectedUid: uid,
+    });
+    const suspendAckAt = new Date(expiryAt.getTime() + 1000);
+    await ack(String(suspension.command_id), suspendAckAt, pin, name, uid, 2);
+    await processX904NonmemberDailyAccess(db as any, new Date(suspendAckAt.getTime() + 3000));
+    const expiredGrant = (await run(
+      "SELECT access_state,activated_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",
+      [accessId],
+    )).rows[0];
+    expect(expiredGrant.access_state).toBe("expired");
+    expect(new Date(expiredGrant.activated_at).getTime()).toBe(ackAt.getTime());
+    const commandsBeforeRetry = Number((await run(
+      "SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",
+      [String(accessId)],
+    )).rows[0].n);
+    expect(commandsBeforeRetry).toBe(2);
+    await addSnapshot(new Date(suspendAckAt.getTime() + 4000), pin, name, 2);
+    await processX904NonmemberDailyAccess(db as any, new Date(suspendAckAt.getTime() + 5000));
+    expect(Number((await run(
+      "SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",
+      [String(accessId)],
+    )).rows[0].n)).toBe(commandsBeforeRetry);
   } finally {
     delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   }
