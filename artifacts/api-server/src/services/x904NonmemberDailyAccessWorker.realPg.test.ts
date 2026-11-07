@@ -565,3 +565,79 @@ test("public PIN review gate: checkout and confirmed payment alone never activat
     delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   }
 });
+
+test("HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant", async () => {
+  // This invokes the real Express bookings router, not a copied approval function.
+  // All writes are scoped to disposable 127.0.0.1 PostgreSQL. No external X904 device.
+  process.env.SESSION_SECRET ||= "ci-isolated-x904-pin-http-test-secret";
+  const { default: express } = await import("express");
+  const { default: supertest } = await import("supertest");
+  const { default: bookingsRouter } = await import("../routes/bookings.js");
+  const { default: whatsappRouter } = await import("../routes/whatsapp.js");
+  const { createToken } = await import("../lib/auth.js");
+  const app = express();
+  app.use(express.json());
+  app.use("/api", bookingsRouter);
+  app.use("/api", whatsappRouter);
+  const request = supertest(app);
+  const id=9606, pay=9706, pin="606", uid=606, name="CI HTTP PIN STAFF";
+  const dateParts=new Intl.DateTimeFormat("en-CA",{
+    timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"
+  }).formatToParts(new Date());
+  const wd=Object.fromEntries(dateParts.map(p=>[p.type,p.value]));
+  const today=`${wd.year}-${wd.month}-${wd.day}`;
+  const hour=Number(new Intl.DateTimeFormat("en-GB",{
+    timeZone:"Asia/Jakarta",hour:"2-digit",hourCycle:"h23"
+  }).format(new Date()));
+  const endpoint=`/api/bookings/${id}/x904-guest-pin-approve`;
+  // Real public booking HTTP route: reject incomplete checkout before any DB write.
+  const incomplete=await request.post("/api/wa/booking").send({publicGymGuest:true});
+  expect(incomplete.status).toBe(400);
+  expect(incomplete.body).toHaveProperty("error");
+
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  try {
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+      VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+      VALUES($1,$2,'08:00','gym_public_guest','review_required PIN',
+      'confirmed','SC-CI-HTTP-PIN-9606',$3,30000)`,[id,today,name]);
+    await run(`INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+       booking_id,verification_state,access_state)
+      VALUES('TDBD234200545','pin','PIN VERIFIED',$1,$2,$3,$4,
+       'review_required','review_required')`,[pin,uid,name,id]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at) VALUES($1,$2,'confirmed',now())",[pay,id]);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id])).rows[0].access_id);
+    const before=(await run("SELECT verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(before).toMatchObject({verification_state:"review_required",access_state:"review_required"});
+
+    const anonymous=await request.post(endpoint).send({identityChecked:true,officialFundsChecked:true,officialBankReference:"CI-BANK-9706"});
+    expect(anonymous.status).toBe(403);
+    const token=createToken(301,"staff");
+    const invalid=await request.post(endpoint).set("Authorization",`Bearer ${token}`)
+      .send({identityChecked:true,officialFundsChecked:false,officialBankReference:"CI-BANK-9706"});
+    expect(invalid.status).toBe(400);
+    const afterRejected=(await run("SELECT verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(afterRejected).toMatchObject({verification_state:"review_required",access_state:"review_required"});
+
+    if (hour>=6 && hour<23) {
+      const approved=await request.post(endpoint).set("Authorization",`Bearer ${token}`)
+        .send({identityChecked:true,officialFundsChecked:true,officialBankReference:"CI-BANK-9706"});
+      expect(approved.status).toBe(200);
+      expect(approved.body).toMatchObject({success:true,accessState:"pending"});
+      const grant=(await run("SELECT verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+      expect(grant).toMatchObject({verification_state:"verified",access_state:"pending"});
+      // HTTP approval must not directly enqueue a command. Worker alone does so.
+      expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+    } else {
+      const outsideHours=await request.post(endpoint).set("Authorization",`Bearer ${token}`)
+        .send({identityChecked:true,officialFundsChecked:true,officialBankReference:"CI-BANK-9706"});
+      expect(outsideHours.status).toBe(409);
+      expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("review_required");
+    }
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
