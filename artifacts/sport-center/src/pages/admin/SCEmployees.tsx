@@ -113,7 +113,7 @@ export default function SCEmployees() {
       <Card aria-label="Pengelolaan periode kasbon">
         <CardHeader>
           <CardTitle>Periode Kasbon</CardTitle>
-          <p className="text-sm text-muted-foreground">Buat periode bulanan untuk seluruh karyawan, tanpa membuka Google Sheets. Tidak terkait dengan kasbon karyawan tertentu.</p>
+          <p className="text-sm text-muted-foreground">Buat periode bulanan Kasbon POOL untuk seluruh karyawan, tanpa membuka Google Sheets. Tidak terkait dengan kasbon karyawan tertentu.</p>
         </CardHeader>
         <CardContent>
           <KasbonPeriodDialog />
