@@ -112,7 +112,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
    <CardTitle>Histori Kasbon ({records.length})</CardTitle>
    <div className="flex flex-wrap items-center gap-2">
-    <Button variant="outline" disabled={isSalarySynced||isLoading||isError||!records.length||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon seluruh transaksi ke Google Sheets"} onClick={()=>previewSalary.mutate()}>
+    <Button variant="outline" disabled={isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon seluruh transaksi ke Google Sheets"} onClick={()=>previewSalary.mutate()}>
       {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
       {previewSalary.isPending?"Memeriksa...":isSalarySynced?"Synced":"Sync Total"}
     </Button>
