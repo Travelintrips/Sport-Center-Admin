@@ -1,7 +1,7 @@
 /** Nonmember access is independent of the one-hour walk-in booking tariff. */
 export const X904_AUTO_SUSPEND_EXEMPT_PINS = new Set(['237','79','12']);
 export function isX904AutoSuspendExempt(pin: string, deviceRole: number): boolean {
-  return deviceRole === 14 || X904_AUTO_SUSPEND_EXEMPT_PINS.has(pin);
+  return deviceRole === 14 || deviceRole === 4 || X904_AUTO_SUSPEND_EXEMPT_PINS.has(pin);
 }
 export const NONMEMBER_ACCESS_MS = 12 * 60 * 60 * 1000;
 /** Fixed WIB clock, for the current Sport Center opening hours: 06:00–23:00.
@@ -69,7 +69,8 @@ export function decideNonmemberX904Access(input: {
   currentGroup: number;
   now: Date;
 }): NonmemberAccessDecision {
-  if (!input.verifiedNonmemberPin || !Number.isFinite(input.now.getTime())) return 'hold';
+  if (isX904AutoSuspendExempt(input.userPin, input.deviceRole) ||
+      !input.verifiedNonmemberPin || !Number.isFinite(input.now.getTime())) return 'hold';
   if (!input.confirmedPaymentAt || !Number.isFinite(input.confirmedPaymentAt.getTime())) return 'hold';
   const start = input.confirmedPaymentAt.getTime();
   const end = x904NonmemberEffectiveExpiry(input.confirmedPaymentAt)?.getTime();
