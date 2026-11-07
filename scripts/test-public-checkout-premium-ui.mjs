@@ -28,6 +28,10 @@ test("existing pricing, availability, proof, WA and X904 logic remains",()=>{
 test("success page retains proof and status links, without inventing payment confirmations",()=>{
  assert.match(form,/href=\{result\.uploadProofUrl\}/);
  assert.match(form,/href=\{result\.statusUrl\}/);
- assert.match(form,/proofConfirmed \? "Booking Dikonfirmasi!"/);
+ assert.match(form,/Booking Berhasil Dibuat!/);
+ assert.match(form,/Menunggu Verifikasi Admin/);
+ assert.match(form,/Akses X904/);
+ assert.match(form,/Belum Aktif/);
+ assert.doesNotMatch(form,/proofConfirmed \? "Booking Dikonfirmasi!"/);
  assert.match(form,/Booking dan pembayaran mandiri tidak otomatis membuka pintu/);
 });
