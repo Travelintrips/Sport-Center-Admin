@@ -1,4 +1,5 @@
 import { db } from "@workspace/db";
+import { logAudit } from "../lib/auditLog";
 import { sql } from "drizzle-orm";
 
 // Assignment is a physical-card reservation, NOT an X904 door entitlement.
@@ -191,8 +192,20 @@ export async function autoReserveVisAfterFundsVerified(input: {
     });
   } catch (error) {
     if (error instanceof VisReservationError) throw error;
-    // Fail closed (including missing migration or unique constraint conflicts).
+    // Fail closed, but persist an admin-only diagnostic after transaction rollback.
+    const err = error as any;
     console.error("[gym-vis] auto reservation failed", error);
+    await logAudit({
+      action: "GYM_VIS_RESERVATION_ERROR",
+      entity: "booking",
+      after: {
+        orderNumber: input.orderNumber,
+        confirmedPaymentId: input.confirmedPaymentId ?? null,
+        code: String(err?.code ?? "unknown"),
+        constraint: String(err?.constraint ?? ""),
+        message: String(err?.message ?? error).slice(0, 500),
+      },
+    });
     throw new VisReservationError(503,"vis_reservation_failed",
       "Kartu belum berhasil dialokasikan. Tidak ada akses pintu yang diaktifkan.");
   }
