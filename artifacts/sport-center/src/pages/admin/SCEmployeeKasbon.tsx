@@ -122,7 +122,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   </div>
   <div className="rounded-xl border bg-background px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><p className="font-semibold">Check Sync</p><p className="text-xs text-muted-foreground">Lihat baris karyawan pada laporan gaji (bukan Kasbon POOL).</p></div>
+      <div><p className="font-semibold">Check Sync Total — Gaji</p><p className="text-xs text-muted-foreground">Lihat baris karyawan pada laporan gaji (bukan Kasbon POOL).</p></div>
       <Button variant="outline" disabled={checkSalary.isPending||isLoading||isError} onClick={()=>{if(checkOpen){setCheckOpen(false);}else{checkSalary.mutate();}}}>
         <RefreshCw className="mr-2 h-4 w-4"/>{checkSalary.isPending?"Memeriksa...":checkOpen?"Tutup":"Check Sync"}
       </Button>
@@ -149,7 +149,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    </div>
   </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
-   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync</th><th className="p-3">Tindakan</th></tr></thead><tbody>
+   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
     <td className="p-3">{syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
