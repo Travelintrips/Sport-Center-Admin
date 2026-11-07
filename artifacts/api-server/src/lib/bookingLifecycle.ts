@@ -20,7 +20,7 @@ export type BookingLifecycleActor = {
 };
 
 export type LifecycleResult =
-  | { ok: true; bookingId: number; alreadyCompleted: boolean }
+  | { ok: true; bookingId: number; alreadyCompleted: boolean; withoutCheckin?: boolean }
   | { ok: false; reason: string };
 
 function todayJakarta(now: Date): string {
@@ -99,7 +99,7 @@ export async function completeBooking(
         ? "Booking completed setelah check-in dan waktu sesi berakhir"
         : `Selesai administratif tanpa check-in (bukan bukti kehadiran): ${exceptionReason}`,
     });
-    return { ok: true, bookingId, alreadyCompleted: false };
+    return { ok: true, bookingId, alreadyCompleted: false, withoutCheckin: !booking.checkedInAt };
   });
 
   if (result.ok && !result.alreadyCompleted) {
@@ -110,8 +110,8 @@ export async function completeBooking(
       entityId: bookingId,
       before: { status: "confirmed" },
       after: { status: "completed", completedAt: now.toISOString(),
-        reason: exceptionReason && !result.alreadyCompleted ? "admin_close_without_checkin" : "checked_in_and_session_ended",
-        withoutCheckInReason: exceptionReason ?? undefined,
+        reason: result.withoutCheckin ? "admin_close_without_checkin" : "checked_in_and_session_ended",
+        withoutCheckInReason: result.withoutCheckin ? exceptionReason : undefined,
         checkedInAtUntouched: true },
     });
   }
