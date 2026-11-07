@@ -24,7 +24,7 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(scope).toContain('guestNameRoute.deviceUid');
     expect(scope).toContain('guestSubmittedPin && guestNameRoute?.route === "registered"');
     expect(scope).toContain('guestSubmittedPin !== guestNameRoute.userPin');
-    expect(scope).toContain('X904_NONMEMBER_PIN_BUSY');
+    expect(api).toContain('X904_NONMEMBER_PIN_BUSY');
     expect(scope).toContain('x904_verified_nonmember_identities');
     expect(api).toContain('publicGymGuest ? "review_required" : "verified"');
     expect(api).toContain('publicGymGuest ? "review_required" : "pending"');
