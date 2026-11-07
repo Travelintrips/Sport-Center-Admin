@@ -93,6 +93,20 @@ function extractProofToken(uploadProofUrl: string): string | null {
   }
 }
 
+// The visitor enters only the local number; the API always receives 628...
+// Accept pasted +62 / 62 / 08 numbers without duplicating the country code.
+function localWhatsappDigits(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.startsWith("628")) return digits.slice(2);
+  if (digits.startsWith("08")) return digits.slice(1);
+  return digits;
+}
+
+function normalizedWhatsappNumber(value: string): string {
+  const local = localWhatsappDigits(value).slice(0, 14);
+  return local ? `62${local}` : "";
+}
+
 export default function WaBookingForm() {
   const params = useParams<{ facilityId: string }>();
   const search = useSearch();
@@ -132,7 +146,7 @@ export default function WaBookingForm() {
 
   const [form, setForm] = useState({
     customerName: "",
-    customerPhone: phoneFromWA,
+    customerPhone: normalizedWhatsappNumber(phoneFromWA),
     bookingDate: dateFromWA,
     startTime: startTimeFromWA,
     durationHours: durationFromWA,
@@ -473,7 +487,7 @@ export default function WaBookingForm() {
       return;
     }
     if (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim())) {
-      setError("Nomor WhatsApp wajib diisi dengan format 628xxxxxxxxxx untuk notifikasi.");
+      setError("Nomor WhatsApp wajib dimulai dengan 8 (contoh: 8123456789).");
       return;
     }
     // The public form never requires or knows the X904 PIN.
@@ -730,18 +744,24 @@ export default function WaBookingForm() {
               )}
               <div className="space-y-1">
                 <Label htmlFor="phone" className="text-sm font-semibold">Nomor WhatsApp *</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <div className="flex overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-400">
+                  <span className="inline-flex items-center gap-2 border-r border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-700" aria-label="Kode negara Indonesia, plus enam dua">
+                    <Phone className="h-4 w-4 text-gray-500" /> +62
+                  </span>
                   <Input
                     id="phone"
-                    className="pl-9"
-                    placeholder="628123456789"
-                    value={form.customerPhone}
-                    onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))}
+                    type="tel"
+                    inputMode="numeric"
+                    autoComplete="tel-national"
+                    className="min-w-0 flex-1 rounded-none border-0 shadow-none focus-visible:ring-0"
+                    placeholder="8123456789"
+                    maxLength={14}
+                    value={localWhatsappDigits(form.customerPhone)}
+                    onChange={(e) => setForm((f) => ({ ...f, customerPhone: normalizedWhatsappNumber(e.target.value) }))}
                     required
                   />
                 </div>
-                <p className="text-xs text-gray-500">Format: 628xxx (tanpa + atau 0 di depan)</p>
+                <p className="text-xs text-gray-500">Kode negara +62 sudah otomatis. Cukup ketik 8xxxxxxxx, tanpa 0 di depan.</p>
               </div>
               {gymWalkIn && !publicGymGuest && (
                 <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50/50 p-3">
@@ -1109,7 +1129,7 @@ export default function WaBookingForm() {
             const missing: string[] = [];
             if (dedicatedNonmember && !publicGymGuest && !x904VerifiedName) missing.push(x904Verifying ? "Verifikasi PIN/kartu sedang berlangsung" : "PIN/kartu X904 belum terverifikasi");
             if (!form.customerName) missing.push("Nama pemesan belum tersedia");
-            if (!form.customerPhone.trim() || (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim()))) missing.push("Isi nomor WhatsApp valid (628...)");
+            if (!form.customerPhone.trim() || (dedicatedNonmember && !/^628[0-9]{7,13}$/.test(form.customerPhone.trim()))) missing.push("Isi nomor WhatsApp valid (8xxxxxxx)");
             if (!form.bookingDate) missing.push("Pilih tanggal kunjungan");
             if (!form.startTime) missing.push("Pilih jam kunjungan");
             if (!gymWalkIn && (availabilityLoading || !availabilitySlots || !timeSlots.includes(form.startTime))) missing.push("Pilih slot yang tersedia");
