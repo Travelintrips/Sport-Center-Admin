@@ -361,6 +361,69 @@ test("registry verified nonmember enqueues once, revoked and mid-cycle revoked n
   }
 });
 
+test("public booking with verified ordinary X904 PIN: pending payment holds, confirmed grant activates once, ACK starts 12h, expiry suspends", async () => {
+  // Disposable database only: no live booking, bank transaction or device command.
+  const pin = "604", uid = 604, name = "CI VERIFIED PIN";
+  const bookingId = 9604, paymentId = 9704;
+  const paidAt = new Date("2026-11-06T01:00:00Z"); // 08:00 WIB
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = pin;
+  try {
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES ('TDBD234200545',$1,$2,$3,0)", [pin,uid,name]);
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+      VALUES ('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`, [pin,uid,name]);
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+      VALUES ($1,'2026-11-06','08:00','gym_public_guest',
+      'Gym mandiri; nama cocok dengan registry X904; verifikasi petugas wajib',
+      'pending_payment','SC-CI-PIN-9604',$2,30000)`, [bookingId,name]);
+    await run(`INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+       booking_id,verification_state,access_state)
+      VALUES ('TDBD234200545','pin','PIN REGISTERED',$1,$2,$3,$4,'verified','pending')`,
+      [pin,uid,name,bookingId]);
+    await run("INSERT INTO sport_center.sport_payments (id,booking_id,status) VALUES ($1,$2,'pending')",
+      [paymentId,bookingId]);
+    const accessId = Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].access_id);
+    await addSnapshot(new Date(paidAt.getTime()-1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,paidAt);
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+
+    // Admin-approved payment is a simulated DB status, never a real bank mutation.
+    await run("UPDATE sport_center.sport_bookings SET status='confirmed' WHERE id=$1",[bookingId]);
+    await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=$2 WHERE id=$1",[paymentId,paidAt]);
+    const linked = (await run("SELECT payment_id,verification_state,access_state,confirmed_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(linked).toMatchObject({payment_id:paymentId,verification_state:"verified",access_state:"pending"});
+    expect(linked.confirmed_at).toBeTruthy();
+    await addSnapshot(new Date(paidAt.getTime()+1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(paidAt.getTime()+2000));
+    const activate = await commandFor("ACTIVATE_USER",accessId);
+    expect(activate?.payload).toMatchObject({expectedUid:uid,source:"AUTO_NONMEMBER_GYM_12H",accessId});
+    await processX904NonmemberDailyAccess(db as any,new Date(paidAt.getTime()+2500));
+    expect(Number((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='ACTIVATE_USER' AND payload->>'accessId'=$1",[String(accessId)])).rows[0].n)).toBe(1);
+
+    const activatedAt=new Date(paidAt.getTime()+4000);
+    await ack(String(activate.command_id),activatedAt,pin,name,uid,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(activatedAt.getTime()+2000));
+    const active=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(active.access_state).toBe("active");
+    expect(new Date(active.activated_at).getTime()).toBe(activatedAt.getTime());
+    expect(new Date(active.expires_at).getTime()-activatedAt.getTime()).toBe(12*60*60*1000);
+
+    const afterExpiry = new Date(new Date(active.expires_at).getTime()+3000);
+    await addSnapshot(new Date(afterExpiry.getTime()-1000),pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,afterExpiry);
+    const suspend=await commandFor("SUSPEND_USER",accessId);
+    expect(suspend?.payload).toMatchObject({expectedUid:uid,source:"AUTO_NONMEMBER_GYM_12H",accessId});
+    await ack(String(suspend.command_id),new Date(afterExpiry.getTime()+1000),pin,name,uid,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(afterExpiry.getTime()+3000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("expired");
+    expect(Number((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",[String(accessId)])).rows[0].n)).toBe(2);
+  } finally {
+    delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  }
+});
+
 test("real worker: new VIS003 cannot activate while reserved; activates only after handover, then cancels to suspend", async()=>{
   const at = new Date("2026-11-06T01:00:00Z");
   process.env.GYM_X904_NONMEMBER_ONLY_PIN = "13";
