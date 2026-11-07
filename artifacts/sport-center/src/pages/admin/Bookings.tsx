@@ -1974,8 +1974,41 @@ function BookingDetailDrawer({
                     </button>
                   )}
                   {gymVisReservation.state === "collected" && (
-                    <div className="mt-3 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs font-semibold">
-                      Kartu sudah diserahkan. Menunggu worker, ACK dan read-back X904.
+                    <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">
+                      <div className="font-semibold">
+                        {gymVisAccess?.accessState === "active" ? "Akses aktif — read-back X904 sudah diterima." :
+                          gymVisAccess?.returnReady ? "Akses sudah disuspend — kartu siap dikembalikan ke pool." :
+                          "Kartu sudah diserahkan. Menunggu worker / suspend / ACK dan read-back X904."}
+                      </div>
+                      {gymVisAccess && (
+                        <div className="grid grid-cols-2 gap-1 text-[11px]">
+                          <span>Access ID</span><strong>{gymVisAccess.accessId}</strong>
+                          <span>Status akses</span><strong>{gymVisAccess.accessState}</strong>
+                          <span>Verifikasi</span><strong>{gymVisAccess.verificationState}</strong>
+                          <span>Expiry</span><strong>{gymVisAccess.expiresAt ? new Date(gymVisAccess.expiresAt).toLocaleString("id-ID") : "-"}</strong>
+                          <span>Command</span><strong>{gymVisAccess.latestCommand ? `${gymVisAccess.latestCommand.type} / ${gymVisAccess.latestCommand.state}` : "-"}</strong>
+                          <span>ACK / read-back</span><strong>{gymVisAccess.latestCommand?.readBackConfirmed ? "PASS" : "Menunggu"}</strong>
+                          <span>Group mesin</span><strong>{gymVisAccess.latestSnapshot?.group ?? "-"}</strong>
+                        </div>
+                      )}
+                      {gymVisAccess?.returnReady && (
+                        <div className="space-y-2 rounded border border-sky-200 bg-sky-50 p-2 text-sky-900">
+                          <label className="flex items-start gap-2">
+                            <input type="checkbox" checked={visPhysicalReturned} onChange={(e) => setVisPhysicalReturned(e.target.checked)} />
+                            Kartu fisik sudah benar-benar kembali ke petugas.
+                          </label>
+                          <button type="button" disabled={!visPhysicalReturned || returnGymVisMutation.isPending}
+                            onClick={() => returnGymVisMutation.mutate()}
+                            className="rounded bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-50">
+                            {returnGymVisMutation.isPending ? "Memverifikasi..." : "Kembalikan Kartu ke Pool"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {gymVisReservation.state === "returned" && (
+                    <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900">
+                      Kartu sudah returned dan tersedia kembali untuk alokasi berikutnya.
                     </div>
                   )}
                 </>
