@@ -5,7 +5,7 @@ const ui = readFileSync(resolve(process.cwd(), "../sport-center/src/pages/admin/
 
 describe("Income preview: bank source vs receiving bank", () => {
   it("provides a separate editable receiving bank/account field", () => {
-    expect(ui).toContain('htmlFor="income-bank">Bank Pengirim (opsional)');
+    expect(ui).toContain('htmlFor="income-bank">Bank Pengirim <span className="text-red-500">*</span>');
     expect(ui).toContain('htmlFor="income-receiving-account"');
     expect(ui).toContain("Bank / Akun Penerima");
     expect(ui).toContain('value={incomeForm.receivingAccount}');
@@ -15,7 +15,14 @@ describe("Income preview: bank source vs receiving bank", () => {
   it("shows receiving account in preview and requires for bank transfer", () => {
     expect(ui).toContain('Bank / Akun Penerima: {incomeForm.receivingAccount.trim()');
     expect(ui).toContain('(incomeForm.method === "Transfer Bank" && !incomeForm.receivingAccount.trim())');
-    expect(ui).not.toContain('(incomeForm.method === "Transfer Bank" && !incomeForm.bank.trim())');
+    expect(ui).toContain('!incomeForm.bank.trim()');
+    const source = ui.indexOf('htmlFor="income-source"');
+    const sender = ui.indexOf('htmlFor="income-bank"');
+    const method = ui.indexOf('<Label>Metode ');
+    expect(source).toBeGreaterThan(0);
+    expect(sender).toBeGreaterThan(source);
+    expect(method).toBeGreaterThan(sender);
+    expect(ui.slice(sender,method)).toContain('required');
   });
   it("remains preview only without writing database or sheets", () => {
     const begin = ui.indexOf('{/* Incoming funds: UI-only form.');
