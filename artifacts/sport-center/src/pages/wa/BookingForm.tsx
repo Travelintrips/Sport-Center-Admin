@@ -803,7 +803,7 @@ export default function WaBookingForm() {
                   />
                   {publicGymGuest && guestIdentityRoute === "checking" && <p className="text-xs text-slate-500" role="status">Memeriksa nama...</p>}
                   {publicGymGuest && guestLookupError && <p className="text-xs text-amber-700" role="status">{guestLookupError}</p>}
-                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Terdaftar di X904. Verifikasi PIN pribadi sebelum booking.</p>
+                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Terdaftar di X904. Verifikasi PIN pribadi sebelum booking.</p>}
                 </div>
               )}
               <div className="space-y-1">
@@ -835,7 +835,7 @@ export default function WaBookingForm() {
                     </Button>
                     {guestPinMatch === true && <p className="text-xs font-semibold text-green-700" role="status">Nama dan PIN cocok. Akses tetap menunggu persetujuan petugas.</p>}
                     {guestPinMatch === false && <p className="text-xs text-red-700" role="alert">PIN tidak cocok dengan nama.</p>}
-                    {guestLookupError && <p className="text-xs text-amber-700" role="alert">{guestLookupError}</p>
+                    {guestLookupError && <p className="text-xs text-amber-700" role="alert">{guestLookupError}</p>}
                     <p className="text-xs text-slate-500">PIN tidak ditampilkan otomatis. Pencocokan tidak membuka pintu; pembayaran dan identitas wajib diverifikasi petugas.</p>
                   </div>
                 </details>
