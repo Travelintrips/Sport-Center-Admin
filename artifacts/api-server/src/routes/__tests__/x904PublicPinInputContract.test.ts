@@ -31,6 +31,20 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(api).toContain('x904Identity: !publicGymGuest && verifiedX904Identity');
   });
 
+  test("booking WhatsApp uses visible +62 prefix but sends canonical 628 number", () => {
+    expect(form).toContain('Kode negara Indonesia, plus enam dua');
+    expect(form).toContain('> +62');
+    expect(form).toContain('placeholder="8123456789"');
+    expect(form).toContain('value={localWhatsappDigits(form.customerPhone)}');
+    expect(form).toContain('normalizedWhatsappNumber(e.target.value)');
+    expect(form).toContain('customerPhone: normalizedWhatsappNumber(phoneFromWA)');
+    expect(form).toContain('customerPhone: form.customerPhone,');
+    expect(form).toContain('/^628[0-9]{7,13}$/.test(form.customerPhone.trim())');
+    expect(form).toContain('if (digits.startsWith("628")) return digits.slice(2)');
+    expect(form).toContain('if (digits.startsWith("08")) return digits.slice(1)');
+    expect(form).toContain('local ? `62${local}` : ""');
+  });
+
   test("VIS path remains separate and anonymous cannot force a PIN/UID", () => {
     expect(api).toContain('guestNameRoute?.route === "visitor_card"');
     expect(api).toContain('verifiedX904Identity?.identityType === "card"');
