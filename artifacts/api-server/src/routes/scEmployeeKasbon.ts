@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { snapshotKasbonRecords, getKasbonReceiptStatus, type SalarySyncReceipt } from "../lib/scKasbonSalarySnapshot";
 import { syncEmployeeKasbonToSalary } from "../lib/scKasbonSalaryGoogle";
 import { db, scEmployeesTable, scEmployeeKasbonTable, auditLogsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
@@ -102,12 +103,33 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
  try {
   const [employee]=await db.select({employeeId:scEmployeesTable.employeeId,fullName:scEmployeesTable.fullName}).from(scEmployeesTable).where(eq(scEmployeesTable.employeeId,employeeId)).limit(1);
   if(!employee){res.status(404).json({error:"Karyawan tidak ditemukan"});return;}
-  const records=await db.select({amount:scEmployeeKasbonTable.amount}).from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
+  const records=await db.select({id:scEmployeeKasbonTable.id,amount:scEmployeeKasbonTable.amount,
+   kasbonDate:scEmployeeKasbonTable.kasbonDate,updatedAt:scEmployeeKasbonTable.updatedAt})
+   .from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
+  const snapshot=snapshotKasbonRecords(records);
   const total=records.reduce((sum,record)=>sum+Number(record.amount),0);
   if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
   const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview");
-  if(action==="sync")await logAudit({...getUserFromReq(req),action:"SC_KASBON_SALARY_SHEET_SYNCED",entity:"sc_employee_kasbon",after:outcome,...getClientInfo(req)});
-  res.json(outcome);
+  if(action==="sync"){
+   // The Google API already read back the exact G value. Ensure DB hasn't changed
+   // during the external request before recording a durable receipt.
+   const latest=await db.select({id:scEmployeeKasbonTable.id,amount:scEmployeeKasbonTable.amount,
+    kasbonDate:scEmployeeKasbonTable.kasbonDate,updatedAt:scEmployeeKasbonTable.updatedAt})
+    .from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
+   if(JSON.stringify(snapshotKasbonRecords(latest))!==JSON.stringify(snapshot))
+    throw Error("KASBON_CHANGED_DURING_SYNC_RETRY");
+   await logAudit({...getUserFromReq(req),action:"SC_KASBON_SALARY_SHEET_SYNCED",entity:"sc_employee_kasbon",
+    after:{...outcome,records:snapshot},...getClientInfo(req)});
+  }
+  const [last]=await db.select({after:auditLogsTable.after}).from(auditLogsTable)
+   .where(and(eq(auditLogsTable.action,"SC_KASBON_SALARY_SHEET_SYNCED"),
+    sql`${auditLogsTable.after}->>'employeeId' = ${employeeId}`))
+   .orderBy(desc(auditLogsTable.id)).limit(1);
+  const rawReceipt=(last?.after??null) as SalarySyncReceipt|null;
+  // Legacy entries have no per-transaction evidence: keep them unverified.
+  const receipt=rawReceipt && Array.isArray(rawReceipt.records)?rawReceipt:null;
+  const status=getKasbonReceiptStatus(snapshot,receipt,action==="sync" || (outcome.status==="preview" && outcome.matched));
+  res.json({...outcome,...status});
  }catch(e){
   const code=(e as Error).message;
   console.error("[SC_KASBON_SALARY_SYNC]",code);

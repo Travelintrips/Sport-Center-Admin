@@ -29,10 +29,9 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [uploading,setUploading]=useState(false);
  const [toDelete,setToDelete]=useState<Kasbon|null>(null);
  const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string}|null>(null);
- type SalaryCheck={matched:boolean;name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
+ type SalaryCheck={matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
- const [syncRecordId,setSyncRecordId]=useState<number|null>(null);
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
  const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,records.map(r=>r.id+":"+r.amount).join("|")];
@@ -46,7 +45,9 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  });
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
- const isSalarySynced = Boolean((salaryCheck??initialSalaryCheck)?.matched && Number((salaryCheck??initialSalaryCheck)?.amount)===totalKasbon);
+ const syncEvidence=salaryCheck??initialSalaryCheck;
+ const isSalarySynced=Boolean(syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
+ const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
  const save=useMutation({mutationFn:(payload:Form)=>api(endpoint(employee.employeeId)+(editing===null?"":"/"+editing),editing===null?"POST":"PATCH",payload),
   onSuccess:()=>{setSalaryCheck(null);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});qc.invalidateQueries({queryKey:key});setOpen(false);setEditing(null);setForm(blank());toast({title:"Kasbon tersimpan di Sport Center",description:"Sinkronisasi Google Sheets diproses terpisah; belum dinyatakan berhasil."});},
   onError:(e:Error)=>toast({title:"Gagal menyimpan",description:e.message,variant:"destructive"})});
@@ -102,7 +103,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     </div>
     {checkOpen&&salaryCheck&&<div className="mt-4 space-y-3">
      <div className="flex flex-wrap items-center gap-2 text-sm"><span>Nama Sheets: <strong>{salaryCheck.name}</strong></span><span>· Sel: <strong>{salaryCheck.cell}</strong></span>
-      <span className={salaryCheck.matched?"rounded-full bg-green-100 px-2 py-0.5 font-semibold text-green-700":"rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{salaryCheck.matched?"Synced — total cocok":"Belum cocok"}</span>
+      <span className={salaryCheck.matched?"rounded-full bg-green-100 px-2 py-0.5 font-semibold text-green-700":"rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{salaryCheck.matched?"Total cocok dengan Sheets":"Total belum cocok"}</span>
      </div>
      <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-xs"><thead><tr className="border-b">{["No","Nama","Uang Makan","Hari Kerja","Persentase","Total Salary","Kasbon","Sisa Gaji"].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead>
       <tbody><tr>{[salaryCheck.sheetRow.number,salaryCheck.sheetRow.name,salaryCheck.sheetRow.uangMakan,salaryCheck.sheetRow.hariKerja,salaryCheck.sheetRow.persentase,salaryCheck.sheetRow.totalSalary,salaryCheck.sheetRow.kasbon,salaryCheck.sheetRow.sisaGaji].map((v,i)=><td key={i} className="border-b p-2 whitespace-nowrap">{i===6 && Number.isFinite(Number(v))?currency(v):String(v||"—")}</td>)}</tr></tbody></table></div>
@@ -110,33 +111,39 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   </div>
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
    <CardTitle>Histori Kasbon ({records.length})</CardTitle>
+   <div className="flex flex-wrap items-center gap-2">
+    <Button variant="outline" disabled={isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon seluruh transaksi ke Google Sheets"} onClick={()=>previewSalary.mutate()}>
+      {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
+      {previewSalary.isPending?"Memeriksa...":isSalarySynced?"Synced":"Sync Total"}
+    </Button>
    <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm" aria-label="Total Kasbon">
     <span className="font-medium text-muted-foreground">Total Kasbon</span>
     <span className="border-l pl-3 text-base font-semibold tabular-nums" aria-live="polite">{isLoading ? "Memuat..." : isError ? "—" : currency(totalKasbon)}</span>
+   </div>
    </div>
   </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync</th><th className="p-3">Tindakan</th></tr></thead><tbody>
     {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
-    <td className="p-3">{isSalarySynced?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
+    <td className="p-3">{syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
-    <Button size="sm" variant="outline" disabled={isSalarySynced||previewSalary.isPending||syncSalary.isPending||isLoading||isError} title={isSalarySynced?"Total kasbon sudah cocok dengan Google Sheets":"Sync total kasbon ke Google Sheets"} onClick={()=>{setSyncRecordId(r.id);previewSalary.mutate();}}><RefreshCw className="mr-1 h-3 w-3"/>{previewSalary.isPending&&syncRecordId===r.id?"Memeriksa...":"Sync"}</Button><Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
+    <Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button></div></td></tr>)}
    </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
   </CardContent></Card>
   <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
    <DialogContent className="max-w-md">
-    <DialogHeader><DialogTitle>Konfirmasi Insert / Sync Kasbon</DialogTitle></DialogHeader>
+    <DialogHeader><DialogTitle>Konfirmasi Sync Total Kasbon</DialogTitle></DialogHeader>
     <div className="space-y-2 text-sm">
      <p>Karyawan: <strong>{employee.fullName}</strong> ({employee.employeeId})</p>
      <p>Nama Google Sheets: <strong>{salaryPreview?.name}</strong></p>
      <p>Tujuan: Gaji November 2026 — <strong>{salaryPreview?.cell}</strong> (kolom G)</p>
-     <p>Transaksi dipilih: <strong>KB-{String(syncRecordId??0).padStart(5,"0")}</strong></p>
+     <p>Transaksi yang akan dicakup: <strong>{records.length} transaksi kasbon</strong></p>
      <p>Total seluruh kasbon karyawan: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
-     <p className="text-muted-foreground">Sync menulis total seluruh kasbon karyawan ke satu sel G, bukan nominal satu transaksi. Tidak dijumlahkan ulang. Jika baris berubah atau nama tidak cocok, penulisan ditolak.</p>
+     <p className="text-muted-foreground">Sync mengganti total kasbon karyawan pada satu sel G. Setelah read-back berhasil, setiap transaksi yang tercakup dicatat dalam bukti sinkronisasi. Jika data berubah, jalankan Sync Total kembali.</p>
     </div>
     <div className="flex justify-end gap-2">
      <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
-     <Button disabled={!salaryPreview||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Insert / Sync"}</Button>
+     <Button disabled={!salaryPreview||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Sync Total"}</Button>
     </div>
    </DialogContent>
   </Dialog>

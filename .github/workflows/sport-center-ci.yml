@@ -212,6 +212,9 @@ jobs:
       - name: Verify Kasbon Check Sync shows salary values (no production writes)
         run: node scripts/test-sc-kasbon-check-sync-display.mjs
 
+      - name: Verify Kasbon aggregate Sync receipts and transaction badges
+        run: node --experimental-strip-types scripts/test-sc-kasbon-total-sync-snapshot.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
