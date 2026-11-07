@@ -86,3 +86,33 @@ const repeat=planDynamicKasbon(november,formulas,amounts,"1500000");
 assert.equal(repeat.status,"blocked");
 assert.equal(repeat.reason,"KASBON_TARGET_OCCUPIED");
 console.log("PASS: November transaction stays in November after December exists; retry blocked");
+
+ 
+// Regression for SC003 / 7 November layout. A shorter daily SUM formula must
+// be recognized and expanded only after verifying existing totals, not guessed.
+{
+ const height=1060, formatted=Array.from({length:height},()=>[]),
+  actual=Array.from({length:height},()=>[]),
+  formulas=Array.from({length:height},()=>[]);
+ put(formatted,1041,1,"November");
+ put(formatted,1042,1,"Tanggal"); put(formatted,1042,2,"Keterangan");
+ for(let day=1;day<=30;day++)put(formatted,1042,day+4,`11-${day}-2026`);
+ for(let r=1043;r<=1057;r++)put(formatted,r,2,r===1047?"Kasbon Robby":"Kasbon Person "+r);
+ put(formatted,1058,2,"Total");
+ put(actual,1047,9,1500000); put(formulas,1047,9,1500000);
+ for(let r=1043;r<=1057;r++)put(actual,r,3,r===1047?1500000:0);
+ put(actual,1047,4,0);
+ put(actual,1058,3,1500000);put(actual,1058,11,0);
+ put(formulas,1047,3,"=SUM(D1047:I1047)");
+ put(formulas,1058,11,"=SUM(K1043:K1056)");
+ put(formulas,1058,3,"=SUM(C1043:C1056)");
+ const section=discoverKasbonSection(formatted,actual,"2026-11-07","Kasbon Robby");
+ const result=planDynamicKasbon(section,formulas,actual,"10000");
+ assert.equal(result.status,"ready",JSON.stringify(result));
+ assert.equal(result.destination,"K1047");
+ assert.ok(result.repairs.some(r=>r.cell==="K1058" && r.formula==="=SUM(K1043:K1057)"));
+ assert.ok(result.repairs.some(r=>r.cell==="C1058" && r.formula==="=SUM(C1043:C1057)"));
+ assert.ok(result.repairs.some(r=>r.cell==="C1047"));
+}
+console.log("PASS: live-layout November 7 safety preflight with short formula ranges");
+
