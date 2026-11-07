@@ -13,7 +13,7 @@ assert.match(dialog,/preview\?\.writeEnabled/);
 assert.match(routes,/PAYROLL_TAB_ALREADY_EXISTS/);
 assert.match(routes,/count>20000\|\|cols<13\|\|cols>2000/,"allocated grid must not be limited to 200 rows");
 assert.match(routes,/PAYROLL_TEMPLATE_POPULATED_ROWS_UNSAFE/,"populated A:M must still have 200-row safety bound");
-assert.match(routes,/range:"'".*sourceTitle\.replace.*"\x27!A:M"/,"read real populated rows not grid allocation");
+assert.ok(routes.includes(`sourceTitle.replace(/'/g,"''")+"'!A:M"`),"read real populated rows not grid allocation");
 assert.doesNotMatch(routes,/count>200\|\|cols<13/);
 
 assert.match(routes,/SC_SALARY_TAB_CREATE_ENABLED/);
