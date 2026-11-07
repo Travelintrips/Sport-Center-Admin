@@ -39,17 +39,23 @@ async function inspect(period:string) {
  const sourceId=source.properties?.sheetId;
  const count=source.properties?.gridProperties?.rowCount??0;
  const cols=source.properties?.gridProperties?.columnCount??0;
- if(!Number.isSafeInteger(sourceId)||count<20||count>200||cols<13||cols>200)
+ // Google Sheets gridProperties describes allocated cells (often 1000+ blank rows),
+ // not the number of populated payroll records. Validate grid safety separately
+ // from the actual populated A:M range returned by values.get.
+ if(!Number.isSafeInteger(sourceId)||count<20||count>20000||cols<13||cols>2000)
   throw Error("PAYROLL_TEMPLATE_LAYOUT_UNSAFE");
  if(sourceId===NOVEMBER_GID && sourceTitle!=="Gaji November 2026")throw Error("PAYROLL_TEMPLATE_ID_MISMATCH");
  if(sourceTitle==="Gaji November 2026"&&sourceId!==NOVEMBER_GID)throw Error("PAYROLL_TEMPLATE_ID_MISMATCH");
  const values=await sheets.spreadsheets.values.get({
-  spreadsheetId:PROD_SPREADSHEET,range:"'"+sourceTitle.replace(/'/g,"''")+"'!A1:M"+count,
+  spreadsheetId:PROD_SPREADSHEET,range:"'"+sourceTitle.replace(/'/g,"''")+"'!A:M",
   valueRenderOption:"FORMULA"
  });
+ // Unbounded A:M returns only used rows, even when the grid has 1000+ blank
+ // allocated rows. Never silently ignore populated rows past the safe limit.
  const rows=values.data.values??[];
+ if(rows.length<20||rows.length>200)throw Error("PAYROLL_TEMPLATE_POPULATED_ROWS_UNSAFE");
  const plan=planPayrollDraft(period,rows);
- return {sheets,plan,sourceId:sourceId!,spreadsheetId:PROD_SPREADSHEET,rowCount:count,sourceRows:rows,
+ return {sheets,plan,sourceId:sourceId!,spreadsheetId:PROD_SPREADSHEET,rowCount:rows.length,sourceRows:rows,
   sheetIds:(meta.data.sheets??[]).map(x=>x.properties?.sheetId).filter((id):id is number=>Number.isSafeInteger(id))};
 }
 router.post("/admin/sc-employees/payroll-tabs/preview",adminMiddleware,async(req,res)=>{
