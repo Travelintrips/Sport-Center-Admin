@@ -259,6 +259,69 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
   }
 });
 
+// Read-only matching preview against the canonical BizPortal bank-mutation rows
+// ingested from the configured "kas besar sc" Google Sheet. Never add or edit
+// a bank mutation here: a manual SC expense is not proof of a bank movement.
+router.get("/admin/expenses/:id/sheet-candidates", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      res.status(400).json({ error: "ID pengeluaran tidak valid" });
+      return;
+    }
+    const [expense] = await db.select().from(expensesTable).where(eq(expensesTable.id, id)).limit(1);
+    if (!expense) {
+      res.status(404).json({ error: "Pengeluaran tidak ditemukan" });
+      return;
+    }
+    if (expense.paymentStatus !== "paid") {
+      res.json({ state: "NOT_PAID", candidates: [], verified: false,
+        message: "Pengeluaran belum ditandai dibayar. Tidak ditulis ke mutasi bank." });
+      return;
+    }
+    // The bank account is bound by BizPortal to its company and sheet config.
+    // Do not guess an account from a payment method or blu/BCA branding.
+    const matches = await db.execute(sql`
+      SELECT bm.id, bm.transaction_date::text AS transaction_date,
+             bm.amount::text AS amount, bm.description,
+             bm.reconciliation_status, bm.status
+      FROM public.bank_mutations bm
+      JOIN public.bank_sheet_configs bsc ON bsc.id = bm.sheet_config_id
+      JOIN public.company_bank_accounts cba
+        ON cba.id = bsc.bank_account_id AND cba.company_id = bsc.company_id
+      WHERE lower(trim(bsc.tab_name)) = 'kas besar sc'
+        AND bsc.is_active = true
+        AND bm.company_id = bsc.company_id
+        AND bm.bank_account_id = bsc.bank_account_id::text
+        AND upper(bm.direction) = 'OUT'
+        AND bm.amount = ${expense.totalAmount}::numeric
+        AND bm.transaction_date BETWEEN ${expense.expenseDate}::date - INTERVAL '1 day'
+                                    AND ${expense.expenseDate}::date + INTERVAL '1 day'
+      ORDER BY ABS(bm.transaction_date - ${expense.expenseDate}::date), bm.id
+      LIMIT 21
+    `);
+    const rows = (matches as any).rows ?? matches;
+    const candidates = Array.isArray(rows) ? rows.slice(0, 20).map((row: any) => ({
+      id: Number(row.id),
+      date: String(row.transaction_date).slice(0, 10),
+      amount: Number(row.amount),
+      description: String(row.description ?? "").slice(0, 300),
+      reconciliationStatus: row.reconciliation_status,
+      status: row.status,
+    })) : [];
+    res.json({
+      state: candidates.length === 0 ? "NOT_FOUND" :
+        candidates.length === 1 && (Array.isArray(rows) ? rows.length === 1 : true)
+          ? "REVIEW_SINGLE" : "REVIEW_MULTIPLE",
+      candidates, verified: false,
+      message: "Hanya kandidat berdasarkan nominal dan tanggal plus/minus 1 hari. Verifikasi referensi bank di BizPortal sebelum menyatakan cocok; tidak ada perubahan Google Sheets.",
+    });
+  } catch (err) {
+    req.log.error({ err }, "Expense bank Sheet candidate lookup error");
+    res.status(503).json({ error: "Pencocokan mutasi belum tersedia; data pengeluaran tetap aman" });
+  }
+});
+
 router.get("/admin/expenses/:id", adminMiddleware, async (req, res) => {
   try {
     const id = Number(req.params["id"]);

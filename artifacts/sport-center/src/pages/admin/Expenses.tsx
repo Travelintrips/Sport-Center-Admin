@@ -108,6 +108,7 @@ export default function AdminExpenses() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
+  const [sheetCheckId, setSheetCheckId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -241,6 +242,21 @@ export default function AdminExpenses() {
     queryFn: () =>
       fetch(`${API}/admin/expenses/${detailId}`, { headers: authHeaders() }).then((r) => r.json()),
     enabled: !!detailId && detailOpen,
+  });
+
+  const { data: sheetCandidates, isFetching: checkingSheet, error: sheetCheckError } = useQuery<{
+    state: string; verified: boolean; message: string;
+    candidates: Array<{ id: number; date: string; amount: number; description: string; reconciliationStatus: string }>;
+  }>({
+    queryKey: ["expense-sheet-candidates", sheetCheckId],
+    enabled: sheetCheckId !== null && detailOpen,
+    retry: false,
+    queryFn: async () => {
+      const response = await fetch(`${API}/admin/expenses/${sheetCheckId}/sheet-candidates`, { headers: authHeaders() });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Gagal mencocokkan mutasi");
+      return result;
+    },
   });
 
   const createMutation = useMutation({
@@ -553,7 +569,7 @@ export default function AdminExpenses() {
                           <Button
                             size="sm" variant="ghost"
                             className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600"
-                            onClick={() => { setDetailId(expense.id); setDetailOpen(true); }}
+                            onClick={() => { setSheetCheckId(null); setDetailId(expense.id); setDetailOpen(true); }}
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
@@ -942,6 +958,37 @@ export default function AdminExpenses() {
                   </div>
                 </div>
               )}
+
+              <div className="rounded-lg border p-3 space-y-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold">Pencocokan Google Sheets — kas besar sc</p>
+                    <p className="text-xs text-gray-500">Data ini adalah catatan operasional, bukan mutasi bank resmi atau jurnal.</p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline"
+                    disabled={detail.paymentStatus !== "paid" || checkingSheet}
+                    onClick={() => setSheetCheckId(detail.id)}>
+                    {checkingSheet ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Search className="w-3 h-3 mr-2" />}
+                    Cari mutasi
+                  </Button>
+                </div>
+                {detail.paymentStatus !== "paid" && <p className="text-xs text-amber-700">Tandai pengeluaran sudah dibayar sebelum mencari kandidat mutasi.</p>}
+                {sheetCheckId === detail.id && sheetCheckError && <p className="text-xs text-red-600">Gagal membaca mutasi. Data pengeluaran tidak berubah.</p>}
+                {sheetCheckId === detail.id && sheetCandidates && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-600">{sheetCandidates.message}</p>
+                    {sheetCandidates.candidates.length === 0
+                      ? <p className="text-xs font-medium text-amber-700">Tidak ditemukan kandidat mutasi. Jangan membuat baris bank otomatis.</p>
+                      : sheetCandidates.candidates.map((candidate) => (
+                        <div key={candidate.id} className="rounded border bg-gray-50 p-2 text-xs space-y-1">
+                          <p className="font-semibold">{candidate.date} • {formatIDR(candidate.amount)} • {candidate.reconciliationStatus || "Belum direkonsiliasi"}</p>
+                          <p className="break-words">{candidate.description}</p>
+                          <p className="text-gray-500">ID mutasi BizPortal: {candidate.id} — kandidat belum diverifikasi</p>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-gray-500">Tanggal</span><p className="font-semibold">{detail.expenseDate}</p></div>
