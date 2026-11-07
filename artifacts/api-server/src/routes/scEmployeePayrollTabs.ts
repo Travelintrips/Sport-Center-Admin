@@ -12,7 +12,7 @@ let writing=false;
 
 function input(body:any):string {
  const period=typeof body?.period==="string"?body.period:"";
- if(Object.keys(body??{}).some(key=>key!=="period")||!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(period))
+ if(Object.keys(body??{}).some(key=>key!=="period")||!/^20\d{2}-(0[1-9]|1[0-2])$/.test(period))
   throw Error("PAYROLL_PERIOD_INVALID");
  return period;
 }
@@ -24,7 +24,7 @@ async function inspect(period:string) {
  if(!raw)throw Error("GOOGLE_SERVICE_ACCOUNT_MISSING");
  const credentials=JSON.parse(raw);
  if(credentials.client_email!==EXPECTED_ACCOUNT)throw Error("GOOGLE_SERVICE_ACCOUNT_UNEXPECTED");
- if(typeof credentials.private_key==="string")credentials.private_key=credentials.private_key.replace(/\\\\n/g,"\\n");
+ if(typeof credentials.private_key==="string")credentials.private_key=credentials.private_key.replace(/\\n/g,"\n");
  const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
  const sheets=google.sheets({version:"v4",auth});
  const meta=await sheets.spreadsheets.get({spreadsheetId:PROD_SPREADSHEET,
@@ -49,7 +49,8 @@ async function inspect(period:string) {
  });
  const rows=values.data.values??[];
  const plan=planPayrollDraft(period,rows);
- return {sheets,plan,sourceId:sourceId!,spreadsheetId:PROD_SPREADSHEET,rowCount:count};
+ return {sheets,plan,sourceId:sourceId!,spreadsheetId:PROD_SPREADSHEET,rowCount:count,sourceRows:rows,
+  sheetIds:(meta.data.sheets??[]).map(x=>x.properties?.sheetId).filter((id):id is number=>Number.isSafeInteger(id))};
 }
 router.post("/admin/sc-employees/payroll-tabs/preview",adminMiddleware,async(req,res)=>{
  try{
@@ -67,17 +68,18 @@ router.post("/admin/sc-employees/payroll-tabs/create",adminMiddleware,async(req,
  writing=true;
  try{
   const period=input(req.body);
-  const {sheets,plan,sourceId,spreadsheetId,rowCount}=await inspect(period);
-  // Duplicate hidden; never expose copied prior-month balances if the clean-up/readback fails.
+  const {sheets,plan,sourceId,spreadsheetId,rowCount,sheetIds,sourceRows}=await inspect(period);
+  // The copy and hidden flag are committed in one Sheets batch to avoid
+  // briefly exposing the previous month's payroll amounts.
+  const newId=Math.max(...sheetIds)+1;
+  if(!Number.isSafeInteger(newId)||newId>=2147483647)throw Error("PAYROLL_SHEET_ID_LIMIT");
   const response=await sheets.spreadsheets.batchUpdate({spreadsheetId,
-   requestBody:{requests:[{duplicateSheet:{sourceSheetId:sourceId,
-    newSheetName:plan.targetTitle,insertSheetIndex:undefined}}]}});
-  const newId=response.data.replies?.[0]?.duplicateSheet?.properties?.sheetId;
-  if(!Number.isSafeInteger(newId))throw Error("PAYROLL_DUPLICATE_ID_MISSING");
-  // Hide immediately while clearing copied values.
-  await sheets.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests:[
-   {updateSheetProperties:{properties:{sheetId:newId,hidden:true},fields:"hidden"}}
-  ]}});
+   requestBody:{requests:[
+    {duplicateSheet:{sourceSheetId:sourceId,newSheetId:newId,newSheetName:plan.targetTitle}},
+    {updateSheetProperties:{properties:{sheetId:newId,hidden:true},fields:"hidden"}}
+   ]}});
+  if(response.data.replies?.[0]?.duplicateSheet?.properties?.sheetId!==newId)
+   throw Error("PAYROLL_DUPLICATE_ID_MISSING");
   const escaped=plan.targetTitle.replace(/'/g,"''");
   const ranges=plan.clearCells.map(cell=>`'${escaped}'!${cell}`);
   await sheets.spreadsheets.values.batchClear({spreadsheetId,requestBody:{ranges}});
@@ -85,13 +87,17 @@ router.post("/admin/sc-employees/payroll-tabs/create",adminMiddleware,async(req,
    range:`'${escaped}'!A1:M${rowCount}`,valueRenderOption:"FORMULA"});
   const after=check.data.values??[];
   const still=plan.clearCells.filter(cell=>{
-   const match=/^([A-Z]+)(\\d+)$/.exec(cell)!;
+   const match=/^([A-Z]+)(\d+)$/.exec(cell)!;
    const column=match[1].split("").reduce((sum,c)=>sum*26+c.charCodeAt(0)-64,0)-1;
    return String(after[Number(match[2])-1]?.[column]??"").trim()!=="";
   });
-  const verification=planPayrollDraft(period,after);
-  if(still.length||verification.employeeCount!==plan.employeeCount)
-   throw Error("PAYROLL_DRAFT_READBACK_FAILED");
+  const identityChanged=sourceRows.some((row,i)=>{
+   const number=String(row?.[0]??"").trim(),name=String(row?.[1]??"").trim();
+   if(!/^[1-9]\\d{0,2}$/.test(number)||!name)return false;
+   return String(after[i]?.[0]??"").trim()!==number||
+    String(after[i]?.[1]??"").trim()!==name;
+  });
+  if(still.length||identityChanged)throw Error("PAYROLL_DRAFT_READBACK_FAILED");
   const metadata=await sheets.spreadsheets.get({spreadsheetId,fields:"sheets(properties(sheetId,title,hidden))"});
   const draft=metadata.data.sheets?.find(s=>s.properties?.sheetId===newId);
   if(draft?.properties?.title!==plan.targetTitle||draft.properties.hidden!==true)
