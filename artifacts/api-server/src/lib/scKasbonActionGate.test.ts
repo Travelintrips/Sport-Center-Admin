@@ -2,7 +2,7 @@ import {describe,it,expect,beforeEach,afterEach} from "@jest/globals";
 import bcrypt from "bcryptjs";
 import {verifyKasbonPassword,issueKasbonGrant,checkKasbonGrant} from "./scKasbonActionGate";
 
-const testPassword="TEST_ONLY_never_a_real_password_827!";
+const testPassword="X7#m9Q2p4!";
 const oldHash=process.env.SC_KASBON_ACTION_PASSWORD_HASH;
 const oldKey=process.env.SC_KASBON_ACTION_SIGNING_KEY;
 beforeEach(()=>{
@@ -16,13 +16,19 @@ afterEach(()=>{
  else process.env.SC_KASBON_ACTION_SIGNING_KEY=oldKey;
 });
 describe("Kasbon dedicated action gate",()=>{
+ it("allows passwords of six through twelve characters only",async()=>{
+  process.env.SC_KASBON_ACTION_PASSWORD_HASH=bcrypt.hashSync("A7$x2Q",5);
+  expect((await verifyKasbonPassword("A7$x2Q",104,"unit-length")).status).toBe("ok");
+  expect((await verifyKasbonPassword("short",104,"unit-length")).status).toBe("invalid");
+  expect((await verifyKasbonPassword("LongerThan12!",104,"unit-length")).status).toBe("invalid");
+ });
  it("fails closed without server-only secrets",async()=>{
   delete process.env.SC_KASBON_ACTION_PASSWORD_HASH;
   expect((await verifyKasbonPassword(testPassword,101,"unit-a")).status).toBe("disabled");
   expect(checkKasbonGrant("x",101,"SC003",4)).toBe(false);
  });
  it("rejects incorrect password and accepts correct independent of admin roles",async()=>{
-  expect((await verifyKasbonPassword("wrong-but-long-enough",101,"unit-b")).status).toBe("invalid");
+  expect((await verifyKasbonPassword("badwrong",101,"unit-b")).status).toBe("invalid");
   expect((await verifyKasbonPassword(testPassword,101,"unit-b")).status).toBe("ok");
  });
  it("binds token to account, employee and single record; rejects tampering",async()=>{
