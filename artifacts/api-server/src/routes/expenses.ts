@@ -5,7 +5,6 @@ import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, co
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { createExpenseJournalEntry, createPublicExpenseAccountingEntry } from "../lib/accounting";
 
 const router = Router();
 
@@ -58,6 +57,8 @@ async function getVendorById(vendorId: number | null): Promise<{ id: number; nam
   return v ?? null;
 }
 
+// Operational expense mirror only. This MUST NOT create bank_mutations or GL postings.
+// BizPortal Sheets reconciliation imports actual bank transactions separately.
 async function syncToPublic(expense: typeof expensesTable.$inferSelect, facilityName: string | null) {
   try {
     await db
@@ -325,10 +326,6 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       return;
     }
 
-    if (!coaAccountId && !category) {
-      res.status(400).json({ error: "Akun COA wajib dipilih" });
-      return;
-    }
 
     // Lookup COA account to derive category if not provided
     let resolvedCategory = category;
@@ -567,51 +564,10 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
       .where(eq(expensesTable.id, id))
       .returning();
 
-    if (action === "pay") {
-      try {
-        const today = new Date().toISOString().split("T")[0]!;
-        const amountNum = Number(existing.amount);
-        const ppnNum = Number(existing.ppnAmount);
-        const totalNum = Number(existing.totalAmount);
-
-        // Fetch COA account details for correct journal posting
-        const coaAccount = await getCoaAccount(existing.coaAccountId);
-
-        const journalId = await createExpenseJournalEntry(
-          existing.expenseNo,
-          existing.category,
-          amountNum,
-          ppnNum,
-          totalNum,
-          existing.paymentMethod ?? "Transfer",
-          existing.description,
-          today,
-          coaAccount?.code,
-          coaAccount?.name,
-          coaAccount?.accountType,
-        );
-        if (journalId) {
-          await db.update(expensesTable).set({ journalId: `JRN-${journalId}` }).where(eq(expensesTable.id, id));
-          updated!.journalId = `JRN-${journalId}`;
-        }
-
-        // Post ke public accounting: DEBIT expense account → CREDIT bank account (1-1020-CST dll)
-        // Ini memastikan pengeluaran TIDAK mendebit Bank Mandiri CST — hanya mengkreditnya.
-        createPublicExpenseAccountingEntry(
-          existing.id,
-          existing.expenseNo,
-          existing.description,
-          coaAccount?.code,
-          amountNum,
-          ppnNum,
-          totalNum,
-          existing.paymentMethod ?? "Transfer",
-          today,
-        ).catch((err) => req.log.warn({ err, expenseNo: existing.expenseNo }, "[accounting] createPublicExpenseAccountingEntry error (non-fatal)"));
-      } catch (journalErr) {
-        req.log.warn({ journalErr }, "Failed to create expense journal (non-fatal)");
-      }
-    }
+    // Expense is an operational record only. BizPortal owns COA classification,
+    // bank reconciliation and accounting journals. Never post from SC Expenses,
+    // including when an admin marks the expense as paid.
+    // Keep the public mirror for a single canonical expense identity.
 
     await logAudit({
       ...user, action: auditActions[action]!, entity: "expense", entityId: id,
