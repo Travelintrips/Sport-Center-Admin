@@ -159,9 +159,33 @@ export async function autoReserveVisAfterFundsVerified(input: {
           WHERE m.device_serial='TDBD234200545' AND m.user_pin=c.pin
         )
         AND NOT EXISTS (
-          SELECT 1 FROM sport_center.x904_nonmember_daily_access a
+          SELECT 1
+          FROM sport_center.x904_nonmember_daily_access a
+          LEFT JOIN sport_center.sport_bookings prior ON prior.id=a.booking_id
           WHERE a.device_serial='TDBD234200545' AND a.user_pin=c.pin
-            AND a.access_state IN ('pending','active','review_required')
+            AND (
+              a.access_state IN ('pending','active')
+              OR (a.access_state='review_required' AND (
+                a.expires_at IS NULL OR a.expires_at>now()
+                OR (prior.booking_date::date >= (now() AT TIME ZONE 'Asia/Jakarta')::date
+                    AND prior.status::text NOT IN ('cancelled','expired','rejected','refunded','completed'))
+              ))
+            )
+        )
+        AND EXISTS (
+          SELECT 1 FROM (
+            SELECT observed_at,user_count,users
+            FROM sport_center.gym_x904_access_snapshots
+            WHERE device_serial='TDBD234200545'
+            ORDER BY snapshot_id DESC LIMIT 1
+          ) snap
+          WHERE snap.observed_at>=now()-interval '5 minutes'
+            AND jsonb_typeof(snap.users)='array'
+            AND jsonb_array_length(snap.users)=snap.user_count
+            AND (SELECT count(*) FROM jsonb_array_elements(snap.users) su
+                 WHERE su->>'pin'=c.pin
+                   AND regexp_replace(upper(coalesce(su->>'name','')),'[[:space:]]+','','g')=c.code
+                   AND su->>'group'='2' AND su->>'role'='0' AND su->>'enabled'='true')=1
         )
         ORDER BY c.code LIMIT 1`);
       if (!candidate.rows.length) throw new VisReservationError(409,"vis_pool_exhausted",

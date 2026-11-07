@@ -18,6 +18,7 @@ const oldEnv = envKeys.map(key => process.env[key]);
 const migration = readFileSync("migrations/20261031_x904_nonmember_daily_access.sql","utf8");
 const activationClockMigration = readFileSync("migrations/20261102_x904_nonmember_verified_activation_clock.sql","utf8");
 const businessHoursMigration = readFileSync("migrations/20261105_x904_nonmember_2300_wib_cutoff.sql","utf8");
+const liveAccessIndexMigration = readFileSync("migrations/20261107_x904_review_required_not_live.sql","utf8");
 
 beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
@@ -38,6 +39,7 @@ beforeAll(async () => {
   await run(migration);
   await run(activationClockMigration);
   await run(businessHoursMigration);
+  await run(liveAccessIndexMigration);
   // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
   await run("CREATE ROLE anon");
   await run("CREATE ROLE authenticated");
@@ -482,6 +484,11 @@ test("real VIS reservation service: admin-confirmed payment creates one held gra
   const order="SC-CI-VIS-9323";
   await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES (9323,$1,'07:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI NEW VISITOR',30000)",[futureDate,order]);
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES (9423,9323,'confirmed',now(),30000,'ci://validated-proof')");
+  // A stale historical review_required row must not block a physically suspended VIS004.
+  await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status) VALUES (9322,'2026-11-01','07:00','admin','completed')");
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at) VALUES(9422,9322,'confirmed','2026-11-01T01:00:00Z')");
+  await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state) VALUES ('TDBD234200545','card','VIS004','17',17,'VIS 004',9322,9422,'2026-11-01T01:00:00Z','2026-11-01T10:00:00Z','verified','review_required')");
+  await addSnapshot(new Date(),'17','VIS 004',2);
   const request={orderNumber:order,officialBankReference:"ADMINPAY-9423",verifiedBy:"CI_ADMIN",officialFundsChecked:true,confirmedPaymentId:9423};
   const reserved=await autoReserveVisAfterFundsVerified(request);
   expect(reserved).toMatchObject({cardCode:"VIS004",state:"reserved",newReservation:true});
