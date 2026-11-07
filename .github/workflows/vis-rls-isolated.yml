@@ -1,0 +1,41 @@
+name: VIS RLS isolated PostgreSQL
+
+on:
+  pull_request:
+    paths:
+      - 'artifacts/api-server/migrations/20261107_gym_vis_app_role_rls.sql'
+      - 'scripts/test-gym-vis-rls-role-pg.mjs'
+      - '.github/workflows/vis-rls-isolated.yml'
+  workflow_dispatch:
+
+jobs:
+  role-rls:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: vis_rls_test_only
+          POSTGRES_DB: vis_rls_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vis_rls_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify idempotency, drift and real app-role DML
+        env:
+          VIS_RLS_TEST_DATABASE_URL: postgresql://postgres:vis_rls_test_only@127.0.0.1:5432/vis_rls_ci
+        run: node --test scripts/test-gym-vis-rls-role-pg.mjs
