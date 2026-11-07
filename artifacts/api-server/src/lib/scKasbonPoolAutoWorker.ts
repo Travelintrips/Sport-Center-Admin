@@ -16,7 +16,7 @@ async function finish(id:number,status:"synced"|"needs_review",reason:string|nul
   SET status=${status},last_error_code=${reason},processed_at=now()
   WHERE id=${id} AND status='processing'`);
 }
-export async function kasbonPoolTick():Promise<void> {
+export async function kasbonPoolTick(targetKasbonId?:number):Promise<void> {
  if(process.env.SC_KASBON_POOL_SYNC_ENABLED!=="true"||busy)return;
  busy=true;
  let id:number|null=null;
@@ -24,7 +24,8 @@ export async function kasbonPoolTick():Promise<void> {
   const claimed=records(await db.execute(sql`
     UPDATE sport_center.sc_kasbon_pool_sync_events SET status='processing',attempts=attempts+1
     WHERE id=(SELECT id FROM sport_center.sc_kasbon_pool_sync_events
-      WHERE status='pending' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+      WHERE status='pending' AND (${targetKasbonId??null}::integer IS NULL OR kasbon_id=${targetKasbonId??null})
+      ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
     RETURNING id,kasbon_id,employee_id,event_type,new_record`))[0] as EventRow|undefined;
   if(!claimed)return;
   id=Number(claimed.id);
