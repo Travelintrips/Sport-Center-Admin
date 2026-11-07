@@ -1,9 +1,10 @@
 import { Router } from "express";
+import multer from "multer";
+import { scanPaymentProof } from "../lib/paymentProofOcr";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { createExpenseJournalEntry, createPublicExpenseAccountingEntry } from "../lib/accounting";
 
 const router = Router();
 
@@ -56,6 +57,8 @@ async function getVendorById(vendorId: number | null): Promise<{ id: number; nam
   return v ?? null;
 }
 
+// Operational expense mirror only. This MUST NOT create bank_mutations or GL postings.
+// BizPortal Sheets reconciliation imports actual bank transactions separately.
 async function syncToPublic(expense: typeof expensesTable.$inferSelect, facilityName: string | null) {
   try {
     await db
@@ -120,6 +123,39 @@ async function deleteFromPublic(expenseNo: string) {
     console.warn("[sync-public-expenses] Non-fatal delete error:", err);
   }
 }
+
+// Preview only: no expense created and no bank confirmation implied.
+// Reuse the existing payment-proof OCR worker without fetching arbitrary URLs.
+const expenseProofPreviewUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)),
+});
+router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPreviewUpload.single("proof"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: "Unggah bukti berupa JPG, PNG atau WebP" });
+      return;
+    }
+    if (req.body?.consent !== "true") {
+      res.status(400).json({ error: "Persetujuan pemrosesan OCR diperlukan" });
+      return;
+    }
+    const result = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    res.json({
+      amount: result.amount,
+      date: result.date,
+      recipient: result.recipient,
+      paymentMethod: result.paymentMethod,
+      engine: result.engine,
+      // Suggestions only, never verified payment evidence.
+      verified: false,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Expense proof OCR preview error");
+    res.status(500).json({ error: "Gagal membaca bukti; silakan isi manual" });
+  }
+});
 
 // ─── GET COA accounts for expense form ────────────────────────────────────────
 router.get("/admin/expenses/coa-accounts", adminMiddleware, async (req, res) => {
@@ -223,6 +259,69 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
   }
 });
 
+// Read-only matching preview against the canonical BizPortal bank-mutation rows
+// ingested from the configured "kas besar sc" Google Sheet. Never add or edit
+// a bank mutation here: a manual SC expense is not proof of a bank movement.
+router.get("/admin/expenses/:id/sheet-candidates", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      res.status(400).json({ error: "ID pengeluaran tidak valid" });
+      return;
+    }
+    const [expense] = await db.select().from(expensesTable).where(eq(expensesTable.id, id)).limit(1);
+    if (!expense) {
+      res.status(404).json({ error: "Pengeluaran tidak ditemukan" });
+      return;
+    }
+    if (expense.paymentStatus !== "paid") {
+      res.json({ state: "NOT_PAID", candidates: [], verified: false,
+        message: "Pengeluaran belum ditandai dibayar. Tidak ditulis ke mutasi bank." });
+      return;
+    }
+    // The bank account is bound by BizPortal to its company and sheet config.
+    // Do not guess an account from a payment method or blu/BCA branding.
+    const matches = await db.execute(sql`
+      SELECT bm.id, bm.transaction_date::text AS transaction_date,
+             bm.amount::text AS amount, bm.description,
+             bm.reconciliation_status, bm.status
+      FROM public.bank_mutations bm
+      JOIN public.bank_sheet_configs bsc ON bsc.id = bm.sheet_config_id
+      JOIN public.company_bank_accounts cba
+        ON cba.id = bsc.bank_account_id AND cba.company_id = bsc.company_id
+      WHERE lower(trim(bsc.tab_name)) = 'kas besar sc'
+        AND bsc.is_active = true
+        AND bm.company_id = bsc.company_id
+        AND bm.bank_account_id = bsc.bank_account_id::text
+        AND upper(bm.direction) = 'OUT'
+        AND bm.amount = ${expense.totalAmount}::numeric
+        AND bm.transaction_date BETWEEN ${expense.expenseDate}::date - INTERVAL '1 day'
+                                    AND ${expense.expenseDate}::date + INTERVAL '1 day'
+      ORDER BY ABS(bm.transaction_date - ${expense.expenseDate}::date), bm.id
+      LIMIT 21
+    `);
+    const rows = (matches as any).rows ?? matches;
+    const candidates = Array.isArray(rows) ? rows.slice(0, 20).map((row: any) => ({
+      id: Number(row.id),
+      date: String(row.transaction_date).slice(0, 10),
+      amount: Number(row.amount),
+      description: String(row.description ?? "").slice(0, 300),
+      reconciliationStatus: row.reconciliation_status,
+      status: row.status,
+    })) : [];
+    res.json({
+      state: candidates.length === 0 ? "NOT_FOUND" :
+        candidates.length === 1 && (Array.isArray(rows) ? rows.length === 1 : true)
+          ? "REVIEW_SINGLE" : "REVIEW_MULTIPLE",
+      candidates, verified: false,
+      message: "Hanya kandidat berdasarkan nominal dan tanggal plus/minus 1 hari. Verifikasi referensi bank di BizPortal sebelum menyatakan cocok; tidak ada perubahan Google Sheets.",
+    });
+  } catch (err) {
+    req.log.error({ err }, "Expense bank Sheet candidate lookup error");
+    res.status(503).json({ error: "Pencocokan mutasi belum tersedia; data pengeluaran tetap aman" });
+  }
+});
+
 router.get("/admin/expenses/:id", adminMiddleware, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
@@ -281,10 +380,15 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       return;
     }
 
-    if (!coaAccountId && !category) {
-      res.status(400).json({ error: "Akun COA wajib dipilih" });
+    if (typeof notes !== "string" || notes.trim().length < 3) {
+      res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
       return;
     }
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !Number.isFinite(Number(ppnAmount)) || Number(ppnAmount) < 0) {
+      res.status(400).json({ error: "Nominal atau PPN tidak valid" });
+      return;
+    }
+
 
     // Lookup COA account to derive category if not provided
     let resolvedCategory = category;
@@ -325,7 +429,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       paymentStatus: "draft",
       receiptUrl: receiptUrl || null,
       receiptUrls: Array.isArray(receiptUrls) ? receiptUrls : [],
-      notes: notes || null,
+      notes: notes.trim(),
       createdBy: user.userId ?? null,
     } as any).returning();
 
@@ -383,6 +487,11 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
       amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
+
+    if (notes !== undefined && (typeof notes !== "string" || notes.trim().length < 3)) {
+      res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
+      return;
+    }
 
     // Resolve category from COA if provided
     let resolvedCategory = category ?? existing.category;
@@ -518,51 +627,10 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
       .where(eq(expensesTable.id, id))
       .returning();
 
-    if (action === "pay") {
-      try {
-        const today = new Date().toISOString().split("T")[0]!;
-        const amountNum = Number(existing.amount);
-        const ppnNum = Number(existing.ppnAmount);
-        const totalNum = Number(existing.totalAmount);
-
-        // Fetch COA account details for correct journal posting
-        const coaAccount = await getCoaAccount(existing.coaAccountId);
-
-        const journalId = await createExpenseJournalEntry(
-          existing.expenseNo,
-          existing.category,
-          amountNum,
-          ppnNum,
-          totalNum,
-          existing.paymentMethod ?? "Transfer",
-          existing.description,
-          today,
-          coaAccount?.code,
-          coaAccount?.name,
-          coaAccount?.accountType,
-        );
-        if (journalId) {
-          await db.update(expensesTable).set({ journalId: `JRN-${journalId}` }).where(eq(expensesTable.id, id));
-          updated!.journalId = `JRN-${journalId}`;
-        }
-
-        // Post ke public accounting: DEBIT expense account → CREDIT bank account (1-1020-CST dll)
-        // Ini memastikan pengeluaran TIDAK mendebit Bank Mandiri CST — hanya mengkreditnya.
-        createPublicExpenseAccountingEntry(
-          existing.id,
-          existing.expenseNo,
-          existing.description,
-          coaAccount?.code,
-          amountNum,
-          ppnNum,
-          totalNum,
-          existing.paymentMethod ?? "Transfer",
-          today,
-        ).catch((err) => req.log.warn({ err, expenseNo: existing.expenseNo }, "[accounting] createPublicExpenseAccountingEntry error (non-fatal)"));
-      } catch (journalErr) {
-        req.log.warn({ journalErr }, "Failed to create expense journal (non-fatal)");
-      }
-    }
+    // Expense is an operational record only. BizPortal owns COA classification,
+    // bank reconciliation and accounting journals. Never post from SC Expenses,
+    // including when an admin marks the expense as paid.
+    // Keep the public mirror for a single canonical expense identity.
 
     await logAudit({
       ...user, action: auditActions[action]!, entity: "expense", entityId: id,

@@ -22,7 +22,7 @@ import {
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
 
-const PAYMENT_METHODS = ["Transfer Bank", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
+const PAYMENT_METHODS = ["Transfer Bank", "BI-FAST", "QRIS", "PLN Prabayar", "E-Commerce", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -58,11 +58,6 @@ const ACCOUNT_TYPE_COLORS: Record<string, string> = {
   expense: "bg-orange-50 text-orange-700",
 };
 
-const JOURNAL_TYPE_INFO: Record<string, { label: string; desc: string }> = {
-  expense: { label: "Beban Operasional", desc: "Debit Beban → Kredit Kas/Bank" },
-  asset: { label: "Aset / Kasbon", desc: "Debit Piutang/Aset → Kredit Kas/Bank" },
-  liability: { label: "Bayar Hutang", desc: "Debit Hutang/Kewajiban → Kredit Kas/Bank" },
-};
 
 function formatIDR(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
@@ -113,6 +108,7 @@ export default function AdminExpenses() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
+  const [sheetCheckId, setSheetCheckId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -122,6 +118,12 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
+  const [autoReadProof, setAutoReadProof] = useState(false);
+  const [proofPreview, setProofPreview] = useState<{
+    amount: number | null; date: string | null; recipient: string | null;
+    paymentMethod: string; engine: string; verified: boolean;
+  } | null>(null);
+  const [scanningProof, setScanningProof] = useState(false);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
@@ -155,11 +157,47 @@ export default function AdminExpenses() {
       }
       setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
       toast({ title: `${uploaded.length} foto nota berhasil diupload` });
+      // Optional read-only OCR preview; a failure must not lose uploaded evidence.
+      const firstProof = fileArr.find((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type));
+      if (firstProof && autoReadProof) {
+        setScanningProof(true);
+        try {
+          const proofFd = new FormData();
+          proofFd.append("proof", firstProof);
+          proofFd.append("consent", "true");
+          const response = await fetch(`${API}/admin/expenses/preview-proof`, {
+            method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: proofFd,
+          });
+          if (!response.ok) throw new Error("OCR unavailable");
+          const preview = await response.json();
+          if (preview.amount != null || preview.date || preview.recipient) setProofPreview(preview);
+          else toast({ title: "Bukti tersimpan", description: "Data bukti belum terbaca, silakan isi form manual." });
+        } catch {
+          toast({ title: "Bukti tersimpan", description: "Pratinjau otomatis tidak tersedia; isikan detail secara manual." });
+        } finally {
+          setScanningProof(false);
+        }
+      }
     } catch (err: any) {
       toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
     } finally {
       setUploadingReceipt(false);
     }
+  }
+
+  function applyProofPreview() {
+    if (!proofPreview) return;
+    setForm((prev) => ({
+      ...prev,
+      expenseDate: proofPreview.date && /^\d{4}-\d{2}-\d{2}$/.test(proofPreview.date)
+        ? proofPreview.date : prev.expenseDate,
+      amount: proofPreview.amount != null && Number.isFinite(proofPreview.amount) && proofPreview.amount > 0
+        ? String(proofPreview.amount) : prev.amount,
+      paymentMethod: proofPreview.paymentMethod === "QRIS" ? "QRIS"
+        : proofPreview.paymentMethod === "Transfer Bank" ? "Transfer Bank" : prev.paymentMethod,
+    }));
+    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, dan metode sebelum membuat pengeluaran." });
+    setProofPreview(null);
   }
 
   function removeReceiptUrl(idx: number) {
@@ -204,6 +242,21 @@ export default function AdminExpenses() {
     queryFn: () =>
       fetch(`${API}/admin/expenses/${detailId}`, { headers: authHeaders() }).then((r) => r.json()),
     enabled: !!detailId && detailOpen,
+  });
+
+  const { data: sheetCandidates, isFetching: checkingSheet, error: sheetCheckError } = useQuery<{
+    state: string; verified: boolean; message: string;
+    candidates: Array<{ id: number; date: string; amount: number; description: string; reconciliationStatus: string }>;
+  }>({
+    queryKey: ["expense-sheet-candidates", sheetCheckId],
+    enabled: sheetCheckId !== null && detailOpen,
+    retry: false,
+    queryFn: async () => {
+      const response = await fetch(`${API}/admin/expenses/${sheetCheckId}/sheet-candidates`, { headers: authHeaders() });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Gagal mencocokkan mutasi");
+      return result;
+    },
   });
 
   const createMutation = useMutation({
@@ -318,6 +371,8 @@ export default function AdminExpenses() {
   function openCreate() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM });
+    setProofPreview(null);
+    setAutoReadProof(false);
     setFormOpen(true);
   }
 
@@ -339,23 +394,20 @@ export default function AdminExpenses() {
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
       notes: expense.notes ?? "",
     });
+    setProofPreview(null);
     setFormOpen(true);
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.coaAccountId) {
-      toast({ title: "Akun COA wajib dipilih", variant: "destructive" });
-      return;
-    }
-    if (!form.vendorId) {
-      toast({ title: "Vendor wajib dipilih", description: "Pilih vendor dari daftar yang tersedia", variant: "destructive" });
+    if (!form.notes.trim()) {
+      toast({ title: "Catatan transaksi wajib diisi", description: "Tuliskan tujuan penggunaan dana sebelum menyimpan.", variant: "destructive" });
       return;
     }
     const selectedV = vendors.find((v) => v.id === Number(form.vendorId));
     const body = {
       expenseDate: form.expenseDate,
-      coaAccountId: Number(form.coaAccountId),
+      coaAccountId: form.coaAccountId ? Number(form.coaAccountId) : null,
       description: form.description,
       vendorId: form.vendorId ? Number(form.vendorId) : null,
       vendorName: selectedV?.name ?? form.vendorName ?? null,
@@ -365,7 +417,7 @@ export default function AdminExpenses() {
       paymentMethod: form.paymentMethod || null,
       paymentAccount: form.paymentAccount || null,
       receiptUrls: form.receiptUrls,
-      notes: form.notes || null,
+      notes: form.notes.trim(),
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, body });
@@ -477,7 +529,7 @@ export default function AdminExpenses() {
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">No. Pengeluaran</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Tanggal</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Akun COA</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Kategori Internal</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Deskripsi</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Vendor</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-600">Total</th>
@@ -517,7 +569,7 @@ export default function AdminExpenses() {
                           <Button
                             size="sm" variant="ghost"
                             className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600"
-                            onClick={() => { setDetailId(expense.id); setDetailOpen(true); }}
+                            onClick={() => { setSheetCheckId(null); setDetailId(expense.id); setDetailOpen(true); }}
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
@@ -590,12 +642,16 @@ export default function AdminExpenses() {
 
       {/* Form Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[min(94vw,860px)] max-w-[860px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-black">{editingId ? "Edit Pengeluaran" : "Tambah Pengeluaran"}</DialogTitle>
           </DialogHeader>
+          <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+            <p className="font-semibold">Pencatatan Pengeluaran Sport Center</p>
+            <p className="mt-1">Isi data dan catatan tujuan transaksi, lalu lampirkan bukti transfer/QRIS (termasuk blu). Data tersimpan sebagai pencatatan operasional, bukan jurnal atau mutasi bank terverifikasi. BizPortal tetap menangani rekonsiliasi Google Sheets kas besar sc.</p>
+          </div>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Tanggal <span className="text-red-500">*</span></Label>
                 <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
@@ -603,7 +659,7 @@ export default function AdminExpenses() {
               <div className="space-y-1">
                 <Label className="flex items-center gap-1">
                   <BookOpen className="w-3.5 h-3.5 text-orange-500" />
-                  Akun COA <span className="text-red-500">*</span>
+                  Kategori internal / COA referensi (opsional)
                 </Label>
                 <Popover open={coaOpen} onOpenChange={setCoaOpen}>
                   <PopoverTrigger asChild>
@@ -651,7 +707,7 @@ export default function AdminExpenses() {
                       {ACCOUNT_TYPE_LABELS[selectedCoa.accountType] ?? selectedCoa.accountType}
                     </span>
                     <span className="text-gray-600">
-                      {JOURNAL_TYPE_INFO[selectedCoa.accountType]?.desc ?? ""}
+                      Hanya klasifikasi internal. Jurnal dikelola BizPortal.
                     </span>
                   </div>
                 )}
@@ -667,6 +723,12 @@ export default function AdminExpenses() {
                 rows={2}
                 required
               />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Catatan tujuan transaksi <span className="text-red-500">*</span></Label>
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Wajib: barang/jasa yang dibeli, tujuan pembayaran, atau alasan transfer..." rows={2} required minLength={3} />
+              <p className="text-xs text-gray-500">Berbeda dari deskripsi bank; catatan ini menjadi keterangan pembukuan Sport Center.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -775,13 +837,31 @@ export default function AdminExpenses() {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label>Rekening / Akun Pembayaran</Label>
+                <Label>Rekening sumber pembayaran (keterangan)</Label>
+                <p className="text-xs text-gray-500">Misalnya: blu by BCA Digital, Mandiri, atau kas tunai. Bukan pemetaan COA otomatis.</p>
                 <Input value={form.paymentAccount} onChange={(e) => setForm({ ...form, paymentAccount: e.target.value })} placeholder="Nama bank / no. rekening" />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label>Foto Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1)</span></Label>
+              <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
+              <p className="text-xs text-gray-500">Unggah screenshot atau bukti transaksi blu (seperti bukti yang dibagikan dari aplikasi). Periksa isian tanggal, nominal dan penerima secara manual.</p>
+              <label className="flex items-start gap-2 text-xs text-gray-700">
+                <input type="checkbox" checked={autoReadProof} onChange={(e) => setAutoReadProof(e.target.checked)} className="mt-0.5" />
+                <span>Baca bukti otomatis (opsional). Jika diaktifkan, foto diproses oleh OCR server yang dapat memakai layanan AI terkonfigurasi sebagai cadangan; admin tetap harus memeriksa hasilnya.</span>
+              </label>
+              {scanningProof && <p className="text-xs text-teal-700">Membaca bukti pembayaran untuk saran isian...</p>}
+              {proofPreview && (
+                <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
+                  <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>
+                  <p>Nominal: {proofPreview.amount == null ? "Tidak terbaca" : formatIDR(proofPreview.amount)} • Tanggal: {proofPreview.date ?? "Tidak terbaca"}</p>
+                  <p>Penerima terdeteksi: {proofPreview.recipient ?? "Tidak terbaca"} • Metode: {proofPreview.paymentMethod}</p>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={applyProofPreview}>Terapkan saran ke form</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setProofPreview(null)}>Abaikan</Button>
+                  </div>
+                </div>
+              )}
               <input
                 ref={receiptInputRef}
                 type="file"
@@ -828,17 +908,13 @@ export default function AdminExpenses() {
                 ) : (
                   <>
                     <Upload className="w-5 h-5" />
-                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Klik untuk upload foto nota"}</span>
+                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Unggah bukti dari blu atau foto nota"}</span>
                     <span className="text-xs">JPG, PNG, WebP — maks 10 MB per foto</span>
                   </>
                 )}
               </button>
             </div>
 
-            <div className="space-y-1">
-              <Label>Catatan</Label>
-              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Catatan tambahan..." rows={2} />
-            </div>
 
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
@@ -870,7 +946,7 @@ export default function AdminExpenses() {
 
               {detail.coaAccount && (
                 <div className="p-3 rounded-lg bg-orange-50 border border-orange-100">
-                  <p className="text-xs text-gray-500 mb-1 font-medium">Akun COA</p>
+                  <p className="text-xs text-gray-500 mb-1 font-medium">Kategori internal (referensi COA)</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {detail.coaAccount.code} — {detail.coaAccount.name}
                   </p>
@@ -878,12 +954,41 @@ export default function AdminExpenses() {
                     <Badge className={`text-[10px] ${ACCOUNT_TYPE_COLORS[detail.coaAccount.accountType] ?? "bg-gray-100"}`}>
                       {ACCOUNT_TYPE_LABELS[detail.coaAccount.accountType] ?? detail.coaAccount.accountType}
                     </Badge>
-                    {JOURNAL_TYPE_INFO[detail.coaAccount.accountType] && (
-                      <span className="text-xs text-gray-500">{JOURNAL_TYPE_INFO[detail.coaAccount.accountType]?.desc}</span>
-                    )}
+                    <span className="text-xs text-gray-500">Referensi pencatatan saja, tidak membuat jurnal.</span>
                   </div>
                 </div>
               )}
+
+              <div className="rounded-lg border p-3 space-y-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold">Pencocokan Google Sheets — kas besar sc</p>
+                    <p className="text-xs text-gray-500">Data ini adalah catatan operasional, bukan mutasi bank resmi atau jurnal.</p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline"
+                    disabled={detail.paymentStatus !== "paid" || checkingSheet}
+                    onClick={() => setSheetCheckId(detail.id)}>
+                    {checkingSheet ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Search className="w-3 h-3 mr-2" />}
+                    Cari mutasi
+                  </Button>
+                </div>
+                {detail.paymentStatus !== "paid" && <p className="text-xs text-amber-700">Tandai pengeluaran sudah dibayar sebelum mencari kandidat mutasi.</p>}
+                {sheetCheckId === detail.id && sheetCheckError && <p className="text-xs text-red-600">Gagal membaca mutasi. Data pengeluaran tidak berubah.</p>}
+                {sheetCheckId === detail.id && sheetCandidates && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-600">{sheetCandidates.message}</p>
+                    {sheetCandidates.candidates.length === 0
+                      ? <p className="text-xs font-medium text-amber-700">Tidak ditemukan kandidat mutasi. Jangan membuat baris bank otomatis.</p>
+                      : sheetCandidates.candidates.map((candidate) => (
+                        <div key={candidate.id} className="rounded border bg-gray-50 p-2 text-xs space-y-1">
+                          <p className="font-semibold">{candidate.date} • {formatIDR(candidate.amount)} • {candidate.reconciliationStatus || "Belum direkonsiliasi"}</p>
+                          <p className="break-words">{candidate.description}</p>
+                          <p className="text-gray-500">ID mutasi BizPortal: {candidate.id} — kandidat belum diverifikasi</p>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-gray-500">Tanggal</span><p className="font-semibold">{detail.expenseDate}</p></div>
