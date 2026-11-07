@@ -512,6 +512,57 @@ test("real VIS reservation service: admin-confirmed payment creates one held gra
   expect(replay.state).toBe("collected");
 });
 
+
+test("VIS concurrency and failure guards: no double allocation, cross-payment rejected, stale snapshot fails closed", async () => {
+  const futureDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"})
+    .format(new Date(Date.now()+3*86400000));
+  const orderA="SC-CI-CONC-9330", orderB="SC-CI-CONC-9331";
+  await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES (9330,$1,'07:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI CONC A',30000)",[futureDate,orderA]);
+  await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES (9331,$1,'07:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI CONC B',30000)",[futureDate,orderB]);
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES (9430,9330,'confirmed',now(),30000,'ci://conc-a'),(9431,9331,'confirmed',now(),30000,'ci://conc-b')");
+  const users=JSON.stringify([
+    {pin:"90",name:"VIS 002",role:0,group:2,enabled:true},
+    {pin:"15",name:"VIS 006",role:0,group:2,enabled:true},
+  ]);
+  await run("INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users) VALUES('TDBD234200545',now(),2,$1::jsonb)",[users]);
+
+  await expect(autoReserveVisAfterFundsVerified({
+    orderNumber:orderA,officialBankReference:"ADMINPAY-9431",verifiedBy:"CI_ADMIN",
+    officialFundsChecked:true,confirmedPaymentId:9431,
+  })).rejects.toMatchObject({code:"payment_confirmation_changed"});
+
+  const [a,b]=await Promise.all([
+    autoReserveVisAfterFundsVerified({orderNumber:orderA,officialBankReference:"ADMINPAY-9430",verifiedBy:"CI_ADMIN",officialFundsChecked:true,confirmedPaymentId:9430}),
+    autoReserveVisAfterFundsVerified({orderNumber:orderB,officialBankReference:"ADMINPAY-9431",verifiedBy:"CI_ADMIN",officialFundsChecked:true,confirmedPaymentId:9431}),
+  ]);
+  expect(new Set([a.cardCode,b.cardCode]).size).toBe(2);
+  expect(new Set([a.cardCode,b.cardCode])).toEqual(new Set(["VIS002","VIS006"]));
+  expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id IN (9330,9331)")).rows[0].n).toBe(2);
+  expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id IN (9330,9331)")).rows[0].n).toBe(2);
+
+  const retry=await autoReserveVisAfterFundsVerified({
+    orderNumber:orderA,officialBankReference:"ADMINPAY-9430",verifiedBy:"CI_ADMIN",
+    officialFundsChecked:true,confirmedPaymentId:9430,
+  });
+  expect(retry).toMatchObject({cardCode:a.cardCode,newReservation:false});
+  expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=9330")).rows[0].n).toBe(1);
+
+  await collectReservedVisCard({orderNumber:orderA,physicalCardHandedOver:true,collectedBy:"CI_STAFF"});
+  const pinA=a.cardCode==="VIS002"?"90":"15";
+  expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE user_pin=$1",[pinA])).rows[0].n).toBe(0);
+
+  const orderC="SC-CI-STALE-9332";
+  await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES (9332,$1,'07:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI STALE',30000)",[futureDate,orderC]);
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES (9432,9332,'confirmed',now(),30000,'ci://stale')");
+  await run("INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users) VALUES('TDBD234200545',now()-interval '6 minutes',2,$1::jsonb)",[users]);
+  await expect(autoReserveVisAfterFundsVerified({
+    orderNumber:orderC,officialBankReference:"ADMINPAY-9432",verifiedBy:"CI_ADMIN",
+    officialFundsChecked:true,confirmedPaymentId:9432,
+  })).rejects.toMatchObject({code:"vis_pool_exhausted"});
+  expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=9332")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9332")).rows[0].n).toBe(0);
+});
+
 test("public PIN review gate: checkout and confirmed payment alone never activate; staff approval permits verified ACK", async () => {
   // Mirror the current production payment trigger on disposable PostgreSQL.
   // The historical base migration did not distinguish guest PINs; production does.
