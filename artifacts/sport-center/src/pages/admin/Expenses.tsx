@@ -123,6 +123,7 @@ export default function AdminExpenses() {
     sourceName: "",
     method: "Transfer Bank",
     bank: "",
+    receivingAccount: "",
     amount: "",
   });
   const [formOpen, setFormOpen] = useState(false);
@@ -473,7 +474,7 @@ export default function AdminExpenses() {
             onClick={() => {
               setIncomeForm({
                 transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
-                sourceName: "", method: "Transfer Bank", bank: "", amount: "",
+                sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", amount: "",
               });
               setIncomePreview(false);
               setIncomeOpen(true);
@@ -717,10 +718,9 @@ export default function AdminExpenses() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="income-bank">Bank {incomeForm.method === "Transfer Bank" ? <span className="text-red-500">*</span> : "(opsional)"}</Label>
+              <Label htmlFor="income-bank">Bank Pengirim (opsional)</Label>
               <Input id="income-bank" list="income-bank-suggestions"
                 placeholder="Contoh: Mandiri, BCA, blu"
-                required={incomeForm.method === "Transfer Bank"}
                 value={incomeForm.bank}
                 onChange={(e) => { setIncomeForm({ ...incomeForm, bank: e.target.value }); setIncomePreview(false); }} />
               <datalist id="income-bank-suggestions">
@@ -730,7 +730,28 @@ export default function AdminExpenses() {
                 <option value="BNI" />
                 <option value="BRI" />
               </datalist>
-              <p className="text-xs text-gray-500">Catatan bank penerima dana; belum terhubung ke rekening atau COA BizPortal.</p>
+              <p className="text-xs text-gray-500">Bank asal transfer, jika diketahui. Berbeda dengan rekening yang menerima dana.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-receiving-account">
+                Bank / Akun Penerima {incomeForm.method === "Transfer Bank" ? <span className="text-red-500">*</span> : "(opsional)"}
+              </Label>
+              <Input id="income-receiving-account" list="income-receiving-suggestions" autoComplete="off"
+                placeholder="Contoh: BCA, blu by BCA Digital, Mandiri"
+                required={incomeForm.method === "Transfer Bank"}
+                value={incomeForm.receivingAccount}
+                onChange={(e) => {
+                  setIncomeForm({ ...incomeForm, receivingAccount: e.target.value });
+                  setIncomePreview(false);
+                }} />
+              <datalist id="income-receiving-suggestions">
+                <option value="BCA" />
+                <option value="blu by BCA Digital" />
+                <option value="Mandiri" />
+                <option value="BNI" />
+                <option value="BRI" />
+              </datalist>
+              <p className="text-xs text-gray-500">Bank atau akun tujuan yang menerima uang. Hanya informasi pada pratinjau UI.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="income-amount">Nominal (Rp) <span className="text-red-500">*</span></Label>
@@ -747,6 +768,7 @@ export default function AdminExpenses() {
                 <p className="font-semibold text-emerald-800">Pratinjau Uang Masuk — belum tersimpan</p>
                 <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
                 <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
+                <p>Bank / Akun Penerima: {incomeForm.receivingAccount.trim() || "Tidak ditentukan"}</p>
                 <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
               </div>
             )}
@@ -754,7 +776,7 @@ export default function AdminExpenses() {
               <Button type="button" variant="outline" onClick={() => setIncomeOpen(false)}>Batal</Button>
               <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white"
                 disabled={!incomeForm.transactionDate || !incomeForm.sourceName.trim() ||
-                  (incomeForm.method === "Transfer Bank" && !incomeForm.bank.trim()) ||
+                  (incomeForm.method === "Transfer Bank" && !incomeForm.receivingAccount.trim()) ||
                   Number(incomeForm.amount) <= 0}>
                 Pratinjau Input
               </Button>
