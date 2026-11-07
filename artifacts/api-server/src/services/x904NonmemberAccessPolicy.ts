@@ -69,8 +69,7 @@ export function decideNonmemberX904Access(input: {
   currentGroup: number;
   now: Date;
 }): NonmemberAccessDecision {
-  if (isX904AutoSuspendExempt(input.userPin, input.deviceRole) ||
-      !input.verifiedNonmemberPin || !Number.isFinite(input.now.getTime())) return 'hold';
+  if (!input.verifiedNonmemberPin || !Number.isFinite(input.now.getTime())) return 'hold';
   if (!input.confirmedPaymentAt || !Number.isFinite(input.confirmedPaymentAt.getTime())) return 'hold';
   const start = input.confirmedPaymentAt.getTime();
   const end = x904NonmemberEffectiveExpiry(input.confirmedPaymentAt)?.getTime();
