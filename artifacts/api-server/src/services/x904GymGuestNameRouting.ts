@@ -57,8 +57,8 @@ export async function resolveGymGuestName(rawName: string, submittedPin = ""): P
     WHERE u.device_serial=${DEVICE}
       AND upper(regexp_replace(trim(u.display_name), '[[:space:]]+', ' ', 'g'))=${name}
       AND m.status::text='active'
-      AND m.start_date <= ${todayWib}::date
-      AND m.end_date >= ${todayWib}::date
+      AND m.start_date <= ${todayWib}
+      AND m.end_date >= ${todayWib}
     LIMIT 1`);
   if (active.rows.length) return review();
 
