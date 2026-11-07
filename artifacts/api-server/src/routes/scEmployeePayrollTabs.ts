@@ -87,23 +87,15 @@ router.post("/admin/sc-employees/payroll-tabs/create",adminMiddleware,async(req,
   if(response.data.replies?.[0]?.duplicateSheet?.properties?.sheetId!==newId)
    throw Error("PAYROLL_DUPLICATE_ID_MISSING");
   const escaped=plan.targetTitle.replace(/'/g,"''");
-  const ranges=plan.clearCells.map(cell=>`'${escaped}'!${cell}`);
-  await sheets.spreadsheets.values.batchClear({spreadsheetId,requestBody:{ranges}});
+  // A full sheet duplication already preserves ALL data, formulas and formatting.
+  // Never clear payroll amounts: the user explicitly requires the new tab to
+  // start with the exact previous-month column values.
   const check=await sheets.spreadsheets.values.get({spreadsheetId,
    range:`'${escaped}'!A1:M${rowCount}`,valueRenderOption:"FORMULA"});
   const after=check.data.values??[];
-  const still=plan.clearCells.filter(cell=>{
-   const match=/^([A-Z]+)(\d+)$/.exec(cell)!;
-   const column=match[1].split("").reduce((sum,c)=>sum*26+c.charCodeAt(0)-64,0)-1;
-   return String(after[Number(match[2])-1]?.[column]??"").trim()!=="";
-  });
-  const identityChanged=sourceRows.some((row,i)=>{
-   const number=String(row?.[0]??"").trim(),name=String(row?.[1]??"").trim();
-   if(!/^[1-9]\d{0,2}$/.test(number)||!name)return false;
-   return String(after[i]?.[0]??"").trim()!==number||
-    String(after[i]?.[1]??"").trim()!==name;
-  });
-  if(still.length||identityChanged)throw Error("PAYROLL_DRAFT_READBACK_FAILED");
+  if(after.length!==sourceRows.length||sourceRows.some((row,i)=>
+    row.some((value,c)=>String(after[i]?.[c]??"")!==String(value??""))))
+   throw Error("PAYROLL_FULL_COPY_READBACK_FAILED");
   const metadata=await sheets.spreadsheets.get({spreadsheetId,fields:"sheets(properties(sheetId,title,hidden))"});
   const draft=metadata.data.sheets?.find(s=>s.properties?.sheetId===newId);
   if(draft?.properties?.title!==plan.targetTitle||draft.properties.hidden!==true)
@@ -112,7 +104,7 @@ router.post("/admin/sc-employees/payroll-tabs/create",adminMiddleware,async(req,
    {updateSheetProperties:{properties:{sheetId:newId,hidden:false},fields:"hidden"}}
   ]}});
   const audit={period,sourceTitle:plan.sourceTitle,targetTitle:plan.targetTitle,sheetId:newId,
-   employeeCount:plan.employeeCount,clearedCells:plan.clearCells.length};
+   employeeCount:plan.employeeCount,copiedCells:sourceRows.reduce((n,row)=>n+row.filter(v=>v!==""&&v!==null&&v!==undefined).length,0)};
   await logAudit({...getUserFromReq(req),action:"SC_PAYROLL_MONTHLY_TAB_CREATED",
    entity:"sc_employee_payroll_tab",after:audit,...getClientInfo(req)});
   res.json({created:true,...audit,url:`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?gid=${newId}#gid=${newId}`});
