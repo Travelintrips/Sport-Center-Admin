@@ -28,7 +28,7 @@ assert.match(route,/recordsForKasbonPeriod\(records,period\)/);
 assert.match(route,/monthlyKasbonTotal\(records,period\)/);
 assert.match(route,/recordsForKasbonPeriod\(latest,period\)/);
 assert.match(route,/after:\{\.\.\.outcome,period,records:snapshot\}/);
-assert.match(route,/after->>'period'/);
+assert.ok(route.includes("->>'period'"),"monthly receipt must be filtered by audit period");
 assert.match(sheets,/filter\(s=>s\.properties\?\.title===tab\)/);
 assert.match(sheets,/SALARY_WORKSHEET_NOT_VERIFIED/);
 assert.match(sheets,/SALARY_NOVEMBER_WORKSHEET_ID_CHANGED/);
