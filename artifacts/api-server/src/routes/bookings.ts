@@ -3484,6 +3484,19 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       });
       return;
     }
+    if (status === "confirmed" && beforeUpdate.status !== "confirmed") {
+      const confirmedPayment = await db.select({ id: paymentsTable.id })
+        .from(paymentsTable)
+        .where(and(eq(paymentsTable.bookingId, id), eq(paymentsTable.status, "confirmed")))
+        .limit(1);
+      if (!confirmedPayment.length && beforeUpdate.membershipPaymentId == null) {
+        res.status(409).json({
+          code: "BOOKING_CONFIRM_REQUIRES_PAYMENT_VERIFICATION",
+          error: "Konfirmasi booking harus mengikuti verifikasi pembayaran, bukan hanya pilihan status.",
+        });
+        return;
+      }
+    }
     if (status && ["pending_payment", "paid"].includes(status) &&
         ["confirmed", "completed", "cancelled", "refunded"].includes(beforeUpdate.status)) {
       res.status(409).json({
