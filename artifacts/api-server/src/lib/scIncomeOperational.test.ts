@@ -1,4 +1,4 @@
-import {describe,it,expect} from "vitest";
+
 import {validateIncome,incomeFingerprint,INCOME_TAB,INCOME_HEADERS} from "./scIncomeOperational";
 const ok={entryKey:"d1a518c1-e086-45d8-9259-822bc0ba87b3",transactionDate:"2026-11-09",
   sourceName:"Felicia Justiani",senderBank:"BCA",method:"Transfer Bank",
