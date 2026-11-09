@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
+import { autoReserveVisAfterFundsVerified, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { normalizeX904VisitorName } from "../services/x904VisitorName";
 import { db, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
@@ -1620,6 +1621,64 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
   }
 });
 
+// Assign a physical VIS card to an EXISTING paid Gym booking. Never create a
+// duplicate booking/payment and never issue an X904 device command here.
+// Handover and device read-back are separate, mandatory gates.
+router.post("/bookings/:bookingId/x904-vis-reserve", async (req, res) => {
+  const authorization = String(req.headers.authorization ?? "");
+  const principal = authorization.startsWith("Bearer ")
+    ? verifyToken(authorization.slice(7)) : null;
+  if (!principal?.userId || !isOperationalBookingRole(principal.role)) {
+    res.status(403).json({ error: "Hanya petugas booking yang dapat menetapkan kartu VIS." });
+    return;
+  }
+  const bookingId = Number(req.params.bookingId);
+  if (!Number.isSafeInteger(bookingId) || bookingId <= 0 ||
+      req.body?.identityChecked !== true || req.body?.officialFundsChecked !== true) {
+    res.status(400).json({ error: "Booking, identitas pengunjung, dan dana resmi wajib diverifikasi petugas." });
+    return;
+  }
+  try {
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking || booking.source !== "web" || booking.status !== "confirmed" ||
+        booking.payerType !== "personal" || booking.bookingType === "event") {
+      res.status(409).json({ error: "Hanya booking web GYM personal yang sudah dikonfirmasi yang dapat memakai penetapan VIS ini." });
+      return;
+    }
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    if (!facility || !isGymFacility(facility)) {
+      res.status(409).json({ error: "Penetapan VIS hanya tersedia untuk booking GYM." });
+      return;
+    }
+    const result = await autoReserveVisAfterFundsVerified({
+      orderNumber: booking.orderNumber,
+      officialBankReference: String(req.body?.officialBankReference ?? ""),
+      officialFundsChecked: true,
+      verifiedBy: String(principal.userId),
+      allowWebBooking: true,
+    });
+    await logAudit({
+      userId: principal.userId,
+      userRole: principal.role,
+      action: "GYM_VIS_EXISTING_WEB_BOOKING_RESERVED",
+      entity: "booking",
+      entityId: booking.id,
+      after: { cardCode: result.cardCode, state: result.state, newReservation: result.newReservation },
+      ...getClientInfo(req),
+    });
+    res.json({ success: true, ...result, message: "Kartu VIS direservasi untuk booking yang sudah dibayar; serah-terima fisik dan ACK mesin masih wajib." });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
+    req.log.error({ err: error }, "Reserve VIS for existing web booking failed");
+    res.status(503).json({ error: "Reservasi VIS tidak tersedia. Tidak ada akses baru diterbitkan." });
+  }
+});
+
 router.post("/bookings", async (req, res) => {
   // Declared outside try so the catch block can release the advisory lock on error
   let slotLockKey: { fId: number; dInt: number } | null = null;
@@ -1755,7 +1814,21 @@ router.post("/bookings", async (req, res) => {
     // Admin-created guest bookings have no registered customer identity. Never
     // implicitly attach them to the logged-in operator (including super_admin).
     const isAdminGuestBooking = isAdminRequest && bookingSource === "admin" && req.body.customerId === null;
-    const effectiveCustomerId = isAdminGuestBooking ? null : bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
+    // A staff session is never the customer's identity, including when the
+    // staff member opens the public/web booking form for a walk-in guest.
+    // Keep bookedByUserId as the operator audit field instead.
+    const staffPersonalBooking = isAdminRequest && !isCompanyBilling && !isPendingCompany;
+    if (staffPersonalBooking && bodyCustomerId) {
+      const [selectedCustomer] = await db.select({ role: usersTable.role })
+        .from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
+      if (!selectedCustomer || selectedCustomer.role !== "customer") {
+        res.status(400).json({ error: "Akun petugas tidak boleh ditetapkan sebagai identitas pelanggan." });
+        return;
+      }
+    }
+    const effectiveCustomerId = staffPersonalBooking
+      ? bodyCustomerId
+      : isAdminGuestBooking ? null : bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
     const activityType = req.body.activityType || null;
     let numberOfPeople = req.body.numberOfPeople == null ? null : Number(req.body.numberOfPeople);
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -2180,11 +2253,11 @@ router.post("/bookings", async (req, res) => {
         let existingUser: typeof usersTable.$inferSelect | undefined;
         if (normalizedPhone) {
           [existingUser] = await db.select().from(usersTable)
-            .where(eq(usersTable.phone, normalizedPhone)).limit(1);
+            .where(and(eq(usersTable.phone, normalizedPhone), eq(usersTable.role, "customer"))).limit(1);
         }
         if (!existingUser && customerEmail) {
           [existingUser] = await db.select().from(usersTable)
-            .where(eq(usersTable.email, String(customerEmail))).limit(1);
+            .where(and(eq(usersTable.email, String(customerEmail)), eq(usersTable.role, "customer"))).limit(1);
         }
 
         if (existingUser) {
