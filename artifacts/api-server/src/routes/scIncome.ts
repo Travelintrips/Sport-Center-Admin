@@ -4,6 +4,7 @@ import {sql} from "drizzle-orm";
 import {adminMiddleware} from "../lib/auth";
 import {getUserFromReq,logAudit,getClientInfo} from "../lib/auditLog";
 import {validateIncome,incomeFingerprint,resultRows,syncIncomeRow} from "../lib/scIncomeOperational";
+import {syncConfirmedCashIncome} from "../lib/scIncomeCashLedger";
 
 const router=Router();
 // Human-readable, immutable receipt ID backed by the database primary key.
@@ -14,7 +15,9 @@ router.get("/admin/income",adminMiddleware,async(req,res)=>{
   const entries=resultRows(await db.execute(sql`SELECT id,entry_key,transaction_date::text AS "transactionDate",
    source_name AS "sourceName",sender_bank AS "senderBank",method,receiving_account AS "receivingAccount",
    amount::text,bank_reference AS "bankReference",reconciliation_state AS "reconciliationState",
-   sheet_sync_state AS "sheetSyncState",sheet_sync_error AS "sheetSyncError",created_at
+   sheet_sync_state AS "sheetSyncState",sheet_sync_error AS "sheetSyncError",
+   cash_sheet_state AS "cashSheetState", cash_sheet_row AS "cashSheetRow",
+   cash_sheet_error AS "cashSheetError", created_at
    FROM sport_center.sc_income_entries ORDER BY transaction_date DESC,id DESC LIMIT 250`));
   const month=resultRows(await db.execute(sql`SELECT COALESCE(SUM(amount),0)::text AS total,
    count(*) FILTER (WHERE sheet_sync_state<>'synced') AS awaiting
@@ -29,6 +32,14 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
  let input;
  try{input=validateIncome(req.body)}catch(e){res.status(400).json({error:e instanceof Error?e.message:"INVALID_INPUT"});return;}
  const fingerprint=incomeFingerprint(input);
+ // Cash ledger is separate from transfer-to-bank receipts. Explicit physical-cash attestation required.
+ const forCash=input.method==="Tunai" && input.receivingAccount==="Kas Besar SC";
+ if(forCash && req.body?.confirmedCashReceived!==true){
+   res.status(400).json({error:"CONFIRM_CASH_RECEIVED_REQUIRED"});return;
+ }
+ if(!forCash && req.body?.confirmedCashReceived===true){
+   res.status(400).json({error:"CASH_CONFIRMATION_ACCOUNT_MISMATCH"});return;
+ }
  try{
   const existing=resultRows(await db.execute(sql`SELECT id,entry_key,fingerprint,sheet_sync_state FROM sport_center.sc_income_entries WHERE entry_key=${input.entryKey}::uuid`))[0];
   if(existing){
@@ -43,10 +54,12 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
     return;
   }
   const saved=resultRows(await db.execute(sql`INSERT INTO sport_center.sc_income_entries
-   (entry_key,transaction_date,source_name,sender_bank,method,receiving_account,amount,bank_reference,fingerprint,created_by)
+   (entry_key,transaction_date,source_name,sender_bank,method,receiving_account,amount,bank_reference,fingerprint,created_by,
+    cash_received_confirmed_at,cash_sheet_state)
    VALUES (${input.entryKey}::uuid,${input.transactionDate}::date,${input.sourceName},${input.senderBank},
            ${input.method},${input.receivingAccount},${input.amount},${input.bankReference},${fingerprint},
-           ${getUserFromReq(req).userId??null})
+           ${getUserFromReq(req).userId??null},
+           ${forCash ? new Date() : null},${forCash?"pending":"not_applicable"})
    ON CONFLICT DO NOTHING RETURNING id,entry_key,fingerprint,sheet_sync_state`))[0];
   if(!saved){
     // Under concurrent requests, either same idempotency key or another bank reference won.
@@ -57,9 +70,11 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
   await logAudit({...getUserFromReq(req),action:"SC_INCOME_CREATED",entity:"sc_income_entry",entityId:Number(saved.id),
     after:{entryKey:input.entryKey,transactionDate:input.transactionDate,sourceName:input.sourceName,
       senderBank:input.senderBank,method:input.method,receivingAccount:input.receivingAccount,amount:input.amount,
-      reconciliationState:"UNVERIFIED"},...getClientInfo(req)});
+      reconciliationState:"UNVERIFIED",cashReceivedConfirmed:forCash},...getClientInfo(req)});
   const sheetStatus=await syncIncomeRow(Number(saved.id));
-  res.status(201).json({id:Number(saved.id),incomeNo:incomeNo(Number(saved.id)),entryKey:input.entryKey,sheetStatus,reconciliationState:"UNVERIFIED"});
+  const cashSheetStatus=forCash?await syncConfirmedCashIncome(Number(saved.id)):"not_applicable";
+  res.status(201).json({id:Number(saved.id),incomeNo:incomeNo(Number(saved.id)),entryKey:input.entryKey,
+    sheetStatus,cashSheetStatus,reconciliationState:"UNVERIFIED"});
  }catch(e){req.log.error({err:e},"SC income save failed");res.status(503).json({error:"Gagal menyimpan Uang Masuk; periksa daftar sebelum mencoba lagi"});}
 });
 router.post("/admin/income/:id/retry-sheet",adminMiddleware,async(req,res)=>{
@@ -67,6 +82,12 @@ router.post("/admin/income/:id/retry-sheet",adminMiddleware,async(req,res)=>{
  if(!Number.isSafeInteger(id)||id<1){res.status(400).json({error:"INVALID_ID"});return;}
  try{const status=await syncIncomeRow(id);res.json({sheetStatus:status});}
  catch(e){req.log.error({err:e},"SC income sheet retry");res.status(503).json({error:"Sinkronisasi belum tersedia"});}
+});
+router.post("/admin/income/:id/retry-cash-sheet",adminMiddleware,async(req,res)=>{
+ const id=Number(req.params.id);
+ if(!Number.isSafeInteger(id)||id<1){res.status(400).json({error:"INVALID_ID"});return;}
+ try{const cashSheetStatus=await syncConfirmedCashIncome(id);res.json({cashSheetStatus});}
+ catch(e){req.log.error({err:e},"SC cash sheet retry");res.status(503).json({error:"CASH_SYNC_UNAVAILABLE"});}
 });
 // Find candidates only: matching does not approve, reconcile or post to GL.
 router.get("/admin/income/:id/mutation-candidates",adminMiddleware,async(req,res)=>{
