@@ -18,6 +18,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminPaymentProofRecorded, notifyAdminBookingReport, notifyGymVisitorCardReserved, notifyGymGuestPaymentVerified } from "../lib/notifications";
 import { isAuthorizedAdminProofUploader } from "../lib/adminPaymentProofReport";
+import { canRecordConfirmedBookingOutstandingPayment } from "../lib/confirmedBookingOutstandingPayment";
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
@@ -586,12 +587,31 @@ router.post("/payments", async (req, res) => {
     const billedAmount = groupBookings.reduce(
       (sum, b) => sum + Number(b.grandTotal ?? b.totalPrice ?? 0), 0,
     );
+    const hasUnconfirmedPayment = groupPayments.some((p) =>
+      ["pending", "pending_payment", "waiting_confirmation"].includes(p.status));
+    // An extension can increase a previously confirmed booking's total after
+    // the first payment (historically labelled full_payment). An authorized
+    // operator may collect only the additional balance, never reopen a paid
+    // booking or accept another pending proof.
+    const canSettleConfirmedPartial = canRecordConfirmedBookingOutstandingPayment({
+      bookingStatus: booking.status,
+      confirmedAmount,
+      billedAmount,
+      actorRole: uploadActor?.role ?? null,
+      hasUnconfirmedPayment,
+    });
     const canSettleConfirmedDp = booking.status === "confirmed" &&
       hasConfirmedDp &&
       !groupPayments.some((p) => p.status === "confirmed" && p.paymentType !== "dp") &&
-      confirmedAmount > 0 && confirmedAmount < billedAmount;
-    if (!["pending_payment", "expired"].includes(booking.status) && !canSettleConfirmedDp) {
-      res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran" });
+      confirmedAmount > 0 && confirmedAmount < billedAmount &&
+      !hasUnconfirmedPayment;
+    if (!["pending_payment", "expired"].includes(booking.status) &&
+        !canSettleConfirmedDp && !canSettleConfirmedPartial) {
+      res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran atau pelunasan yang sah" });
+      return;
+    }
+    if (hasUnconfirmedPayment) {
+      res.status(409).json({ error: "Bukti pembayaran sebelumnya masih menunggu verifikasi" });
       return;
     }
 
@@ -609,8 +629,10 @@ router.post("/payments", async (req, res) => {
       return;
     }
 
-    const paymentType = configuredDp
-      ? dpAlreadyConfirmed ? "pelunasan" : "dp"
+    const hasConfirmedPartial = confirmedAmount > 0 && confirmedAmount < billedAmount;
+    const paymentType = hasConfirmedPartial
+      ? "pelunasan"
+      : configuredDp ? dpAlreadyConfirmed ? "pelunasan" : "dp"
       : "full_payment";
 
     // Payment type is derived from the booking state, never trusted from the browser.
@@ -668,7 +690,7 @@ router.post("/payments", async (req, res) => {
       paymentType === "dp"
         ? configuredDownPayment
         : paymentType === "pelunasan"
-        ? Math.max(0, total - confirmedDp)
+        ? Math.max(0, total - confirmedAmount)
         : total;
     const submittedAmount = Number(amount);
     if (
@@ -724,13 +746,7 @@ router.post("/payments", async (req, res) => {
     }
 
     if (paymentType === "pelunasan") {
-      const confirmedDpTotal = Math.max(
-        0,
-        ...groupPayments
-          .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
-          .map((p) => Number(p.amount)),
-      );
-      const remainingAmount = grandTotalVal - confirmedDpTotal;
+      const remainingAmount = grandTotalVal - confirmedAmount;
       if (amountNum > remainingAmount + PAYMENT_TOLERANCE) {
         res.status(400).json({
           error: `Nominal pelunasan (Rp ${amountNum.toLocaleString("id-ID")}) melebihi sisa tagihan (Rp ${remainingAmount.toLocaleString("id-ID")})`,

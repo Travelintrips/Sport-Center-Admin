@@ -38,7 +38,7 @@ export function getBookingPaymentCapture(
   const isSubsequentPayment = hasConfirmedPartial;
   const paymentType = isSubsequentPayment ? "pelunasan" : configuredDp > 0 ? "dp" : "full_payment";
   const amount = isSubsequentPayment ? remaining : configuredDp > 0 ? configuredDp : total;
-  const allowedBookingStatus = ["pending_payment", "waiting_confirmation", "paid", "confirmed", "completed", "expired"].includes(booking.status ?? "");
+  const allowedBookingStatus = ["pending_payment", "waiting_confirmation", "paid", "confirmed", "expired"].includes(booking.status ?? "");
   const canRecord =
     groupHistoryReady && Number.isFinite(total) && total > 0 &&
     Number.isFinite(confirmedAmount) && confirmedAmount >= 0 &&
