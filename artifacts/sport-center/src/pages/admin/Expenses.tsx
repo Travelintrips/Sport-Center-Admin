@@ -76,6 +76,50 @@ export function formatExpenseRupiahInput(value: string): string {
   return digits ? new Intl.NumberFormat("id-ID").format(Number(digits)) : "";
 }
 
+const INCOME_SOURCE_OPTIONS = ["Felicia Justiani", "Cahaya Sejati Teknologi", "Angelia Nirwana"];
+const INCOME_BANK_OPTIONS = ["Mandiri", "BCA", "blu by BCA Digital", "BNI", "BRI"];
+
+type IncomeDropdownProps = {
+  id: string;
+  value: string;
+  options: string[];
+  placeholder: string;
+  otherPlaceholder: string;
+  required?: boolean;
+  onChange: (value: string) => void;
+};
+
+/** Consistent with the Metode select. Unknown values remain manually editable. */
+function IncomeDropdown({ id, value, options, placeholder, otherPlaceholder, required, onChange }: IncomeDropdownProps) {
+  const manual = value !== "" && !options.includes(value);
+  return (
+    <div className="space-y-2">
+      <Select
+        value={manual ? "__manual__" : value || undefined}
+        onValueChange={(next) => onChange(next === "__manual__" ? " " : next)}
+      >
+        <SelectTrigger id={id} aria-required={required}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+          <SelectItem value="__manual__">Lainnya (isi manual)</SelectItem>
+        </SelectContent>
+      </Select>
+      {manual && (
+        <Input
+          aria-label={otherPlaceholder}
+          value={value.trimStart()}
+          onChange={(event) => onChange(event.target.value === "" ? " " : event.target.value)}
+          placeholder={otherPlaceholder}
+          required={required}
+          autoComplete="off"
+        />
+      )}
+    </div>
+  );
+}
+
 const EMPTY_FORM = {
   expenseDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
   coaAccountId: "",
@@ -692,31 +736,28 @@ export default function AdminExpenses() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="income-source">Dana Masuk (Dari) <span className="text-red-500">*</span></Label>
-              <Input id="income-source" required list="income-source-suggestions" autoComplete="off"
-                placeholder="Ketik nama pengirim atau perusahaan"
+              <IncomeDropdown
+                id="income-source"
                 value={incomeForm.sourceName}
-                onChange={(e) => { setIncomeForm({ ...incomeForm, sourceName: e.target.value }); setIncomePreview(false); }} />
-              <datalist id="income-source-suggestions">
-                <option value="Felicia Justiani" />
-                <option value="Cahaya Sejati Teknologi" />
-                <option value="Angelia Nirwana" />
-              </datalist>
+                options={INCOME_SOURCE_OPTIONS}
+                placeholder="Pilih pengirim dana"
+                otherPlaceholder="Ketik nama pengirim atau perusahaan"
+                required
+                onChange={(value) => { setIncomeForm({ ...incomeForm, sourceName: value }); setIncomePreview(false); }}
+              />
               <p className="text-xs text-gray-500">Contoh dari kas besar sc. Nama lain boleh diketik manual.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="income-bank">Bank Pengirim <span className="text-red-500">*</span></Label>
-              <Input id="income-bank" list="income-bank-suggestions"
-                placeholder="Contoh: Mandiri, BCA, blu"
-                required
+              <IncomeDropdown
+                id="income-bank"
                 value={incomeForm.bank}
-                onChange={(e) => { setIncomeForm({ ...incomeForm, bank: e.target.value }); setIncomePreview(false); }} />
-              <datalist id="income-bank-suggestions">
-                <option value="Mandiri" />
-                <option value="BCA" />
-                <option value="blu by BCA Digital" />
-                <option value="BNI" />
-                <option value="BRI" />
-              </datalist>
+                options={INCOME_BANK_OPTIONS}
+                placeholder="Pilih bank pengirim"
+                otherPlaceholder="Ketik bank pengirim"
+                required
+                onChange={(value) => { setIncomeForm({ ...incomeForm, bank: value }); setIncomePreview(false); }}
+              />
               <p className="text-xs text-gray-500">Bank asal dana. Berbeda dengan bank atau akun penerima.</p>
             </div>
             <div className="space-y-1.5">
@@ -737,21 +778,18 @@ export default function AdminExpenses() {
               <Label htmlFor="income-receiving-account">
                 Bank / Akun Penerima {incomeForm.method === "Transfer Bank" ? <span className="text-red-500">*</span> : "(opsional)"}
               </Label>
-              <Input id="income-receiving-account" list="income-receiving-suggestions" autoComplete="off"
-                placeholder="Contoh: BCA, blu by BCA Digital, Mandiri"
-                required={incomeForm.method === "Transfer Bank"}
+              <IncomeDropdown
+                id="income-receiving-account"
                 value={incomeForm.receivingAccount}
-                onChange={(e) => {
-                  setIncomeForm({ ...incomeForm, receivingAccount: e.target.value });
+                options={INCOME_BANK_OPTIONS}
+                placeholder="Pilih bank atau akun penerima"
+                otherPlaceholder="Ketik bank atau akun penerima"
+                required={incomeForm.method === "Transfer Bank"}
+                onChange={(value) => {
+                  setIncomeForm({ ...incomeForm, receivingAccount: value });
                   setIncomePreview(false);
-                }} />
-              <datalist id="income-receiving-suggestions">
-                <option value="BCA" />
-                <option value="blu by BCA Digital" />
-                <option value="Mandiri" />
-                <option value="BNI" />
-                <option value="BRI" />
-              </datalist>
+                }}
+              />
               <p className="text-xs text-gray-500">Bank atau akun tujuan yang menerima uang. Hanya informasi pada pratinjau UI.</p>
             </div>
             <div className="space-y-1.5">
