@@ -15,13 +15,16 @@ function client(){
   })});
 }
 async function sheetTarget(){
-  // The mapped account #1 was independently audited as cash. Do not require
-  // the app role to read private company_bank_accounts (RLS denies it).
-  const rows=resultRows(await db.execute(sql`SELECT b.sheet_id,b.tab_name,b.company_id,b.bank_account_id
-    FROM public.bank_sheet_configs b WHERE b.id=12 AND b.is_active=true`));
+  // Both the mapping and account type must be read back at runtime.
+  // A narrowly scoped app-role RLS policy allows only this cash account.
+  const rows=resultRows(await db.execute(sql`SELECT b.sheet_id,b.tab_name,b.company_id,b.bank_account_id,c.account_type
+    FROM public.bank_sheet_configs b
+    JOIN public.company_bank_accounts c ON c.id=b.bank_account_id AND c.company_id=b.company_id
+    WHERE b.id=12 AND b.is_active=true`));
   if(rows.length!==1 || rows[0].sheet_id!==CASH_SHEET_ID ||
      String(rows[0].tab_name).trim().toLowerCase()!==CASH_TAB ||
-     Number(rows[0].company_id)!==1 || Number(rows[0].bank_account_id)!==1)
+     Number(rows[0].company_id)!==1 || Number(rows[0].bank_account_id)!==1 ||
+     rows[0].account_type!=="cash")
      throw Error("SC_CASH_TARGET_NOT_VERIFIED");
   return CASH_SHEET_ID;
 }

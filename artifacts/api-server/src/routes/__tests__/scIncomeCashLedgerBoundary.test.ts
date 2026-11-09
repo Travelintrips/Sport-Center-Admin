@@ -20,6 +20,7 @@ describe("Cash-only bank-sheet feed",()=>{
   expect(worker).toContain('process.env.SC_CASH_LEDGER_SYNC_ENABLED==="true"');
   expect(worker).toContain("cash_received_confirmed_at IS NOT NULL");
   expect(worker).toContain("method='Tunai' AND receiving_account='Kas Besar SC'");
+  expect(worker).toContain('rows[0].account_type!=="cash"');
   expect(worker).toContain("CASH_SHEET_HEADERS_MISMATCH");
   expect(worker).toContain("CASH_SHEET_READBACK_NOT_UNIQUE");
   expect(worker).toContain("cashLedgerPositions");
