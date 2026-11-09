@@ -48,3 +48,16 @@ test("PROD polling requires explicit opt-in, is serialized, and remains detectio
   assert.doesNotMatch(runtime, /setInterval\([^\)]*\bsync\s*\(/);
   assert.doesNotMatch(runtime, /\b(?:update|delete|insert)\s+(?:into\s+)?sport_center\.(?:sport_payments|sport_bookings|x904_user_commands)/i);
 });
+
+test("PROD ingestion rejects database roles capable of editing canonical payments", () => {
+  assert.match(runtime, /QRIS_PROD_DB_ROLE_NOT_LEAST_PRIVILEGED/);
+  assert.match(runtime, /pg_has_role\(current_user, 'qris_gmail_prod_runtime', 'USAGE'\)/);
+  assert.match(runtime, /has_table_privilege\(current_user, 'sport_center\.sport_payments', 'INSERT'\)/);
+  assert.match(runtime, /has_table_privilege\(current_user, 'sport_center\.sport_payments', 'UPDATE'\)/);
+  assert.match(runtime, /has_table_privilege\(current_user, 'sport_center\.sport_payments', 'DELETE'\)/);
+  assert.match(runtime, /access\.can_insert_payments === false/);
+  assert.match(runtime, /access\.can_update_payments === false/);
+  assert.match(runtime, /access\.can_delete_payments === false/);
+  assert.match(runtime, /access\.can_insert_detection === true/);
+  assert.match(runtime, /access\.can_update_detection_status === true/);
+});
