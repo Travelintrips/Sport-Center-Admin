@@ -1519,11 +1519,12 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const { data: gymX904Monitoring } = useQuery({
+  const { data: gymX904Monitoring, isError: gymX904MonitoringFailed, error: gymX904MonitoringError, refetch: retryGymX904Monitoring } = useQuery({
     queryKey: ["admin-gym-x904-monitoring", booking.orderNumber],
-    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
     refetchInterval: 15000,
+    refetchOnMount: "always",
     queryFn: async () => {
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/x904-monitoring`, {
         cache: "no-store",
@@ -1534,7 +1535,9 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? gymX904Monitoring?.reservation ?? null;
+  // Monitoring is the current source of truth for VIS reservations on web Gym bookings.
+  // Legacy detail may be null or stale; never let it override read-back status.
+  const gymVisReservation = gymX904Monitoring?.reservation ?? gymGuestAdminDetail?.visCardReservation ?? null;
   const gymVisAccess = gymX904Monitoring?.access ?? null;
   const gymVisPool = gymX904Monitoring?.pool ?? [];
   const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
@@ -1607,7 +1610,10 @@ function BookingDetailDrawer({
       return payload;
     },
     onSuccess: async (result: any) => {
-      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] });
+      await Promise.all([
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] }),
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] }),
+      ]);
       paymentToast.toast({
         title: "Kartu VIS disiapkan tanpa booking baru",
         description: `${result?.cardCode ?? "Kartu"} telah direservasi. Serahkan kartu fisik dan verifikasi ACK X904 sebelum menyatakan akses aktif.`,
@@ -1991,12 +1997,21 @@ function BookingDetailDrawer({
             detection={qrisEmailDetection}
             paymentStatus={qrisEmailPaymentStatus}
           />
+          {(booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && gymX904MonitoringFailed && (
+            <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <div className="font-semibold">Status kartu VIS/X904 belum dapat diverifikasi.</div>
+              <p>{String((gymX904MonitoringError as Error)?.message ?? "Monitoring tidak tersedia")}. Jangan serahkan atau menetapkan kartu sebelum status terbaru terbaca.</p>
+              <button type="button" onClick={() => void retryGymX904Monitoring()}
+                className="rounded-lg border border-amber-400 bg-white px-3 py-2 font-semibold">Coba lagi monitoring VIS</button>
+            </div>
+          )}
           {booking.source === "web" &&
             /gym|fitness/i.test(String(booking.facilityName ?? "")) &&
-            booking.status === "confirmed" && !gymVisReservation && (
+            booking.status === "confirmed" && !gymVisReservation && !gymX904MonitoringFailed &&
+            String(booking.bookingDate ?? "").slice(0, 10) === new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }) && (
             <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
               <div className="font-semibold">Tetapkan kartu VIS ke booking ini</div>
-              <p className="text-xs leading-relaxed">Gunakan booking yang sudah dibayar, tanpa membuat booking atau pembayaran kedua. Petugas wajib memeriksa identitas Fandy/pengunjung, mutasi resmi, dan ketersediaan kartu. Aktivasi tetap menunggu serah-terima fisik dan ACK mesin.</p>
+              <p className="text-xs leading-relaxed">Gunakan booking yang sudah dibayar, tanpa membuat booking atau pembayaran kedua. Petugas wajib memeriksa identitas pengunjung, mutasi resmi, dan ketersediaan kartu. Aktivasi tetap menunggu serah-terima fisik dan ACK mesin.</p>
               <label className="block space-y-1 text-xs font-semibold">
                 Referensi transaksi bank resmi
                 <input aria-label="Referensi transaksi bank resmi VIS" value={visOfficialReference}
