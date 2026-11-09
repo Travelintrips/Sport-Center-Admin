@@ -9,7 +9,7 @@ const historicalNames:Record<string,Record<string,{name:string;row:number}>>={
  "2026-11":{SC003:{name:"ROBBY RAHMAN",row:9}},
 };
 export function resolvePayrollIdentity(employeeId:string,fullName:string,period:string){
- if(employeeId==="SC003" && !["ROBBY RAHMAN","ROBBY"].includes(fullName.trim().replace(/\\s+/g," ").toUpperCase()))
+ if(employeeId==="SC003" && !["ROBBY RAHMAN","ROBBY"].includes(fullName.trim().toUpperCase()))
   throw Error("SALARY_EMPLOYEE_ALIAS_IDENTITY_CHANGED");
  const mapped=historicalNames[period]?.[employeeId];
  return {name:mapped?.name??fullName,expectedRow:mapped?.row??null};
