@@ -15,6 +15,21 @@ describe("Gym paid web booking identity and VIS handoff regression", () => {
     expect(bookings).toContain('eq(usersTable.role, "customer")');
   });
 
+  test("admin card booking reuses an identical paid web visit rather than duplicating payment", () => {
+    const start = bookings.indexOf("// Staff must reuse an already paid web Gym booking");
+    const end = bookings.indexOf("let verifiedX904Identity", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const guard = bookings.slice(start, end);
+    expect(guard).toContain('req.body.x904IdentityType === "card"');
+    expect(guard).toContain("b.customer_phone=");
+    expect(guard).toContain("upper(btrim(b.customer_name))");
+    expect(guard).toContain("b.status::text='confirmed'");
+    expect(guard).toContain("p.status::text='confirmed'");
+    expect(guard).toContain('"EXISTING_PAID_GYM_BOOKING"');
+    expect(guard).toContain("existingBookingId:");
+  });
+
   test("existing booking reservation requires authenticated staff, a confirmed booking and independent funds and identity checks", () => {
     const start = bookings.indexOf('router.post("/bookings/:bookingId/x904-vis-reserve"');
     const end = bookings.indexOf('router.post("/bookings", async', start);
