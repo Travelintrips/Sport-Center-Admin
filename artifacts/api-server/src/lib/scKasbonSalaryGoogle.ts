@@ -33,9 +33,8 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
  const matches=(meta.data.sheets??[]).filter(s=>s.properties?.title===tab);
  if(matches.length!==1)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
  const target=matches[0];const gid=target.properties?.sheetId;
- if(!Number.isSafeInteger(gid)||gid===undefined||gid<0)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ if(typeof gid!=="number"||!Number.isSafeInteger(gid)||gid<0)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
  if(period==="2026-11"&&gid!==NOVEMBER_GID)throw Error("SALARY_NOVEMBER_WORKSHEET_ID_CHANGED");
- if(!target)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
  const rowCount=target.properties?.gridProperties?.rowCount??0;
  if(!Number.isSafeInteger(rowCount)||rowCount<22||rowCount>10000)throw Error("SALARY_ROWS_UNEXPECTED");
  const range=tabRange("A1:H"+rowCount);
