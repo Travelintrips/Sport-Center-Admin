@@ -24,6 +24,29 @@ describe("Gym VIS operational monitoring contract", () => {
     expect(ui).toContain("visPhysicalReturned");
   });
 
+  test("web Gym booking and public guest both poll authoritative VIS monitoring", () => {
+    const queryStart = ui.indexOf('const { data: gymX904Monitoring');
+    const queryEnd = ui.indexOf('const gymVisReservation', queryStart);
+    const monitoringQuery = ui.slice(queryStart, queryEnd);
+    expect(queryStart).toBeGreaterThan(-1);
+    expect(monitoringQuery).toContain('booking.source === "gym_public_guest"');
+    expect(monitoringQuery).toContain('booking.source === "web"');
+    expect(monitoringQuery).toContain('refetchInterval: 15000');
+    expect(monitoringQuery).toContain('refetchOnMount: "always"');
+    expect(ui).toContain('gymX904Monitoring?.reservation ?? gymGuestAdminDetail?.visCardReservation');
+    expect(ui).toContain('invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] })');
+    expect(api).toContain("['gym_public_guest', 'web'].includes");
+  });
+
+  test("monitoring errors fail closed with retry; past-date web VIS reservation is hidden", () => {
+    expect(ui).toContain('gymX904MonitoringFailed');
+    expect(ui).toContain('Coba lagi monitoring VIS');
+    expect(ui).toContain('Jangan serahkan atau menetapkan kartu sebelum status terbaru terbaca');
+    expect(ui).toContain('new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })');
+    expect(ui).toContain('booking.status === "confirmed" && !gymVisReservation && !gymX904MonitoringFailed');
+    expect(ui).not.toContain('identitas Fandy/pengunjung');
+  });
+
   test("PIN approval remains explicit staff attestation and never payment-only", () => {
     expect(waUi).toContain("Saya telah memeriksa langsung identitas pengunjung");
     expect(waUi).toContain("Saya sudah memastikan dana resmi diterima");
