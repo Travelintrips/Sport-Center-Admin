@@ -44,7 +44,7 @@ test('real PostgreSQL RLS: idempotency, drift, valid and invalid DML', async () 
       confirmed_at timestamptz,expires_at timestamptz,
       verification_state text,access_state text,activated_at timestamptz
     );
-    INSERT INTO sport_center.sport_bookings VALUES
+    INSERT INTO sport_center.sport_bookings (id,source,status) VALUES
       (101,'gym_public_guest','confirmed'),
       (102,'gym_public_guest','pending'),
       (103,'gym_public_guest','confirmed'),
