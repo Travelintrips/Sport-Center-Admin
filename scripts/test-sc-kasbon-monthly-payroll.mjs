@@ -8,8 +8,9 @@ const records=[
  {id:17,kasbonDate:"2027-02-09",amount:"30000.00"}
 ];
 assert.equal(assertKasbonPeriod("2026-11"),"2026-11");
-for(const bad of ["2026-10","2027-00","2027-13","2027-1","2027-01-01","all","2099-13"])assert.throws(()=>assertKasbonPeriod(bad),/SALARY_PERIOD_INVALID/);
+for(const bad of ["2026-09","2027-00","2027-13","2027-1","2027-01-01","all","2099-13"])assert.throws(()=>assertKasbonPeriod(bad),/SALARY_PERIOD_INVALID/);
 for(const [period,total,ids,tab] of [
+ ["2026-10",0,[],"Gaji Oktober 2026"],
  ["2026-11",1500000,[4],"Gaji November 2026"],
  ["2026-12",10000,[15],"Gaji Desember 2026"],
  ["2027-01",20000,[16],"Gaji Januari 2027"],
@@ -34,7 +35,7 @@ assert.match(sheets,/SALARY_WORKSHEET_NOT_VERIFIED/);
 assert.match(sheets,/SALARY_NOVEMBER_WORKSHEET_ID_CHANGED/);
 assert.match(sheets,/period,tab/);
 assert.match(sheets,/salaryTabForKasbonPeriod\(period\)/);
-assert.match(ui,/type="month" min="2026-11"/);
+assert.match(ui,/type="month" min="2026-10"/);
 assert.match(ui,/visibleRecords=showAllMonths\?records:monthlyRecords/);
 assert.match(ui,/const totalKasbon = monthlyRecords\.reduce/);
 assert.match(ui,/queryKey:syncKey/);
