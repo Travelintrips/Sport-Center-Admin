@@ -44,10 +44,18 @@ describe("Income and expense candidates remain read-only and account scoped", ()
     expect(lookup).toBeDefined();
     expect(lookup).not.toMatch(/(?:INSERT INTO|UPDATE|DELETE FROM) public\.bank_mutations/i);
   });
-  it("shows income candidate inspection without silently posting bank receipts", () => {
+  it("leaves candidate endpoint read-only without an inline register UI", () => {
     const ui = readFileSync(resolve(process.cwd(),"../sport-center/src/pages/admin/Expenses.tsx"),"utf8");
-    expect(ui).toContain("Cek kandidat bank");
-    expect(ui).toContain("Kandidat mutasi BizPortal (baca saja");
-    expect(ui).toContain("/mutation-candidates");
+    expect(ui).not.toContain("Pencatatan Uang Masuk SC");
+    expect(route).toContain('router.get("/admin/income/:id/mutation-candidates"');
   });
+});
+
+
+describe("human-readable SC income number",()=>{
+ it("derives receipt number from durable DB primary key on created and replayed inserts",()=>{
+   expect(route).toContain('const incomeNo=(id:number)');
+   expect(route).toContain('SC-IN-');
+   expect((route.match(/incomeNo:incomeNo\(Number\(/g)||[]).length).toBe(4);
+ });
 });
