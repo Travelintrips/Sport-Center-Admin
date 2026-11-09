@@ -20,22 +20,22 @@ WITH CHECK (
   AND activated_at IS NULL
   AND EXISTS (
     SELECT 1 FROM sport_center.sport_bookings b
-    WHERE b.id = booking_id
+    WHERE b.id = x904_nonmember_daily_access.booking_id
       AND b.source = 'gym_public_guest'
       AND b.status::text = 'pending_payment'
-      AND b.customer_name = verified_name
+      AND b.customer_name = x904_nonmember_daily_access.verified_name
   )
   AND EXISTS (
     SELECT 1 FROM sport_center.x904_verified_nonmember_identities v
-    WHERE v.device_serial = device_serial
-      AND v.user_pin = user_pin
-      AND v.device_uid = device_uid
-      AND v.display_name = verified_name
+    WHERE v.device_serial = x904_nonmember_daily_access.device_serial
+      AND v.user_pin = x904_nonmember_daily_access.user_pin
+      AND v.device_uid = x904_nonmember_daily_access.device_uid
+      AND v.display_name = x904_nonmember_daily_access.verified_name
       AND v.verification_state = 'verified'
       AND v.revoked_at IS NULL
   )
   AND NOT EXISTS (
     SELECT 1 FROM sport_center.gym_x904_member_mapping m
-    WHERE m.device_serial = device_serial AND m.user_pin = user_pin
+    WHERE m.device_serial = x904_nonmember_daily_access.device_serial AND m.user_pin = x904_nonmember_daily_access.user_pin
   )
 );
