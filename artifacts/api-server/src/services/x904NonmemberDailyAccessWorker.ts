@@ -317,7 +317,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const expiry = activeStart
         ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
         : null;
-      const shouldBeActive = (a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status))) &&
+      // A web booking attached to a physical VIS must be confirmed to activate.
+      // Cancellation/completion causes the ordinary verified SUSPEND path.
+      const bookingEligible = a.booking_source === "web" && a.identity_type === "card"
+        ? a.booking_status === "confirmed"
+        : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
+      const shouldBeActive = bookingEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
