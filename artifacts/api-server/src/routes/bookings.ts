@@ -1656,7 +1656,7 @@ router.post("/bookings/:bookingId/x904-vis-reserve", async (req, res) => {
       orderNumber: booking.orderNumber,
       officialBankReference: String(req.body?.officialBankReference ?? ""),
       officialFundsChecked: true,
-      verifiedBy: String(principal.userId),
+      verifiedBy: `STAFF-${principal.userId}`,
       allowWebBooking: true,
     });
     await logAudit({
