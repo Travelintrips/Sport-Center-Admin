@@ -290,7 +290,7 @@ export default function AdminExpenses() {
       fetch(`${API}/admin/expenses?${params}`, { headers: authHeaders() }).then((r) => r.json()),
   });
 
-  const { data: incomeData, refetch: refetchIncome } = useQuery<{
+  const { data: incomeData, refetch: refetchIncome, isError: incomeLoadError } = useQuery<{
     entries: Array<{ id: number; transactionDate: string; sourceName: string;
       senderBank: string; receivingAccount: string; amount: string;
       sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
@@ -637,7 +637,7 @@ export default function AdminExpenses() {
             <div>
               <p className="font-semibold">Pencatatan Uang Masuk SC</p>
               <p className="text-xs text-gray-500">
-                Manual bulan ini: {formatIDR(incomeData?.summary.manualThisMonth ?? 0)} (belum terverifikasi).
+                Manual bulan ini: {incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Belum tersedia"} (belum terverifikasi).
                 Tidak dijumlahkan otomatis dengan mutasi bank untuk mencegah hitung ganda.
               </p>
             </div>
@@ -646,7 +646,10 @@ export default function AdminExpenses() {
             </span>
           </div>
           {(incomeData?.entries ?? []).length === 0 ? (
-            <p className="text-sm text-gray-500">Belum ada pencatatan Uang Masuk manual.</p>
+            <p className="text-sm text-gray-500">
+              {incomeLoadError ? "Daftar Uang Masuk belum tersedia. Data tidak boleh diasumsikan kosong."
+                : "Belum ada pencatatan Uang Masuk manual."}
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
