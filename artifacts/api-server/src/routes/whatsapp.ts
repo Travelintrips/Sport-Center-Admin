@@ -1383,22 +1383,39 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
 
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
-    notifyWaBookingCreated({
-      customerName: bookingCustomerName,
-      customerPhone,
-      orderNumber,
-      facilityName: facility.name,
-      bookingDate,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      totalPrice: amountToPay.toLocaleString("id-ID"),
-      paymentDeadline: deadlineStr,
-      statusUrl,
-      uploadProofUrl,
-      bankName: settings?.bankName ?? "",
-      bankAccount: settings?.bankAccount ?? "",
-      bankAccountName: settings?.bankAccountName ?? "",
-    });
+    if (publicGymGuest && publicProof) {
+      // Customer has already submitted a proof. Never send a duplicate
+      // payment request for a successfully received receipt.
+      void Promise.resolve().then(() => notifyWaProofReceived({
+        customerName: bookingCustomerName,
+        customerPhone,
+        orderNumber,
+        facilityName: facility.name,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: amountToPay.toLocaleString("id-ID"),
+        statusUrl,
+      })).catch(err => console.error("[gym-public] receipt notification failed", err));
+    } else {
+      // Other WA bookings retain their existing payment-request flow.
+      notifyWaBookingCreated({
+        customerName: bookingCustomerName,
+        customerPhone,
+        orderNumber,
+        facilityName: facility.name,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: amountToPay.toLocaleString("id-ID"),
+        paymentDeadline: deadlineStr,
+        statusUrl,
+        uploadProofUrl,
+        bankName: settings?.bankName ?? "",
+        bankAccount: settings?.bankAccount ?? "",
+        bankAccountName: settings?.bankAccountName ?? "",
+      });
+    }
 
     await logAudit({
       action: "wa_booking_created",
