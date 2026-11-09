@@ -36,7 +36,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  type SalaryCheck={period:string;tab:string;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
- const [selectedPeriod,setSelectedPeriod]=useState(()=>{const d=new Date();const value=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");return value<"2026-11"?"2026-11":value;});
+ const [selectedPeriod,setSelectedPeriod]=useState(()=>{const d=new Date();const value=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");return value<"2026-10"?"2026-10":value;});
  const [showAllMonths,setShowAllMonths]=useState(false);
  const monthLabel=new Date(selectedPeriod+"-01T12:00:00").toLocaleDateString("id-ID",{month:"long",year:"numeric"});
  const monthRecords=(records:Kasbon[])=>records.filter(r=>r.kasbonDate.slice(0,7)===selectedPeriod);
@@ -158,9 +158,9 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border bg-background px-4 py-3">
    <div className="space-y-1">
     <Label htmlFor="kasbon-period"><CalendarDays className="mr-1 inline h-4 w-4"/>Bulan Kasbon &amp; Laporan Gaji</Label>
-    <Input id="kasbon-period" type="month" min="2026-11" max="2099-12" value={selectedPeriod}
+    <Input id="kasbon-period" type="month" min="2026-10" max="2099-12" value={selectedPeriod}
      disabled={checkSalary.isPending||syncSalary.isPending||previewSalary.isPending}
-     onChange={e=>{if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(e.target.value)||e.target.value<"2026-11")return;
+     onChange={e=>{if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(e.target.value)||e.target.value<"2026-10")return;
       setSelectedPeriod(e.target.value);setShowAllMonths(false);setSalaryCheck(null);setSalaryPreview(null);setCheckOpen(false);}}/>
    </div>
    <Button variant={showAllMonths?"default":"outline"} onClick={()=>{setShowAllMonths(v=>!v);setSalaryCheck(null);setSalaryPreview(null);setCheckOpen(false);}}
