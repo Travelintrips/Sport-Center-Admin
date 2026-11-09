@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 describe("Gym VIS operational monitoring contract", () => {
   const api = readFileSync(join(process.cwd(),"src/routes/waBookingsAdmin.ts"),"utf8");
+  const bookings = readFileSync(join(process.cwd(),"src/routes/bookings.ts"),"utf8");
   const ui = readFileSync(join(process.cwd(),"../sport-center/src/pages/admin/Bookings.tsx"),"utf8");
   const waUi = readFileSync(join(process.cwd(),"../sport-center/src/pages/admin/WaBookings.tsx"),"utf8");
 
@@ -22,6 +23,17 @@ describe("Gym VIS operational monitoring contract", () => {
     expect(ui).toContain("Kembalikan Kartu ke Pool");
     expect(ui).toContain("gymVisAccess?.returnReady");
     expect(ui).toContain("visPhysicalReturned");
+  });
+
+  test("existing web booking VIS assignment verifies current staff session, not just token role", () => {
+    const start = bookings.indexOf('router.post("/bookings/:bookingId/x904-vis-reserve"');
+    const end = bookings.indexOf('router.post("/bookings", async', start);
+    expect(start).toBeGreaterThan(-1);
+    const route = bookings.slice(start, end);
+    expect(route).toContain('authMiddleware, async (req, res)');
+    expect(route).toContain('isOperationalBookingRole(principal.role)');
+    expect(route).toContain('req.body?.officialFundsChecked !== true');
+    expect(route).not.toContain('ACTIVATE_USER');
   });
 
   test("web Gym booking and public guest both poll authoritative VIS monitoring", () => {
