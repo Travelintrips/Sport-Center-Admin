@@ -75,7 +75,11 @@ router.get("/admin/income/:id/mutation-candidates",adminMiddleware,async(req,res
   const candidates=resultRows(await db.execute(sql`SELECT bm.id,bm.transaction_date::text AS date,
     bm.amount::text AS amount,left(bm.description,220) AS description,bm.reconciliation_status
    FROM public.bank_mutations bm JOIN public.bank_sheet_configs bsc ON bsc.id=bm.sheet_config_id
-   WHERE bsc.is_active=true AND lower(trim(bsc.tab_name))='kas besar sc'
+   WHERE bsc.id=12 AND bsc.company_id=1
+    AND bsc.is_active=true AND lower(trim(bsc.tab_name))='kas besar sc'
+    AND bsc.bank_account_id IS NOT NULL
+    AND bm.company_id=bsc.company_id
+    AND bm.bank_account_id=bsc.bank_account_id::text
     AND bm.direction='IN' AND bm.amount=${row.amount}::numeric
     AND bm.transaction_date BETWEEN ${row.transaction_date}::date-interval '1 day'
       AND ${row.transaction_date}::date+interval '1 day'

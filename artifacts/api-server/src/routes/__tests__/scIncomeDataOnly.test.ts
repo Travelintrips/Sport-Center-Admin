@@ -32,3 +32,22 @@ describe("SC manual income does not post bank verified movements",()=>{
    expect(migration).toContain("UNVERIFIED");
  });
 });
+
+
+describe("Income and expense candidates remain read-only and account scoped", () => {
+  it("limits income candidates to the mapped CST bank account and does not write reconciliations", () => {
+    expect(route).toContain("bsc.id=12 AND bsc.company_id=1");
+    expect(route).toContain("bm.company_id=bsc.company_id");
+    expect(route).toContain("bm.bank_account_id=bsc.bank_account_id::text");
+    expect(route).toContain('verified:false');
+    const lookup = route.split('router.get("/admin/income/:id/mutation-candidates"')[1];
+    expect(lookup).toBeDefined();
+    expect(lookup).not.toMatch(/(?:INSERT INTO|UPDATE|DELETE FROM) public\.bank_mutations/i);
+  });
+  it("shows income candidate inspection without silently posting bank receipts", () => {
+    const ui = readFileSync(resolve(process.cwd(),"../sport-center/src/pages/admin/Expenses.tsx"),"utf8");
+    expect(ui).toContain("Cek kandidat bank");
+    expect(ui).toContain("Kandidat mutasi BizPortal (baca saja");
+    expect(ui).toContain("/mutation-candidates");
+  });
+});

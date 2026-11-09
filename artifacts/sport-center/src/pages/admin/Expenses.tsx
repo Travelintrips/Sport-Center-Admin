@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -180,6 +180,7 @@ export default function AdminExpenses() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
+  const [incomeCheckId, setIncomeCheckId] = useState<number | null>(null);
   const [sheetCheckId, setSheetCheckId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -407,6 +408,22 @@ export default function AdminExpenses() {
       const response = await fetch(`${API}/admin/expenses/${sheetCheckId}/sheet-candidates`, { headers: authHeaders() });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Gagal mencocokkan mutasi");
+      return result;
+    },
+  });
+
+  // Read-only lookup. A candidate is never proof of payment or a reconciliation decision.
+  const { data: incomeCandidates, isFetching: checkingIncomeCandidates, error: incomeCandidateError } = useQuery<{
+    candidates: Array<{ id: number; date: string; amount: string; description: string; reconciliation_status: string }>;
+    verified: false;
+  }>({
+    queryKey: ["sc-income-mutation-candidates", incomeCheckId],
+    enabled: incomeCheckId !== null,
+    retry: false,
+    queryFn: async () => {
+      const response = await fetch(`${API}/admin/income/${incomeCheckId}/mutation-candidates`, { headers: authHeaders() });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Kandidat mutasi belum tersedia");
       return result;
     },
   });
@@ -666,18 +683,42 @@ export default function AdminExpenses() {
                   <th>Nominal</th><th>Status Sheets</th><th>Tindakan</th>
                 </tr></thead>
                 <tbody>{(incomeData?.entries ?? []).map((entry) => (
-                  <tr key={entry.id} className="border-b">
+                  <Fragment key={entry.id}>
+                  <tr className="border-b">
                     <td className="py-2">{entry.transactionDate}</td>
                     <td>{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
                     <td>{entry.receivingAccount}</td>
                     <td>{formatIDR(Number(entry.amount))}</td>
                     <td>{entry.sheetSyncState === "synced" ? "Tersinkron (belum diverifikasi)" : entry.sheetSyncState}</td>
-                    <td>{entry.sheetSyncState !== "synced" && (
-                      <Button size="sm" variant="outline" onClick={() => retryIncomeSync(entry.id)}>
-                        Coba sinkron
+                    <td className="space-x-2">
+                      {entry.sheetSyncState !== "synced" && (
+                        <Button size="sm" variant="outline" onClick={() => retryIncomeSync(entry.id)}>
+                          Coba sinkron
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline"
+                        onClick={() => setIncomeCheckId((current) => current === entry.id ? null : entry.id)}>
+                        {incomeCheckId === entry.id ? "Tutup kandidat" : "Cek kandidat bank"}
                       </Button>
-                    )}</td>
+                    </td>
                   </tr>
+                  {incomeCheckId === entry.id && (
+                    <tr key={`income-candidates-${entry.id}`}>
+                      <td colSpan={6} className="p-3 bg-gray-50 text-xs">
+                        <p className="font-semibold">Kandidat mutasi BizPortal (baca saja — belum diverifikasi)</p>
+                        {checkingIncomeCandidates ? <p>Memeriksa...</p>
+                          : incomeCandidateError ? <p className="text-red-700">Kandidat belum bisa dibaca. Tidak ada transaksi yang diubah.</p>
+                          : !incomeCandidates?.candidates?.length ? <p>Tidak ada kandidat pada rekening, nominal, dan tanggal yang diperiksa.</p>
+                          : incomeCandidates.candidates.map((candidate) => (
+                            <p key={candidate.id} className="mt-2">
+                              ID {candidate.id} · {candidate.date} · {formatIDR(Number(candidate.amount))} · {candidate.description}
+                              <span className="block text-gray-500">Status BizPortal: {candidate.reconciliation_status ?? "Belum direkonsiliasi"}. Ini bukan konfirmasi otomatis.</span>
+                            </p>
+                          ))}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}</tbody>
               </table>
             </div>
