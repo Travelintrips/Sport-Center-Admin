@@ -1349,7 +1349,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
     if (publicGymGuest && publicProof) {
       // Staff must approve from the authenticated Admin Booking page, not
       // the generic WA review endpoint. Notification is best effort only.
-      void Promise.resolve(notifyWaProofUploaded({
+      void Promise.resolve().then(() => notifyWaProofUploaded({
         customerName: booking.customerName,
         customerPhone: booking.customerPhone,
         orderNumber: booking.orderNumber,
@@ -1409,6 +1409,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
 
     res.status(201).json({
       ...booking,
+      publicProofToken: undefined,
       totalPrice: Number(booking.totalPrice),
       discountAmount: Number(booking.discountAmount),
       facilityName: facility.name,
