@@ -209,11 +209,15 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
   }
   const [last]=await db.select({after:auditLogsTable.after}).from(auditLogsTable)
    .where(and(eq(auditLogsTable.action,"SC_KASBON_SALARY_SHEET_SYNCED"),
-    sql`${auditLogsTable.after}->>'employeeId' = ${employeeId}`))
+    sql`${auditLogsTable.after}->>'employeeId' = ${employeeId}`,
+    sql`(${auditLogsTable.after}->>'period' = ${period} OR (${period} = '2026-11' AND ${auditLogsTable.after}->>'period' IS NULL))`))
    .orderBy(desc(auditLogsTable.id)).limit(1);
   const rawReceipt=(last?.after??null) as SalarySyncReceipt|null;
   // Legacy entries have no per-transaction evidence: keep them unverified.
-  const receipt=rawReceipt && Array.isArray(rawReceipt.records)?rawReceipt:null;
+  const receipt=rawReceipt && Array.isArray(rawReceipt.records) &&
+   ((rawReceipt as SalarySyncReceipt & {period?:string}).period===period ||
+    (period==="2026-11" && !(rawReceipt as SalarySyncReceipt & {period?:string}).period &&
+     rawReceipt.records.every(r=>r.kasbonDate.slice(0,7)==="2026-11"))) ? rawReceipt : null;
   const status=getKasbonReceiptStatus(snapshot,receipt,action==="sync" || (outcome.status==="preview" && outcome.matched));
   res.json({...outcome,...status});
  }catch(e){
