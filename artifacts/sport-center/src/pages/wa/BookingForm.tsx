@@ -159,7 +159,10 @@ export default function WaBookingForm() {
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreview, setProofPreview] = useState<string | null>(null);
   const [proofUploadError, setProofUploadError] = useState("");
-  const [proofConfirmed, setProofConfirmed] = useState(false);
+  // The payment is not submitted merely because a local image passed OCR.
+  // The backend must acknowledge a persisted payment before the confirmation
+  // screen may say the proof awaits administrative review.
+  const [proofUploadState, setProofUploadState] = useState<"idle" | "uploading" | "received" | "confirmed" | "failed">("idle");
   const [uploadingProof, setUploadingProof] = useState(false);
   const [proofScanning, setProofScanning] = useState(false);
   const [proofOcrPreview, setProofOcrPreview] = useState<BookingProofOcrPreview | null>(null);
@@ -466,43 +469,50 @@ export default function WaBookingForm() {
     }
   }
 
-  async function uploadProofForBooking(booking: BookingResult): Promise<boolean> {
-    if (!proofFile || !form.paymentMethod) return false;
+  async function uploadProofForBooking(booking: BookingResult): Promise<void> {
+    // This is a retry of the proof on the ORIGINAL booking, never another booking
+    // or payment instruction. Do not mistake an OCR preview for an uploaded proof.
+    if (!proofFile || !form.paymentMethod) {
+      setProofUploadState("failed");
+      setProofUploadError("Foto bukti dan metode pembayaran diperlukan untuk mengirim bukti.");
+      return;
+    }
     const token = extractProofToken(booking.uploadProofUrl);
     if (!token) {
-      setProofUploadError("Link upload bukti tidak valid. Gunakan tombol Upload Bukti Pembayaran.");
-      return false;
+      setProofUploadState("failed");
+      setProofUploadError("Link upload bukti tidak valid. Gunakan Upload Bukti Pembayaran pada booking ini.");
+      return;
     }
 
     setUploadingProof(true);
+    setProofUploadState("uploading");
     setProofUploadError("");
     try {
       const fd = new FormData();
       fd.append("proof", proofFile);
-      fd.append(
-        "paymentMethod",
-        form.paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
-      );
+      fd.append("paymentMethod", form.paymentMethod === "qris" ? "QRIS" : "Transfer Bank");
       const response = await fetch(`/api/wa/proof/${encodeURIComponent(token)}`, {
         method: "POST",
         body: fd,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setProofUploadError(
-          data?.error ??
-            "Bukti belum dapat diverifikasi. Booking sudah dibuat; silakan ganti foto dan upload kembali.",
-        );
-        return false;
+        setProofUploadError(data?.error ?? "Bukti belum tersimpan. Gunakan Coba Upload Lagi pada booking yang sama.");
+        setProofUploadState("failed");
+        return;
       }
-      const confirmed = data?.status === "confirmed";
-      setProofConfirmed(confirmed);
-      return confirmed;
+      // A successful proof does not imply confirmed funds. The Gym guest flow
+      // returns waiting_confirmation until an authorized operator verifies it.
+      if (data?.success !== true ||
+          !["waiting_confirmation", "confirmed"].includes(String(data?.status))) {
+        setProofUploadError("Server belum mengonfirmasi penyimpanan bukti. Periksa status booking atau upload ulang.");
+        setProofUploadState("failed");
+        return;
+      }
+      setProofUploadState(data.status === "confirmed" ? "confirmed" : "received");
     } catch {
-      setProofUploadError(
-        "Upload bukti gagal. Booking sudah dibuat; silakan coba upload kembali.",
-      );
-      return false;
+      setProofUploadError("Upload bukti gagal. Booking tetap tercatat; coba upload ulang tanpa membuat booking baru.");
+      setProofUploadState("failed");
     } finally {
       setUploadingProof(false);
     }
@@ -563,6 +573,9 @@ export default function WaBookingForm() {
       const data = await resp.json();
       if (!resp.ok) { setError(data.error ?? "Terjadi kesalahan"); return; }
       const bookingResult = data as BookingResult;
+      // Keep the new booking ID even if its separate proof upload fails.
+      // Start the visible upload state before switching to the confirmation view.
+      setProofUploadState(proofFile && form.paymentMethod ? "uploading" : "idle");
       setResult(bookingResult);
       if (proofFile && form.paymentMethod) {
         await uploadProofForBooking(bookingResult);
@@ -646,11 +659,11 @@ export default function WaBookingForm() {
               <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3" aria-label="Status booking dan akses Gym">
                 <h3 className="font-bold text-slate-900">Status Booking Gym</h3>
                 <div className="flex items-center justify-between gap-3 text-sm"><span>Booking</span><span className="font-semibold text-green-700">Berhasil Dibuat</span></div>
-                <div className="flex items-center justify-between gap-3 text-sm"><span>Pembayaran</span><span className="font-semibold text-amber-700">Menunggu Verifikasi Admin</span></div>
+                <div className="flex items-center justify-between gap-3 text-sm"><span>Pembayaran</span><span className="font-semibold text-amber-700">{proofUploadState === "received" ? "Menunggu Verifikasi Admin" : proofUploadState === "confirmed" ? "Terverifikasi" : proofUploadState === "uploading" ? "Mengunggah Bukti..." : proofUploadState === "failed" ? "Bukti Belum Tersimpan" : "Menunggu Pengiriman Bukti"}</span></div>
                 <div className="flex items-center justify-between gap-3 text-sm"><span>Akses X904</span><span className="font-semibold text-slate-600">Belum Aktif</span></div>
                 <p className="border-t border-slate-100 pt-3 text-xs text-slate-600">
-                  Status ini adalah kondisi awal setelah booking dikirim. Setelah admin memverifikasi dana dan petugas memeriksa identitas,
-                  akses baru siap jika aktivasi mesin serta read-back berhasil. Gunakan Cek Status Booking untuk perkembangan terbaru.
+                  Booking sudah dibuat. Bukti baru dinyatakan diterima jika upload berhasil tercatat di server.
+                  Pembayaran tetap harus diverifikasi admin dan identitas diperiksa petugas sebelum aktivasi X904 melalui ACK/read-back. Gunakan Cek Status Booking untuk status terbaru.
                 </p>
               </div>
             )}
@@ -661,11 +674,15 @@ export default function WaBookingForm() {
               </p>
             )}
             <p className="text-sm text-gray-600 text-center">
-              {proofUploadError
-                ? "Booking sudah dibuat. Bukti pembayaran perlu diupload atau diperbaiki."
-                : dedicatedNonmember
-                  ? "Bukti pembayaran yang diterima tetap menunggu pemeriksaan petugas. Booking belum memberi akses pintu."
-                  : "Booking berhasil dibuat. Periksa status pembayaran melalui Cek Status Booking."}
+              {proofUploadState === "uploading"
+                ? "Booking berhasil dibuat. Mengirim bukti pembayaran ke server..."
+                : proofUploadState === "failed"
+                  ? "Booking sudah dibuat, tetapi bukti belum berhasil tersimpan. Jangan membayar atau membuat booking lagi."
+                  : proofUploadState === "received"
+                    ? "Bukti pembayaran sudah tercatat dan menunggu verifikasi admin. Booking belum memberi akses pintu."
+                    : proofUploadState === "confirmed"
+                      ? "Pembayaran sudah terkonfirmasi oleh sistem. Periksa status terbaru sebelum menggunakan fasilitas."
+                      : "Booking sudah dibuat, tetapi belum ada bukti pembayaran yang terkonfirmasi tersimpan."}
             </p>
 
             {proofUploadError && (
@@ -675,11 +692,28 @@ export default function WaBookingForm() {
             )}
 
             <div className="space-y-2">
-              {!proofConfirmed && (
+              {proofUploadState === "uploading" && (
+                <p role="status" className="rounded-lg bg-blue-50 p-3 text-center text-sm font-semibold text-blue-700">
+                  Mengunggah bukti pembayaran. Jangan menutup halaman atau membuat booking baru.
+                </p>
+              )}
+              {proofUploadState === "failed" && proofFile && (
+                <Button type="button" onClick={() => { void uploadProofForBooking(result); }}
+                  disabled={uploadingProof}
+                  className="w-full bg-orange-600 hover:bg-orange-700">
+                  Coba Upload Lagi — Booking {result.orderNumber}
+                </Button>
+              )}
+              {proofUploadState !== "received" && proofUploadState !== "confirmed" && proofUploadState !== "uploading" && (
                 <a href={result.uploadProofUrl}
-                  className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg text-center text-sm transition-colors">
-                  📎 {proofUploadError ? "Upload / Ganti Bukti Pembayaran" : "Upload Bukti Pembayaran"}
+                  className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 px-4 rounded-lg text-center text-sm transition-colors">
+                  📎 Upload Bukti Pembayaran pada Booking Ini
                 </a>
+              )}
+              {(proofUploadState === "received" || proofUploadState === "confirmed") && (
+                <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700">
+                  Bukti pembayaran sudah diterima sistem. Tidak perlu upload atau membayar ulang.
+                </p>
               )}
               <a href={result.statusUrl}
                 className="block w-full border border-orange-300 text-orange-700 font-semibold py-3 px-4 rounded-lg text-center text-sm hover:bg-orange-50 transition-colors">
