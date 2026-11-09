@@ -33,3 +33,18 @@ test("production Booking Detail banner is explicitly feature-gated", () => {
   assert.match(bookingDetailSource, /process\.env\.NODE_ENV === "production"/);
   assert.match(bookingDetailSource, /\? sql\.raw\("'reference_match_review'"\)/);
 });
+
+test("PROD polling requires explicit opt-in, is serialized, and remains detection-only", () => {
+  assert.match(runtime, /QRIS_GMAIL_PROD_POLL_ENABLED/);
+  assert.match(runtime, /pollMinutes\s*=.*(?:\n|.)*?rawPollMinutes >= 5/);
+  assert.match(runtime, /if \(syncInProgress\) return \{ busy: true, autoConfirmed: 0 \}/);
+  assert.match(runtime, /if \(pollEnabled\) \{/);
+  assert.match(runtime, /setInterval\(\(\) => \{/);
+  assert.match(runtime, /void runSyncSafely\(\)\.catch\(\(\) => \{\}\)/);
+  assert.match(runtime, /lastSuccessAt/);
+  assert.match(runtime, /lastFailureCode/);
+  assert.match(runtime, /lastSummary/);
+  assert.match(runtime, /autoConfirmed: 0/);
+  assert.doesNotMatch(runtime, /setInterval\([^\)]*\bsync\s*\(/);
+  assert.doesNotMatch(runtime, /\b(?:update|delete|insert)\s+(?:into\s+)?sport_center\.(?:sport_payments|sport_bookings|x904_user_commands)/i);
+});
