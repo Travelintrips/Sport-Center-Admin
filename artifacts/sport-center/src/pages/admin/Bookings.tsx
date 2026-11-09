@@ -1453,6 +1453,7 @@ function BookingDetailDrawer({
     total: groupInvoiceAmount,
     confirmedAmount: confirmedGroupTotal,
     hasConfirmedDp: hasConfirmedGroupDp,
+    hasConfirmedPartial: hasConfirmedGroupPartial,
   } = getBookingPaymentCapture(booking, allPayments);
   const systemRepairPayments = allPayments.filter((payment: any) =>
     (payment?.status === "rejected" || payment?.status === "cancelled") &&
@@ -2442,17 +2443,21 @@ function BookingDetailDrawer({
             </div>
           )}
 
-          {/* Show pelunasan after confirmed DP, including a DP paid on a sibling booking. */}
+          {/* Show remaining-balance collection after any confirmed partial payment,
+              including an original full_payment followed by added booking hours. */}
               {canRecordGroupPayment && (
                 <div className="rounded-lg border p-3 space-y-3 mb-3">
-                  <div className="font-semibold text-sm">{hasConfirmedGroupDp ? "Catat Pelunasan" : "Catat Pembayaran Pelanggan"}</div>
+                  <div className="font-semibold text-sm">{hasConfirmedGroupPartial ? "Catat Pelunasan" : "Catat Pembayaran Pelanggan"}</div>
                   <p className="text-xs text-muted-foreground">
                     {booking.groupRef ? "Grup " + booking.groupRef : "Order " + booking.orderNumber}
-                    {" · "} {hasConfirmedGroupDp ? "Sisa pelunasan " : "Tagihan "}
+                    {" · "} {hasConfirmedGroupPartial ? "Sisa pelunasan " : "Tagihan "}
                     {paymentAmountToRecord.toLocaleString("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0})}
                   </p>
-                  {hasConfirmedGroupDp && (
-                    <p className="text-xs text-muted-foreground">Total grup {formatCurrency(groupInvoiceAmount)} · DP terkonfirmasi {formatCurrency(confirmedGroupTotal)}. Satu bukti pelunasan berlaku untuk seluruh grup.</p>
+                  {hasConfirmedGroupPartial && (
+                    <p className="text-xs text-muted-foreground">
+                      Total {formatCurrency(groupInvoiceAmount)} · Pembayaran terkonfirmasi {formatCurrency(confirmedGroupTotal)}.
+                      {booking.groupRef ? " Satu bukti pelunasan berlaku untuk seluruh grup." : " Bukti pembayaran sebelumnya tetap tersimpan."}
+                    </p>
                   )}
                   <Label>Metode pembayaran</Label>
                   <Select value={newPaymentMethod} onValueChange={(v)=>setNewPaymentMethod(v as "QRIS"|"Transfer Bank")}>
