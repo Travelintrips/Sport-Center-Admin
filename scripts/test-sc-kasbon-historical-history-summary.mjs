@@ -11,7 +11,7 @@ assert.match(ui,/Saldo historis Sheets/);
 assert.match(ui,/Historis · belum direkonsiliasi/);
 assert.match(ui,/Bukan transaksi Kasbon SC/);
 assert.match(ui,/Hanya baca/);
-assert.match(ui,/Tidak ada catatan kasbon untuk periode/); // error if copy changes unexpectedly
+assert.match(ui,/Belum ada catatan kasbon untuk periode yang dipilih/);
 assert.match(ui,/!visibleRecords.length&&!showHistoricalOctober/);
 assert.match(ui,/Tidak dapat diedit|tidak dapat diedit/i);
 assert.match(ui,/Referensi Sheets: \{currency\(historicalOctoberAmount\)\}/);
