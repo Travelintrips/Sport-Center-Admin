@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { snapshotKasbonRecords, getKasbonReceiptStatus, type SalarySyncReceipt } from "../lib/scKasbonSalarySnapshot";
+import {assertKasbonPeriod,recordsForKasbonPeriod,monthlyKasbonTotal} from "../lib/scKasbonMonthlyPeriod";
 import { syncEmployeeKasbonToSalary } from "../lib/scKasbonSalaryGoogle";
 import { kasbonPoolTick } from "../lib/scKasbonPoolAutoWorker";
 import {verifyKasbonPassword,issueKasbonGrant,checkKasbonGrant} from "../lib/scKasbonActionGate";
@@ -179,9 +180,7 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
  if(!employeePattern.test(employeeId)){res.status(400).json({error:"ID karyawan tidak valid"});return;}
  const action=req.body?.action;
  const period=req.body?.period;
- if(typeof period!=="string"||!/^20\d{2}-(0[1-9]|1[0-2])$/.test(period)||period<"2026-11"||period>"2099-12"){
-  res.status(400).json({error:"SALARY_PERIOD_INVALID"});return;
- }
+ try {assertKasbonPeriod(period);}catch{res.status(400).json({error:"SALARY_PERIOD_INVALID"});return;}
  if(!["preview","sync"].includes(action)||Object.keys(req.body??{}).some(k=>!["action","period"].includes(k))){
   res.status(400).json({error:"Aksi sinkronisasi tidak valid"});return;
  }
@@ -191,9 +190,9 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
   const records=await db.select({id:scEmployeeKasbonTable.id,amount:scEmployeeKasbonTable.amount,
    kasbonDate:scEmployeeKasbonTable.kasbonDate,updatedAt:scEmployeeKasbonTable.updatedAt})
    .from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
-  const monthly=records.filter(record=>record.kasbonDate.slice(0,7)===period);
+  const monthly=recordsForKasbonPeriod(records,period);
   const snapshot=snapshotKasbonRecords(monthly);
-  const total=monthly.reduce((sum,record)=>sum+Number(record.amount),0);
+  const total=monthlyKasbonTotal(records,period);
   if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
   const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview",period);
   if(action==="sync"){
@@ -202,7 +201,7 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
    const latest=await db.select({id:scEmployeeKasbonTable.id,amount:scEmployeeKasbonTable.amount,
     kasbonDate:scEmployeeKasbonTable.kasbonDate,updatedAt:scEmployeeKasbonTable.updatedAt})
     .from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
-   if(JSON.stringify(snapshotKasbonRecords(latest.filter(record=>record.kasbonDate.slice(0,7)===period)))!==JSON.stringify(snapshot))
+   if(JSON.stringify(snapshotKasbonRecords(recordsForKasbonPeriod(latest,period)))!==JSON.stringify(snapshot))
     throw Error("KASBON_CHANGED_DURING_SYNC_RETRY");
    await logAudit({...getUserFromReq(req),action:"SC_KASBON_SALARY_SHEET_SYNCED",entity:"sc_employee_kasbon",
     after:{...outcome,period,records:snapshot},...getClientInfo(req)});
