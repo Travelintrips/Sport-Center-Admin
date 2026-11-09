@@ -10,7 +10,7 @@ describe("Income preview: bank source vs receiving bank", () => {
     expect(ui).toContain("Bank / Akun Penerima");
     expect(ui).toContain('value={incomeForm.receivingAccount}');
     expect(ui).toContain('value={incomeForm.bank}');
-    expect(ui).toContain('<option value="blu by BCA Digital" />');
+    expect(ui).toContain('"blu by BCA Digital"');
   });
   it("shows receiving account in preview and requires for bank transfer", () => {
     expect(ui).toContain('Bank / Akun Penerima: {incomeForm.receivingAccount.trim()');
@@ -23,6 +23,17 @@ describe("Income preview: bank source vs receiving bank", () => {
     expect(sender).toBeGreaterThan(source);
     expect(method).toBeGreaterThan(sender);
     expect(ui.slice(sender,method)).toContain('required');
+  });
+  it("uses application dropdowns with a manual option for all three fields", () => {
+    expect(ui).toContain('function IncomeDropdown(');
+    expect(ui).toContain('<SelectTrigger id={id} aria-required={required}>');
+    expect(ui).toContain('<SelectItem value="__manual__">Lainnya (isi manual)</SelectItem>');
+    expect(ui).toContain('id="income-source"');
+    expect(ui).toContain('id="income-bank"');
+    expect(ui).toContain('id="income-receiving-account"');
+    expect(ui).not.toContain('<datalist id="income-source-suggestions">');
+    expect(ui).not.toContain('<datalist id="income-bank-suggestions">');
+    expect(ui).not.toContain('<datalist id="income-receiving-suggestions">');
   });
   it("remains preview only without writing database or sheets", () => {
     const begin = ui.indexOf('{/* Incoming funds: UI-only form.');
