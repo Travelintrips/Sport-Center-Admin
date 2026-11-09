@@ -14,7 +14,7 @@ assert.doesNotMatch(creation,/result\.salary|salaryOk/,"save UI must not claim p
 assert.match(creation,/Kasbon POOL tersinkron/);
 assert.match(creation,/Sync Kasbon POOL belum berhasil/);
 assert.match(creation,/retry:false/,"don't resubmit a failed KB insert");
-assert.match(payroll,/salary-sync","POST",\{action:"sync"\}/,"only Sync Total writes payroll G");
+assert.match(payroll,/salary-sync","POST",\{action:"sync",period:selectedPeriod\}/,"only Sync Total writes payroll G for selected period");
 assert.doesNotMatch(payroll,/pool-sync/);
 assert.match(ui,/Konfirmasi Sync Total/);
 assert.match(worker,/export async function kasbonPoolTick\(targetKasbonId\?:number\)/);
