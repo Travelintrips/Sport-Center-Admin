@@ -193,6 +193,14 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
   const monthly=recordsForKasbonPeriod(records,period);
   const snapshot=snapshotKasbonRecords(monthly);
   const total=monthlyKasbonTotal(records,period);
+  // October predates the reliable SC Kasbon ledger. An empty/newly backfilled
+  // month must not overwrite historical payroll G with Rp0.
+  if(action==="sync" && period==="2026-10"){
+   res.status(409).json({error:"SALARY_HISTORICAL_OCTOBER_READ_ONLY"});return;
+  }
+  if(action==="sync" && monthly.length===0){
+   res.status(409).json({error:"SALARY_MONTH_HAS_NO_KASBON_RECORDS"});return;
+  }
   if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
   const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview",period);
   if("employeeMissing" in outcome && outcome.employeeMissing){
