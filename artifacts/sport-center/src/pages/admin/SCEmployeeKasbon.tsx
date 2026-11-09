@@ -36,7 +36,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  type SalaryCheck={period:string;tab:string;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
- const [selectedPeriod,setSelectedPeriod]=useState(()=>new Date().toLocaleDateString("en-CA").slice(0,7));
+ const [selectedPeriod,setSelectedPeriod]=useState(()=>{const d=new Date();const value=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");return value<"2026-11"?"2026-11":value;});
  const [showAllMonths,setShowAllMonths]=useState(false);
  const monthLabel=new Date(selectedPeriod+"-01T12:00:00").toLocaleDateString("id-ID",{month:"long",year:"numeric"});
  const monthRecords=(records:Kasbon[])=>records.filter(r=>r.kasbonDate.slice(0,7)===selectedPeriod);
@@ -46,7 +46,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const monthlyRecords=monthRecords(records);
  const visibleRecords=showAllMonths?records:monthlyRecords;
  const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,selectedPeriod,monthlyRecords.map(r=>r.id+":"+r.amount).join("|")];
- const {data:initialSalaryCheck,isFetching:isSalaryChecking,isError:isSalaryCheckError}=useQuery<SalaryCheck>({
+ const {data:initialSalaryCheck,isFetching:isSalaryChecking,isError:isSalaryCheckError,error:salaryCheckLoadError}=useQuery<SalaryCheck>({
   queryKey:syncKey,
   queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
   enabled:!showAllMonths&&!isLoading&&!isError,
@@ -125,7 +125,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const checkSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
   onSuccess:(result:SalaryCheck)=>{if(result.period!==selectedPeriod)return;setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
-  onError:(e:Error)=>{setSalaryCheck(null);toast({title:"Check Sync gagal",description:e.message,variant:"destructive"});}
+  onError:(e:Error)=>{setSalaryCheck(null);toast({title:e.message==="SALARY_WORKSHEET_NOT_VERIFIED"?"Tab Gaji belum tersedia":"Check Sync gagal",description:e.message,variant:"destructive"});}
  });
  const previewSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
@@ -174,6 +174,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
         <RefreshCw className="mr-2 h-4 w-4"/>{checkSalary.isPending?"Memeriksa...":checkOpen?"Tutup":"Check Sync"}
       </Button>
     </div>
+    {isSalaryCheckError&&!showAllMonths&&<p role="alert" className="mt-2 text-xs text-destructive">{(salaryCheckLoadError as Error)?.message==="SALARY_WORKSHEET_NOT_VERIFIED"?"Tab gaji "+monthLabel+" belum tersedia. Buat tab terlebih dahulu dari Data Karyawan SC.":"Gagal memeriksa tab gaji "+monthLabel+". Silakan Check Sync ulang."}</p>}
     {checkOpen&&salaryCheck&&<div className="mt-4 space-y-3">
      <div className="flex flex-wrap items-center gap-2 text-sm"><span>Nama Sheets: <strong>{salaryCheck.name}</strong></span><span>· Sel: <strong>{salaryCheck.cell}</strong></span>
       <span className={salaryCheck.matched?"rounded-full bg-green-100 px-2 py-0.5 font-semibold text-green-700":"rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{salaryCheck.matched?"Total cocok dengan Sheets":"Total belum cocok"}</span>
@@ -196,8 +197,8 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    </div>
   </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
-   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
-    {visibleRecords.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
+   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th>{showAllMonths&&<th className="p-3">Bulan</th>}<th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
+    {visibleRecords.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td>{showAllMonths&&<td className="p-3 whitespace-nowrap">{new Date(r.kasbonDate+"T12:00:00").toLocaleDateString("id-ID",{month:"short",year:"numeric"})}</td>}<td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
     <td className="p-3">{showAllMonths?<span className="text-xs text-muted-foreground">Pilih bulan untuk cek status</span>:isSalaryChecking?<span className="text-xs text-muted-foreground">Memeriksa Sheets...</span>:payrollMatches&&syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:syncedRecordIds.has(r.id)?<span className="text-xs font-medium text-amber-700">Perlu Sync Total</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
     {hasActionGrant(r.id)?<>
