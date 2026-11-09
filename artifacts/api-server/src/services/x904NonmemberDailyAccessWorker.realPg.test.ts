@@ -949,6 +949,10 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
 
 test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and historical pins untouched", async () => {
   // Isolated local PostgreSQL; never send machine commands to a real X904.
+  // Previous scenarios may insert simulated snapshots after this clock.
+  // Reset only the future slice of the disposable fixture, preserving the
+  // historical observations used to detect reused PINs.
+  await run("DELETE FROM sport_center.gym_x904_access_snapshots WHERE observed_at >= '2026-11-08T23:59:00Z'");
   process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED = "true";
   process.env.GYM_X904_NEW_USER_BASELINE_AT = "2026-11-08T23:59:00.000Z";
   // First sighting at 00:01; worker only processes at 00:03, after a new
