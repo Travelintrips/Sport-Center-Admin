@@ -1550,6 +1550,9 @@ function BookingDetailDrawer({
     qrisDetectionPayment?.status ??
     null;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
+  useEffect(() => {
+    setAdminNotes(booking.adminNotes ?? "");
+  }, [booking.id]);
   const [cancellationNoteError, setCancellationNoteError] = useState("");
   const [cancellationReason, setCancellationReason] = useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
@@ -2901,8 +2904,10 @@ function BookingDetailDrawer({
                     {[
                       { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
                       { value: "paid",            label: "💳 Menunggu Verifikasi" },
+                      { value: "confirmed",       label: "✅ Dikonfirmasi" },
                       { value: "completed",       label: "✅ Selesai" },
                       { value: "cancelled",       label: "❌ Dibatalkan" },
+                      ...(booking.status === "refunded" ? [{ value: "refunded", label: "↩️ Dikembalikan" }] : []),
                     ].map((o: {value:string;label:string}) => (
                       <SelectItem key={o.value} value={o.value} className="text-xs">
                         {o.label}
