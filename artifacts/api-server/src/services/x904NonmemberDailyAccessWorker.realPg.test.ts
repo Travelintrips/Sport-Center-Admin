@@ -772,6 +772,55 @@ test("public verified PIN at closing: 22:40 activation, automatic 23:00 suspend,
   }
 });
 
+test("registered PIN checkout row lock works under production-like RLS, registry writes remain denied", async () => {
+  // Mimics PROD sport_center_app precisely, including SELECT-only RLS followed
+  // by SELECT ... FOR SHARE in POST /api/wa/booking. Disposable PostgreSQL only.
+  const pin = "608", uid = 608, name = "CI RLS PIN";
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+  await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+    (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+    VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+  await run("CREATE ROLE sport_center_app");
+  await run("GRANT USAGE ON SCHEMA sport_center TO sport_center_app");
+  await run("GRANT SELECT,UPDATE ON sport_center.x904_verified_nonmember_identities TO sport_center_app");
+  await run(`CREATE POLICY gym_nonmember_registry_backend_read
+    ON sport_center.x904_verified_nonmember_identities
+    FOR SELECT TO sport_center_app USING (true)`);
+
+  const readSql = `SELECT 1 FROM sport_center.x904_verified_nonmember_identities
+    WHERE device_serial='TDBD234200545' AND user_pin=$1 AND device_uid=$2
+      AND upper(regexp_replace(trim(display_name),'[[:space:]]+',' ','g'))=
+          upper(regexp_replace(trim($3::text),'[[:space:]]+',' ','g'))
+      AND verification_state='verified' AND revoked_at IS NULL`;
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL ROLE sport_center_app");
+    expect((await c.query(readSql,[pin,uid,name])).rowCount).toBe(1);
+    // The original production regression: visible in plain SELECT but not
+    // visible under FOR SHARE because UPDATE RLS policy is absent.
+    expect((await c.query(readSql+" FOR SHARE",[pin,uid,name])).rowCount).toBe(0);
+    await c.query("ROLLBACK");
+  } finally { c.release(); }
+
+  await run(readFileSync("migrations/20261109_x904_verified_registry_for_share_rls.sql","utf8"));
+  const app = await pool.connect();
+  try {
+    await app.query("BEGIN");
+    await app.query("SET LOCAL ROLE sport_center_app");
+    expect((await app.query(readSql+" FOR SHARE",[pin,uid,name])).rowCount).toBe(1);
+    await app.query("ROLLBACK");
+    await app.query("BEGIN");
+    await app.query("SET LOCAL ROLE sport_center_app");
+    await expect(app.query(
+      "UPDATE sport_center.x904_verified_nonmember_identities SET display_name='FORGED' WHERE user_pin=$1",
+      [pin],
+    )).rejects.toThrow(/row-level security policy/i);
+    await app.query("ROLLBACK");
+  } finally { app.release(); }
+  expect((await run("SELECT display_name FROM sport_center.x904_verified_nonmember_identities WHERE user_pin=$1",[pin])).rows[0].display_name).toBe(name);
+});
+
 test("HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant", async () => {
   // This invokes the real Express bookings router, not a copied approval function.
   // All writes are scoped to disposable 127.0.0.1 PostgreSQL. No external X904 device.
