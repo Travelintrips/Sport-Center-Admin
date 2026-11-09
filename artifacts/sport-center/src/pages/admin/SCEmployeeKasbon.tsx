@@ -124,12 +124,12 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  });
  const checkSalary=useMutation({
   mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
-  onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
+  onSuccess:(result:SalaryCheck)=>{if(result.period!==selectedPeriod)return;setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
   onError:(e:Error)=>{setSalaryCheck(null);toast({title:"Check Sync gagal",description:e.message,variant:"destructive"});}
  });
  const previewSalary=useMutation({
-  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
-  onSuccess:result=>setSalaryPreview(result),
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
+  onSuccess:result=>{if(result.period===selectedPeriod)setSalaryPreview(result);},
   onError:(e:Error)=>toast({title:"Pratinjau Sync gagal",description:e.message,variant:"destructive"})
  });
  const syncSalary=useMutation({
@@ -187,7 +187,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    <div className="flex flex-wrap items-center gap-2">
     <Button variant="outline" disabled={showAllMonths||isSalaryChecking||isSalaryCheckError||checkSalary.isPending||isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalaryChecking||checkSalary.isPending?"Sedang memeriksa laporan gaji; Sync Total belum tersedia":isSalaryCheckError?"Pemeriksaan Sheets gagal; lakukan Check Sync ulang":isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
       {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
-      {isSalaryChecking||checkSalary.isPending||previewSalary.isPending?"Memeriksa Sheets...":isSalarySynced?"Synced":"Sync Total"}
+      {showAllMonths?"Pilih Bulan":isSalaryChecking||checkSalary.isPending||previewSalary.isPending?"Memeriksa Sheets...":isSalarySynced?"Synced":"Sync Total"}
     </Button>
    <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm" aria-label="Total Kasbon">
     <span className="font-medium text-muted-foreground">Total Kasbon {showAllMonths?"":monthLabel}</span>
@@ -219,7 +219,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     </div>
     <div className="flex justify-end gap-2">
      <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
-     <Button disabled={!salaryPreview||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Sync Total"}</Button>
+     <Button disabled={!salaryPreview||salaryPreview.period!==selectedPeriod||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Sync Total"}</Button>
     </div>
    </DialogContent>
   </Dialog>
