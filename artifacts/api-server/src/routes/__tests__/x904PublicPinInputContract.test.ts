@@ -55,6 +55,15 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).toContain("Status Booking Gym");
     expect(form).toContain("Berhasil Dibuat");
     expect(form).toContain("Menunggu Verifikasi Admin");
+    // OCR preview and booking creation alone are not proof receipt.
+    // Only a successfully persisted waiting_confirmation response opens admin review.
+    expect(form).toContain('data?.success !== true');
+    expect(form).toContain('"waiting_confirmation", "confirmed"');
+    expect(form).toContain('proofUploadState === "received" ? "Menunggu Verifikasi Admin"');
+    expect(form).toContain('proofUploadState === "failed" ? "Bukti Belum Tersimpan"');
+    expect(form).toContain('void uploadProofForBooking(result)');
+    expect(form).toContain("Booking tetap tercatat; coba upload ulang tanpa membuat booking baru.");
+    expect(form).not.toContain("setProofConfirmed(confirmed)");
     expect(form).toContain("Belum Aktif");
     expect(form).toContain("aktivasi mesin serta read-back berhasil");
     expect(form).toContain("Cek Status Booking");
