@@ -1373,7 +1373,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
     const proofToken = booking.publicProofToken ?? await createWaToken(booking.id, "upload_proof", 7);
 
     // Get bank info
-    const settingsRows = await db.select().from(settingsTable).limit(1);
+    const settingsRows = publicGymGuest ? [] : await db.select().from(settingsTable).limit(1);
     const settings = settingsRows[0];
 
     // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
