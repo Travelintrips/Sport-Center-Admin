@@ -101,3 +101,9 @@ test("waiting_confirmation or pending_payment blocks repeat pelunasan upload", (
     assert.equal(result.canRecord, false);
   }
 });
+
+test("completed bookings are not reopened for balance capture", () => {
+  const result = getBookingPaymentCapture({grandTotal:200000,status:"completed"},
+    [{status:"confirmed",paymentType:"full_payment",amount:100000}]);
+  assert.equal(result.canRecord,false);
+});
