@@ -88,6 +88,10 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     WHERE device_serial=${DEVICE}
       AND observed_at >= ${new Date(baseline)}
       AND observed_at >= ${new Date(now.getTime() - 75 * 60_000)}
+      -- Ignore snapshots dated after the supplied evaluation clock.
+      -- This is essential for deterministic historical replay and for
+      -- fail-closed behavior when a collector clock jumps ahead.
+      AND observed_at <= ${now}
     ORDER BY snapshot_id DESC LIMIT 80`);
   if (snapshots.rows.length < 2) return;
   const allHistory = (snapshots.rows as any[]).reverse();
