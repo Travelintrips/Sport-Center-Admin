@@ -1,11 +1,11 @@
 import { google } from "googleapis";
 import { planKasbonSalaryColumnG, type KasbonTotal } from "./scKasbonTotalSheetPlan";
 import {salaryTabForKasbonPeriod} from "./scKasbonMonthlyPeriod";
+import {resolvePayrollIdentity} from "./scKasbonSalaryVerifiedIdentity";
 
 const SPREADSHEET_ID = "1_Zq5gX7xW35YdI46zeLNguvc6TNb6qP7_vGhTqDAtXg";
 const NOVEMBER_GID = 1429288652;
 const aliases: Record<string,string> = {
-  SC003: "ROBBY",
   SC004: "TRI WISUDO",
   SC008: "SONIK",
 };
@@ -41,19 +41,21 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
  // FORMULA returns formulas, allowing the planner to protect existing formula cells.
  const result=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range,valueRenderOption:"FORMULA"});
  const rows=result.data.values??[];
- // The payroll sheet shortens Robby Rahman to ROBBY: bind only to the known SC003 identity.
- if(input.employeeId==="SC003" && input.fullName.trim().toUpperCase()!=="ROBBY RAHMAN" && input.fullName.trim().toUpperCase()!=="ROBBY")
-  throw Error("SALARY_EMPLOYEE_ALIAS_IDENTITY_CHANGED");
- const plan=planKasbonSalaryColumnG([input],rows,aliases);
+ // Use exact verified name for each historical month, never fuzzy matching.
+ const identity=resolvePayrollIdentity(input.employeeId,input.fullName,period);
+ const periodAliases={...aliases,[input.employeeId]:input.employeeId==="SC003"?identity.name:(aliases[input.employeeId]??identity.name)};
+ const plan=planKasbonSalaryColumnG([input],rows,periodAliases);
  const entry=plan.writes[0];
  if(!entry){
   // Missing historical employee: preview only. Never invent a salary row.
   if(!dryRun)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
   return {status:"preview" as const,employeeMissing:true,matched:false,
-   employeeId:input.employeeId,name:aliases[input.employeeId]??input.fullName,
+   employeeId:input.employeeId,name:periodAliases[input.employeeId],
    cell:"",amount:Number(input.total),spreadsheetId:SPREADSHEET_ID,gid,period,tab,
    sheetRow:null};
  }
+ if(identity.expectedRow!==null && entry.row!==identity.expectedRow)
+  throw Error("SALARY_VERIFIED_EMPLOYEE_ROW_CHANGED");
  const existing=String(rows[entry.row-1]?.[6]??"");
  if(existing.startsWith("="))throw Error("SALARY_KASBON_FORMULA_PROTECTED");
  const cell=tabRange(entry.range);
