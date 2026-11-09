@@ -11,6 +11,7 @@ if (url.hostname !== '127.0.0.1' || url.pathname !== '/vis_rls_ci' || url.userna
 }
 const device = 'TDBD234200545';
 const migration = readFileSync(new URL('../artifacts/api-server/migrations/20261107_gym_vis_app_role_rls.sql', import.meta.url),'utf8');
+const paidWebMigration = readFileSync(new URL('../artifacts/api-server/migrations/20261109_paid_web_gym_vis_rls.sql', import.meta.url),'utf8');
 const db = new Client({connectionString:url.href});
 
 test('real PostgreSQL RLS: idempotency, drift, valid and invalid DML', async () => {
@@ -21,8 +22,17 @@ test('real PostgreSQL RLS: idempotency, drift, valid and invalid DML', async () 
   await db.query("GRANT USAGE ON SCHEMA sport_center TO sport_center_app");
   await db.query(`CREATE TYPE sport_center.booking_status AS ENUM ('pending','confirmed');
     CREATE TYPE sport_center.payment_status AS ENUM ('pending','confirmed');
-    CREATE TABLE sport_center.sport_bookings (id integer PRIMARY KEY,source text,status sport_center.booking_status);
-    CREATE TABLE sport_center.sport_payments (id integer PRIMARY KEY,booking_id integer,status sport_center.payment_status);
+    CREATE TABLE sport_center.sport_bookings (
+      id integer PRIMARY KEY,source text,status sport_center.booking_status,
+      payer_type text DEFAULT 'personal',booking_type text DEFAULT 'regular',
+      booking_date date DEFAULT ((now() AT TIME ZONE 'Asia/Jakarta')::date),
+      grand_total numeric DEFAULT 30000,total_price numeric DEFAULT 30000
+    );
+    CREATE TABLE sport_center.sport_payments (
+      id integer PRIMARY KEY,booking_id integer,status sport_center.payment_status,
+      confirmed_at timestamptz DEFAULT now(),proof_url text DEFAULT '/test-only-proof',
+      amount numeric DEFAULT 30000
+    );
     CREATE TABLE sport_center.gym_vis_card_reservations (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,booking_id integer,payment_id integer,
       device_serial text DEFAULT 'TDBD234200545',card_code text,user_pin text,
@@ -38,10 +48,16 @@ test('real PostgreSQL RLS: idempotency, drift, valid and invalid DML', async () 
       (101,'gym_public_guest','confirmed'),
       (102,'gym_public_guest','pending'),
       (103,'gym_public_guest','confirmed'),
-      (104,'other','confirmed');
-    INSERT INTO sport_center.sport_payments VALUES
-      (201,101,'confirmed'),(202,102,'confirmed'),
-      (203,103,'pending'),(204,104,'confirmed');`);
+      (104,'other','confirmed'),
+      (105,'web','confirmed'),
+      (106,'web','pending'),
+      (107,'web','confirmed'),
+      (108,'web','confirmed');
+    INSERT INTO sport_center.sport_payments (id,booking_id,status,proof_url) VALUES
+      (201,101,'confirmed','/test-proof'),(202,102,'confirmed','/test-proof'),
+      (203,103,'pending','/test-proof'),(204,104,'confirmed','/test-proof'),
+      (205,105,'confirmed','/test-proof'),(206,106,'confirmed','/test-proof'),
+      (207,107,'pending','/test-proof'),(208,108,'confirmed',NULL);`);
   await db.query(migration);
   await db.query(migration);
   const policyCount=await db.query("SELECT count(*)::int n FROM pg_policies WHERE schemaname='sport_center' AND tablename IN ('gym_vis_card_reservations','x904_nonmember_daily_access')");
@@ -81,6 +97,40 @@ test('real PostgreSQL RLS: idempotency, drift, valid and invalid DML', async () 
   assert.equal((await db.query("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access")).rows[0].n,1);
   await db.query('ROLLBACK');
   assert.equal((await db.query("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations")).rows[0].n,0,'test rows rolled back');
+  // New route's web booking was previously rejected by the original
+  // gym_public_guest-only INSERT policies. Prove the narrow additive policies
+  // admit it, and still reject unpaid, invalid or unchecked grants.
+  await db.query(paidWebMigration);
+  const paidPolicyCount = await db.query("SELECT count(*)::int n FROM pg_policies WHERE schemaname='sport_center' AND tablename IN ('gym_vis_card_reservations','x904_nonmember_daily_access')");
+  assert.equal(paidPolicyCount.rows[0].n,8);
+  await db.query('BEGIN');
+  await db.query('SET LOCAL ROLE sport_center_app');
+  const deniedWeb = async (query, params, label) => {
+    await db.query('SAVEPOINT web_negative');
+    let deniedByRls = false;
+    try { await db.query(query, params); } catch (e) { deniedByRls = e.code === '42501'; }
+    await db.query('ROLLBACK TO SAVEPOINT web_negative');
+    await db.query('RELEASE SAVEPOINT web_negative');
+    assert.equal(deniedByRls,true,label+' must fail closed');
+  };
+  const webReservationSql=`INSERT INTO sport_center.gym_vis_card_reservations
+    (booking_id,payment_id,card_code,user_pin,device_uid,funds_reference,funds_verified_by)
+    VALUES ($1,$2,'VIS001','78',338,$3,'ROLE-TEST')`;
+  await db.query(webReservationSql,[105,205,'ADMINPAY-205']);
+  await deniedWeb(webReservationSql,[106,206,'ADMINPAY-206'],'pending web booking');
+  await deniedWeb(webReservationSql,[107,207,'ADMINPAY-207'],'unconfirmed web payment');
+  await deniedWeb(webReservationSql,[108,208,'ADMINPAY-208'],'web payment without proof');
+  await deniedWeb(webReservationSql,[105,205,'MANUAL-205'],'unmatched internal payment reference');
+  const webGrantSql=`INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state)
+    VALUES ('TDBD234200545','card','VIS001','78',338,'VIS 001',105,205,
+      (SELECT confirmed_at FROM sport_center.sport_payments WHERE id=205),
+      (((now() AT TIME ZONE 'Asia/Jakarta')::date+time '23:00') AT TIME ZONE 'Asia/Jakarta'),
+      $1,'pending')`;
+  await db.query(webGrantSql,['pending']);
+  await deniedWeb(webGrantSql,['verified'],'premature web door entitlement');
+  await db.query('ROLLBACK');
+  assert.equal((await db.query("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations")).rows[0].n,0,'web test writes rolled back');
   // Negative drift test: mutate a policy in a disposable test database only.
   await db.query('BEGIN');
   await db.query('ALTER POLICY gym_vis_app_select ON sport_center.gym_vis_card_reservations USING (true)');
