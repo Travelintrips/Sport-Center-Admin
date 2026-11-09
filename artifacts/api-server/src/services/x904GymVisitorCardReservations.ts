@@ -25,6 +25,8 @@ export async function autoReserveVisAfterFundsVerified(input: {
   verifiedBy: string;
   officialFundsChecked: boolean;
   confirmedPaymentId?: number;
+  // Only an authenticated staff route may opt in existing paid web Gym bookings.
+  allowWebBooking?: boolean;
 }): Promise<{ cardCode: string; state: string; newReservation: boolean }> {
   const ref = String(input.officialBankReference ?? "").trim().toUpperCase();
   const actor = String(input.verifiedBy ?? "").trim();
@@ -45,11 +47,23 @@ export async function autoReserveVisAfterFundsVerified(input: {
         WHERE order_number=${input.orderNumber} FOR UPDATE`);
       const booking = bookingResult.rows[0] as any | undefined;
       if (!booking) throw new VisReservationError(404, "booking_not_found", "Booking tidak ditemukan.");
-      if (booking.source !== "gym_public_guest" || booking.status !== "confirmed") {
+      const existingWebGuest = input.allowWebBooking === true && booking.source === "web";
+      if (!["gym_public_guest", ...(existingWebGuest ? ["web"] : [])].includes(String(booking.source)) ||
+          booking.status !== "confirmed") {
         throw new VisReservationError(409, "booking_not_confirmed",
-          "Kartu VIS hanya untuk booking Gym mandiri dengan pembayaran terkonfirmasi.");
+          "Kartu VIS hanya untuk booking Gym yang sudah dikonfirmasi dan melalui jalur terotorisasi.");
       }
-      if (!String(booking.notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
+      if (existingWebGuest) {
+        const todayWib = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+        const hourWib = Number(new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Jakarta", hour: "2-digit", hourCycle: "h23",
+        }).format(new Date()));
+        if (String(booking.booking_date) !== todayWib || hourWib < 6 || hourWib >= 23) {
+          throw new VisReservationError(409, "booking_day_closed",
+            "Booking web hanya dapat menerima VIS pada tanggal kunjungan, pukul 06.00–23.00 WIB.");
+        }
+      }
+      if (!existingWebGuest && !String(booking.notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
         throw new VisReservationError(409, "not_a_new_visitor",
           "Booking ini bukan pengunjung baru yang berhak mendapat kartu VIS otomatis.");
       }
