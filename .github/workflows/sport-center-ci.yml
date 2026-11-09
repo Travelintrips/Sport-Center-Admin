@@ -230,6 +230,9 @@ jobs:
       - name: Verify historical October and November salary employee mappings
         run: node --experimental-strip-types scripts/test-sc-kasbon-historical-robby-identity.mjs
 
+      - name: Verify historical Kasbon summary does not fabricate transactions
+        run: node scripts/test-sc-kasbon-historical-history-summary.mjs
+
       - name: Verify green payroll badge requires current Sheets G match
         run: node scripts/test-sc-kasbon-total-badge-live-match.mjs
 
