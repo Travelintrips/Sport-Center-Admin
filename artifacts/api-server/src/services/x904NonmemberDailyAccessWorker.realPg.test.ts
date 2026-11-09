@@ -821,6 +821,55 @@ test("registered PIN checkout row lock works under production-like RLS, registry
   expect((await run("SELECT display_name FROM sport_center.x904_verified_nonmember_identities WHERE user_pin=$1",[pin])).rows[0].display_name).toBe(name);
 });
 
+test("production-style RLS accepts only held public registered PIN grant, never active or unauthorized", async () => {
+  // RLS integration test uses an isolated localhost PostgreSQL role, not PROD.
+  // The earlier registry lock test creates sport_center_app and registry policies.
+  const pin = "609", uid = 609, name = "CI PUBLIC REVIEW RLS", bookingId = 9609;
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+  await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+    (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+    VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+  await run(`INSERT INTO sport_center.sport_bookings
+    (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+    VALUES ($1,'2026-11-09','15:00','gym_public_guest','test','pending_payment','SC-CI-RLS-9609',$2,30000)`,[bookingId,name]);
+  await run("GRANT SELECT ON sport_center.sport_bookings, sport_center.gym_x904_member_mapping TO sport_center_app");
+  await run("GRANT SELECT, INSERT ON sport_center.x904_nonmember_daily_access TO sport_center_app");
+  await run("ALTER TABLE sport_center.x904_nonmember_daily_access ENABLE ROW LEVEL SECURITY");
+  // Reproduce the actual restrictive production rule: ordinary backend inserts
+  // can create verified pending grants, but not review_required anonymous grants.
+  await run(`CREATE POLICY x904_nonmember_app_insert ON sport_center.x904_nonmember_daily_access
+    FOR INSERT TO sport_center_app
+    WITH CHECK (device_serial='TDBD234200545' AND access_state='pending'
+                AND activated_at IS NULL AND verification_state='verified'
+                AND payment_id IS NULL AND confirmed_at IS NULL AND expires_at IS NULL)`);
+
+  const insertSql = `INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+      booking_id,verification_state,access_state)
+    VALUES('TDBD234200545','pin','PIN:'||$1,$1,$2,$3,$4,'review_required','review_required')`;
+  const conn = await pool.connect();
+  const attempt = async (actualUid: number, actualPin = pin) => {
+    await conn.query("BEGIN");
+    await conn.query("SET LOCAL ROLE sport_center_app");
+    try {
+      await conn.query(insertSql,[actualPin,actualUid,name,bookingId]);
+      await conn.query("ROLLBACK");
+      return "allowed";
+    } catch (err) {
+      await conn.query("ROLLBACK");
+      return String((err as { code?: string }).code ?? "error");
+    }
+  };
+  try {
+    expect(await attempt(uid)).toBe("42501"); // pre-fix RLS denial
+    await run(readFileSync("migrations/20261109_x904_public_pin_review_insert_rls.sql","utf8"));
+    expect(await attempt(uid)).toBe("allowed");
+    expect(await attempt(uid+1)).toBe("42501"); // cannot forge X904 UID
+    expect(await attempt(uid,"237")).toBe("42501"); // special PIN excluded
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].n).toBe(0);
+  } finally { conn.release(); }
+});
+
 test("HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant", async () => {
   // This invokes the real Express bookings router, not a copied approval function.
   // All writes are scoped to disposable 127.0.0.1 PostgreSQL. No external X904 device.
