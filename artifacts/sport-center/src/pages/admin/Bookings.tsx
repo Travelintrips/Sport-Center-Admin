@@ -1788,6 +1788,7 @@ function BookingDetailDrawer({
     }
   };
 
+  const isCancelledArchive = booking.status === "cancelled";
   const isCompleted = booking.status === "completed" || booking.status === "confirmed";
   const hasPaymentData = Boolean(editablePayment || booking.paidAt || booking.membershipPayment);
   const hasConfirmedPaymentBookingMismatch =
@@ -1805,6 +1806,7 @@ function BookingDetailDrawer({
     endTimeChanged;
 
   const saveDates = async () => {
+    if (isCancelledArchive) return; // Cancelled bookings are immutable in the detail UI.
     const nextBookingDate = bookingDateChanged ? bookingDate : undefined;
     const nextPaymentDate = paymentDateChanged ? paymentDate || undefined : undefined;
     const nextStartTime = startTimeChanged ? startTime : undefined;
@@ -2149,6 +2151,12 @@ function BookingDetailDrawer({
             />
           )}
 
+          {isCancelledArchive && (
+            <div role="note" className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+              <strong className="block text-sm font-semibold">Arsip pembatalan — bukan booking aktif</strong>
+              Booking ini tetap tersimpan untuk audit. Bukti pembayaran yang ditolak bukan pembayaran sah. Koreksi tanggal dan sinkronisasi rekonsiliasi dinonaktifkan pada booking batal. Gunakan booking aktif yang benar untuk operasional.
+            </div>
+          )}
           {/* Customer Info */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
@@ -2165,7 +2173,7 @@ function BookingDetailDrawer({
               )}
               <BookingCustomerContact bookings={[booking]} />
               <InfoRow icon={Building2} label="Fasilitas" value={booking.facilityName} span />
-              <div className="col-span-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
+              {!isCancelledArchive && <div className="col-span-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
                   <CalendarDays size={13} /> Koreksi tanggal & jam
                 </div>
@@ -2231,7 +2239,7 @@ function BookingDetailDrawer({
                 >
                   {savingDates ? "Menyimpan..." : "Simpan tanggal"}
                 </Button>
-              </div>
+              </div>}
               <InfoRow icon={Clock} label="Waktu" value={`${booking.startTime?.slice(0, 5)} – ${booking.endTime?.slice(0, 5)}`} />
               <InfoRow icon={Hash} label="Durasi" value={`${booking.durationHours} jam`} />
               {/* Breakdown harga event */}
@@ -2502,6 +2510,7 @@ function BookingDetailDrawer({
                      Boolean(pmt.isMembershipPayment || pmt.isCompanyInvoicePayment);
                    const paymentDate = pmt.paidAt ?? pmt.confirmedAt ?? pmt.submittedAt;
                    const canSyncReconciliation =
+                     !isCancelledArchive &&
                      !isSyntheticPayment &&
                      Boolean(paymentDate) &&
                      (pmt.status === "confirmed" || paymentDateChangedIds.has(Number(pmt.id)));
@@ -2570,9 +2579,9 @@ function BookingDetailDrawer({
                           payment={pmt}
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
-                          disabled={isUpdating}
+                          disabled={isUpdating || isCancelledArchive}
                           lockedReason={
-                            pmt.isMembershipPayment
+                            isCancelledArchive ? "Booking dibatalkan; metode pembayaran hanya dapat dilihat" : pmt.isMembershipPayment
                               ? "Metode pembayaran membership dikelola dari data membership"
                               : pmt.isCompanyInvoicePayment
                                 ? "Metode pembayaran dikelola dari pelunasan invoice perusahaan"
@@ -2638,7 +2647,7 @@ function BookingDetailDrawer({
                               membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
                             />
                           )}
-                          {paymentDate && (
+                          {paymentDate && !isCancelledArchive && (
                             <Button
                               type="button"
                               variant="outline"
