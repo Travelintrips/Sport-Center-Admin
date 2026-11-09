@@ -2,9 +2,14 @@ import { google } from "googleapis";
 import { planKasbonSalaryColumnG, type KasbonTotal } from "./scKasbonTotalSheetPlan";
 
 const SPREADSHEET_ID = "1_Zq5gX7xW35YdI46zeLNguvc6TNb6qP7_vGhTqDAtXg";
-const GID = 1429288652;
-const TAB = "Gaji November 2026";
-const tabRange = (cell: string) => "'" + TAB.replace(/'/g, "''") + "'!" + cell;
+const NOVEMBER_GID = 1429288652;
+const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+export function resolveSalaryPeriod(period:string):{period:string;tab:string}{
+ if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(period))throw Error("SALARY_PERIOD_INVALID");
+ const [year,month]=period.split("-").map(Number);
+ if(year<2026 || (year===2026&&month<11) || year>2099)throw Error("SALARY_PERIOD_OUT_OF_RANGE");
+ return {period,tab:`Gaji ${MONTHS[month-1]} ${year}`};
+}
 const aliases: Record<string,string> = {
   SC003: "ROBBY",
   SC004: "TRI WISUDO",
@@ -22,14 +27,20 @@ function googleClient() {
  const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
  return google.sheets({version:"v4",auth});
 }
-export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean) {
+export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean,period:string) {
+ const {tab}=resolveSalaryPeriod(period);
+ const tabRange=(cell:string)=>"'" + tab.replace(/'/g,"''") + "'!" + cell;
  // Preview is read-only and must never be blocked by the write switch.
  // Only explicit admin-confirmed sync requests can write; deployment can disable writes with false.
  if(!dryRun && process.env.SC_KASBON_SALARY_SYNC_ENABLED==="false")throw Error("SALARY_SYNC_DISABLED");
  if(process.env.APP_ENV!=="production" || process.env.NODE_ENV!=="production")throw Error("SALARY_PRODUCTION_ENV_REQUIRED");
  const sheets=googleClient();
  const meta=await sheets.spreadsheets.get({spreadsheetId:SPREADSHEET_ID,fields:"sheets(properties(sheetId,title,gridProperties(rowCount)),protectedRanges,merges)"});
- const target=(meta.data.sheets??[]).find(s=>s.properties?.sheetId===GID&&s.properties?.title===TAB);
+ const matches=(meta.data.sheets??[]).filter(s=>s.properties?.title===tab);
+ if(matches.length!==1)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ const target=matches[0];const gid=target.properties?.sheetId;
+ if(!Number.isSafeInteger(gid)||gid===undefined||gid<0)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ if(period==="2026-11"&&gid!==NOVEMBER_GID)throw Error("SALARY_NOVEMBER_WORKSHEET_ID_CHANGED");
  if(!target)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
  const rowCount=target.properties?.gridProperties?.rowCount??0;
  if(!Number.isSafeInteger(rowCount)||rowCount<22||rowCount>10000)throw Error("SALARY_ROWS_UNEXPECTED");
@@ -46,7 +57,7 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
  const existing=String(rows[entry.row-1]?.[6]??"");
  if(existing.startsWith("="))throw Error("SALARY_KASBON_FORMULA_PROTECTED");
  const cell=tabRange(entry.range);
- const report={employeeId:input.employeeId,name:entry.name,cell:entry.range,previous:existing,amount:entry.amount,spreadsheetId:SPREADSHEET_ID,gid:GID};
+ const report={employeeId:input.employeeId,name:entry.name,cell:entry.range,previous:existing,amount:entry.amount,spreadsheetId:SPREADSHEET_ID,gid,period,tab};
  if(dryRun){
   // Live Sheets row, not a hardcoded G9/G11 mapping. Read-only on-demand check.
   const raw=rows[entry.row-1]??[];
