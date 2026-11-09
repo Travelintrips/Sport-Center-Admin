@@ -1,15 +1,9 @@
 import { google } from "googleapis";
 import { planKasbonSalaryColumnG, type KasbonTotal } from "./scKasbonTotalSheetPlan";
+import {salaryTabForKasbonPeriod} from "./scKasbonMonthlyPeriod";
 
 const SPREADSHEET_ID = "1_Zq5gX7xW35YdI46zeLNguvc6TNb6qP7_vGhTqDAtXg";
 const NOVEMBER_GID = 1429288652;
-const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
-export function resolveSalaryPeriod(period:string):{period:string;tab:string}{
- if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(period))throw Error("SALARY_PERIOD_INVALID");
- const [year,month]=period.split("-").map(Number);
- if(year<2026 || (year===2026&&month<11) || year>2099)throw Error("SALARY_PERIOD_OUT_OF_RANGE");
- return {period,tab:`Gaji ${MONTHS[month-1]} ${year}`};
-}
 const aliases: Record<string,string> = {
   SC003: "ROBBY",
   SC004: "TRI WISUDO",
@@ -28,7 +22,7 @@ function googleClient() {
  return google.sheets({version:"v4",auth});
 }
 export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean,period:string) {
- const {tab}=resolveSalaryPeriod(period);
+ const tab=salaryTabForKasbonPeriod(period);
  const tabRange=(cell:string)=>"'" + tab.replace(/'/g,"''") + "'!" + cell;
  // Preview is read-only and must never be blocked by the write switch.
  // Only explicit admin-confirmed sync requests can write; deployment can disable writes with false.
