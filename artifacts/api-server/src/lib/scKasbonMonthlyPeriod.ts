@@ -13,3 +13,10 @@ export function monthlyKasbonTotal<T extends {amount:string|number;kasbonDate:st
  if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
  return total;
 }
+
+const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+export function salaryTabForKasbonPeriod(period:string):string{
+ assertKasbonPeriod(period);
+ const [year,month]=period.split("-").map(Number);
+ return `Gaji ${MONTHS[month-1]} ${year}`;
+}
