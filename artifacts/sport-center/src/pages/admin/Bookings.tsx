@@ -1627,6 +1627,9 @@ function BookingDetailDrawer({
 
   const handoverGymVisMutation = useMutation({
     mutationFn: async () => {
+      if (gymX904MonitoringFailed || !gymX904Monitoring?.reservation || gymX904Monitoring.reservation.state !== "reserved") {
+        throw new Error("Monitoring VIS belum tervalidasi; lakukan pemeriksaan ulang sebelum serah-terima.");
+      }
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/collect-vis`, {
         method: "POST",
         headers: {
@@ -2053,7 +2056,7 @@ function BookingDetailDrawer({
                       <button
                         type="button"
                         onClick={() => handoverGymVisMutation.mutate()}
-                        disabled={!visPhysicalHandedOver || handoverGymVisMutation.isPending}
+                        disabled={!visPhysicalHandedOver || gymX904MonitoringFailed || !gymX904Monitoring?.reservation || handoverGymVisMutation.isPending}
                         className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                       >
                         {handoverGymVisMutation.isPending
@@ -2086,7 +2089,7 @@ function BookingDetailDrawer({
                             <input type="checkbox" checked={visPhysicalReturned} onChange={(e) => setVisPhysicalReturned(e.target.checked)} />
                             Kartu fisik sudah benar-benar kembali ke petugas.
                           </label>
-                          <button type="button" disabled={!visPhysicalReturned || returnGymVisMutation.isPending}
+                          <button type="button" disabled={!visPhysicalReturned || gymX904MonitoringFailed || !gymX904Monitoring?.access?.returnReady || returnGymVisMutation.isPending}
                             onClick={() => returnGymVisMutation.mutate()}
                             className="rounded bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-50">
                             {returnGymVisMutation.isPending ? "Memverifikasi..." : "Kembalikan Kartu ke Pool"}
