@@ -43,14 +43,14 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
  const rows=result.data.values??[];
  // Use exact verified name for each historical month, never fuzzy matching.
  const identity=resolvePayrollIdentity(input.employeeId,input.fullName,period);
- const periodAliases={...aliases,[input.employeeId]:identity.name};
+ const periodAliases={...aliases,[input.employeeId]:input.employeeId==="SC003"?identity.name:(aliases[input.employeeId]??identity.name)};
  const plan=planKasbonSalaryColumnG([input],rows,periodAliases);
  const entry=plan.writes[0];
  if(!entry){
   // Missing historical employee: preview only. Never invent a salary row.
   if(!dryRun)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
   return {status:"preview" as const,employeeMissing:true,matched:false,
-   employeeId:input.employeeId,name:identity.name,
+   employeeId:input.employeeId,name:periodAliases[input.employeeId],
    cell:"",amount:Number(input.total),spreadsheetId:SPREADSHEET_ID,gid,period,tab,
    sheetRow:null};
  }
