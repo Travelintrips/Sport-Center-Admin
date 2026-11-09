@@ -1634,8 +1634,8 @@ router.post("/bookings/:bookingId/x904-vis-reserve", authMiddleware, async (req,
   }
   const bookingId = Number(req.params.bookingId);
   if (!Number.isSafeInteger(bookingId) || bookingId <= 0 ||
-      req.body?.identityChecked !== true || req.body?.officialFundsChecked !== true) {
-    res.status(400).json({ error: "Booking, identitas pengunjung, dan dana resmi wajib diverifikasi petugas." });
+      req.body?.identityChecked !== true) {
+    res.status(400).json({ error: "Booking dan identitas pengunjung wajib diverifikasi petugas." });
     return;
   }
   try {
@@ -1652,11 +1652,29 @@ router.post("/bookings/:bookingId/x904-vis-reserve", authMiddleware, async (req,
       res.status(409).json({ error: "Penetapan VIS hanya tersedia untuk booking GYM." });
       return;
     }
+    // The field operator never enters a bank statement reference or attests
+    // to a bank account they cannot access. Reuse exactly one previously
+    // confirmed booking payment, with proof and exact amount rechecked under
+    // the VIS transaction lock. ADMINPAY is an internal payment identity,
+    // NOT independent bank settlement confirmation.
+    const confirmedPayments = await db.select({ id: paymentsTable.id })
+      .from(paymentsTable)
+      .where(and(eq(paymentsTable.bookingId, booking.id), eq(paymentsTable.status, "confirmed")))
+      .limit(2);
+    if (confirmedPayments.length !== 1) {
+      res.status(409).json({
+        code: "payment_ambiguous",
+        error: "Pembayaran belum terkonfirmasi atau terdapat lebih dari satu pembayaran terkonfirmasi. Minta verifikasi bagian keuangan.",
+      });
+      return;
+    }
+    const confirmedPaymentId = Number(confirmedPayments[0].id);
     const result = await autoReserveVisAfterFundsVerified({
       orderNumber: booking.orderNumber,
-      officialBankReference: String(req.body?.officialBankReference ?? ""),
+      officialBankReference: `ADMINPAY-${confirmedPaymentId}`,
       officialFundsChecked: true,
-      verifiedBy: `STAFF-${principal.userId}`,
+      confirmedPaymentId,
+      verifiedBy: `PAYMENT-CONFIRMED-${principal.userId}`,
       allowWebBooking: true,
     });
     await logAudit({
@@ -1665,7 +1683,8 @@ router.post("/bookings/:bookingId/x904-vis-reserve", authMiddleware, async (req,
       action: "GYM_VIS_EXISTING_WEB_BOOKING_RESERVED",
       entity: "booking",
       entityId: booking.id,
-      after: { cardCode: result.cardCode, state: result.state, newReservation: result.newReservation },
+      after: { cardCode: result.cardCode, state: result.state, newReservation: result.newReservation,
+        confirmedPaymentId, evidenceType: "existing_confirmed_payment", bankSettlementIndependentlyChecked: false },
       ...getClientInfo(req),
     });
     res.json({ success: true, ...result, message: "Kartu VIS direservasi untuk booking yang sudah dibayar; serah-terima fisik dan ACK mesin masih wajib." });

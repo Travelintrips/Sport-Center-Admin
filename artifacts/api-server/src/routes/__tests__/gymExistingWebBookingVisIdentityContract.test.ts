@@ -30,7 +30,7 @@ describe("Gym paid web booking identity and VIS handoff regression", () => {
     expect(guard).toContain("existingBookingId:");
   });
 
-  test("existing booking reservation requires authenticated staff, a confirmed booking and independent funds and identity checks", () => {
+  test("existing booking reservation reuses server-verified confirmed payment, never field-staff bank attestation", () => {
     const start = bookings.indexOf('router.post("/bookings/:bookingId/x904-vis-reserve"');
     const end = bookings.indexOf('router.post("/bookings", async', start);
     expect(start).toBeGreaterThan(-1);
@@ -38,7 +38,13 @@ describe("Gym paid web booking identity and VIS handoff regression", () => {
     const route = bookings.slice(start, end);
     expect(route).toContain("isOperationalBookingRole(principal.role)");
     expect(route).toContain("req.body?.identityChecked !== true");
-    expect(route).toContain("req.body?.officialFundsChecked !== true");
+    expect(route).not.toContain("req.body?.officialFundsChecked !== true");
+    expect(route).not.toContain("req.body?.officialBankReference");
+    expect(route).toContain('eq(paymentsTable.status, "confirmed")');
+    expect(route).toContain("confirmedPayments.length !== 1");
+    expect(route).toContain("confirmedPaymentId,");
+    expect(route).toContain("ADMINPAY-");
+    expect(route).toContain("bankSettlementIndependentlyChecked: false");
     expect(route).toContain('booking.source !== "web"');
     expect(route).toContain('booking.status !== "confirmed"');
     expect(route).toContain("autoReserveVisAfterFundsVerified");
@@ -57,6 +63,16 @@ describe("Gym paid web booking identity and VIS handoff regression", () => {
     expect(cards).toContain('"vis_pool_exhausted"');
     expect(cards).toContain("verification_state,access_state)");
     expect(cards).toContain("'pending','pending'");
+  });
+
+  test("field operator VIS UI asks identity only, without fake bank statement attestation", () => {
+    const ui = readFileSync(join(process.cwd(), "../sport-center/src/pages/admin/Bookings.tsx"), "utf8");
+    expect(ui).toContain("Sistem membaca pembayaran yang sudah dikonfirmasi");
+    expect(ui).toContain("Status pembayaran terkonfirmasi bukan bukti settlement bank");
+    expect(ui).not.toContain("visOfficialReference");
+    expect(ui).not.toContain("visFundsChecked");
+    expect(ui).toContain("identityChecked: visIdentityChecked");
+    expect(ui).toContain("disabled={!visIdentityChecked || assignExistingWebVisMutation.isPending}");
   });
 
   test("worker never bypasses physical handover for web VIS", () => {

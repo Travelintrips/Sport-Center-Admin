@@ -32,7 +32,10 @@ describe("Gym VIS operational monitoring contract", () => {
     const route = bookings.slice(start, end);
     expect(route).toContain('authMiddleware, async (req, res)');
     expect(route).toContain('isOperationalBookingRole(principal.role)');
-    expect(route).toContain('req.body?.officialFundsChecked !== true');
+    expect(route).not.toContain('req.body?.officialFundsChecked !== true');
+    expect(route).toContain('eq(paymentsTable.status, "confirmed")');
+    expect(route).toContain("confirmedPayments.length !== 1");
+    expect(route).toContain("confirmedPaymentId,");
     expect(route).not.toContain('ACTIVATE_USER');
   });
 

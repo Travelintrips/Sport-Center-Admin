@@ -1564,9 +1564,7 @@ function BookingDetailDrawer({
   const [newPaymentError, setNewPaymentError] = useState("");
   const [visPhysicalReturned, setVisPhysicalReturned] = useState(false);
   const [visPhysicalHandedOver, setVisPhysicalHandedOver] = useState(false);
-  const [visOfficialReference, setVisOfficialReference] = useState("");
   const [visIdentityChecked, setVisIdentityChecked] = useState(false);
-  const [visFundsChecked, setVisFundsChecked] = useState(false);
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
   const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
@@ -1600,9 +1598,7 @@ function BookingDetailDrawer({
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
         body: JSON.stringify({
-          officialBankReference: visOfficialReference.trim(),
           identityChecked: visIdentityChecked,
-          officialFundsChecked: visFundsChecked,
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -2014,23 +2010,12 @@ function BookingDetailDrawer({
             String(booking.bookingDate ?? "").slice(0, 10) === new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }) && (
             <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
               <div className="font-semibold">Tetapkan kartu VIS ke booking ini</div>
-              <p className="text-xs leading-relaxed">Gunakan booking yang sudah dibayar, tanpa membuat booking atau pembayaran kedua. Petugas wajib memeriksa identitas pengunjung, mutasi resmi, dan ketersediaan kartu. Aktivasi tetap menunggu serah-terima fisik dan ACK mesin.</p>
-              <label className="block space-y-1 text-xs font-semibold">
-                Referensi transaksi bank resmi
-                <input aria-label="Referensi transaksi bank resmi VIS" value={visOfficialReference}
-                  onChange={event => setVisOfficialReference(event.target.value)}
-                  placeholder="Minimal 6 karakter, sesuai mutasi" maxLength={80}
-                  className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm font-normal text-slate-900" />
-              </label>
+              <p className="text-xs leading-relaxed">Gunakan booking yang sudah dibayar, tanpa membuat booking atau pembayaran kedua. Petugas cukup mencocokkan identitas pengunjung. Sistem membaca pembayaran yang sudah dikonfirmasi dan bukti tersimpan; tidak perlu mengunggah ulang bukti atau mengakses mutasi bank. Status pembayaran terkonfirmasi bukan bukti settlement bank. Aktivasi tetap menunggu serah-terima fisik dan ACK mesin.</p>
               <label className="flex items-start gap-2 text-xs">
                 <input type="checkbox" checked={visIdentityChecked} onChange={event => setVisIdentityChecked(event.target.checked)} />
                 Saya sudah mencocokkan identitas pengunjung secara fisik.
               </label>
-              <label className="flex items-start gap-2 text-xs">
-                <input type="checkbox" checked={visFundsChecked} onChange={event => setVisFundsChecked(event.target.checked)} />
-                Saya telah memverifikasi dana masuk di kanal bank resmi (bukan hanya bukti unggahan).
-              </label>
-              <button type="button" disabled={!visIdentityChecked || !visFundsChecked || visOfficialReference.trim().length < 6 || assignExistingWebVisMutation.isPending}
+              <button type="button" disabled={!visIdentityChecked || assignExistingWebVisMutation.isPending}
                 onClick={() => assignExistingWebVisMutation.mutate()}
                 className="rounded-lg bg-sky-800 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
                 {assignExistingWebVisMutation.isPending ? "Memeriksa dan mereservasi..." : "Reservasi VIS untuk booking ini"}
