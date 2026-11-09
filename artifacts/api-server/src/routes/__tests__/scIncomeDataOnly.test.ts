@@ -18,6 +18,13 @@ describe("SC manual income does not post bank verified movements",()=>{
    expect(writer).toContain("SHEET_HEADERS_MISMATCH");
    expect(writer).toContain("DEV_CANNOT_WRITE_PROD_SHEET");
  });
+ it("permits a distinct same-day receipt only after explicit duplicate confirmation",()=>{
+   const followup=readFileSync(resolve(process.cwd(),"../../migrations/20261109_sc_income_allow_confirmed_same_day_repeats.sql"),"utf8");
+   const ui=readFileSync(resolve(process.cwd(),"../sport-center/src/pages/admin/Expenses.tsx"),"utf8");
+   expect(route).toContain("confirmSimilar !== true");
+   expect(ui).toContain("Tetap Simpan — Transaksi Berbeda");
+   expect(followup).toContain("DROP CONSTRAINT IF EXISTS sc_income_entries_fingerprint_key");
+ });
  it("enforces RLS and unique fingerprints and status unverified",()=>{
    expect(migration).toContain("fingerprint text NOT NULL UNIQUE");
    expect(migration).toContain("entry_key uuid NOT NULL UNIQUE");

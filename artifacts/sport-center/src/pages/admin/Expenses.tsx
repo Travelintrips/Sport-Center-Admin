@@ -162,6 +162,7 @@ export default function AdminExpenses() {
   // Saved incoming funds are operational and unverified, never journal postings.
   const [incomeOpen, setIncomeOpen] = useState(false);
   const [incomeSaving, setIncomeSaving] = useState(false);
+  const [incomeDuplicateWarning, setIncomeDuplicateWarning] = useState(false);
   const [incomeEntryKey, setIncomeEntryKey] = useState(() => crypto.randomUUID());
   const [incomePreview, setIncomePreview] = useState(false);
   const [incomeForm, setIncomeForm] = useState({
@@ -304,7 +305,7 @@ export default function AdminExpenses() {
     },
   });
 
-  async function saveIncome() {
+  async function saveIncome(confirmSimilar = false) {
     if (!incomePreview || incomeSaving) return;
     setIncomeSaving(true);
     try {
@@ -313,6 +314,7 @@ export default function AdminExpenses() {
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({
           entryKey: incomeEntryKey,
+          confirmSimilar,
           transactionDate: incomeForm.transactionDate,
           sourceName: incomeForm.sourceName.trim(),
           senderBank: incomeForm.bank.trim(),
@@ -323,7 +325,12 @@ export default function AdminExpenses() {
         }),
       });
       const result = await response.json();
+      if (!response.ok && result.error === "POSSIBLE_DUPLICATE_INCOME") {
+        setIncomeDuplicateWarning(true);
+        return;
+      }
       if (!response.ok) throw new Error(result.message || result.error || "Gagal menyimpan");
+      setIncomeDuplicateWarning(false);
       toast({
         title: "Uang Masuk berhasil dicatat",
         description: result.sheetStatus === "synced"
@@ -588,6 +595,7 @@ export default function AdminExpenses() {
                 sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
               });
               setIncomePreview(false);
+              setIncomeDuplicateWarning(false);
               setIncomeEntryKey(crypto.randomUUID());
               setIncomeOpen(true);
             }}
@@ -934,6 +942,15 @@ export default function AdminExpenses() {
                 <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
               </div>
             )}
+            {incomeDuplicateWarning && (
+              <div className="rounded-md border border-amber-300 p-3 text-sm space-y-2">
+                <p className="font-semibold">Ditemukan pencatatan Uang Masuk yang sangat mirip.</p>
+                <p>Jika ini transaksi berbeda dengan tanggal, bank, pengirim, dan nominal sama, periksa bukti lalu konfirmasi. Jika duplikat, batalkan.</p>
+                <Button type="button" variant="outline" disabled={incomeSaving} onClick={() => saveIncome(true)}>
+                  Tetap Simpan — Transaksi Berbeda
+                </Button>
+              </div>
+            )}
             <div className="flex items-center justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setIncomeOpen(false)}>Batal</Button>
               <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -944,7 +961,7 @@ export default function AdminExpenses() {
                 Pratinjau Input
               </Button>
               {incomePreview && (
-                <Button type="button" disabled={incomeSaving} onClick={saveIncome}
+                <Button type="button" disabled={incomeSaving} onClick={() => saveIncome()}
                   className="bg-emerald-700 text-white hover:bg-emerald-800">
                   {incomeSaving ? "Menyimpan..." : "Simpan Uang Masuk"}
                 </Button>

@@ -35,7 +35,10 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
   // Warn/fail closed for identical manual records, distinct from verified bank mutations.
   const possible=resultRows(await db.execute(sql`SELECT id FROM sport_center.sc_income_entries
    WHERE fingerprint=${fingerprint} AND transaction_date=${input.transactionDate}::date LIMIT 1`))[0];
-  if(possible){res.status(409).json({error:"POSSIBLE_DUPLICATE_INCOME",existingId:Number(possible.id)});return;}
+  if(possible && req.body?.confirmSimilar !== true){
+    res.status(409).json({error:"POSSIBLE_DUPLICATE_INCOME",existingId:Number(possible.id)});
+    return;
+  }
   const saved=resultRows(await db.execute(sql`INSERT INTO sport_center.sc_income_entries
    (entry_key,transaction_date,source_name,sender_bank,method,receiving_account,amount,bank_reference,fingerprint,created_by)
    VALUES (${input.entryKey}::uuid,${input.transactionDate}::date,${input.sourceName},${input.senderBank},
