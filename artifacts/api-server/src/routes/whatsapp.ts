@@ -1172,6 +1172,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
         expectedSettlementDate: enrichment.expectedSettlementDate,
       };
     }
+    const bookingBaseUrl = await getBaseUrl();
     const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
@@ -1326,20 +1327,29 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
           changedByName: bookingCustomerName,
           note: "Booking Gym mandiri dan bukti pembayaran disimpan bersamaan; menunggu verifikasi admin dan kepemilikan PIN. Akses X904 tetap ditahan.",
         });
-        return { ...created, status: "waiting_confirmation" as const };
+        // Include the recovery link in the same commit. Failure here rolls back
+        // booking+payment instead of returning an HTTP 500 after persistence.
+        const publicProofToken = randomBytes(18).toString("base64url");
+        await tx.insert(waActionTokensTable).values({
+          token: publicProofToken,
+          bookingId: created.id,
+          action: "upload_proof",
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        });
+        return { ...created, status: "waiting_confirmation" as const, publicProofToken };
       }
       await tx.insert(bookingHistoryTable).values({
         bookingId: created.id, fromStatus: null, toStatus: "pending_payment",
         changedByName: bookingCustomerName, note: "Booking dibuat via WhatsApp",
       });
-      return created;
+      return { ...created, publicProofToken: null as string | null };
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
     if (publicGymGuest && publicProof) {
-      // Notification failure cannot undo a committed payment record.
-      const reviewToken = await createWaToken(booking.id, "review_payment", 7);
-      notifyWaProofUploaded({
+      // Staff must approve from the authenticated Admin Booking page, not
+      // the generic WA review endpoint. Notification is best effort only.
+      void Promise.resolve(notifyWaProofUploaded({
         customerName: booking.customerName,
         customerPhone: booking.customerPhone,
         orderNumber: booking.orderNumber,
@@ -1349,9 +1359,9 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
         endTime: booking.endTime,
         totalPrice: Number(totalPrice).toLocaleString("id-ID"),
         proofUrl: publicProof.url,
-        reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
-        note: "Bukti tercatat; hanya admin booking boleh memverifikasi pembayaran Gym mandiri.",
-      });
+        reviewUrl: `${bookingBaseUrl}/admin/bookings`,
+        note: "Bukti diterima bersama booking Gym mandiri; verifikasi pembayaran dan kepemilikan PIN melalui Admin Booking.",
+      })).catch(err => console.error("[gym-public] proof notification failed", err));
     }
 
     // Record tax transaction (non-blocking)
@@ -1360,7 +1370,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
     }
 
     // Create proof upload token (multi-use, 7 days)
-    const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+    const proofToken = booking.publicProofToken ?? await createWaToken(booking.id, "upload_proof", 7);
 
     // Get bank info
     const settingsRows = await db.select().from(settingsTable).limit(1);
@@ -1368,8 +1378,8 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
 
     // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
     const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-    const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
-    const uploadProofUrl = `${await getBaseUrl()}/bukti/${proofToken}`;
+    const statusUrl = `${bookingBaseUrl}/status/${orderNumber}`;
+    const uploadProofUrl = `${bookingBaseUrl}/bukti/${proofToken}`;
 
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
@@ -1395,7 +1405,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
       entity: "booking",
       entityId: booking.id,
       after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime, x904Route: guestNameRoute?.route ?? null },
-    });
+    }).catch(err => console.error("[wa/booking] post-commit audit failure", err));
 
     res.status(201).json({
       ...booking,
