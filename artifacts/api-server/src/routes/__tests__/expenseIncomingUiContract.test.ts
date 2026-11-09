@@ -20,6 +20,10 @@ describe("incoming money operational UI",()=>{
  });
  it("removes the highlighted income register while retaining the input form and unique receipt ID",()=>{
    expect(ui).not.toContain("Pencatatan Uang Masuk SC");
+   expect(ui).toContain("Histori Uang Masuk SC");
+   expect(ui).toContain("Histori Uang Masuk");
+   expect(ui).toContain("entry.incomeNo");
+   expect(ui).toContain("incomeData.entries.map");
    expect(ui).not.toContain("Manual bulan ini:");
    expect(ui).toContain("result.incomeNo");
    expect(ui).toContain("Input Uang Masuk");

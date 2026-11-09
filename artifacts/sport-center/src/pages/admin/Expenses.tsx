@@ -161,6 +161,7 @@ export default function AdminExpenses() {
 
   // Saved incoming funds are operational and unverified, never journal postings.
   const [incomeOpen, setIncomeOpen] = useState(false);
+  const [incomeHistoryOpen, setIncomeHistoryOpen] = useState(false);
   const [incomeSaving, setIncomeSaving] = useState(false);
   const [incomeDuplicateWarning, setIncomeDuplicateWarning] = useState(false);
   const [incomeEntryKey, setIncomeEntryKey] = useState(() => crypto.randomUUID());
@@ -291,8 +292,8 @@ export default function AdminExpenses() {
       fetch(`${API}/admin/expenses?${params}`, { headers: authHeaders() }).then((r) => r.json()),
   });
 
-  const { refetch: refetchIncome } = useQuery<{
-    entries: Array<{ id: number; transactionDate: string; sourceName: string;
+  const { data: incomeData, refetch: refetchIncome, isError: incomeHistoryError, isFetching: incomeHistoryLoading } = useQuery<{
+    entries: Array<{ id: number; incomeNo: string; transactionDate: string; sourceName: string;
       senderBank: string; receivingAccount: string; amount: string;
       sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
     summary: { manualThisMonth: number; awaitingSync: number };
@@ -590,6 +591,12 @@ export default function AdminExpenses() {
           >
             <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
           </Button>
+          <Button variant="outline" onClick={() => {
+            setIncomeHistoryOpen(true);
+            void refetchIncome();
+          }}>
+            <Eye className="w-4 h-4 mr-2" /> Histori Uang Masuk
+          </Button>
           <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
             <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
           </Button>
@@ -777,6 +784,43 @@ export default function AdminExpenses() {
       </Card>
 
       {/* Incoming funds: save to SC operational register, not bank movements. */}
+      {/* Historical receipts remain accessible without restoring the removed inline register. */}
+      <Dialog open={incomeHistoryOpen} onOpenChange={setIncomeHistoryOpen}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Histori Uang Masuk SC</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Pencatatan operasional, bukan mutasi bank terverifikasi. Status Tersinkron
+            berarti tercatat pada tab SC Uang Masuk, bukan pada tab kas besar sc.
+          </p>
+          {incomeHistoryLoading && !incomeData ? <p>Memuat histori...</p> :
+            incomeHistoryError ? <p className="text-red-700">Histori gagal dibaca. Data lama tidak dihapus.</p> :
+            !incomeData?.entries.length ? <p>Belum ada histori Uang Masuk.</p> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b text-left">
+                    <th className="p-2">ID Pemasukan</th><th className="p-2">Tanggal</th>
+                    <th className="p-2">Pengirim / Bank</th><th className="p-2">Akun Penerima</th>
+                    <th className="p-2">Nominal</th><th className="p-2">Status Sheets</th>
+                  </tr></thead>
+                  <tbody>{incomeData.entries.map((entry) => (
+                    <tr key={entry.id} className="border-b">
+                      <td className="p-2 font-mono">{entry.incomeNo}</td>
+                      <td className="p-2">{entry.transactionDate}</td>
+                      <td className="p-2">{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
+                      <td className="p-2">{entry.receivingAccount}</td>
+                      <td className="p-2">{formatIDR(Number(entry.amount))}</td>
+                      <td className="p-2">{entry.sheetSyncState === "synced" ? "Tersinkron — belum terverifikasi" : entry.sheetSyncState}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          <p className="text-xs text-gray-500">ID pemasukan tetap sama pada database dan respons API; tidak membuat jurnal atau payment.</p>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={incomeOpen} onOpenChange={(open) => {
         setIncomeOpen(open);
         if (!open) setIncomePreview(false);
