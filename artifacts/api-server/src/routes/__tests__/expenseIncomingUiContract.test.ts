@@ -18,9 +18,12 @@ describe("incoming money operational UI",()=>{
    expect(ui).toContain('id="income-date"');
    expect(ui).toContain("formatExpenseRupiahInput(incomeForm.amount)");
  });
- it("tracks manual total separately from bank card",()=>{
-   expect(ui).toContain("summary.manualThisMonth");
-   expect(ui).toContain("Tidak dijumlahkan otomatis dengan mutasi bank");
-   expect(ui).toContain("retryIncomeSync");
+ it("removes the highlighted income register while retaining the input form and unique receipt ID",()=>{
+   expect(ui).not.toContain("Pencatatan Uang Masuk SC");
+   expect(ui).not.toContain("Manual bulan ini:");
+   expect(ui).toContain("result.incomeNo");
+   expect(ui).toContain("Input Uang Masuk");
+   expect(ui).toContain("Tambah Pengeluaran");
  });
+
 });

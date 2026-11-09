@@ -6,6 +6,9 @@ import {getUserFromReq,logAudit,getClientInfo} from "../lib/auditLog";
 import {validateIncome,incomeFingerprint,resultRows,syncIncomeRow} from "../lib/scIncomeOperational";
 
 const router=Router();
+// Human-readable, immutable receipt ID backed by the database primary key.
+const incomeNo=(id:number)=>`SC-IN-${String(id).padStart(6,"0")}`;
+
 router.get("/admin/income",adminMiddleware,async(req,res)=>{
  try{
   const entries=resultRows(await db.execute(sql`SELECT id,entry_key,transaction_date::text AS "transactionDate",
@@ -18,7 +21,7 @@ router.get("/admin/income",adminMiddleware,async(req,res)=>{
    FROM sport_center.sc_income_entries
    WHERE transaction_date>=date_trunc('month',timezone('Asia/Jakarta',now()))::date
      AND transaction_date<(date_trunc('month',timezone('Asia/Jakarta',now()))+interval '1 month')::date`))[0];
-  res.json({entries,summary:{manualThisMonth:Number(month?.total??0),awaitingSync:Number(month?.awaiting??0)},
+  res.json({entries:entries.map((entry:any)=>({...entry,incomeNo:incomeNo(Number(entry.id))})),summary:{manualThisMonth:Number(month?.total??0),awaitingSync:Number(month?.awaiting??0)},
    source:"SC_OPERATIONAL_UNVERIFIED",note:"Manual SC income is not a verified bank mutation or accounting journal"});
  }catch(e){req.log.error({err:e},"SC income list failed");res.status(503).json({error:"Daftar Uang Masuk belum tersedia"});}
 });
@@ -30,7 +33,7 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
   const existing=resultRows(await db.execute(sql`SELECT id,entry_key,fingerprint,sheet_sync_state FROM sport_center.sc_income_entries WHERE entry_key=${input.entryKey}::uuid`))[0];
   if(existing){
    if(existing.fingerprint!==fingerprint){res.status(409).json({error:"ENTRY_KEY_REUSED_WITH_DIFFERENT_DATA"});return;}
-   res.json({id:Number(existing.id),entryKey:input.entryKey,sheetStatus:existing.sheet_sync_state,replayed:true});return;
+   res.json({id:Number(existing.id),incomeNo:incomeNo(Number(existing.id)),entryKey:input.entryKey,sheetStatus:existing.sheet_sync_state,replayed:true});return;
   }
   // Warn/fail closed for identical manual records, distinct from verified bank mutations.
   const possible=resultRows(await db.execute(sql`SELECT id FROM sport_center.sc_income_entries
@@ -49,14 +52,14 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
     // Under concurrent requests, either same idempotency key or another bank reference won.
     const winner=resultRows(await db.execute(sql`SELECT id,fingerprint,sheet_sync_state FROM sport_center.sc_income_entries WHERE entry_key=${input.entryKey}::uuid`))[0];
     if(!winner||winner.fingerprint!==fingerprint){res.status(409).json({error:"DUPLICATE_BANK_REFERENCE_OR_TRANSACTION"});return;}
-    res.json({id:Number(winner.id),entryKey:input.entryKey,sheetStatus:winner.sheet_sync_state,replayed:true});return;
+    res.json({id:Number(winner.id),incomeNo:incomeNo(Number(winner.id)),entryKey:input.entryKey,sheetStatus:winner.sheet_sync_state,replayed:true});return;
   }
   await logAudit({...getUserFromReq(req),action:"SC_INCOME_CREATED",entity:"sc_income_entry",entityId:Number(saved.id),
     after:{entryKey:input.entryKey,transactionDate:input.transactionDate,sourceName:input.sourceName,
       senderBank:input.senderBank,method:input.method,receivingAccount:input.receivingAccount,amount:input.amount,
       reconciliationState:"UNVERIFIED"},...getClientInfo(req)});
   const sheetStatus=await syncIncomeRow(Number(saved.id));
-  res.status(201).json({id:Number(saved.id),entryKey:input.entryKey,sheetStatus,reconciliationState:"UNVERIFIED"});
+  res.status(201).json({id:Number(saved.id),incomeNo:incomeNo(Number(saved.id)),entryKey:input.entryKey,sheetStatus,reconciliationState:"UNVERIFIED"});
  }catch(e){req.log.error({err:e},"SC income save failed");res.status(503).json({error:"Gagal menyimpan Uang Masuk; periksa daftar sebelum mencoba lagi"});}
 });
 router.post("/admin/income/:id/retry-sheet",adminMiddleware,async(req,res)=>{
@@ -75,7 +78,11 @@ router.get("/admin/income/:id/mutation-candidates",adminMiddleware,async(req,res
   const candidates=resultRows(await db.execute(sql`SELECT bm.id,bm.transaction_date::text AS date,
     bm.amount::text AS amount,left(bm.description,220) AS description,bm.reconciliation_status
    FROM public.bank_mutations bm JOIN public.bank_sheet_configs bsc ON bsc.id=bm.sheet_config_id
-   WHERE bsc.is_active=true AND lower(trim(bsc.tab_name))='kas besar sc'
+   WHERE bsc.id=12 AND bsc.company_id=1
+    AND bsc.is_active=true AND lower(trim(bsc.tab_name))='kas besar sc'
+    AND bsc.bank_account_id IS NOT NULL
+    AND bm.company_id=bsc.company_id
+    AND bm.bank_account_id=bsc.bank_account_id::text
     AND bm.direction='IN' AND bm.amount=${row.amount}::numeric
     AND bm.transaction_date BETWEEN ${row.transaction_date}::date-interval '1 day'
       AND ${row.transaction_date}::date+interval '1 day'

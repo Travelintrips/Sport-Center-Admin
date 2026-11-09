@@ -291,7 +291,7 @@ export default function AdminExpenses() {
       fetch(`${API}/admin/expenses?${params}`, { headers: authHeaders() }).then((r) => r.json()),
   });
 
-  const { data: incomeData, refetch: refetchIncome, isError: incomeLoadError } = useQuery<{
+  const { refetch: refetchIncome } = useQuery<{
     entries: Array<{ id: number; transactionDate: string; sourceName: string;
       senderBank: string; receivingAccount: string; amount: string;
       sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
@@ -333,9 +333,9 @@ export default function AdminExpenses() {
       setIncomeDuplicateWarning(false);
       toast({
         title: "Uang Masuk berhasil dicatat",
-        description: result.sheetStatus === "synced"
-          ? "Tercatat juga di tab SC Uang Masuk, masih belum terverifikasi bank."
-          : "Data tersimpan di SC. Sinkronisasi Sheets belum selesai.",
+        description: `${result.incomeNo} — ${result.sheetStatus === "synced"
+          ? "Tercatat di tab SC Uang Masuk, belum terverifikasi bank."
+          : "Tersimpan di SC. Sinkronisasi Sheets belum selesai."}`,
       });
       await refetchIncome();
       await qc.invalidateQueries({ queryKey: ["expenses"] });
@@ -347,18 +347,6 @@ export default function AdminExpenses() {
         description: error.message ?? "Periksa daftar sebelum mengulangi.",
         variant: "destructive" });
     } finally { setIncomeSaving(false); }
-  }
-
-  async function retryIncomeSync(id: number) {
-    try {
-      const response = await fetch(`${API}/admin/income/${id}/retry-sheet`, {
-        method: "POST", headers: authHeaders(),
-      });
-      if (!response.ok) throw new Error("Sinkronisasi belum tersedia");
-      const result = await response.json();
-      toast({ title: result.sheetStatus === "synced" ? "Sheets tersinkron" : "Sinkronisasi masih tertunda" });
-      await refetchIncome();
-    } catch { toast({ title: "Sinkronisasi gagal", variant: "destructive" }); }
   }
 
   const { data: facilities = [] } = useQuery({
@@ -639,52 +627,6 @@ export default function AdminExpenses() {
         </Card>
       </div>
 
-      <Card>
-        <CardContent className="p-4 space-y-3">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <div>
-              <p className="font-semibold">Pencatatan Uang Masuk SC</p>
-              <p className="text-xs text-gray-500">
-                Manual bulan ini: {incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Belum tersedia"} (belum terverifikasi).
-                Tidak dijumlahkan otomatis dengan mutasi bank untuk mencegah hitung ganda.
-              </p>
-            </div>
-            <span className="text-xs text-gray-500">
-              Menunggu sinkronisasi: {incomeData?.summary.awaitingSync ?? "—"}
-            </span>
-          </div>
-          {(incomeData?.entries ?? []).length === 0 ? (
-            <p className="text-sm text-gray-500">
-              {incomeLoadError ? "Daftar Uang Masuk belum tersedia. Data tidak boleh diasumsikan kosong."
-                : "Belum ada pencatatan Uang Masuk manual."}
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="border-b text-left">
-                  <th className="py-2">Tanggal</th><th>Pengirim</th><th>Akun penerima</th>
-                  <th>Nominal</th><th>Status Sheets</th><th>Tindakan</th>
-                </tr></thead>
-                <tbody>{(incomeData?.entries ?? []).map((entry) => (
-                  <tr key={entry.id} className="border-b">
-                    <td className="py-2">{entry.transactionDate}</td>
-                    <td>{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
-                    <td>{entry.receivingAccount}</td>
-                    <td>{formatIDR(Number(entry.amount))}</td>
-                    <td>{entry.sheetSyncState === "synced" ? "Tersinkron (belum diverifikasi)" : entry.sheetSyncState}</td>
-                    <td>{entry.sheetSyncState !== "synced" && (
-                      <Button size="sm" variant="outline" onClick={() => retryIncomeSync(entry.id)}>
-                        Coba sinkron
-                      </Button>
-                    )}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
@@ -935,6 +877,7 @@ export default function AdminExpenses() {
             {incomePreview && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-1">
                 <p className="font-semibold text-emerald-800">Periksa Uang Masuk sebelum disimpan</p>
+                <p className="text-xs text-emerald-800">ID unik pemasukan diterbitkan setelah penyimpanan berhasil.</p>
                 <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
                 <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
                 <p>Bank / Akun Penerima: {incomeForm.receivingAccount.trim() || "Tidak ditentukan"}</p>
