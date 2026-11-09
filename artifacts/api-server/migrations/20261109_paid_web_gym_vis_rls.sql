@@ -29,8 +29,6 @@ WITH CHECK (
       AND p.confirmed_at IS NOT NULL AND nullif(btrim(p.proof_url),'') IS NOT NULL
       AND p.amount >= coalesce(b.grand_total,b.total_price)
       AND b.booking_date::date=(now() AT TIME ZONE 'Asia/Jakarta')::date
-      AND (now() AT TIME ZONE 'Asia/Jakarta')::time >= time '06:00'
-      AND (now() AT TIME ZONE 'Asia/Jakarta')::time < time '23:00'
       AND gym_vis_card_reservations.funds_reference='ADMINPAY-'||p.id::text
   )
 );
@@ -61,8 +59,6 @@ WITH CHECK (
       AND p.amount >= coalesce(b.grand_total,b.total_price)
       AND x904_nonmember_daily_access.confirmed_at=p.confirmed_at
       AND b.booking_date::date=(now() AT TIME ZONE 'Asia/Jakarta')::date
-      AND (now() AT TIME ZONE 'Asia/Jakarta')::time >= time '06:00'
-      AND (now() AT TIME ZONE 'Asia/Jakarta')::time < time '23:00'
       AND expires_at=((b.booking_date::date + time '23:00') AT TIME ZONE 'Asia/Jakarta')
   )
 );
