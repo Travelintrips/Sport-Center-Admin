@@ -212,6 +212,14 @@ jobs:
           }
           Write-Output 'X904_DURABLE_WORKER_POWERSHELL_PARSE_PASS'
 
+      - name: Compile PROD QRIS detection-only runtime (no execution)
+        run: |
+          pnpm --filter @workspace/api-server exec esbuild \
+            ../../scripts/qris-mandiri/qris-prod-detection-runtime.ts \
+            --bundle --platform=node --format=esm --packages=external \
+            --outfile=/tmp/sc-qris-prod-detection-runtime.mjs
+          node --check /tmp/sc-qris-prod-detection-runtime.mjs
+
       - name: Verify QRIS Gmail PROD detection safety contract
         run: node --test scripts/qris-mandiri/qris-prod-runtime-contract.test.mjs
 
