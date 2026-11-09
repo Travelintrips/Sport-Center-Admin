@@ -3443,10 +3443,53 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       res.status(400).json({ error: `Invalid status: ${status}` });
       return;
     }
+    if (adminNotes !== undefined && (typeof adminNotes !== "string" || adminNotes.length > 2000)) {
+      res.status(400).json({ error: "Catatan admin harus berupa teks maksimal 2.000 karakter." });
+      return;
+    }
 
     const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!beforeUpdate) {
       res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    // Notes-only must never masquerade as a status transition or trigger
+    // payment synchronization, finance reversal, or customer notification.
+    if (!status && adminNotes !== undefined && !hasAdditionalChargesUpdate) {
+      const [saved] = await db.update(bookingsTable)
+        .set({ adminNotes, updatedAt: new Date() })
+        .where(eq(bookingsTable.id, id))
+        .returning({ id: bookingsTable.id });
+      if (!saved) { res.status(404).json({ error: "Not found" }); return; }
+      await db.insert(bookingHistoryTable).values({
+        bookingId: id,
+        fromStatus: beforeUpdate.status,
+        toStatus: beforeUpdate.status,
+        changedBy: getUserFromReq(req).userId ?? null,
+        changedByName: getUserFromReq(req).userName ?? "Admin",
+        note: "Catatan admin internal diperbarui (tanpa perubahan status)",
+      });
+      const refreshed = await getBookingWithPayment(id);
+      res.json(refreshed);
+      return;
+    }
+
+    // Refund requires independent proof of money actually returned.
+    // No direct status shortcut is allowed.
+    if (status === "refunded" && beforeUpdate.status !== "refunded") {
+      res.status(409).json({
+        code: "REFUND_REQUIRES_VERIFIED_FINANCIAL_WORKFLOW",
+        error: "Status Dikembalikan tidak boleh diatur manual. Verifikasi dana benar-benar dikembalikan melalui proses keuangan.",
+      });
+      return;
+    }
+    if (status && ["pending_payment", "paid"].includes(status) &&
+        ["confirmed", "completed", "cancelled", "refunded"].includes(beforeUpdate.status)) {
+      res.status(409).json({
+        code: "BOOKING_STATUS_DOWNGRADE_BLOCKED",
+        error: "Booking yang sudah dikonfirmasi/selesai/dibatalkan tidak boleh diturunkan langsung ke status pembayaran awal.",
+      });
       return;
     }
 
