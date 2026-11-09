@@ -129,6 +129,9 @@ jobs:
           console.log("DEV database URL structure PASS (actual PostgreSQL authentication is checked by tests).");
           NODE
 
+      - name: Verify real DEV Gym X904 RLS checkout policy parity (read-only)
+        run: pnpm --filter @workspace/api-server exec node scripts/verify-dev-x904-checkout-rls.mjs
+
       - name: Verify Gym X904 admin isolation and navigation
         run: node scripts/verify-gym-x904-admin-contract.mjs
 
