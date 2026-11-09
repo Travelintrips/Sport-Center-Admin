@@ -5,8 +5,15 @@ import {sql} from "drizzle-orm";
 import {INCOME_TAB,INCOME_HEADERS,incomeRowPositions} from "./scIncomeValidation";
 export {INCOME_TAB,INCOME_HEADERS,incomeRowPositions,validateIncome,incomeFingerprint} from "./scIncomeValidation";
 export const resultRows=(r:any):any[]=>r?.rows??(Array.isArray(r)?r:[]);
+// A production admin saving a real receipt authorizes this isolated Sheet write.
+// Explicit false is the emergency kill switch. DEV is disabled unless explicitly enabled.
+export function incomeSyncEnabled():boolean {
+ if(process.env.SC_INCOME_SHEETS_SYNC_ENABLED==="false")return false;
+ return process.env.NODE_ENV==="production"||process.env.SC_INCOME_SHEETS_SYNC_ENABLED==="true";
+}
+
 async function sheetTarget(){
- if(process.env.SC_INCOME_SHEETS_SYNC_ENABLED!=="true")throw Error("INCOME_SYNC_DISABLED");
+ if(!incomeSyncEnabled())throw Error("INCOME_SYNC_DISABLED");
  if(!process.env.GOOGLE_SERVICE_ACCOUNT_JSON)throw Error("GOOGLE_SERVICE_ACCOUNT_NOT_CONFIGURED");
  const rows=resultRows(await db.execute(sql`SELECT sheet_id FROM public.bank_sheet_configs WHERE lower(trim(tab_name))='kas besar sc' AND is_active=true ORDER BY id DESC LIMIT 2`));
  if(rows.length!==1)throw Error("SHEET_CONFIG_MISSING_OR_AMBIGUOUS");
@@ -39,7 +46,7 @@ async function rowKeys(sheets:ReturnType<typeof google.sheets>,id:string){
  return (r.data.values??[]) as unknown[][];
 }
 export async function syncIncomeRow(id:number):Promise<"synced"|"disabled"|"pending">{
- if(process.env.SC_INCOME_SHEETS_SYNC_ENABLED!=="true")return "disabled";
+ if(!incomeSyncEnabled())return "disabled";
  const claimed=resultRows(await db.execute(sql`UPDATE sport_center.sc_income_entries SET
    sheet_sync_state='syncing',sheet_sync_started_at=now(),sheet_sync_attempts=sheet_sync_attempts+1,updated_at=now()
    WHERE id=${id} AND (sheet_sync_state IN ('pending','failed','disabled')
@@ -71,7 +78,7 @@ export async function syncIncomeRow(id:number):Promise<"synced"|"disabled"|"pend
  }
 }
 export function startScIncomeRetryWorker(){
- if(process.env.SC_INCOME_SHEETS_SYNC_ENABLED!=="true")return;
+ if(!incomeSyncEnabled())return;
  const timer=setInterval(async()=>{
   try{const rows=resultRows(await db.execute(sql`SELECT id FROM sport_center.sc_income_entries WHERE
     sheet_sync_state IN ('pending','disabled') OR (sheet_sync_state='failed' AND updated_at<now()-interval '5 minutes')
