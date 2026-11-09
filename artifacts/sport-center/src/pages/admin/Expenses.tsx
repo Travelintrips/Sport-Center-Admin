@@ -77,7 +77,7 @@ export function formatExpenseRupiahInput(value: string): string {
 }
 
 const INCOME_SOURCE_OPTIONS = ["Felicia Justiani", "Cahaya Sejati Teknologi", "Angelia Nirwana"];
-const INCOME_BANK_OPTIONS = ["Mandiri", "BCA", "blu by BCA Digital", "BNI", "BRI"];
+const INCOME_BANK_OPTIONS = ["Mandiri", "BCA", "blu by BCA Digital", "BNI", "BRI", "Kas Tunai", "Kas Besar SC"];
 
 type IncomeDropdownProps = {
   id: string;
@@ -166,6 +166,7 @@ export default function AdminExpenses() {
   const [incomeDuplicateWarning, setIncomeDuplicateWarning] = useState(false);
   const [incomeEntryKey, setIncomeEntryKey] = useState(() => crypto.randomUUID());
   const [incomePreview, setIncomePreview] = useState(false);
+  const [cashReceiptConfirmed, setCashReceiptConfirmed] = useState(false);
   const [incomeForm, setIncomeForm] = useState({
     transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
     sourceName: "",
@@ -293,7 +294,7 @@ export default function AdminExpenses() {
   });
 
   const { data: incomeData, refetch: refetchIncome, isError: incomeHistoryError, isFetching: incomeHistoryLoading } = useQuery<{
-    entries: Array<{ id: number; incomeNo: string; transactionDate: string; sourceName: string;
+    entries: Array<{ id: number; incomeNo: string; cashSheetState: string; cashSheetRow: number | null; transactionDate: string; sourceName: string;
       senderBank: string; receivingAccount: string; amount: string;
       sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
     summary: { manualThisMonth: number; awaitingSync: number };
@@ -323,6 +324,8 @@ export default function AdminExpenses() {
           receivingAccount: incomeForm.receivingAccount.trim(),
           bankReference: incomeForm.bankReference.trim(),
           amount: Number(incomeForm.amount),
+          confirmedCashReceived: cashReceiptConfirmed && incomeForm.method === "Tunai" &&
+            incomeForm.receivingAccount === "Kas Besar SC",
         }),
       });
       const result = await response.json();
@@ -334,7 +337,7 @@ export default function AdminExpenses() {
       setIncomeDuplicateWarning(false);
       toast({
         title: "Uang Masuk berhasil dicatat",
-        description: `${result.incomeNo} — ${result.sheetStatus === "synced"
+        description: `${result.incomeNo} — ${result.cashSheetStatus === "synced" ? "Kas Besar SC tersinkron (belum direkonsiliasi)." : result.cashSheetStatus === "disabled" ? "Penerimaan kas tersimpan; integrasi Kas Besar SC belum diaktifkan." : result.sheetStatus === "synced"
           ? "Tercatat di tab SC Uang Masuk, belum terverifikasi bank."
           : "Tersimpan di SC. Sinkronisasi Sheets belum selesai."}`,
       });
@@ -342,12 +345,28 @@ export default function AdminExpenses() {
       await qc.invalidateQueries({ queryKey: ["expenses"] });
       setIncomeOpen(false);
       setIncomePreview(false);
+      setCashReceiptConfirmed(false);
       setIncomeEntryKey(crypto.randomUUID());
     } catch (error: any) {
       toast({ title: "Gagal menyimpan Uang Masuk",
         description: error.message ?? "Periksa daftar sebelum mengulangi.",
         variant: "destructive" });
     } finally { setIncomeSaving(false); }
+  }
+
+  async function retryCashLedger(id: number) {
+    try {
+      const response = await fetch(`${API}/admin/income/${id}/retry-cash-sheet`, {
+        method: "POST", headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("Pengiriman kas belum tersedia");
+      const result = await response.json();
+      toast({ title: result.cashSheetStatus === "synced"
+        ? "Kas Besar SC tersinkron" : "Pengiriman kas belum selesai" });
+      await refetchIncome();
+    } catch {
+      toast({ title: "Kas Besar SC belum tersinkron", variant: "destructive" });
+    }
   }
 
   const { data: facilities = [] } = useQuery({
@@ -584,6 +603,7 @@ export default function AdminExpenses() {
                 sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
               });
               setIncomePreview(false);
+              setCashReceiptConfirmed(false);
               setIncomeDuplicateWarning(false);
               setIncomeEntryKey(crypto.randomUUID());
               setIncomeOpen(true);
@@ -802,7 +822,7 @@ export default function AdminExpenses() {
                   <thead><tr className="border-b text-left">
                     <th className="p-2">ID Pemasukan</th><th className="p-2">Tanggal</th>
                     <th className="p-2">Pengirim / Bank</th><th className="p-2">Akun Penerima</th>
-                    <th className="p-2">Nominal</th><th className="p-2">Status Sheets</th>
+                    <th className="p-2">Nominal</th><th className="p-2">Status Sheets</th><th className="p-2">Kas Besar SC</th>
                   </tr></thead>
                   <tbody>{incomeData.entries.map((entry) => (
                     <tr key={entry.id} className="border-b">
@@ -812,6 +832,14 @@ export default function AdminExpenses() {
                       <td className="p-2">{entry.receivingAccount}</td>
                       <td className="p-2">{formatIDR(Number(entry.amount))}</td>
                       <td className="p-2">{entry.sheetSyncState === "synced" ? "Tersinkron — belum terverifikasi" : entry.sheetSyncState}</td>
+                      <td className="p-2">
+                        {entry.cashSheetState === "not_applicable" ? "Bukan transaksi kas" :
+                          entry.cashSheetState === "synced" ? `Baris ${entry.cashSheetRow}` : entry.cashSheetState}
+                        {(entry.cashSheetState === "pending" || entry.cashSheetState === "failed") &&
+                          <Button size="sm" variant="outline" onClick={() => retryCashLedger(entry.id)}>
+                            Coba sinkron kas
+                          </Button>}
+                      </td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -918,6 +946,15 @@ export default function AdminExpenses() {
                   setIncomePreview(false);
                 }} />
             </div>
+            {incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && (
+              <label className="flex gap-2 items-start text-sm rounded border p-3">
+                <input type="checkbox" checked={cashReceiptConfirmed}
+                  onChange={(e) => { setCashReceiptConfirmed(e.target.checked); setIncomePreview(false); }} />
+                <span>Saya memastikan kas tunai benar-benar telah diterima. Kirim data ke
+                  <strong> kas besar sc</strong> hanya jika pengiriman kas diaktifkan.
+                  Pencatatan ini akan masuk alur matching BizPortal; tidak mengisi saldo secara otomatis.</span>
+              </label>
+            )}
             {incomePreview && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-1">
                 <p className="font-semibold text-emerald-800">Periksa Uang Masuk sebelum disimpan</p>
@@ -944,7 +981,8 @@ export default function AdminExpenses() {
                 disabled={!incomeForm.transactionDate || !incomeForm.sourceName.trim() ||
                   !incomeForm.bank.trim() ||
                   (incomeForm.method === "Transfer Bank" && !incomeForm.receivingAccount.trim()) ||
-                  Number(incomeForm.amount) <= 0}>
+                  Number(incomeForm.amount) <= 0 ||
+                  (incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && !cashReceiptConfirmed)}>
                 Pratinjau Input
               </Button>
               {incomePreview && (
