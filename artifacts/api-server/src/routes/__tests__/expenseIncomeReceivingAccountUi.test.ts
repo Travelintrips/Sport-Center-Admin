@@ -35,8 +35,8 @@ describe("Income preview: bank source vs receiving bank", () => {
     expect(ui).not.toContain('<datalist id="income-bank-suggestions">');
     expect(ui).not.toContain('<datalist id="income-receiving-suggestions">');
   });
-  it("remains preview only without writing database or sheets", () => {
-    const begin = ui.indexOf('{/* Incoming funds: UI-only form.');
+  it("saves only through operational income API (no direct Sheets mutation)", () => {
+    const begin = ui.indexOf('{/* Incoming funds: save to SC operational register');
     const end = ui.indexOf('{/* Form Dialog */}', begin);
     const modal = ui.slice(begin, end);
     expect(modal).toContain("setIncomePreview(true)");
