@@ -33,7 +33,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [actionGrant,setActionGrant]=useState<{recordId:number;authorization:string;expiresAt:number}|null>(null);
  const hasActionGrant=(recordId:number)=>actionGrant?.recordId===recordId&&actionGrant.expiresAt>Date.now();
  const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string;period:string;tab:string}|null>(null);
- type SalaryCheck={period:string;tab:string;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
+ type SalaryCheck={period:string;tab:string;employeeMissing?:boolean;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}|null};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
  const [selectedPeriod,setSelectedPeriod]=useState(()=>{const d=new Date();const value=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");return value<"2026-10"?"2026-10":value;});
@@ -57,10 +57,10 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
  const totalKasbon = monthlyRecords.reduce((sum,record) => sum + Number(record.amount), 0);
  const syncEvidence=showAllMonths?null:(initialSalaryCheck??salaryCheck);
- const isSalarySynced=Boolean(!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched&&syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
+ const isSalarySynced=Boolean(!syncEvidence?.employeeMissing&&!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched&&syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
  // Historical receipt alone cannot prove the current payroll G cell matches.
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
- const payrollMatches=Boolean(!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
+ const payrollMatches=Boolean(!syncEvidence?.employeeMissing&&!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
  const save=useMutation({
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
@@ -175,7 +175,8 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
       </Button>
     </div>
     {isSalaryCheckError&&!showAllMonths&&<p role="alert" className="mt-2 text-xs text-destructive">{(salaryCheckLoadError as Error)?.message==="SALARY_WORKSHEET_NOT_VERIFIED"?"Tab gaji "+monthLabel+" belum tersedia. Buat tab terlebih dahulu dari Data Karyawan SC.":"Gagal memeriksa tab gaji "+monthLabel+". Silakan Check Sync ulang."}</p>}
-    {checkOpen&&salaryCheck&&<div className="mt-4 space-y-3">
+    {syncEvidence?.employeeMissing&&!showAllMonths&&<p role="status" className="mt-2 text-sm text-amber-700">Karyawan {employee.fullName} tidak tercatat di tab {syncEvidence.tab}. Tidak ada baris untuk diperiksa; Sync Total dinonaktifkan. Data Kasbon bulan ini tetap aman.</p>}
+    {checkOpen&&salaryCheck&&!salaryCheck.employeeMissing&&salaryCheck.sheetRow&&<div className="mt-4 space-y-3">
      <div className="flex flex-wrap items-center gap-2 text-sm"><span>Nama Sheets: <strong>{salaryCheck.name}</strong></span><span>· Sel: <strong>{salaryCheck.cell}</strong></span>
       <span className={salaryCheck.matched?"rounded-full bg-green-100 px-2 py-0.5 font-semibold text-green-700":"rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{salaryCheck.matched?"Total cocok dengan Sheets":"Total belum cocok"}</span>
      </div>
@@ -186,7 +187,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
    <CardTitle>Histori Kasbon — {showAllMonths?"Semua Bulan":monthLabel} ({visibleRecords.length})</CardTitle>
    <div className="flex flex-wrap items-center gap-2">
-    <Button variant="outline" disabled={showAllMonths||isSalaryChecking||isSalaryCheckError||checkSalary.isPending||isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalaryChecking||checkSalary.isPending?"Sedang memeriksa laporan gaji; Sync Total belum tersedia":isSalaryCheckError?"Pemeriksaan Sheets gagal; lakukan Check Sync ulang":isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
+    <Button variant="outline" disabled={showAllMonths||isSalaryChecking||isSalaryCheckError||Boolean(syncEvidence?.employeeMissing)||checkSalary.isPending||isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalaryChecking||checkSalary.isPending?"Sedang memeriksa laporan gaji; Sync Total belum tersedia":isSalaryCheckError?"Pemeriksaan Sheets gagal; lakukan Check Sync ulang":isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
       {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
       {showAllMonths?"Pilih Bulan":isSalaryChecking||checkSalary.isPending||previewSalary.isPending?"Memeriksa Sheets...":isSalarySynced?"Synced":"Sync Total"}
     </Button>
