@@ -46,7 +46,14 @@ export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boole
   throw Error("SALARY_EMPLOYEE_ALIAS_IDENTITY_CHANGED");
  const plan=planKasbonSalaryColumnG([input],rows,aliases);
  const entry=plan.writes[0];
- if(!entry)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
+ if(!entry){
+  // Missing historical employee: preview only. Never invent a salary row.
+  if(!dryRun)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
+  return {status:"preview" as const,employeeMissing:true,matched:false,
+   employeeId:input.employeeId,name:aliases[input.employeeId]??input.fullName,
+   cell:"",amount:Number(input.total),spreadsheetId:SPREADSHEET_ID,gid,period,tab,
+   sheetRow:null};
+ }
  const existing=String(rows[entry.row-1]?.[6]??"");
  if(existing.startsWith("="))throw Error("SALARY_KASBON_FORMULA_PROTECTED");
  const cell=tabRange(entry.range);
