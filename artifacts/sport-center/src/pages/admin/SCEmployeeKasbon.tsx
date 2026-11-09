@@ -150,7 +150,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   </div>
   <div className="rounded-xl border bg-background px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><p className="font-semibold">Check Sync Total — Gaji</p><p className="text-xs text-muted-foreground">Periksa total Kasbon pada Google Sheets gaji untuk bulan yang dipilih (kolom G).</p></div>
+      <div><p className="font-semibold">Check Sync Total — Gaji</p><p className="text-xs text-muted-foreground">Periksa total Kasbon di Google Sheets gaji, kolom G (saat ini: November 2026).</p></div>
       <Button variant="outline" disabled={checkSalary.isPending||isLoading||isError} onClick={()=>{if(checkOpen){setCheckOpen(false);}else{checkSalary.mutate();}}}>
         <RefreshCw className="mr-2 h-4 w-4"/>{checkSalary.isPending?"Memeriksa...":checkOpen?"Tutup":"Check Sync"}
       </Button>
