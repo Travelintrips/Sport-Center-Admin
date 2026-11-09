@@ -1376,6 +1376,7 @@ function BookingDetailDrawer({
   groupBookings = [],
   onClose,
   onUpdateStatus,
+  onSaveAdminNotes,
   onConfirmPayment,
   onRejectPayment,
   onSyncCompanyInvoicePayment,
@@ -1398,6 +1399,7 @@ function BookingDetailDrawer({
   groupBookings?: any[];
   onClose: () => void;
   onUpdateStatus: (status: string, notes?: string) => void;
+  onSaveAdminNotes: (notes: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
   onSyncCompanyInvoicePayment: (bookingId: number) => void;
@@ -2867,7 +2869,7 @@ function BookingDetailDrawer({
               className="text-sm rounded-xl border-slate-200 dark:border-slate-700 resize-none"
             />
             <button
-              onClick={() => onUpdateStatus(booking.status, adminNotes)}
+              onClick={() => onSaveAdminNotes(adminNotes)}
               disabled={isUpdating}
               className="text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
             >
@@ -2884,6 +2886,7 @@ function BookingDetailDrawer({
               {/* Status Dropdown */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-500">Ubah Status Langsung</label>
+                <p className="text-[11px] text-slate-500">Perubahan status bukan verifikasi pembayaran atau bukti pengembalian dana.</p>
                 <Select
                   value={booking.status}
                   onValueChange={(val) => {
@@ -2900,7 +2903,6 @@ function BookingDetailDrawer({
                       { value: "paid",            label: "💳 Menunggu Verifikasi" },
                       { value: "completed",       label: "✅ Selesai" },
                       { value: "cancelled",       label: "❌ Dibatalkan" },
-                      { value: "refunded",        label: "↩️ Dikembalikan" },
                     ].map((o: {value:string;label:string}) => (
                       <SelectItem key={o.value} value={o.value} className="text-xs">
                         {o.label}
@@ -2957,16 +2959,9 @@ function BookingDetailDrawer({
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">
                 {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
-                  <ActionButton
-                    action="refunded"
-                    label="Kembalikan Dana"
-                    description="Ubah status → Dikembalikan"
-                    icon={RotateCcw}
-                    confirmAction={confirmAction}
-                    onClick={() => handleAction("refunded")}
-                    isUpdating={isUpdating}
-                    variant="purple"
-                  />
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
+                    Pengembalian dana harus dibuktikan dan dibukukan melalui alur keuangan; mengubah status booking saja tidak melakukan refund.
+                  </p>
                 )}
 
                 {booking.status === "paid" && (
@@ -3118,7 +3113,6 @@ const STATUS_OPTIONS = [
   { value: "paid",            label: "💳 Pembayaran Selesai" },
   { value: "confirmed",       label: "✅ Dikonfirmasi" },
   { value: "cancelled",       label: "❌ Dibatalkan" },
-  { value: "refunded",        label: "↩️ Pengembalian Dana" },
 ];
 
 function isBookingTimePast(bookingDate: string, endTime: string): boolean {
@@ -4104,7 +4098,7 @@ export default function AdminBookings() {
           });
           return;
         }
-        toast({ title: "Status booking diperbarui" });
+        toast({ title: variables?.data?.adminNotes !== undefined && variables?.data?.status === undefined ? "Catatan admin tersimpan" : "Status booking diperbarui" });
         setSelectedBooking(
           (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === data?.id) ?? data,
         );
@@ -4547,6 +4541,14 @@ export default function AdminBookings() {
     updateBookingMutation.mutate({
       id: selectedBooking.id,
       data: { status: status as any, adminNotes },
+    });
+  };
+
+  const handleSaveAdminNotes = (notes: string) => {
+    if (!selectedBooking) return;
+    updateBookingMutation.mutate({
+      id: selectedBooking.id,
+      data: { adminNotes: notes } as any,
     });
   };
 
@@ -6294,6 +6296,7 @@ export default function AdminBookings() {
           }
           onClose={() => setSelectedBooking(null)}
           onUpdateStatus={handleStatusUpdate}
+          onSaveAdminNotes={handleSaveAdminNotes}
           onConfirmPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "confirmed" } })
           }
