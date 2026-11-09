@@ -170,6 +170,7 @@ export default function AdminExpenses() {
     method: "Transfer Bank",
     bank: "",
     receivingAccount: "",
+    bankReference: "",
     amount: "",
   });
   const [formOpen, setFormOpen] = useState(false);
@@ -317,6 +318,7 @@ export default function AdminExpenses() {
           senderBank: incomeForm.bank.trim(),
           method: incomeForm.method,
           receivingAccount: incomeForm.receivingAccount.trim(),
+          bankReference: incomeForm.bankReference.trim(),
           amount: Number(incomeForm.amount),
         }),
       });
@@ -583,7 +585,7 @@ export default function AdminExpenses() {
             onClick={() => {
               setIncomeForm({
                 transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
-                sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", amount: "",
+                sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
               });
               setIncomePreview(false);
               setIncomeEntryKey(crypto.randomUUID());
@@ -902,6 +904,15 @@ export default function AdminExpenses() {
               <p className="text-xs text-gray-500">Bank atau akun tujuan yang menerima uang. Hanya informasi pada pratinjau UI.</p>
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="income-reference">Nomor Referensi Bank (opsional)</Label>
+              <Input id="income-reference" value={incomeForm.bankReference}
+                maxLength={120} placeholder="Nomor referensi pada bukti transfer"
+                onChange={(event) => {
+                  setIncomeForm({ ...incomeForm, bankReference: event.target.value });
+                  setIncomePreview(false);
+                }} />
+            </div>
+            <div className="space-y-1.5">
               <Label htmlFor="income-amount">Nominal (Rp) <span className="text-red-500">*</span></Label>
               <Input id="income-amount" type="text" inputMode="numeric" required
                 placeholder="Contoh: 500.000"
@@ -917,6 +928,7 @@ export default function AdminExpenses() {
                 <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
                 <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
                 <p>Bank / Akun Penerima: {incomeForm.receivingAccount.trim() || "Tidak ditentukan"}</p>
+                {incomeForm.bankReference.trim() && <p>Referensi: {incomeForm.bankReference.trim()}</p>}
                 <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
               </div>
             )}

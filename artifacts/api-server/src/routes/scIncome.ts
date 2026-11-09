@@ -55,7 +55,9 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
      userId:actor.userId??null,after:{date:data.transactionDate,amount:data.amount,
        bankVerified:false},...getClientInfo(req)});
   }
-  const candidates=resultRows(await db.execute(sql`
+  let candidateCount=0;
+  try{
+   const candidates=resultRows(await db.execute(sql`
     SELECT bm.id FROM public.bank_mutations bm JOIN public.bank_sheet_configs bsc
       ON bsc.id=bm.sheet_config_id AND bsc.company_id=bm.company_id
       AND bm.bank_account_id=bsc.bank_account_id::text
@@ -65,10 +67,14 @@ router.post("/admin/income",adminMiddleware,async(req,res)=>{
                                   AND ${data.transactionDate}::date+interval '1 day'
     LIMIT 11
   `));
+   candidateCount=Math.min(candidates.length,10);
+  }catch(e){
+   req.log.warn({err:e},"Bank candidates unavailable; SC income entry preserved");
+  }
   // Sync is independently idempotent. Failed sync keeps the saved record intact.
   const sheetStatus=await syncIncomeRow(id);
   res.status(inserted?201:200).json({ok:true,id,sheetStatus,bankVerified:false,
-    candidateCount:Math.min(candidates.length,10),
+    candidateCount,
     note:"Mutasi cocok perlu diverifikasi di BizPortal; pencatatan SC belum terverifikasi bank."});
  }catch(e){
   req.log.error({err:e},"income save failed");
