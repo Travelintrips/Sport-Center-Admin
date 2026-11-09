@@ -1869,6 +1869,33 @@ router.post("/bookings", async (req, res) => {
       /gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")) &&
       isAdminRequest && bookingSource === "admin" && isOperationalBookingRole(loggedInRole) &&
       normalizedBookingDate < getTodayWIB();
+    // Staff must reuse an already paid web Gym booking for the SAME visitor,
+    // date and facility rather than creating a second booking solely to
+    // generate a VIS grant. Ordinary repeat visits without a VIS selection
+    // keep their existing workflow.
+    if (isWalkIn && isAdminRequest && bookingSource === "admin" &&
+        req.body.x904IdentityType === "card" && normalizedBookingDate === getTodayWIB()) {
+      const existingPaid = await db.execute(sql`SELECT b.id,b.order_number
+        FROM sport_center.sport_bookings b
+        JOIN sport_center.sport_payments p ON p.booking_id=b.id
+        WHERE b.facility_id=${normalizedFacilityId}
+          AND b.booking_date=${normalizedBookingDate}
+          AND b.source IN ('web','gym_public_guest')
+          AND b.status::text='confirmed' AND p.status::text='confirmed'
+          AND b.customer_phone=${customerPhone}
+          AND upper(btrim(b.customer_name))=upper(btrim(${normalizedCustomerName}))
+        ORDER BY b.id DESC LIMIT 1`);
+      if (existingPaid.rows.length) {
+        const original = existingPaid.rows[0] as any;
+        res.status(409).json({
+          code: "EXISTING_PAID_GYM_BOOKING",
+          error: `Pengunjung sudah memiliki booking GYM terbayar ${String(original.order_number)}. Buka booking tersebut dan tetapkan kartu VIS di sana, tanpa membuat pembayaran atau booking baru.`,
+          existingBookingId: Number(original.id),
+          existingOrderNumber: String(original.order_number),
+        });
+        return;
+      }
+    }
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
     let x904VisitorName: string | null = null;
     const hasX904Identity = req.body.x904IdentityType != null || req.body.x904IdentityValue != null;
