@@ -38,6 +38,7 @@ interface BookingResult {
   totalPrice: number;
   statusUrl: string;
   uploadProofUrl: string;
+  proofStatus?: "waiting_confirmation" | null;
 }
 
 interface AvailabilitySlot {
@@ -553,32 +554,51 @@ export default function WaBookingForm() {
     }
     setSubmitting(true);
     try {
-      const resp = await fetch("/api/wa/booking", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerName: form.customerName,
-          customerPhone: form.customerPhone,
-          facilityId: params.facilityId,
-          bookingDate: form.bookingDate,
-          startTime: form.startTime,
-          durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
-          notes: form.notes,
-          paymentMethod: form.paymentMethod || undefined,
-          ...(publicGymGuest ? { publicGymGuest: true } : {}),
-          ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
-            ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
-        }),
-      });
+      const payload = {
+        customerName: form.customerName,
+        customerPhone: form.customerPhone,
+        facilityId: params.facilityId,
+        bookingDate: form.bookingDate,
+        startTime: form.startTime,
+        durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
+        notes: form.notes,
+        paymentMethod: form.paymentMethod || undefined,
+        ...(publicGymGuest ? { publicGymGuest: true } : {}),
+        ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
+          ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
+      };
+      // Public Gym sends the proof and booking together. The backend commits
+      // both in a single transaction; there is no second upload to lose.
+      const requestOptions: RequestInit = publicGymGuest
+        ? (() => {
+            const fd = new FormData();
+            for (const [key, value] of Object.entries(payload)) {
+              if (value !== undefined && value !== null) fd.append(key, String(value));
+            }
+            if (proofFile) fd.append("proof", proofFile);
+            return { method: "POST", body: fd };
+          })()
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          };
+      const resp = await fetch("/api/wa/booking", requestOptions);
       const data = await resp.json();
-      if (!resp.ok) { setError(data.error ?? "Terjadi kesalahan"); return; }
+      if (!resp.ok) { setError(data.error ?? "Bukti dan booking belum tersimpan. Coba lagi tanpa membayar ulang."); return; }
       const bookingResult = data as BookingResult;
-      // Keep the new booking ID even if its separate proof upload fails.
-      // Start the visible upload state before switching to the confirmation view.
-      setProofUploadState(proofFile && form.paymentMethod ? "uploading" : "idle");
-      setResult(bookingResult);
-      if (proofFile && form.paymentMethod) {
-        await uploadProofForBooking(bookingResult);
+      if (publicGymGuest) {
+        // Fail closed: a partial success must never be reported to the customer.
+        if (bookingResult.proofStatus !== "waiting_confirmation") {
+          setError("Server belum mengonfirmasi penyimpanan bukti. Jangan membuat booking lagi; periksa status melalui petugas.");
+          return;
+        }
+        setProofUploadState("received");
+        setResult(bookingResult);
+      } else {
+        setProofUploadState(proofFile && form.paymentMethod ? "uploading" : "idle");
+        setResult(bookingResult);
+        if (proofFile && form.paymentMethod) await uploadProofForBooking(bookingResult);
       }
     } catch {
       setError("Gagal mengirim booking. Coba lagi.");

@@ -943,7 +943,7 @@ router.post("/wa/gym-name-route", async (req, res) => {
 });
 
 // POST /api/wa/booking — create booking from mini form
-router.post("/wa/booking", async (req, res) => {
+router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
   try {
     const { customerName, customerPhone, facilityId, bookingDate, startTime, durationHours, notes, x904IdentityType, x904IdentityValue } = req.body;
     let bookingCustomerName = String(customerName ?? "").trim();
@@ -961,7 +961,7 @@ router.post("/wa/booking", async (req, res) => {
     const gymWalkIn = isGymWalkInFacility(facility);
     // Public self-service is an unbound reservation, NEVER a physical door grant.
     // The person may pay without registration; PIN/card assignment is a separate verified step.
-    const publicGymGuest = req.body.publicGymGuest === true;
+    const publicGymGuest = req.body.publicGymGuest === true || req.body.publicGymGuest === "true";
     // A self-service visitor can provide a PIN to match with the separately
     // resolved registered name. Neither input proves ownership or grants access.
     const guestSubmittedPin = publicGymGuest ? String(req.body.requestedX904Pin ?? "").trim() : "";
@@ -1122,6 +1122,57 @@ router.post("/wa/booking", async (req, res) => {
       customerId: customer?.id ?? undefined,
       bookingDate,
     });
+    // Anonymous Gym checkout is ONE multipart submission: booking plus original
+    // proof image. Never create a half-booking if OCR or durable storage fails.
+    // Other legacy WA/admin JSON booking paths remain unchanged.
+    let publicProof: {
+      url: string;
+      method: "QRIS" | "Transfer Bank";
+      provider: "mandiri_direct" | "unknown";
+      ocr: Awaited<ReturnType<typeof scanPaymentProof>>;
+      companyId: number;
+      bankAccountId: string;
+      expectedSettlementDate: string | null;
+    } | null = null;
+    if (publicGymGuest) {
+      if (!req.file) {
+        res.status(400).json({ error: "Bukti pembayaran wajib disertakan bersama booking Gym mandiri. Tidak ada booking yang dibuat." });
+        return;
+      }
+      const selectedMethod = parseWaProofPaymentMethod(req.body.paymentMethod);
+      if (!selectedMethod) {
+        res.status(400).json({ error: "Metode pembayaran tidak valid." });
+        return;
+      }
+      const ocr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+      if (ocr.amount == null || Number(ocr.amount) !== totalPrice) {
+        res.status(422).json({
+          error: "Nominal pada bukti pembayaran tidak sesuai tagihan; booking belum dibuat.",
+          code: "GYM_PUBLIC_PROOF_AMOUNT_MISMATCH",
+        });
+        return;
+      }
+      const url = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
+      if (!url) {
+        res.status(503).json({ error: "Bukti pembayaran gagal disimpan. Booking belum dibuat; coba lagi." });
+        return;
+      }
+      const provider: "mandiri_direct" | "unknown" =
+        selectedMethod === "QRIS" ? "mandiri_direct" : "unknown";
+      const enrichment = await resolveRequiredPaymentEnrichment({
+        payerType: null,
+        companyCustomerId: null,
+        companyInvoiceId: null,
+        facilityId: Number(facilityId),
+      }, provider, new Date());
+      publicProof = {
+        url, method: selectedMethod, provider, ocr,
+        companyId: enrichment.companyId,
+        bankAccountId: enrichment.bankAccountId,
+        expectedSettlementDate: enrichment.expectedSettlementDate,
+      };
+    }
+    const bookingBaseUrl = await getBaseUrl();
     const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
@@ -1238,14 +1289,80 @@ router.post("/wa/booking", async (req, res) => {
             ${publicGymGuest ? "review_required" : "verified"},
             ${publicGymGuest ? "review_required" : "pending"})`);
       }
+      if (publicGymGuest && publicProof) {
+        // The same database transaction commits the booking, its held PIN
+        // entitlement and the *pending* proof. Never mark funds confirmed here.
+        await tx.insert(paymentsTable).values({
+          bookingId: created.id,
+          amount: String(totalPrice),
+          proofUrl: publicProof.url,
+          paymentMethod: publicProof.method,
+          paymentProvider: publicProof.provider,
+          providerName: normalizeProviderName(publicProof.provider),
+          providerId: createPaymentProviderId(publicProof.provider, `gym-guest-proof-${created.id}`),
+          providerOrderId: createPaymentProviderOrderId(publicProof.provider, `gym-guest-proof-order-${created.id}`),
+          companyId: publicProof.companyId,
+          bankAccountId: publicProof.bankAccountId,
+          expectedSettlementDate: publicProof.expectedSettlementDate,
+          ocrName: publicProof.ocr.name ?? null,
+          ocrAmount: String(publicProof.ocr.amount),
+          ocrDate: publicProof.ocr.date ?? null,
+          ocrRaw: publicProof.ocr.rawText ?? null,
+          ocrData: {
+            paymentMethod: publicProof.ocr.paymentMethod,
+            confidence: publicProof.ocr.confidence,
+            signals: publicProof.ocr.signals,
+            recipient: publicProof.ocr.recipient,
+            engine: publicProof.ocr.engine,
+            scannedAt: publicProof.ocr.scannedAt,
+            amountMatch: true,
+            fromSingleCheckout: true,
+          },
+          status: "pending",
+        });
+        await tx.update(bookingsTable).set({ status: "waiting_confirmation", updatedAt: new Date() })
+          .where(eq(bookingsTable.id, created.id));
+        await tx.insert(bookingHistoryTable).values({
+          bookingId: created.id, fromStatus: null, toStatus: "waiting_confirmation",
+          changedByName: bookingCustomerName,
+          note: "Booking Gym mandiri dan bukti pembayaran disimpan bersamaan; menunggu verifikasi admin dan kepemilikan PIN. Akses X904 tetap ditahan.",
+        });
+        // Include the recovery link in the same commit. Failure here rolls back
+        // booking+payment instead of returning an HTTP 500 after persistence.
+        const publicProofToken = randomBytes(18).toString("base64url");
+        await tx.insert(waActionTokensTable).values({
+          token: publicProofToken,
+          bookingId: created.id,
+          action: "upload_proof",
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        });
+        return { ...created, status: "waiting_confirmation" as const, publicProofToken };
+      }
       await tx.insert(bookingHistoryTable).values({
         bookingId: created.id, fromStatus: null, toStatus: "pending_payment",
-        changedByName: bookingCustomerName, note: publicGymGuest ? "Booking Gym mandiri tanpa akun; belum ada hak akses X904" : "Booking dibuat via WhatsApp",
+        changedByName: bookingCustomerName, note: "Booking dibuat via WhatsApp",
       });
-      return created;
+      return { ...created, publicProofToken: null as string | null };
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
+    if (publicGymGuest && publicProof) {
+      // Staff must approve from the authenticated Admin Booking page, not
+      // the generic WA review endpoint. Notification is best effort only.
+      void Promise.resolve().then(() => notifyWaProofUploaded({
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facility.name,
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(totalPrice).toLocaleString("id-ID"),
+        proofUrl: publicProof.url,
+        reviewUrl: `${bookingBaseUrl}/admin/bookings`,
+        note: "Bukti diterima bersama booking Gym mandiri; verifikasi pembayaran dan kepemilikan PIN melalui Admin Booking.",
+      })).catch(err => console.error("[gym-public] proof notification failed", err));
+    }
 
     // Record tax transaction (non-blocking)
     if (taxCalc.taxCode) {
@@ -1253,50 +1370,69 @@ router.post("/wa/booking", async (req, res) => {
     }
 
     // Create proof upload token (multi-use, 7 days)
-    const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+    const proofToken = booking.publicProofToken ?? await createWaToken(booking.id, "upload_proof", 7);
 
     // Get bank info
-    const settingsRows = await db.select().from(settingsTable).limit(1);
+    const settingsRows = publicGymGuest ? [] : await db.select().from(settingsTable).limit(1);
     const settings = settingsRows[0];
 
     // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
     const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-    const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
-    const uploadProofUrl = `${await getBaseUrl()}/bukti/${proofToken}`;
+    const statusUrl = `${bookingBaseUrl}/status/${orderNumber}`;
+    const uploadProofUrl = `${bookingBaseUrl}/bukti/${proofToken}`;
 
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
-    notifyWaBookingCreated({
-      customerName: bookingCustomerName,
-      customerPhone,
-      orderNumber,
-      facilityName: facility.name,
-      bookingDate,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      totalPrice: amountToPay.toLocaleString("id-ID"),
-      paymentDeadline: deadlineStr,
-      statusUrl,
-      uploadProofUrl,
-      bankName: settings?.bankName ?? "",
-      bankAccount: settings?.bankAccount ?? "",
-      bankAccountName: settings?.bankAccountName ?? "",
-    });
+    if (publicGymGuest && publicProof) {
+      // Customer has already submitted a proof. Never send a duplicate
+      // payment request for a successfully received receipt.
+      void Promise.resolve().then(() => notifyWaProofReceived({
+        customerName: bookingCustomerName,
+        customerPhone,
+        orderNumber,
+        facilityName: facility.name,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: amountToPay.toLocaleString("id-ID"),
+        statusUrl,
+      })).catch(err => console.error("[gym-public] receipt notification failed", err));
+    } else {
+      // Other WA bookings retain their existing payment-request flow.
+      notifyWaBookingCreated({
+        customerName: bookingCustomerName,
+        customerPhone,
+        orderNumber,
+        facilityName: facility.name,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: amountToPay.toLocaleString("id-ID"),
+        paymentDeadline: deadlineStr,
+        statusUrl,
+        uploadProofUrl,
+        bankName: settings?.bankName ?? "",
+        bankAccount: settings?.bankAccount ?? "",
+        bankAccountName: settings?.bankAccountName ?? "",
+      });
+    }
 
     await logAudit({
       action: "wa_booking_created",
       entity: "booking",
       entityId: booking.id,
       after: { orderNumber, source: publicGymGuest ? "gym_public_guest" : "whatsapp", facilityId, bookingDate, startTime, endTime, x904Route: guestNameRoute?.route ?? null },
-    });
+    }).catch(err => console.error("[wa/booking] post-commit audit failure", err));
 
     res.status(201).json({
       ...booking,
+      publicProofToken: undefined,
       totalPrice: Number(booking.totalPrice),
       discountAmount: Number(booking.discountAmount),
       facilityName: facility.name,
       statusUrl,
       uploadProofUrl,
+      proofStatus: publicGymGuest && publicProof ? "waiting_confirmation" : null,
       gymGuestIdentityRoute: guestNameRoute?.route ?? null,
       // Never leak linked PIN/UID via an anonymous no-login response.
       x904Identity: !publicGymGuest && verifiedX904Identity ? {
