@@ -1624,7 +1624,7 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
 // Assign a physical VIS card to an EXISTING paid Gym booking. Never create a
 // duplicate booking/payment and never issue an X904 device command here.
 // Handover and device read-back are separate, mandatory gates.
-router.post("/bookings/:bookingId/x904-vis-reserve", async (req, res) => {
+router.post("/bookings/:bookingId/x904-vis-reserve", authMiddleware, async (req, res) => {
   const authorization = String(req.headers.authorization ?? "");
   const principal = authorization.startsWith("Bearer ")
     ? verifyToken(authorization.slice(7)) : null;
