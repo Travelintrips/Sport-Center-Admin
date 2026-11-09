@@ -95,6 +95,50 @@ async function gmailJson(token: string, url: string): Promise<any> {
 
 let pool: pg.Pool;
 
+// A single process owns polling. The runtime does not change booking/payment
+// state, and credentials are required in the PROD-only environment file.
+const pollEnabled = e("QRIS_GMAIL_PROD_POLL_ENABLED").toLowerCase() === "true";
+const rawPollMinutes = Number(e("QRIS_GMAIL_PROD_POLL_MINUTES") || "5");
+const pollMinutes = Number.isFinite(rawPollMinutes) &&
+  Number.isInteger(rawPollMinutes) && rawPollMinutes >= 5 && rawPollMinutes <= 60
+  ? rawPollMinutes : 5;
+let syncInProgress = false;
+let lastAttemptAt: string | null = null;
+let lastSuccessAt: string | null = null;
+let lastFailureCode: string | null = null;
+let lastSummary: { scanned: number; inserted: number; reconciled: number; invalid: number; autoConfirmed: 0 } | null = null;
+
+async function runSyncSafely(): Promise<{ busy?: boolean; scanned?: number; inserted?: number; reconciled?: number; duplicateOrExisting?: number; invalid?: number; autoConfirmed: 0; decisions?: any[] }> {
+  if (syncInProgress) return { busy: true, autoConfirmed: 0 };
+  syncInProgress = true;
+  lastAttemptAt = new Date().toISOString();
+  try {
+    const result = await sync();
+    lastSuccessAt = new Date().toISOString();
+    lastFailureCode = null;
+    lastSummary = {
+      scanned: result.scanned,
+      inserted: result.inserted,
+      reconciled: result.reconciled,
+      invalid: result.invalid,
+      autoConfirmed: 0,
+    };
+    return result;
+  } catch (err) {
+    // Sanitized errors only; OAuth tokens, message bodies and DB URLs never
+    // appear in status or are logged.
+    const raw = err instanceof Error ? err.message : "";
+    lastFailureCode = /^GMAIL_API_HTTP_\d+$/.test(raw) ? raw
+      : raw === "GMAIL_OAUTH_REFRESH_FAILED" ? raw
+      : raw.startsWith("PROD_DB_TARGET_MISMATCH") ? "PROD_DB_TARGET_MISMATCH"
+      : "SYNC_FAILED";
+    console.error("[qris-prod] detection sync failed:", lastFailureCode);
+    throw new Error(lastFailureCode);
+  } finally {
+    syncInProgress = false;
+  }
+}
+
 async function sync(): Promise<any> {
   const token = await oauthToken();
   const allowed = e("QRIS_GMAIL_ALLOWED_FROM").toLowerCase();
@@ -267,9 +311,19 @@ async function boot(): Promise<void> {
           allowedSenderConfigured: true,
           mode: "read_only_detection",
           autoConfirm: false,
+          pollEnabled,
+          pollMinutes,
+          syncInProgress,
+          lastAttemptAt,
+          lastSuccessAt,
+          lastFailureCode,
+          lastSummary,
         });
       }
-      if (req.method === "POST" && url.pathname === "/sync") return json(res, 200, await sync());
+      if (req.method === "POST" && url.pathname === "/sync") {
+        const result = await runSyncSafely();
+        return json(res, result.busy ? 409 : 200, result);
+      }
       if (req.method === "GET" && url.pathname === "/transactions") {
         const result = await pool.query(
           "select id,gmail_message_id,merchant_name,acquirer,provider_reference,transaction_at,amount,tip,total,parse_status,match_status,candidate_payment_ids,created_at from sport_center.qris_email_transactions order by id desc limit 100",
@@ -284,8 +338,18 @@ async function boot(): Promise<void> {
   });
 
   server.listen(PORT, HOST, () =>
-    console.log(`[qris-prod] listening ${HOST}:${PORT}; DB=${PROD_REF}; autoConfirm=false`),
+    console.log(`[qris-prod] listening ${HOST}:${PORT}; DB=${PROD_REF}; autoConfirm=false; poll=${pollEnabled}`),
   );
+
+  // Explicit opt-in only. This doesn't activate PROD without the separate
+  // service configuration and OAuth read-only credentials.
+  if (pollEnabled) {
+    void runSyncSafely().catch(() => {});
+    const poll = setInterval(() => {
+      void runSyncSafely().catch(() => {});
+    }, pollMinutes * 60 * 1000);
+    poll.unref?.();
+  }
 }
 
 boot().catch((error) => {
