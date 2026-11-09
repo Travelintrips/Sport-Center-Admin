@@ -870,6 +870,56 @@ test("production-style RLS accepts only held public registered PIN grant, never 
   } finally { conn.release(); }
 });
 
+test("single-checkout DB transaction commits held PIN and receipt together, or rolls both back", async () => {
+  // Real disposable PostgreSQL with actual PIN registry RLS and protected grant
+  // policy. No machine, external payment, PROD DB, or fake verified funds.
+  const pin="610",uid=610,name="CI ATOMIC GYM CHECKOUT";
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+  await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+    (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+    VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+  await run("GRANT SELECT,INSERT,UPDATE ON sport_center.sport_bookings TO sport_center_app");
+  await run("GRANT SELECT,INSERT ON sport_center.sport_payments TO sport_center_app");
+  const create = async (bookingId:number,paymentId:number) => {
+    const client=await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE sport_center_app");
+      await client.query(`INSERT INTO sport_center.sport_bookings
+        (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+        VALUES($1,'2026-11-09','16:12','gym_public_guest','single multipart proof',
+          'pending_payment',$2,$3,30000)`,[bookingId,`SC-CI-ATOMIC-${bookingId}`,name]);
+      await client.query(`INSERT INTO sport_center.x904_nonmember_daily_access
+        (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+          booking_id,verification_state,access_state)
+        VALUES('TDBD234200545','pin','PIN:'||$1,$1,$2,$3,$4,'review_required','review_required')`,
+        [pin,uid,name,bookingId]);
+      await client.query(`INSERT INTO sport_center.sport_payments
+        (id,booking_id,status,amount,proof_url)
+        VALUES($1,$2,'pending',30000,'ci://durable-proof-receipt')`,[paymentId,bookingId]);
+      await client.query("UPDATE sport_center.sport_bookings SET status='waiting_confirmation' WHERE id=$1",[bookingId]);
+      await client.query("COMMIT");
+      return "committed";
+    } catch(err) {
+      await client.query("ROLLBACK");
+      return String((err as {code?:string}).code ?? "error");
+    } finally {client.release();}
+  };
+  expect(await create(9610,9710)).toBe("committed");
+  expect((await run("SELECT status FROM sport_center.sport_bookings WHERE id=9610")).rows[0].status).toBe("waiting_confirmation");
+  expect((await run("SELECT status,proof_url FROM sport_center.sport_payments WHERE booking_id=9610")).rows[0])
+    .toMatchObject({status:"pending",proof_url:"ci://durable-proof-receipt"});
+  expect((await run("SELECT verification_state,access_state,payment_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9610")).rows[0])
+    .toMatchObject({verification_state:"review_required",access_state:"review_required",payment_id:null});
+  const grantId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9610")).rows[0].access_id);
+  expect(await commandFor("ACTIVATE_USER",grantId)).toBeUndefined();
+  // A late payment INSERT error must roll back booking and grant too.
+  expect(await create(9611,9710)).toBe("23505");
+  expect((await run("SELECT count(*)::int n FROM sport_center.sport_bookings WHERE id=9611")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9611")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=9611")).rows[0].n).toBe(0);
+});
+
 test("HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant", async () => {
   // This invokes the real Express bookings router, not a copied approval function.
   // All writes are scoped to disposable 127.0.0.1 PostgreSQL. No external X904 device.
