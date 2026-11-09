@@ -370,3 +370,45 @@ jobs:
           SUPABASE_DATABASE_URL_DEV: postgresql://postgres:vis_ci_only@127.0.0.1:55444/x904_nonmember_safe2
           NODE_ENV: test
         run: pnpm --filter @workspace/api-server test:x904-nonmember-real-pg
+
+  gym-checkout-real-postgres:
+    name: Gym checkout — actual multipart HTTP and isolated PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: checkout_ci_only
+          POSTGRES_DB: pin700_checkout_isolated
+        ports:
+          - 55444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pin700_checkout_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test real checkout HTTP, rollback, retry and concurrent submissions
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: isolated-checkout-ci-not-a-production-secret
+          SUPABASE_DATABASE_URL_DEV: postgresql://postgres:checkout_ci_only@127.0.0.1:55444/pin700_checkout_isolated
+          GYM_CHECKOUT_ISOLATED_PG_URL: postgresql://postgres:checkout_ci_only@127.0.0.1:55444/pin700_checkout_isolated
+        run: >-
+          pnpm --filter @workspace/api-server exec node --experimental-vm-modules
+          ./node_modules/jest/bin/jest.js --runInBand
+          src/routes/__tests__/gymPublicCheckout.realPg.test.ts
