@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {assertKasbonPeriod,recordsForKasbonPeriod,monthlyKasbonTotal} from "../artifacts/api-server/src/lib/scKasbonMonthlyPeriod.ts";
-import {resolveSalaryPeriod} from "../artifacts/api-server/src/lib/scKasbonSalaryGoogle.ts";
+import {assertKasbonPeriod,recordsForKasbonPeriod,monthlyKasbonTotal,salaryTabForKasbonPeriod} from "../artifacts/api-server/src/lib/scKasbonMonthlyPeriod.ts";
 const records=[
  {id:4,kasbonDate:"2026-11-05",amount:"1500000.00"},
  {id:15,kasbonDate:"2026-12-04",amount:"10000.00"},
@@ -19,7 +18,7 @@ for(const [period,total,ids,tab] of [
 ]){
  assert.equal(monthlyKasbonTotal(records,period),total,period);
  assert.deepEqual(recordsForKasbonPeriod(records,period).map(x=>x.id),ids,period);
- assert.equal(resolveSalaryPeriod(period).tab,tab,period);
+ assert.equal(salaryTabForKasbonPeriod(period),tab,period);
 }
 const route=readFileSync("artifacts/api-server/src/routes/scEmployeeKasbon.ts","utf8");
 const sheets=readFileSync("artifacts/api-server/src/lib/scKasbonSalaryGoogle.ts","utf8");
@@ -34,6 +33,7 @@ assert.match(sheets,/filter\(s=>s\.properties\?\.title===tab\)/);
 assert.match(sheets,/SALARY_WORKSHEET_NOT_VERIFIED/);
 assert.match(sheets,/SALARY_NOVEMBER_WORKSHEET_ID_CHANGED/);
 assert.match(sheets,/period,tab/);
+assert.match(sheets,/salaryTabForKasbonPeriod\(period\)/);
 assert.match(ui,/type="month" min="2026-11"/);
 assert.match(ui,/visibleRecords=showAllMonths\?records:monthlyRecords/);
 assert.match(ui,/const totalKasbon = monthlyRecords\.reduce/);
