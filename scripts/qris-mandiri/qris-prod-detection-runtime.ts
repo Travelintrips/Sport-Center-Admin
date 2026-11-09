@@ -295,7 +295,35 @@ async function boot(): Promise<void> {
   }
 
   pool = new pg.Pool({ connectionString: db, max: 2, ssl: { rejectUnauthorized: false } });
-  await pool.query("select 1");
+  // Fail closed if PROD is pointed at the regular Sport Center app user or
+  // a privileged database owner. The runtime must use a dedicated LOGIN role
+  // that INHERITs ONLY qris_gmail_prod_runtime. Its RLS permits reading
+  // pending QRIS payment candidates and writing detection-only records.
+  // Never print the database username, URL or secrets in startup logs.
+  const scope = await pool.query(`
+    select
+      pg_has_role(current_user, 'qris_gmail_prod_runtime', 'USAGE') as dedicated_role_inherited,
+      has_table_privilege(current_user, 'sport_center.sport_payments', 'SELECT') as can_read_payments,
+      has_table_privilege(current_user, 'sport_center.sport_payments', 'INSERT') as can_insert_payments,
+      has_table_privilege(current_user, 'sport_center.sport_payments', 'UPDATE') as can_update_payments,
+      has_table_privilege(current_user, 'sport_center.sport_payments', 'DELETE') as can_delete_payments,
+      has_table_privilege(current_user, 'sport_center.qris_email_transactions', 'SELECT') as can_read_detection,
+      has_table_privilege(current_user, 'sport_center.qris_email_transactions', 'INSERT') as can_insert_detection,
+      has_column_privilege(current_user, 'sport_center.qris_email_transactions', 'match_status', 'UPDATE') as can_update_detection_status,
+      has_column_privilege(current_user, 'sport_center.qris_email_transactions', 'candidate_payment_ids', 'UPDATE') as can_update_detection_candidates
+  `);
+  const access = scope.rows[0] ?? {};
+  const safeRole =
+    access.dedicated_role_inherited === true &&
+    access.can_read_payments === true &&
+    access.can_insert_payments === false &&
+    access.can_update_payments === false &&
+    access.can_delete_payments === false &&
+    access.can_read_detection === true &&
+    access.can_insert_detection === true &&
+    access.can_update_detection_status === true &&
+    access.can_update_detection_candidates === true;
+  if (!safeRole) throw new Error("QRIS_PROD_DB_ROLE_NOT_LEAST_PRIVILEGED");
 
   const server = http.createServer(async (req, res) => {
     try {
