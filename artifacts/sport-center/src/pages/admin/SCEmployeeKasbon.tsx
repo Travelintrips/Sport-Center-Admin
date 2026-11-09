@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2, LockKeyhole } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2, LockKeyhole, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,24 +36,31 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  type SalaryCheck={matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
+ const [selectedPeriod,setSelectedPeriod]=useState(()=>new Date().toLocaleDateString("en-CA").slice(0,7));
+ const [showAllMonths,setShowAllMonths]=useState(false);
+ const monthLabel=new Date(selectedPeriod+"-01T12:00:00").toLocaleDateString("id-ID",{month:"long",year:"numeric"});
+ const monthRecords=(records:Kasbon[])=>records.filter(r=>r.kasbonDate.slice(0,7)===selectedPeriod);
+
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
- const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,records.map(r=>r.id+":"+r.amount).join("|")];
+ const monthlyRecords=monthRecords(records);
+ const visibleRecords=showAllMonths?records:monthlyRecords;
+ const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,selectedPeriod,monthlyRecords.map(r=>r.id+":"+r.amount).join("|")];
  const {data:initialSalaryCheck,isFetching:isSalaryChecking,isError:isSalaryCheckError}=useQuery<SalaryCheck>({
   queryKey:syncKey,
-  queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
-  enabled:!isLoading&&!isError&&records.length>0,
+  queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
+  enabled:!showAllMonths&&!isLoading&&!isError,
   staleTime:0,
   refetchOnWindowFocus:true,
   retry:false,
  });
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
- const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
- const syncEvidence=initialSalaryCheck??salaryCheck;
- const isSalarySynced=Boolean(!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched&&syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
+ const totalKasbon = monthlyRecords.reduce((sum,record) => sum + Number(record.amount), 0);
+ const syncEvidence=showAllMonths?null:(initialSalaryCheck??salaryCheck);
+ const isSalarySynced=Boolean(!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched&&syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
  // Historical receipt alone cannot prove the current payroll G cell matches.
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
- const payrollMatches=Boolean(!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
+ const payrollMatches=Boolean(!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
  const save=useMutation({
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
@@ -116,7 +123,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   }
  });
  const checkSalary=useMutation({
-  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
   onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
   onError:(e:Error)=>{setSalaryCheck(null);toast({title:"Check Sync gagal",description:e.message,variant:"destructive"});}
  });
@@ -126,7 +133,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   onError:(e:Error)=>toast({title:"Pratinjau Sync gagal",description:e.message,variant:"destructive"})
  });
  const syncSalary=useMutation({
-  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}),
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync",period:selectedPeriod}),
   onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});toast({title:"Total Kasbon berhasil Sync ke laporan gaji",description:result.cell+" — "+currency(result.amount)});},
   onError:(e:Error)=>{setSalaryPreview(null);setSalaryCheck(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
  });
