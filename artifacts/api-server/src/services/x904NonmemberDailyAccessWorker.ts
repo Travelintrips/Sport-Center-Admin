@@ -245,8 +245,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       // Only the new self-service VIS flow requires witnessed physical handover.
       // Legacy verified-card/PIN grants retain their established behavior.
-      if (a.booking_source === "gym_public_guest" &&
-          String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
+      if (a.identity_type === "card" &&
+          ((a.booking_source === "gym_public_guest" &&
+            String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) ||
+            a.booking_source === "web")) {
         // A revoked booking must never initiate activation. Do not skip an
         // already activated entitlement, though: it must still reach the
         // regular SUSPEND_USER path and receive verified device read-back.
@@ -315,7 +317,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const expiry = activeStart
         ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
         : null;
-      const shouldBeActive = (a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status))) &&
+      // A web booking attached to a physical VIS must be confirmed to activate.
+      // Cancellation/completion causes the ordinary verified SUSPEND path.
+      const bookingEligible = a.booking_source === "web" && a.identity_type === "card"
+        ? a.booking_status === "confirmed"
+        : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
+      const shouldBeActive = bookingEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&

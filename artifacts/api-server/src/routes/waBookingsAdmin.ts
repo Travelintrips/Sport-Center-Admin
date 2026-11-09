@@ -676,8 +676,15 @@ router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, a
   try {
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
-    if (!booking || booking.source !== 'gym_public_guest') {
-      res.status(404).json({ error: 'Booking Gym mandiri tidak ditemukan.' }); return;
+    if (!booking || !['gym_public_guest', 'web'].includes(String(booking.source))) {
+      res.status(404).json({ error: 'Booking Gym dengan akses VIS tidak ditemukan.' }); return;
+    }
+    if (booking.source === 'web') {
+      const [facility] = await db.select({ name: facilitiesTable.name, category: facilitiesTable.category })
+        .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+      if (!facility || !/gym|fitness/i.test(`${facility.name ?? ''} ${facility.category ?? ''}`)) {
+        res.status(404).json({ error: 'Monitoring VIS hanya untuk fasilitas Gym.' }); return;
+      }
     }
     const detail = await db.execute(sql`SELECT r.card_code,r.state AS card_state,r.user_pin,r.device_uid,
         r.reserved_at,r.collected_at,r.returned_at,a.access_id,a.verification_state,a.access_state,a.activated_at,a.expires_at

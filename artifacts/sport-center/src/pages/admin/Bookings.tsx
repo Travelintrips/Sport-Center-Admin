@@ -1504,7 +1504,7 @@ function BookingDetailDrawer({
   });
   const { data: gymGuestAdminDetail } = useQuery({
     queryKey: ["admin-gym-guest-detail", booking.orderNumber],
-    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
     refetchOnMount: "always",
     queryFn: async () => {
@@ -1555,6 +1555,10 @@ function BookingDetailDrawer({
   const [savingNewPayment, setSavingNewPayment] = useState(false);
   const [newPaymentError, setNewPaymentError] = useState("");
   const [visPhysicalReturned, setVisPhysicalReturned] = useState(false);
+  const [visPhysicalHandedOver, setVisPhysicalHandedOver] = useState(false);
+  const [visOfficialReference, setVisOfficialReference] = useState("");
+  const [visIdentityChecked, setVisIdentityChecked] = useState(false);
+  const [visFundsChecked, setVisFundsChecked] = useState(false);
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
   const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
@@ -1582,6 +1586,34 @@ function BookingDetailDrawer({
     },
   });
 
+  const assignExistingWebVisMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/bookings/${booking.id}/x904-vis-reserve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({
+          officialBankReference: visOfficialReference.trim(),
+          identityChecked: visIdentityChecked,
+          officialFundsChecked: visFundsChecked,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (result: any) => {
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] });
+      paymentToast.toast({
+        title: "Kartu VIS disiapkan tanpa booking baru",
+        description: `${result?.cardCode ?? "Kartu"} telah direservasi. Serahkan kartu fisik dan verifikasi ACK X904 sebelum menyatakan akses aktif.`,
+      });
+    },
+    onError: (error: any) => paymentToast.toast({
+      title: "Kartu VIS belum dapat dialokasikan",
+      description: String(error?.message ?? error), variant: "destructive",
+    }),
+  });
+
   const handoverGymVisMutation = useMutation({
     mutationFn: async () => {
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/collect-vis`, {
@@ -1598,6 +1630,8 @@ function BookingDetailDrawer({
     },
     onSuccess: async (payload: any) => {
       await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] });
+      setVisPhysicalHandedOver(false);
       paymentToast.toast({
         title: `${payload?.cardCode ?? "Kartu VIS"} diserahkan`,
         description: "Serah-terima tercatat. Worker X904 sekarang boleh menerbitkan perintah ACTIVATE_USER dan menunggu ACK/read-back.",
@@ -1952,9 +1986,37 @@ function BookingDetailDrawer({
             detection={qrisEmailDetection}
             paymentStatus={qrisEmailPaymentStatus}
           />
-          {booking.source === "gym_public_guest" && (
+          {booking.source === "web" &&
+            /gym|fitness/i.test(String(booking.facilityName ?? "")) &&
+            booking.status === "confirmed" && !gymVisReservation && (
+            <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+              <div className="font-semibold">Tetapkan kartu VIS ke booking ini</div>
+              <p className="text-xs leading-relaxed">Gunakan booking yang sudah dibayar, tanpa membuat booking atau pembayaran kedua. Petugas wajib memeriksa identitas Fandy/pengunjung, mutasi resmi, dan ketersediaan kartu. Aktivasi tetap menunggu serah-terima fisik dan ACK mesin.</p>
+              <label className="block space-y-1 text-xs font-semibold">
+                Referensi transaksi bank resmi
+                <input aria-label="Referensi transaksi bank resmi VIS" value={visOfficialReference}
+                  onChange={event => setVisOfficialReference(event.target.value)}
+                  placeholder="Minimal 6 karakter, sesuai mutasi" maxLength={80}
+                  className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm font-normal text-slate-900" />
+              </label>
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" checked={visIdentityChecked} onChange={event => setVisIdentityChecked(event.target.checked)} />
+                Saya sudah mencocokkan identitas pengunjung secara fisik.
+              </label>
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" checked={visFundsChecked} onChange={event => setVisFundsChecked(event.target.checked)} />
+                Saya telah memverifikasi dana masuk di kanal bank resmi (bukan hanya bukti unggahan).
+              </label>
+              <button type="button" disabled={!visIdentityChecked || !visFundsChecked || visOfficialReference.trim().length < 6 || assignExistingWebVisMutation.isPending}
+                onClick={() => assignExistingWebVisMutation.mutate()}
+                className="rounded-lg bg-sky-800 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                {assignExistingWebVisMutation.isPending ? "Memeriksa dan mereservasi..." : "Reservasi VIS untuk booking ini"}
+              </button>
+            </div>
+          )}
+          {(booking.source === "gym_public_guest" || (booking.source === "web" && gymVisReservation)) && (
             <div className={`rounded-xl border p-4 text-sm ${gymVisReservation ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-              <div className="font-bold">Akses Gym Mandiri — Kartu / X904</div>
+              <div className="font-bold">Akses Gym — Kartu / X904</div>
               {gymVisReservation ? (
                 <>
                   <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
@@ -1962,16 +2024,23 @@ function BookingDetailDrawer({
                   <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
                   <div className="mt-2 text-xs font-semibold">Kartu belum berarti pintu aktif; tunggu serah-terima, worker, ACK dan read-back X904.</div>
                   {gymVisReservation.state === "reserved" && (
-                    <button
-                      type="button"
-                      onClick={() => handoverGymVisMutation.mutate()}
-                      disabled={handoverGymVisMutation.isPending}
-                      className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                    >
-                      {handoverGymVisMutation.isPending
-                        ? "Mencatat serah-terima..."
-                        : `${gymVisReservation.cardCode} Sudah Diserahkan → Aktifkan Akses`}
-                    </button>
+                    <div className="mt-3 space-y-2">
+                      <label className="flex items-start gap-2 text-xs">
+                        <input type="checkbox" checked={visPhysicalHandedOver}
+                          onChange={event => setVisPhysicalHandedOver(event.target.checked)} />
+                        Saya menyaksikan kartu fisik benar-benar diserahkan kepada pengunjung.
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handoverGymVisMutation.mutate()}
+                        disabled={!visPhysicalHandedOver || handoverGymVisMutation.isPending}
+                        className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        {handoverGymVisMutation.isPending
+                          ? "Mencatat serah-terima..."
+                          : `Konfirmasi serah-terima ${gymVisReservation.cardCode}`}
+                      </button>
+                    </div>
                   )}
                   {gymVisReservation.state === "collected" && (
                     <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">

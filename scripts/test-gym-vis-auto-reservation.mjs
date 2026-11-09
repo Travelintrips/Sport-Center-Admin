@@ -26,7 +26,9 @@ test("hard uniqueness constraints prevent double allocations and reused bank ref
 test("only official verified funds plus confirmed unique payment can reserve a physical card",()=>{
  assert.match(service,/officialFundsChecked !== true/);
  assert.match(service,/pg_advisory_xact_lock\(90400661\)/);
- assert.match(service,/booking\.source !== "gym_public_guest" \|\| booking\.status !== "confirmed"/);
+ assert.match(service,/const existingWebGuest = input\.allowWebBooking === true/);
+ assert.match(service,/booking\.status !== "confirmed"/);
+ assert.match(service,/booking_day_closed/);
  assert.match(service,/Kartu VIS001–VIS006 menunggu pilihan/);
  assert.match(service,/enrolled\.rows\.length/);
  assert.match(service,/payment\.confirmed_at/);
@@ -144,13 +146,14 @@ test("paid VIS creates a held nonmember grant atomically; physical handover is t
 test("cancelled active visitor access still suspends, but cancelled pending access never activates",()=>{
  const worker=grantWorker;
  assert.match(worker,/a\.activated_at == null\) return/);
+ assert.match(worker,/const bookingEligible = a\.booking_source === "web" && a\.identity_type === "card"/);
  assert.match(worker,/a\.booking_source !== "gym_public_guest" \|\| \["confirmed","completed"\]\.includes\(String\(a\.booking_status\)\)/);
  assert.match(worker,/a\.payment_status === "confirmed"/);
  assert.match(worker,/const targetGroup = shouldBeActive \? 1 : 2/);
  assert.match(worker,/const commandType = shouldBeActive \? "ACTIVATE_USER" : "SUSPEND_USER"/);
  // The cancellation guard must not precede a normal paid grant's end-of-life
  // suspend merely because the booking state has been revoked.
- const start=worker.indexOf("if (a.booking_source === \"gym_public_guest\"");
+ const start=worker.indexOf("if (a.identity_type === \"card\"");
  const end=worker.indexOf("const pin = String(a.user_pin)",start);
  const guard=worker.slice(start,end);
  assert.match(guard,/a\.activated_at == null/);
