@@ -195,6 +195,11 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
   const total=monthlyKasbonTotal(records,period);
   if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
   const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview",period);
+  if("employeeMissing" in outcome && outcome.employeeMissing){
+   // No matching payroll employee row: informative preview, no salary write or sync receipt.
+   res.setHeader("Cache-Control","no-store");
+   res.json({...outcome,allSynced:false,syncedRecordIds:[]});return;
+  }
   if(action==="sync"){
    // The Google API already read back the exact G value. Ensure DB hasn't changed
    // during the external request before recording a durable receipt.
