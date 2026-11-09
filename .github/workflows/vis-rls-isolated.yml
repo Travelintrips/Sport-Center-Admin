@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'artifacts/api-server/migrations/20261107_gym_vis_app_role_rls.sql'
+      - 'artifacts/api-server/migrations/20261109_paid_web_gym_vis_rls.sql'
       - 'scripts/test-gym-vis-rls-role-pg.mjs'
       - '.github/workflows/vis-rls-isolated.yml'
   workflow_dispatch:
