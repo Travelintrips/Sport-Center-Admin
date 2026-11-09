@@ -663,7 +663,7 @@ export default function WaBookingForm() {
                 <div className="flex items-center justify-between gap-3 text-sm"><span>Akses X904</span><span className="font-semibold text-slate-600">Belum Aktif</span></div>
                 <p className="border-t border-slate-100 pt-3 text-xs text-slate-600">
                   Booking sudah dibuat. Bukti baru dinyatakan diterima jika upload berhasil tercatat di server.
-                  Pembayaran tetap harus diverifikasi admin dan identitas diperiksa petugas sebelum aktivasi X904 melalui ACK/read-back. Gunakan Cek Status Booking untuk status terbaru.
+                  Pembayaran tetap harus diverifikasi admin dan identitas diperiksa petugas; akses baru siap jika aktivasi mesin serta read-back berhasil. Gunakan Cek Status Booking untuk status terbaru.
                 </p>
               </div>
             )}
