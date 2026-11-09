@@ -159,8 +159,10 @@ export default function AdminExpenses() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  // UI-only preview. No API endpoint or persistence is wired for incoming funds.
+  // Saved incoming funds are operational and unverified, never journal postings.
   const [incomeOpen, setIncomeOpen] = useState(false);
+  const [incomeSaving, setIncomeSaving] = useState(false);
+  const [incomeEntryKey, setIncomeEntryKey] = useState(() => crypto.randomUUID());
   const [incomePreview, setIncomePreview] = useState(false);
   const [incomeForm, setIncomeForm] = useState({
     transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
@@ -168,6 +170,7 @@ export default function AdminExpenses() {
     method: "Transfer Bank",
     bank: "",
     receivingAccount: "",
+    bankReference: "",
     amount: "",
   });
   const [formOpen, setFormOpen] = useState(false);
@@ -286,6 +289,70 @@ export default function AdminExpenses() {
     queryFn: () =>
       fetch(`${API}/admin/expenses?${params}`, { headers: authHeaders() }).then((r) => r.json()),
   });
+
+  const { data: incomeData, refetch: refetchIncome, isError: incomeLoadError } = useQuery<{
+    entries: Array<{ id: number; transactionDate: string; sourceName: string;
+      senderBank: string; receivingAccount: string; amount: string;
+      sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
+    summary: { manualThisMonth: number; awaitingSync: number };
+  }>({
+    queryKey: ["sc-income-entries"],
+    queryFn: async () => {
+      const response = await fetch(`${API}/admin/income`, { headers: authHeaders() });
+      if (!response.ok) throw new Error("Daftar Uang Masuk belum tersedia");
+      return response.json();
+    },
+  });
+
+  async function saveIncome() {
+    if (!incomePreview || incomeSaving) return;
+    setIncomeSaving(true);
+    try {
+      const response = await fetch(`${API}/admin/income`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entryKey: incomeEntryKey,
+          transactionDate: incomeForm.transactionDate,
+          sourceName: incomeForm.sourceName.trim(),
+          senderBank: incomeForm.bank.trim(),
+          method: incomeForm.method,
+          receivingAccount: incomeForm.receivingAccount.trim(),
+          bankReference: incomeForm.bankReference.trim(),
+          amount: Number(incomeForm.amount),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || result.error || "Gagal menyimpan");
+      toast({
+        title: "Uang Masuk berhasil dicatat",
+        description: result.sheetStatus === "synced"
+          ? "Tercatat juga di tab SC Uang Masuk, masih belum terverifikasi bank."
+          : "Data tersimpan di SC. Sinkronisasi Sheets belum selesai.",
+      });
+      await refetchIncome();
+      await qc.invalidateQueries({ queryKey: ["expenses"] });
+      setIncomeOpen(false);
+      setIncomePreview(false);
+      setIncomeEntryKey(crypto.randomUUID());
+    } catch (error: any) {
+      toast({ title: "Gagal menyimpan Uang Masuk",
+        description: error.message ?? "Periksa daftar sebelum mengulangi.",
+        variant: "destructive" });
+    } finally { setIncomeSaving(false); }
+  }
+
+  async function retryIncomeSync(id: number) {
+    try {
+      const response = await fetch(`${API}/admin/income/${id}/retry-sheet`, {
+        method: "POST", headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("Sinkronisasi belum tersedia");
+      const result = await response.json();
+      toast({ title: result.sheetStatus === "synced" ? "Sheets tersinkron" : "Sinkronisasi masih tertunda" });
+      await refetchIncome();
+    } catch { toast({ title: "Sinkronisasi gagal", variant: "destructive" }); }
+  }
 
   const { data: facilities = [] } = useQuery({
     queryKey: ["facilities"],
@@ -518,9 +585,10 @@ export default function AdminExpenses() {
             onClick={() => {
               setIncomeForm({
                 transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
-                sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", amount: "",
+                sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
               });
               setIncomePreview(false);
+              setIncomeEntryKey(crypto.randomUUID());
               setIncomeOpen(true);
             }}
           >
@@ -562,6 +630,52 @@ export default function AdminExpenses() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <div>
+              <p className="font-semibold">Pencatatan Uang Masuk SC</p>
+              <p className="text-xs text-gray-500">
+                Manual bulan ini: {incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Belum tersedia"} (belum terverifikasi).
+                Tidak dijumlahkan otomatis dengan mutasi bank untuk mencegah hitung ganda.
+              </p>
+            </div>
+            <span className="text-xs text-gray-500">
+              Menunggu sinkronisasi: {incomeData?.summary.awaitingSync ?? "—"}
+            </span>
+          </div>
+          {(incomeData?.entries ?? []).length === 0 ? (
+            <p className="text-sm text-gray-500">
+              {incomeLoadError ? "Daftar Uang Masuk belum tersedia. Data tidak boleh diasumsikan kosong."
+                : "Belum ada pencatatan Uang Masuk manual."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b text-left">
+                  <th className="py-2">Tanggal</th><th>Pengirim</th><th>Akun penerima</th>
+                  <th>Nominal</th><th>Status Sheets</th><th>Tindakan</th>
+                </tr></thead>
+                <tbody>{(incomeData?.entries ?? []).map((entry) => (
+                  <tr key={entry.id} className="border-b">
+                    <td className="py-2">{entry.transactionDate}</td>
+                    <td>{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
+                    <td>{entry.receivingAccount}</td>
+                    <td>{formatIDR(Number(entry.amount))}</td>
+                    <td>{entry.sheetSyncState === "synced" ? "Tersinkron (belum diverifikasi)" : entry.sheetSyncState}</td>
+                    <td>{entry.sheetSyncState !== "synced" && (
+                      <Button size="sm" variant="outline" onClick={() => retryIncomeSync(entry.id)}>
+                        Coba sinkron
+                      </Button>
+                    )}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card>
@@ -712,7 +826,7 @@ export default function AdminExpenses() {
         </CardContent>
       </Card>
 
-      {/* Incoming funds: UI-only form. Save is intentionally not connected yet. */}
+      {/* Incoming funds: save to SC operational register, not bank movements. */}
       <Dialog open={incomeOpen} onOpenChange={(open) => {
         setIncomeOpen(open);
         if (!open) setIncomePreview(false);
@@ -722,8 +836,8 @@ export default function AdminExpenses() {
             <DialogTitle className="font-black">Input Uang Masuk</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-gray-500">
-            Catat informasi dana yang diterima. Form ini masih pratinjau UI dan belum menyimpan data atau
-            mengubah total Uang Masuk.
+            Catat pemasukan operasional. Setelah disimpan, data tetap belum terverifikasi bank.
+            Pencocokan mutasi dan jurnal tetap melalui BizPortal.
           </p>
           <form className="space-y-4 pt-1" onSubmit={(event) => {
             event.preventDefault();
@@ -790,7 +904,15 @@ export default function AdminExpenses() {
                   setIncomePreview(false);
                 }}
               />
-              <p className="text-xs text-gray-500">Bank atau akun tujuan yang menerima uang. Hanya informasi pada pratinjau UI.</p>
+              <p className="text-xs text-gray-500">Bank atau akun tujuan uang masuk. Pencocokan mutasi dilakukan terpisah.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-reference">Nomor Referensi Bank (opsional)</Label>
+              <Input id="income-reference" maxLength={120} placeholder="Nomor referensi pada bukti transfer"
+                value={incomeForm.bankReference} onChange={(event) => {
+                  setIncomeForm({ ...incomeForm, bankReference: event.target.value });
+                  setIncomePreview(false);
+                }} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="income-amount">Nominal (Rp) <span className="text-red-500">*</span></Label>
@@ -804,10 +926,11 @@ export default function AdminExpenses() {
             </div>
             {incomePreview && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-1">
-                <p className="font-semibold text-emerald-800">Pratinjau Uang Masuk — belum tersimpan</p>
+                <p className="font-semibold text-emerald-800">Periksa Uang Masuk sebelum disimpan</p>
                 <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
                 <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
                 <p>Bank / Akun Penerima: {incomeForm.receivingAccount.trim() || "Tidak ditentukan"}</p>
+                {incomeForm.bankReference.trim() && <p>Referensi bank: {incomeForm.bankReference.trim()}</p>}
                 <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
               </div>
             )}
@@ -820,6 +943,12 @@ export default function AdminExpenses() {
                   Number(incomeForm.amount) <= 0}>
                 Pratinjau Input
               </Button>
+              {incomePreview && (
+                <Button type="button" disabled={incomeSaving} onClick={saveIncome}
+                  className="bg-emerald-700 text-white hover:bg-emerald-800">
+                  {incomeSaving ? "Menyimpan..." : "Simpan Uang Masuk"}
+                </Button>
+              )}
             </div>
           </form>
         </DialogContent>
