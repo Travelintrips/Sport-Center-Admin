@@ -33,7 +33,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [actionGrant,setActionGrant]=useState<{recordId:number;authorization:string;expiresAt:number}|null>(null);
  const hasActionGrant=(recordId:number)=>actionGrant?.recordId===recordId&&actionGrant.expiresAt>Date.now();
  const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string;period:string;tab:string}|null>(null);
- type SalaryCheck={period:string;tab:string;employeeMissing?:boolean;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}|null};
+ type SalaryCheck={period:string;tab:string;previous?:string;employeeMissing?:boolean;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}|null};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
  const [selectedPeriod,setSelectedPeriod]=useState(()=>{const d=new Date();const value=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");return value<"2026-10"?"2026-10":value;});
@@ -61,6 +61,16 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  // Historical receipt alone cannot prove the current payroll G cell matches.
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
  const payrollMatches=Boolean(!syncEvidence?.employeeMissing&&!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
+ // Historical payroll totals are an aggregate reference, never individual
+ // Kasbon transactions. The 2026-10 source predates the SC transaction ledger.
+ const historicalOctoberAmount=selectedPeriod==="2026-10"&&!showAllMonths&&monthlyRecords.length===0
+  &&!isSalaryChecking&&!isSalaryCheckError&&!syncEvidence?.employeeMissing
+  &&syncEvidence?.period==="2026-10"&&syncEvidence?.sheetRow
+  &&syncEvidence?.cell.startsWith("G")&&syncEvidence?.previous!==undefined
+  &&String(syncEvidence.previous).trim()!==""
+  ? Number(syncEvidence.previous):NaN;
+ const showHistoricalOctober=Number.isSafeInteger(historicalOctoberAmount)&&historicalOctoberAmount>0;
+
  const save=useMutation({
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
@@ -187,7 +197,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     </div>}
   </div>
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-   <CardTitle>Histori Kasbon — {showAllMonths?"Semua Bulan":monthLabel} ({visibleRecords.length})</CardTitle>
+   <CardTitle>Histori Kasbon — {showAllMonths?"Semua Bulan":monthLabel} ({visibleRecords.length} transaksi SC{showHistoricalOctober?" · 1 ringkasan historis":""})</CardTitle>
    <div className="flex flex-wrap items-center gap-2">
     <Button variant="outline" disabled={showAllMonths||isSalaryChecking||isSalaryCheckError||Boolean(syncEvidence?.employeeMissing)||checkSalary.isPending||isSalarySynced||selectedPeriod==="2026-10"||monthlyRecords.length===0||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalaryChecking||checkSalary.isPending?"Sedang memeriksa laporan gaji; Sync Total belum tersedia":isSalaryCheckError?"Pemeriksaan Sheets gagal; lakukan Check Sync ulang":isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":selectedPeriod==="2026-10"?"Oktober historis hanya boleh Check Sync":monthlyRecords.length===0?"Bulan tanpa transaksi tidak dapat menulis Rp0":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
       {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
@@ -196,6 +206,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
    <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm" aria-label="Total Kasbon">
     <span className="font-medium text-muted-foreground">Total Kasbon {showAllMonths?"":monthLabel}</span>
     <span className="border-l pl-3 text-base font-semibold tabular-nums" aria-live="polite">{isLoading ? "Memuat..." : isError ? "—" : currency(showAllMonths?records.reduce((sum,r)=>sum+Number(r.amount),0):totalKasbon)}</span>
+    {showHistoricalOctober&&<span className="border-l pl-3 text-sm font-semibold text-amber-700 tabular-nums" aria-label="Referensi Kasbon historis Google Sheets">Referensi Sheets: {currency(historicalOctoberAmount)}</span>}
    </div>
    </div>
   </CardHeader><CardContent>
@@ -208,7 +219,17 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button>
     <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button>
    </>:<Button size="sm" variant="outline" onClick={()=>{setActionGrant(null);setActionPassword("");setUnlockRecord(r);}}><LockKeyhole className="mr-1 h-3 w-3"/>Insert Password</Button>}</div></td></tr>)}
-   </tbody></table>{!visibleRecords.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk periode yang dipilih.</p>}</div>}
+    {showHistoricalOctober&&<tr className="border-b bg-amber-50/60">
+      <td className="p-3 font-semibold text-amber-900">Saldo historis Sheets</td>
+      <td className="p-3">Oktober 2026 (tanggal transaksi tidak tersedia)</td>
+      <td className="p-3 font-semibold tabular-nums">{currency(historicalOctoberAmount)}</td>
+      <td className="p-3 text-muted-foreground">Tidak tersedia</td>
+      <td className="p-3">—</td>
+      <td className="p-3 text-xs">Referensi total dari {syncEvidence?.tab}, sel {syncEvidence?.cell}. Bukan transaksi Kasbon SC.</td>
+      <td className="p-3 text-xs font-medium text-amber-700">Historis · belum direkonsiliasi</td>
+      <td className="p-3 text-xs text-muted-foreground">Hanya baca</td>
+    </tr>}
+   </tbody></table>{!visibleRecords.length&&!showHistoricalOctober&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk periode yang dipilih.</p>}{showHistoricalOctober&&<p className="mt-3 text-xs text-muted-foreground">Ringkasan historis diambil dari Google Sheets, bukan dari transaksi individual database. ID, tanggal, dan bukti per transaksi tidak tersedia. Data tidak dapat diedit atau dihapus dari sini, dan tidak dijumlahkan ke total Kasbon SC.</p>}</div>}
   </CardContent></Card>
   <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
    <DialogContent className="max-w-md">
