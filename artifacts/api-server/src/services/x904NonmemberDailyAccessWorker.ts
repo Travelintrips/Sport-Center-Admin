@@ -183,7 +183,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           // A paid, currently valid grant takes priority over legacy cleanup.
           const grant = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
             WHERE device_serial=${DEVICE} AND user_pin=${pin}
-              AND access_state IN ('pending','active') LIMIT 1`);
+              AND (access_state IN ('pending','active')
+                OR (access_state='review_required' AND payment_id IS NOT NULL)) LIMIT 1`);
+          // A paid grant awaiting ACK recovery remains owned by the paid-access
+          // worker. Legacy cleanup must not enqueue a competing unscoped suspend.
           if (grant.rows.length) return;
           const existing = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
             WHERE device_serial=${DEVICE} AND user_pin=${pin}
@@ -435,6 +438,14 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           }
           if (!last.completed_at || observedAt.getTime() <= new Date(String(last.completed_at)).getTime()) return;
           if (currentGroup === targetGroup && last.command_type === commandType) {
+            // Both activation AND suspension need the intended UID and group.
+            // A Group 2 snapshot alone cannot validate an ACK for another user.
+            if (Number((last.result as any)?.afterGroup) !== targetGroup ||
+                Number((last.result as any)?.deviceUid) !== Number(a.device_uid)) {
+              await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
+              return;
+            }
             if (shouldBeActive) {
               const ackGroup = Number((last.result as any)?.afterGroup);
               const ackUid = Number((last.result as any)?.deviceUid);

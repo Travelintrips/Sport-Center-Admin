@@ -23,7 +23,8 @@ const liveAccessIndexMigration = readFileSync("migrations/20261107_x904_review_r
 
 beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
-  await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text);
+  await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text,role text NOT NULL DEFAULT 'customer');
+    CREATE TABLE sport_center.audit_logs(id serial primary key,user_id int,user_name text,user_role text,action text NOT NULL,entity text,entity_id int,"before" jsonb,"after" jsonb,ip_address text,user_agent text,created_at timestamptz DEFAULT now());
     CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
     CREATE TABLE sport_center.sport_bookings(id int primary key, booking_date text NOT NULL DEFAULT '2026-11-06', start_time text NOT NULL DEFAULT '06:00', source text, notes text, status text NOT NULL DEFAULT 'confirmed');
     CREATE TABLE sport_center.sport_payments(id int primary key,booking_id int references sport_center.sport_bookings(id),status text,confirmed_at timestamptz,paid_at timestamptz);
@@ -71,7 +72,7 @@ beforeAll(async () => {
       ('TDBD234200545','17',17,'VIS 004',0),
       ('TDBD234200545','90',339,'VIS 002',0),
       ('TDBD234200545','15',15,'VIS 006',0);`);
-  await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
+  await run(`INSERT INTO sport_center.users(id,name,registration_source,account_status,email,password_hash,role) VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null,'staff'),(302,'CI ACTIVE STAFF','isolated-test','active',null,null,'staff');
     INSERT INTO sport_center.sport_bookings(id) VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','card','VIS001','78',338,'VIS 001',9001);
@@ -964,14 +965,14 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
        booking_id,verification_state,access_state)
       VALUES('TDBD234200545','pin','PIN VERIFIED',$1,$2,$3,$4,
        'review_required','review_required')`,[pin,uid,name,id]);
-    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at) VALUES($1,$2,'confirmed',now())",[pay,id]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed',now(),30000,'ci://validated-proof')",[pay,id]);
     const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id])).rows[0].access_id);
     const before=(await run("SELECT verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(before).toMatchObject({verification_state:"review_required",access_state:"review_required"});
 
     const anonymous=await request.post(endpoint).send({identityChecked:true,officialFundsChecked:true,officialBankReference:"CI-BANK-9706"});
-    expect(anonymous.status).toBe(403);
-    const token=createToken(301,"staff");
+    expect(anonymous.status).toBe(401);
+    const token=createToken(302,"staff");
     const invalid=await request.post(endpoint).set("Authorization",`Bearer ${token}`)
       .send({identityChecked:true,officialFundsChecked:false,officialBankReference:"CI-BANK-9706"});
     expect(invalid.status).toBe(400);
@@ -1040,7 +1041,7 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
       user_pin:"650",command_type:"SUSPEND_USER",state:"queued",
       payload:{expectedUid:650,expectedName:"NEW ROLE ZERO",expectedRole:0,
         firstObservedAt:"2026-11-09T00:01:00.000Z",
-        suspendDeadlineAt:"2026-11-09T00:31:00.000Z"}
+        suspendDeadlineAt:"2026-11-09T00:04:00.000Z"}
     });
     // No automatic commands for 651 role4, 652 role14 or existing 653.
     expect(cmds.some((c:any) => ["651","652","653"].includes(c.user_pin))).toBe(false);
@@ -1101,7 +1102,7 @@ test("unrestricted role-0 rollout handles two fresh PINs and protects special, m
     expect(rows.find((r:any)=>r.user_pin==="660").payload).toMatchObject({
       expectedUid:660,expectedName:"NEW MULTI SPACE",expectedRole:0,
       firstObservedAt:"2026-11-09T00:05:00.000Z",
-      suspendDeadlineAt:"2026-11-09T00:35:00.000Z"
+      suspendDeadlineAt:"2026-11-09T00:08:00.000Z"
     });
   } finally {
     delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
@@ -1136,7 +1137,7 @@ test("collector outage does not freeze later enrollment; no duplicate on retry",
     expect(matches).toHaveLength(1);
     expect(matches[0]).toMatchObject({user_pin:"670",command_type:"SUSPEND_USER",state:"queued",
       payload:{expectedUid:670,expectedRole:0,firstObservedAt:"2026-11-09T00:21:00.000Z",
-        suspendDeadlineAt:"2026-11-09T00:51:00.000Z"}});
+        suspendDeadlineAt:"2026-11-09T00:24:00.000Z"}});
     const old=(await run(`SELECT user_pin FROM sport_center.x904_user_commands
       WHERE user_pin IN ('662','663','664','665','668') AND
         payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;

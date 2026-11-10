@@ -1,0 +1,371 @@
+{
+  "recorded_at_utc": "2026-11-10T08:32:51.393525+00:00",
+  "base_commit": "c1531a28fafac84e013a73610a8d5fb5194104b7",
+  "initial_fix_commit": "32b550e",
+  "scope": "application integration only; no production mutations or X904 commands",
+  "runs": [
+    {
+      "file": "sc-pin700-pipeline-red.json",
+      "sha256": "7ffaeb164341726fb7522a3e1ca09d229e60ab417d5d4de24c5c8fcbfd1926f6",
+      "success": false,
+      "passed": 1,
+      "failed": 5,
+      "tests": [
+        {
+          "name": "application role is not owner/superuser and registry UPDATE remains denied",
+          "status": "passed"
+        },
+        {
+          "name": "audit failure must roll back PIN authorization, not return success",
+          "status": "failed"
+        },
+        {
+          "name": "disabled operator token cannot authorize PIN",
+          "status": "failed"
+        },
+        {
+          "name": "demoted operator token cannot authorize PIN",
+          "status": "failed"
+        },
+        {
+          "name": "retry after committed approval returns the same state and one audit",
+          "status": "failed"
+        },
+        {
+          "name": "booking -> pending proof -> payment HTTP confirmation -> held grant -> staff -> worker activation ACK -> scheduled suspend ACK",
+          "status": "failed"
+        }
+      ]
+    },
+    {
+      "file": "sc-pin700-pipeline-green.json",
+      "sha256": "ae744993585dbe5bb8aa1c0a3f38945b42acdd799b7da4467e7ddf289d4759a5",
+      "success": true,
+      "passed": 6,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "application role is not owner/superuser and registry UPDATE remains denied",
+          "status": "passed"
+        },
+        {
+          "name": "audit failure must roll back PIN authorization, not return success",
+          "status": "passed"
+        },
+        {
+          "name": "disabled operator token cannot authorize PIN",
+          "status": "passed"
+        },
+        {
+          "name": "demoted operator token cannot authorize PIN",
+          "status": "passed"
+        },
+        {
+          "name": "retry after committed approval returns the same state and one audit",
+          "status": "passed"
+        },
+        {
+          "name": "booking -> pending proof -> payment HTTP confirmation -> held grant -> staff -> worker activation ACK -> scheduled suspend ACK",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "sc-pin700-pipeline-extended.json",
+      "sha256": "07ff9721ed970d1363bd355ff301bcfe65faa90dc3fd8e67e9bbb2835eeac5c1",
+      "success": true,
+      "passed": 14,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "application role is not owner/superuser and registry UPDATE remains denied",
+          "status": "passed"
+        },
+        {
+          "name": "audit failure must roll back PIN authorization, not return success",
+          "status": "passed"
+        },
+        {
+          "name": "disabled operator token cannot authorize PIN",
+          "status": "passed"
+        },
+        {
+          "name": "demoted operator token cannot authorize PIN",
+          "status": "passed"
+        },
+        {
+          "name": "retry after committed approval returns the same state and one audit",
+          "status": "passed"
+        },
+        {
+          "name": "complete pipeline from 2026-11-10T01:00:00Z respects verified activation, expiry and wrong-UID rejection",
+          "status": "passed"
+        },
+        {
+          "name": "complete pipeline from 2026-11-10T15:40:00Z respects verified activation, expiry and wrong-UID rejection",
+          "status": "passed"
+        },
+        {
+          "name": "two concurrent staff approvals produce one authorization and one audit",
+          "status": "passed"
+        },
+        {
+          "name": "payment evidence missing_proof cannot release a PIN",
+          "status": "passed"
+        },
+        {
+          "name": "payment evidence insufficient_amount cannot release a PIN",
+          "status": "passed"
+        },
+        {
+          "name": "payment evidence rejected_payment cannot release a PIN",
+          "status": "passed"
+        },
+        {
+          "name": "payment evidence missing_confirmation_time cannot release a PIN",
+          "status": "passed"
+        },
+        {
+          "name": "pending receipt cannot be approved and field staff cannot confirm payment",
+          "status": "passed"
+        },
+        {
+          "name": "stale snapshot holds activation until a fresh snapshot arrives",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "sc-pin700-worker-regression.json",
+      "sha256": "ffbf7fc390a94b12bfbdedf7a87ccb54d4c1a077a331f8b54ca82c19955d0a78",
+      "success": false,
+      "passed": 23,
+      "failed": 3,
+      "tests": [
+        {
+          "name": "pending payment holds; confirmed VIS payment activates, retries DEVICE_BUSY once, then suspends after 12h",
+          "status": "passed"
+        },
+        {
+          "name": "refund of an active paid nonmember queues suspend; protected PINs do not auto-suspend",
+          "status": "passed"
+        },
+        {
+          "name": "PIN 237 remains protected from activation and suspension by nonmember worker",
+          "status": "passed"
+        },
+        {
+          "name": "wrong UID in ACK never marks access active",
+          "status": "passed"
+        },
+        {
+          "name": "cancelled payment before activation never queues activation",
+          "status": "passed"
+        },
+        {
+          "name": "completed SUSPEND ACK cannot be reused as ACTIVATE ACK",
+          "status": "passed"
+        },
+        {
+          "name": "cancelled payment cannot suspend pre-existing Group 1 without verified activation",
+          "status": "passed"
+        },
+        {
+          "name": "VIS006 existing Group 1 must not receive automatic suspend before paid activation",
+          "status": "passed"
+        },
+        {
+          "name": "VIS006 rollout guard rejects invalid PIN and excludes all other PINs",
+          "status": "passed"
+        },
+        {
+          "name": "VIS006 unpaid review_required is held without an unauthorized X904 suspend",
+          "status": "passed"
+        },
+        {
+          "name": "paid VIS006 review_required becomes expired after verified suspend and newer Group2 snapshot",
+          "status": "passed"
+        },
+        {
+          "name": "registry verified nonmember enqueues once, revoked and mid-cycle revoked never enqueue",
+          "status": "passed"
+        },
+        {
+          "name": "public booking with verified ordinary X904 PIN: pending payment holds, confirmed grant activates once, ACK starts 12h, expiry suspends",
+          "status": "passed"
+        },
+        {
+          "name": "real worker: new VIS003 cannot activate while reserved; activates only after handover, then cancels to suspend",
+          "status": "passed"
+        },
+        {
+          "name": "completed gym guest booking keeps an already activated entitlement until expiry",
+          "status": "passed"
+        },
+        {
+          "name": "real VIS reservation service: admin-confirmed payment creates one held grant and only card handover releases it",
+          "status": "passed"
+        },
+        {
+          "name": "VIS concurrency and failure guards: no double allocation, cross-payment rejected, stale snapshot fails closed",
+          "status": "passed"
+        },
+        {
+          "name": "public PIN review gate: checkout and confirmed payment alone never activate; staff approval permits verified ACK",
+          "status": "passed"
+        },
+        {
+          "name": "public verified PIN at closing: 22:40 activation, automatic 23:00 suspend, never reopens tomorrow",
+          "status": "passed"
+        },
+        {
+          "name": "registered PIN checkout row lock works under production-like RLS, registry writes remain denied",
+          "status": "passed"
+        },
+        {
+          "name": "production-style RLS accepts only held public registered PIN grant, never active or unauthorized",
+          "status": "passed"
+        },
+        {
+          "name": "single-checkout DB transaction commits held PIN and receipt together, or rolls both back",
+          "status": "passed"
+        },
+        {
+          "name": "HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant",
+          "status": "passed"
+        },
+        {
+          "name": "new on-device role-0 PIN alone queues one initial suspend; role 4/14 and historical pins untouched",
+          "status": "failed"
+        },
+        {
+          "name": "unrestricted role-0 rollout handles two fresh PINs and protects special, mapped, registered and reused PINs",
+          "status": "failed"
+        },
+        {
+          "name": "collector outage does not freeze later enrollment; no duplicate on retry",
+          "status": "failed"
+        }
+      ]
+    },
+    {
+      "file": "sc-pin700-worker-regression-final.json",
+      "sha256": "b826b9902963617a627676935e170490a68b8b94009a76313d7a616f079b530a",
+      "success": true,
+      "passed": 26,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "pending payment holds; confirmed VIS payment activates, retries DEVICE_BUSY once, then suspends after 12h",
+          "status": "passed"
+        },
+        {
+          "name": "refund of an active paid nonmember queues suspend; protected PINs do not auto-suspend",
+          "status": "passed"
+        },
+        {
+          "name": "PIN 237 remains protected from activation and suspension by nonmember worker",
+          "status": "passed"
+        },
+        {
+          "name": "wrong UID in ACK never marks access active",
+          "status": "passed"
+        },
+        {
+          "name": "cancelled payment before activation never queues activation",
+          "status": "passed"
+        },
+        {
+          "name": "completed SUSPEND ACK cannot be reused as ACTIVATE ACK",
+          "status": "passed"
+        },
+        {
+          "name": "cancelled payment cannot suspend pre-existing Group 1 without verified activation",
+          "status": "passed"
+        },
+        {
+          "name": "VIS006 existing Group 1 must not receive automatic suspend before paid activation",
+          "status": "passed"
+        },
+        {
+          "name": "VIS006 rollout guard rejects invalid PIN and excludes all other PINs",
+          "status": "passed"
+        },
+        {
+          "name": "VIS006 unpaid review_required is held without an unauthorized X904 suspend",
+          "status": "passed"
+        },
+        {
+          "name": "paid VIS006 review_required becomes expired after verified suspend and newer Group2 snapshot",
+          "status": "passed"
+        },
+        {
+          "name": "registry verified nonmember enqueues once, revoked and mid-cycle revoked never enqueue",
+          "status": "passed"
+        },
+        {
+          "name": "public booking with verified ordinary X904 PIN: pending payment holds, confirmed grant activates once, ACK starts 12h, expiry suspends",
+          "status": "passed"
+        },
+        {
+          "name": "real worker: new VIS003 cannot activate while reserved; activates only after handover, then cancels to suspend",
+          "status": "passed"
+        },
+        {
+          "name": "completed gym guest booking keeps an already activated entitlement until expiry",
+          "status": "passed"
+        },
+        {
+          "name": "real VIS reservation service: admin-confirmed payment creates one held grant and only card handover releases it",
+          "status": "passed"
+        },
+        {
+          "name": "VIS concurrency and failure guards: no double allocation, cross-payment rejected, stale snapshot fails closed",
+          "status": "passed"
+        },
+        {
+          "name": "public PIN review gate: checkout and confirmed payment alone never activate; staff approval permits verified ACK",
+          "status": "passed"
+        },
+        {
+          "name": "public verified PIN at closing: 22:40 activation, automatic 23:00 suspend, never reopens tomorrow",
+          "status": "passed"
+        },
+        {
+          "name": "registered PIN checkout row lock works under production-like RLS, registry writes remain denied",
+          "status": "passed"
+        },
+        {
+          "name": "production-style RLS accepts only held public registered PIN grant, never active or unauthorized",
+          "status": "passed"
+        },
+        {
+          "name": "single-checkout DB transaction commits held PIN and receipt together, or rolls both back",
+          "status": "passed"
+        },
+        {
+          "name": "HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant",
+          "status": "passed"
+        },
+        {
+          "name": "new on-device role-0 PIN alone queues one initial suspend; role 4/14 and historical pins untouched",
+          "status": "passed"
+        },
+        {
+          "name": "unrestricted role-0 rollout handles two fresh PINs and protects special, mapped, registered and reused PINs",
+          "status": "passed"
+        },
+        {
+          "name": "collector outage does not freeze later enrollment; no duplicate on retry",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "OCR and blob storage mocked",
+    "Notification and accounting startup/projection mocked",
+    "Device ACKs and authenticated snapshots simulated in disposable database",
+    "No official bank receipt or physical-door proof obtained"
+  ]
+}

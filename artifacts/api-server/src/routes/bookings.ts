@@ -2,7 +2,7 @@ import { Router } from "express";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
 import { autoReserveVisAfterFundsVerified, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { normalizeX904VisitorName } from "../services/x904VisitorName";
-import { db, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
+import { db, auditLogsTable, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -1517,7 +1517,7 @@ function getRequestRole(req: { headers: { authorization?: string } }): string | 
 // Staff-only handoff for a NO-LOGIN ordinary PIN booking. Never accepts a
 // client-selected PIN, UID, or payment assertion. This is a deliberate
 // in-person identity attestation, not automatic approval from a name match.
-router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
+router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async (req, res) => {
   try {
     const rawToken = String(req.headers.authorization ?? "");
     const principal = rawToken.startsWith("Bearer ") ? verifyToken(rawToken.slice(7)) : null;
@@ -1546,24 +1546,49 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
       res.status(409).json({ error: "Aktivasi PIN Gym hanya pada jam operasional 06.00–23.00 WIB." }); return;
     }
 
+    let approvedAccessState = "pending";
     const outcome = await db.transaction(async tx => {
+      // Serialize retries and keep authorization and its mandatory audit atomic.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('x904_guest_pin_approval'),${bookingId})`);
+      const actor = await tx.execute(sql`SELECT role,account_status FROM sport_center.users
+        WHERE id=${principal.userId} FOR SHARE`);
+      if (actor.rows.length !== 1 || actor.rows[0].account_status !== 'active' ||
+          actor.rows[0].role !== principal.role) return "actor_changed";
+      // Payment updates acquire their row lock before their grant trigger.
+      // Use the same order here, rather than approving a concurrently revoked payment.
+      await tx.execute(sql`SELECT p.id FROM sport_center.sport_payments p
+        JOIN sport_center.x904_nonmember_daily_access a ON a.payment_id=p.id AND a.booking_id=p.booking_id
+        WHERE a.booking_id=${bookingId} FOR UPDATE OF p`);
       const found = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.verification_state,a.access_state,
-          b.source,b.status::text AS booking_status,b.booking_date::text AS booking_date,p.status::text AS payment_status
+          b.source,b.status::text AS booking_status,b.booking_date::text AS booking_date,p.status::text AS payment_status,
+          p.proof_url,p.amount,p.confirmed_at AS payment_confirmed_at,
+          COALESCE(b.grand_total,b.total_price) AS payable_total
         FROM sport_center.x904_nonmember_daily_access a
         JOIN sport_center.sport_bookings b ON b.id=a.booking_id
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
         WHERE a.booking_id=${bookingId} AND a.identity_type='pin'
           AND a.device_serial='TDBD234200545'
-        FOR UPDATE OF a`);
+        FOR UPDATE OF a,b`);
       if (found.rows.length !== 1) return "not_found";
       const grant = found.rows[0] as any;
       if (grant.source !== "gym_public_guest" ||
           String(grant.booking_date).slice(0, 10) !== currentDate ||
           grant.payment_status !== "confirmed" || !grant.payment_id ||
           !["confirmed", "paid"].includes(String(grant.booking_status)) ||
-          grant.verification_state !== "review_required" ||
-          grant.access_state !== "review_required") return "not_ready";
+          !grant.payment_confirmed_at || !String(grant.proof_url ?? "").trim() ||
+          !Number.isFinite(Number(grant.payable_total)) || Number(grant.payable_total) <= 0 ||
+          !Number.isFinite(Number(grant.amount)) || Number(grant.amount) < Number(grant.payable_total)) return "not_ready";
+      if (grant.verification_state === "verified" && ["pending","active"].includes(String(grant.access_state))) {
+        const previous = await tx.execute(sql`SELECT 1 FROM sport_center.audit_logs
+          WHERE action='x904_guest_pin_staff_attestation' AND entity='booking' AND entity_id=${bookingId}
+            AND "after"->>'accessId'=${String(grant.access_id)}
+            AND "after"->>'paymentId'=${String(grant.payment_id)} LIMIT 1`);
+        if (previous.rows.length !== 1) return "approval_audit_missing";
+        approvedAccessState = String(grant.access_state);
+        return "already_approved";
+      }
+      if (grant.verification_state !== "review_required" || grant.access_state !== "review_required") return "not_ready";
       const pin = String(grant.user_pin);
       if (["12","79","237"].includes(pin)) return "exempt";
       const inventory = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_lan_users
@@ -1594,27 +1619,31 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
           )
         LIMIT 1`);
       if (activeElsewhere.rows.length) return "pin_busy";
-      await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+      const updated = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
         SET verification_state='verified',access_state='pending'
         WHERE access_id=${Number(grant.access_id)}
-          AND verification_state='review_required' AND access_state='review_required'`);
+          AND verification_state='review_required' AND access_state='review_required'
+        RETURNING access_id`);
+      if (updated.rows.length !== 1) throw new Error("X904_PIN_APPROVAL_NOT_PERSISTED");
+      await tx.insert(auditLogsTable).values({
+        userId: principal.userId, userRole: principal.role,
+        action: "x904_guest_pin_staff_attestation", entity: "booking", entityId: bookingId,
+        before: {verificationState: grant.verification_state, accessState: grant.access_state},
+        after: {identityChecked:true, officialFundsChecked:true, officialBankReference,
+          verifiedBy:principal.userId, accessId:Number(grant.access_id), paymentId:Number(grant.payment_id),
+          userPin:String(grant.user_pin), deviceUid:Number(grant.device_uid), accessState:"pending"},
+      });
       return "approved";
     });
-    if (outcome !== "approved") {
-      res.status(outcome === "not_found" ? 404 : 409).json({
+    if (outcome !== "approved" && outcome !== "already_approved") {
+      res.status(outcome === "actor_changed" ? 401 : outcome === "not_found" ? 404 : 409).json({
         error: outcome === "not_found" ? "Booking PIN tanpa login tidak ditemukan." :
           "Verifikasi tidak dapat disahkan: identitas, pembayaran, tanggal, atau status akses tidak memenuhi syarat.",
         code: outcome,
       });
       return;
     }
-    await logAudit({
-      action: "x904_guest_pin_staff_attestation",
-      entity: "booking",
-      entityId: bookingId,
-      after: { identityChecked: true, officialFundsChecked: true, officialBankReference, verifiedBy: principal.userId, accessState: "pending" },
-    });
-    res.json({ success: true, accessState: "pending", message: "PIN disahkan petugas. Aktivasi menunggu worker dan ACK X904." });
+    res.json({ success: true, accessState: approvedAccessState, idempotent: outcome === "already_approved", message: "PIN disahkan petugas. Aktivasi menunggu worker dan ACK X904." });
   } catch (error) {
     console.error("[x904-guest-pin-approve]", error);
     res.status(500).json({ error: "Gagal mengesahkan akses PIN nonmember." });
