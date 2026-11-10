@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 12
     env:
       NODE_ENV: test
+      NODE_OPTIONS: --experimental-vm-modules
       APP_ENV: development
       ADMIN_BOOKING_DEV_READONLY_SMOKE: enabled
       SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
