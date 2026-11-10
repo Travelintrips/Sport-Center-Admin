@@ -55,7 +55,8 @@ test("missed worker tick retains first observation and overdue read-back detecti
   assert.match(worker, /suspendDeadlineAt/);
   assert.match(worker, /readBackConfirmed/);
   assert.match(worker, /afterGroup/);
-  assert.match(worker, /30min read-back SLA exceeded/);
+  assert.match(worker, /3min read-back SLA exceeded/);
+  assert.match(worker, /firstSeen\.getTime\(\) \+ 3 \* 60_000/);
   assert.match(worker, /users @> jsonb_build_array/);
 });
 
