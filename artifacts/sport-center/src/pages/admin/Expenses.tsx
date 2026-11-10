@@ -336,12 +336,13 @@ export default function AdminExpenses() {
   const {data:financeTestData,refetch:refetchFinanceTest,isError:financeTestReadError} = useQuery<{
     entries:Array<{id:number;testNo:string;direction:"IN"|"OUT";transactionDate:string;
       sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
-      sheetSyncError:string|null;sheetVerifiedAt:string|null;senderBank:string;receivingAccount:string}>;
+      sheetSyncError:string|null;sheetVerifiedAt:string|null;senderBank:string;receivingAccount:string;
+      method:string;bankReference:string|null;notes:string|null}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
     queryKey:["sc-finance-test-entries"],
-    enabled:financeSection==="test",
+    enabled:FINANCE_SC_TEST_ONLY || financeSection==="test",
     retry:false,
     queryFn:async()=>{
       const r=await fetch(`${API}/admin/finance-test`,{headers:authHeaders()});
@@ -630,7 +631,24 @@ export default function AdminExpenses() {
 
   // Presentation only: reuse the existing SC income/expense reads without creating
   // bank mutations, accounting entries, or extra writes to Google Sheets.
-  const unifiedTransactions = [
+  const unifiedTransactions = FINANCE_SC_TEST_ONLY
+    ? (financeTestData?.entries ?? []).map(entry => ({
+      key:`test-${entry.id}`, id:entry.testNo,
+      kind:entry.direction==="IN"?"income" as const:"expense" as const,
+      date:entry.transactionDate,name:entry.sourceName,amount:Number(entry.amount),
+      bank:entry.senderBank||"",account:entry.receivingAccount||"",
+      description:entry.notes||"Simulasi Sport Center",
+      method:entry.method||"Tidak ditentukan",
+      status:entry.sheetSyncState==="synced"?"TEST — Tersinkron":
+        entry.sheetSyncState==="removed"?"TEST — Dihapus dari Sheets":
+        entry.sheetSyncState==="mismatch"?"TEST — Tidak Cocok":
+        `TEST — ${entry.sheetSyncState}`,
+      sheet:`kas besar sc — ${entry.sheetSyncState==="synced"?"baris "+entry.sheetRow:entry.sheetSyncState}`,
+      cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
+        `Status ${entry.sheetSyncState}`,
+      reference:entry.bankReference||"",notes:entry.notes||"",
+    }))
+    : [
     ...(incomeData?.entries ?? []).map(entry => ({
       key: `income-${entry.id}`, id: entry.incomeNo, kind: "income" as const,
       date: entry.transactionDate, name: entry.sourceName, amount: Number(entry.amount),
@@ -655,6 +673,15 @@ export default function AdminExpenses() {
       reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
     })),
   ];
+  const activeTestIncome = (financeTestData?.entries??[]).filter(x=>x.direction==="IN");
+  const activeTestExpense = (financeTestData?.entries??[]).filter(x=>x.direction==="OUT");
+  const visibleTestExpenses = activeTestExpense.filter(item=>{
+    const term=search.trim().toLowerCase();
+    return (!startDate||item.transactionDate>=startDate)
+      && (!endDate||item.transactionDate<=endDate)
+      && (!term||[item.testNo,item.sourceName,item.senderBank,item.receivingAccount,
+        item.bankReference??"",item.notes??""].some(x=>x.toLowerCase().includes(term)));
+  });
   const transactionDateInvalid = transactionDateMode === "range"
     && Boolean(transactionDateFrom && transactionDateTo && transactionDateFrom > transactionDateTo);
   const visibleTransactions = unifiedTransactions.filter(tx =>
@@ -868,33 +895,78 @@ export default function AdminExpenses() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card className="border-l-4 border-l-emerald-500">
               <CardContent className="p-4">
-                <p className="text-sm font-medium text-gray-600">Total Input Uang Masuk — Bulan Ini</p>
-                <p className="text-2xl font-bold text-emerald-800 mt-1">
-                  {incomeHistoryError ? "Tidak tersedia" : incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Memuat..."}
+                <p className="text-sm font-medium text-gray-600">
+                  {FINANCE_SC_TEST_ONLY?"Total Uang Masuk TEST Aktif":"Total Input Uang Masuk — Bulan Ini"}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">Dari register SC, belum tentu cocok dengan mutasi bank.</p>
+                <p className="text-2xl font-bold text-emerald-800 mt-1">
+                  {FINANCE_SC_TEST_ONLY
+                    ? financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.income):"Memuat..."
+                    : incomeHistoryError ? "Tidak tersedia" : incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Memuat..."}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {FINANCE_SC_TEST_ONLY?"Hanya transaksi TEST yang masih ada di Sheets. Bukan kas resmi.":
+                    "Dari register SC, belum tentu cocok dengan mutasi bank."}
+                </p>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-slate-400">
               <CardContent className="p-4">
-                <p className="text-sm font-medium text-gray-600">Mutasi Masuk Kas Besar CST — BizPortal</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {typeof summary.incomingThisMonth === "number" ? formatIDR(summary.incomingThisMonth) : "Belum tersedia"}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Sumber terpisah, baca saja; tidak ditambahkan ke total input SC.
-                  {summary.incomingSheetSyncedAt && <> Sync terakhir {new Date(summary.incomingSheetSyncedAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB.</>}
-                </p>
+                {FINANCE_SC_TEST_ONLY ? <>
+                  <p className="text-sm font-medium text-gray-600">Sisa Saldo TEST Kas Besar SC</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    {financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.balance):"Memuat..."}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Pemasukan TEST dikurangi Pengeluaran TEST; bukan saldo bank.</p>
+                </> : <>
+                  <p className="text-sm font-medium text-gray-600">Mutasi Masuk Kas Besar CST — BizPortal</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    {typeof summary.incomingThisMonth === "number" ? formatIDR(summary.incomingThisMonth) : "Belum tersedia"}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Sumber terpisah, baca saja; tidak ditambahkan ke total input SC.
+                    {summary.incomingSheetSyncedAt && <> Sync terakhir {new Date(summary.incomingSheetSyncedAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB.</>}
+                  </p>
+                </>}
               </CardContent>
             </Card>
           </div>
+          {FINANCE_SC_TEST_ONLY && <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Histori Uang Masuk (TEST) — {activeTestIncome.length}</CardTitle>
+              <p className="text-xs text-gray-500">Termasuk histori yang dihapus dari Sheets, tetapi tidak dihitung dalam total.</p>
+            </CardHeader>
+            <CardContent>
+              {financeTestReadError ? <p role="alert" className="text-red-700 text-sm">Ledger TEST gagal dibaca, jangan ulangi input sebelum memeriksa ID.</p> :
+                !financeTestData ? <p className="text-sm text-gray-500">Memuat histori TEST...</p> :
+                activeTestIncome.length===0 ? <p className="text-sm text-gray-500">Belum ada uang masuk TEST.</p> :
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b text-left">
+                      <th className="p-2">ID</th><th className="p-2">Tanggal</th>
+                      <th className="p-2">Pengirim / Bank</th><th className="p-2 text-right">Nominal</th>
+                      <th className="p-2">Status Sheets</th>
+                    </tr></thead>
+                    <tbody>{activeTestIncome.map(x=><tr className="border-b" key={x.id}>
+                      <td className="p-2 font-mono">{x.testNo}</td>
+                      <td className="p-2">{x.transactionDate}</td>
+                      <td className="p-2">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                      <td className="p-2 text-right">{formatIDR(Number(x.amount))}</td>
+                      <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
+                        x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>}
+            </CardContent>
+          </Card>}
 
         </section>
       ) : financeSection === "details" ? (
         <section role="tabpanel" aria-label="Detail Transaksi Keuangan SC" className="space-y-4">
           <div>
             <h2 className="text-lg font-bold text-blue-900">Detail Transaksi Keuangan SC</h2>
-            <p className="text-sm text-gray-500">Riwayat gabungan baca-saja dari register Uang Masuk dan daftar Pengeluaran SC.</p>
+            <p className="text-sm text-gray-500">{FINANCE_SC_TEST_ONLY?
+              "Riwayat gabungan transaksi TEST dari kas besar sc (tidak membuat mutasi atau jurnal).":
+              "Riwayat gabungan baca-saja dari register Uang Masuk dan daftar Pengeluaran SC."}</p>
           </div>
           <Card>
             <CardContent className="p-4 space-y-4">
@@ -990,7 +1062,8 @@ export default function AdminExpenses() {
               </div>
             </CardContent>
           </Card>
-          {incomeHistoryError && <p className="text-sm text-red-700">Pemasukan belum berhasil dimuat; daftar gabungan mungkin tidak lengkap.</p>}
+          {(FINANCE_SC_TEST_ONLY?financeTestReadError:incomeHistoryError) && <p className="text-sm text-red-700">
+            {FINANCE_SC_TEST_ONLY?"Ledger TEST gagal dibaca.":"Pemasukan belum berhasil dimuat; daftar gabungan mungkin tidak lengkap."}</p>}
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Master Tabel Transaksi</CardTitle></CardHeader>
             <CardContent className="p-0">
@@ -1068,8 +1141,8 @@ export default function AdminExpenses() {
                     ))}
                   </tbody>
                 </table>
-                {(isLoading || incomeHistoryLoading) && !unifiedTransactions.length && <p className="text-sm text-gray-500 p-5">Memuat transaksi...</p>}
-                {!isLoading && !incomeHistoryLoading && !visibleTransactions.length && <p className="text-sm text-gray-500 p-5 text-center">Tidak ada transaksi yang sesuai filter.</p>}
+                {(FINANCE_SC_TEST_ONLY?!financeTestData&&!financeTestReadError:isLoading || incomeHistoryLoading) && !unifiedTransactions.length && <p className="text-sm text-gray-500 p-5">Memuat transaksi...</p>}
+                {(FINANCE_SC_TEST_ONLY?Boolean(financeTestData):!isLoading && !incomeHistoryLoading) && !visibleTransactions.length && <p className="text-sm text-gray-500 p-5 text-center">Tidak ada transaksi yang sesuai filter.</p>}
               </div>
             </CardContent>
           </Card>
@@ -1222,9 +1295,15 @@ export default function AdminExpenses() {
           </div>
           <Card className="border-l-4 border-l-orange-500">
             <CardContent className="p-4">
-              <p className="text-sm font-medium text-gray-600">Pengeluaran Bulan Ini</p>
-              <p className="text-2xl font-bold text-orange-800 mt-1">{formatIDR(summary.totalThisMonth)}</p>
-              <p className="text-xs text-gray-500 mt-1">Catatan operasional SC; berbeda dari mutasi bank BizPortal.</p>
+              <p className="text-sm font-medium text-gray-600">{FINANCE_SC_TEST_ONLY?"Total Pengeluaran TEST Aktif":"Pengeluaran Bulan Ini"}</p>
+              <p className="text-2xl font-bold text-orange-800 mt-1">
+                {FINANCE_SC_TEST_ONLY
+                  ? financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.expense):"Memuat..."
+                  : formatIDR(summary.totalThisMonth)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">{FINANCE_SC_TEST_ONLY?
+                "Hanya pengeluaran uji yang masih ada di Sheets; bukan pengeluaran resmi.":
+                "Catatan operasional SC; berbeda dari mutasi bank BizPortal."}</p>
             </CardContent>
           </Card>
       {/* Filters */}
@@ -1250,11 +1329,29 @@ export default function AdminExpenses() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-bold">
-            Daftar Pengeluaran <span className="text-gray-400 font-normal">({filtered.length})</span>
+            {FINANCE_SC_TEST_ONLY?"Histori Pengeluaran (TEST)":"Daftar Pengeluaran"} <span className="text-gray-400 font-normal">({FINANCE_SC_TEST_ONLY?visibleTestExpenses.length:filtered.length})</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {FINANCE_SC_TEST_ONLY ? (
+            financeTestReadError ?
+              <p role="alert" className="p-5 text-sm text-red-700">Ledger TEST gagal dibaca. Periksa transaksi sebelum input ulang.</p>
+              : !financeTestData ? <p className="p-5 text-gray-500 text-sm">Memuat histori TEST...</p> :
+              visibleTestExpenses.length===0 ? <p className="p-6 text-center text-gray-500">Belum ada pengeluaran TEST sesuai filter.</p> :
+              <div className="overflow-x-auto"><table className="w-full text-sm">
+                <thead className="bg-gray-50"><tr className="border-b text-left">
+                  <th className="p-3">ID / Tanggal</th><th className="p-3">Penerima / Sumber</th>
+                  <th className="p-3 text-right">Nominal</th><th className="p-3">Status Sheets</th>
+                </tr></thead>
+                <tbody>{visibleTestExpenses.map(x=><tr key={x.id} className="border-b">
+                  <td className="p-3 font-mono">{x.testNo}<span className="block text-xs text-gray-500">{x.transactionDate}</span></td>
+                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                  <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
+                  <td className="p-3">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
+                    x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
+                </tr>)}</tbody>
+              </table></div>
+          ) : isLoading ? (
             <div className="p-8 text-center text-gray-400">Memuat data...</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-gray-400">Belum ada pengeluaran</div>
