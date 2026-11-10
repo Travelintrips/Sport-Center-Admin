@@ -13,11 +13,17 @@ describe("SC expense sidebar and financial summary", () => {
     expect(employee).toBeGreaterThan(expense);
     expect(sidebar.slice(expense + 'href: "/admin/expenses"'.length, employee)).not.toContain('href: "/admin/');
   });
-  it("shows only two cards with distinct sources", () => {
-    expect(ui).toContain('>Pengeluaran Bulan Ini (Rp)</span>');
-    expect(ui).toContain('>Uang Masuk (Rp)</span>');
-    expect(ui).toContain('summary.incomingThisMonth');
-    expect(ui).toContain('summary.incomingSheetSyncedAt');
+  it("separates income register and expense summary without mixing their sources", () => {
+    expect(ui).toContain('role="tablist"');
+    expect(ui).toContain('aria-label="Uang Masuk SC"');
+    expect(ui).toContain('aria-label="Pengeluaran SC"');
+    expect(ui).toContain("Total Input Uang Masuk — Bulan Ini");
+    expect(ui).toContain("incomeData.summary.manualThisMonth");
+    expect(ui).toContain("Mutasi Masuk Kas Besar CST — BizPortal");
+    expect(ui).toContain("summary.incomingThisMonth");
+    expect(ui).toContain("summary.incomingSheetSyncedAt");
+    expect(ui).toContain("Pengeluaran Bulan Ini");
+    expect(ui).toContain("summary.totalThisMonth");
     expect(ui).not.toContain('>Pending Approval</span>');
     expect(ui).not.toContain('>Belum Dibayar</span>');
     expect(ui).not.toContain('>Sudah Dibayar</span>');
