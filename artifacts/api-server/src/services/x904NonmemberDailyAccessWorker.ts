@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { isX904AutoSuspendExempt, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry, x904NonmemberSameWibDate } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
+import { expireUnusedAdminVisGrants } from "./x904AdminVisPendingExpiry";
 
 type Store = Pick<typeof db, "execute" | "transaction">;
 const DEVICE = "TDBD234200545";
@@ -76,6 +77,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND registration_source='system_x904_automation'
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
+
+  // Only direct Admin Lapangan VIS grants that never opened the door may be
+  // retired. Requires a fresh authenticated Group 2 snapshot, and issues no
+  // X904 device command. PIN/member/public flows remain unchanged.
+  await expireUnusedAdminVisGrants(store, now, testPin);
 
   // Inventory reconciliation is read-only unless a PIN has an independently
   // verified nonmember grant. An absent member mapping is NOT proof of nonmembership.
