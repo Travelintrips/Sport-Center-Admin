@@ -588,7 +588,7 @@ export default function AdminCheckoutForm() {
     return () => {active = false;};
   }, [isMembership]);
   useEffect(() => {
-    if (!isMembership || memberAction !== "new" || membershipX904Search.trim().length < 2) {
+    if (!isMembership || memberAction !== "new" || membershipX904Pin || membershipX904Search.trim().length < 2) {
       setMembershipX904Candidates([]);
       setMembershipX904Checking(false);
       return;
@@ -616,7 +616,7 @@ export default function AdminCheckoutForm() {
       }
     }, 350);
     return () => {window.clearTimeout(timer);controller.abort();};
-  },[isMembership,memberAction,membershipX904Search]);
+  },[isMembership,memberAction,membershipX904Search,membershipX904Pin]);
   const matchedMember = members.find(m => String(m.id) === memberId);
   const gymCanConfirm = ["owner","admin","super_admin","finance","admin_booking"].includes(String(getCurrentRole()));
   const {data: currentGymPayments,refetch: refreshGymPayments} = useQuery<Array<{
@@ -817,6 +817,24 @@ export default function AdminCheckoutForm() {
       && (isGuest ? guestEmail : selectedCustomer?.email)?.trim() && selectedDate && selectedCustomerId
       && membershipX904Name && membershipX904IdentityConfirmed && membershipX904Pin && membershipX904SelectedUid !== null && !membershipX904Checking && !membershipX904Error)
     : Boolean(matchedMember && !memberLoadError && renewalPeriodValid && (memberAction !== "checkin" || matchedMember.status === "active"));
+  // Only show the reason the submit button is blocked; this does not
+  // bypass any server-side X904, duplicate-member, or payment validation.
+  const membershipNewBlockers = memberAction !== "new" ? [] : [
+    ...(!selectedCustomerId ? ["Pilih customer baru atau customer yang sudah terdaftar."] : []),
+    ...(!(isGuest ? guestName : selectedCustomer?.name)?.trim() ? ["Nama pemesan wajib diisi."] : []),
+    ...(!(isGuest ? guestPhone : selectedCustomer?.phone)?.trim() ? ["Nomor WhatsApp wajib diisi."] : []),
+    ...(!(isGuest ? guestEmail : selectedCustomer?.email)?.trim() ? ["Email wajib diisi."] : []),
+    ...(!selectedDate ? ["Tanggal mulai membership wajib dipilih."] : []),
+    ...(!membershipX904Pin || membershipX904SelectedUid === null || !membershipX904Name
+      ? ["Pilih user X904 yang sudah ada, atau selesaikan pembuatan user baru dan verifikasi ACK/snapshot terlebih dahulu."] : []),
+    ...(!membershipX904IdentityConfirmed ? ["Centang konfirmasi kecocokan pemilik PIN X904."] : []),
+    ...(membershipX904Checking ? ["Pemeriksaan inventaris X904 masih berjalan."] : []),
+    ...(membershipX904Error ? ["Pemeriksaan X904: " + membershipX904Error] : []),
+    ...(getCurrentRole() !== "staff" && !membershipPaymentFile ? ["Pilih bukti pembayaran."] : []),
+    ...(getCurrentRole() !== "staff" && !membershipPaymentDate ? ["Tanggal pembayaran wajib diisi."] : []),
+    ...(getCurrentRole() !== "staff" && membershipPaymentDate > jakartaDateOnly()
+      ? ["Tanggal pembayaran tidak boleh di masa depan."] : []),
+  ];
   // Restore the authoritative receipt state when returning after a session
   // redirect or a successful approval. Never rely on a stale client-only card.
   useEffect(() => {
@@ -2094,6 +2112,7 @@ export default function AdminCheckoutForm() {
                             setMembershipX904SelectedUid(item.uid);
                             setMembershipX904IdentityConfirmed(false);
                             setMembershipX904Search(item.name + " · PIN " + item.pin);
+                            setMembershipX904Error("");
                             setMembershipX904Candidates([]);
                           }}>
                           <span className="font-medium">{item.name}</span>
@@ -2316,6 +2335,14 @@ export default function AdminCheckoutForm() {
                 </div>
               )}
 
+              {!membershipPaymentTarget && !membershipPaymentDone && memberAction === "new" && membershipNewBlockers.length > 0 && (
+                <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="font-semibold">Lengkapi sebelum mendaftarkan member:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    {membershipNewBlockers.map((message) => <li key={message}>{message}</li>)}
+                  </ul>
+                </div>
+              )}
               {!membershipPaymentTarget && !membershipPaymentDone && <Button type="button"
                 disabled={!membershipReady || isSubmitting || (memberAction === "new" && getCurrentRole() !== "staff" && (!membershipPaymentFile || !membershipPaymentDate || membershipPaymentDate > jakartaDateOnly()))}
                 className="w-full" onClick={() => setMembershipConfirmOpen(true)}>
