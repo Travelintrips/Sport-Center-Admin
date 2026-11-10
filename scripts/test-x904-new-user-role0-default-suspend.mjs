@@ -65,3 +65,11 @@ test("no role4 or role14 suspension and active access 12h policy unchanged", () 
   assert.match(policy, /X904_GYM_CLOSE_HOUR_WIB = 23/);
   assert.match(policy, /if \(isX904AutoSuspendExempt\(input\.userPin,input\.deviceRole\)\) return/);
 });
+
+test("safe re-enrollment and registry candidate require physical suspend evidence",()=>{
+  assert.match(worker,/previous\.length===0/);
+  assert.match(worker,/AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND/);
+  assert.match(worker,/verification_state\)\n        VALUES .*'review_required'/s);
+  assert.match(worker,/Number\(command\.rows\[0\]\.result\?\.afterGroup\)!==2/);
+  assert.match(worker,/new Date\(String\(latest\.rows\[0\]\.observed_at\)\)\.getTime\(\)<=new Date\(String\(row\.completed_at\)\)\.getTime\(\)/);
+});
