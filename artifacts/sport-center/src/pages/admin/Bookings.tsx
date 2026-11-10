@@ -2576,7 +2576,7 @@ function BookingDetailDrawer({
                   const confirmLabel = isRepairingBooking
                     ? "Sinkronkan Booking"
                     : booking.source === "gym_public_guest" && pmt.status === "pending"
-                      ? "Konfirmasi Pembayaran & Alokasikan Kartu"
+                      ? gymIdentityRoute === "registered" ? "Konfirmasi Pembayaran PIN" : "Konfirmasi Pembayaran & Alokasikan Kartu"
                       : pmt.paymentType === "dp"
                         ? "Konfirmasi DP"
                         : "Konfirmasi → Selesai";
@@ -2788,7 +2788,9 @@ function BookingDetailDrawer({
                           </button>
                           {booking.source === "gym_public_guest" && pmt.status === "pending" && (
                             <div className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-800">
-                              Setelah dikonfirmasi, sistem otomatis mengalokasikan satu kartu VIS001–VIS006 yang tersedia. Serahkan hanya kartu yang muncul di panel Akses Gym Mandiri.
+                              {gymIdentityRoute === "registered"
+                                ? "Setelah dana resmi diverifikasi, sahkan identitas PIN melalui panel Akses Gym Mandiri. PIN tetap suspend sampai persetujuan petugas dan ACK/read-back X904. Tidak ada alokasi kartu VIS."
+                                : "Setelah dikonfirmasi, sistem otomatis mengalokasikan satu kartu VIS001–VIS006 yang tersedia. Serahkan hanya kartu yang muncul di panel Akses Gym Mandiri."}
                             </div>
                           )}
                           {!pmt.isCompanyInvoicePayment && (
