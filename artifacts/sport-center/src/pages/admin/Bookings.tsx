@@ -1549,6 +1549,10 @@ function BookingDetailDrawer({
   const gymIdentityRoute = gymPinGrant?.accessId && gymPinGrant?.userPin && gymPinGrant?.deviceUid
     ? "registered"
     : gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
+  // A missing/failed identity response must never be interpreted as proof
+  // that this public guest needs a VIS card. Keep that route fail-closed.
+  const gymIdentityUnresolved = booking.source === "gym_public_guest" &&
+    gymIdentityRoute !== "registered" && !gymVisReservation;
 
   const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
   const qrisEmailDetection =
@@ -2031,7 +2035,7 @@ function BookingDetailDrawer({
           )}
           {(booking.source === "gym_public_guest" || (booking.source === "web" && gymVisReservation)) && (
             <div className={`rounded-xl border p-4 text-sm ${gymVisReservation ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-              <div className="font-bold">{gymIdentityRoute === "registered" ? "Akses Gym — PIN X904" : "Akses Gym — Kartu / X904"}</div>
+              <div className="font-bold">{gymIdentityRoute === "registered" ? "Akses Gym — PIN X904" : gymIdentityUnresolved ? "Akses Gym — Identitas belum terverifikasi" : "Akses Gym — Kartu / X904"}</div>
               {gymIdentityRoute === "registered" ? (
                 <div className="mt-2 space-y-2 text-xs">
                   <div>Booking memakai PIN X904 terdaftar. Tidak perlu kartu VIS; verifikasi identitas fisik dan dana resmi sebelum pengesahan akses.</div>
@@ -2042,6 +2046,13 @@ function BookingDetailDrawer({
                       <div>Aktivasi harus dibuktikan dengan ACK/read-back X904.</div>
                     </div>
                   )}
+                </div>
+              ) : gymIdentityUnresolved ? (
+                <div className="mt-2 space-y-2 text-xs">
+                  <div>Data identitas PIN/Kartu belum terbaca. Jangan mengalokasikan VIS atau mengaktifkan PIN sebelum identitas booking terverifikasi.</div>
+                  <div>Status monitoring: {gymX904MonitoringFailed ? "gagal" : gymX904Monitoring ? "PIN belum ditemukan pada respons" : "menunggu respons"}.</div>
+                  <button type="button" onClick={() => void retryGymX904Monitoring()}
+                    className="rounded border border-amber-400 bg-white px-3 py-2 font-semibold">Muat ulang identitas X904</button>
                 </div>
               ) : gymVisReservation ? (
                 <>
@@ -2133,7 +2144,7 @@ function BookingDetailDrawer({
                   )}
                 </>
               )}
-              {gymIdentityRoute !== "registered" && gymVisPool.length > 0 && (
+              {gymIdentityRoute !== "registered" && !gymIdentityUnresolved && gymVisPool.length > 0 && (
                 <div className="mt-4 border-t border-emerald-200 pt-3">
                   <div className="mb-2 text-xs font-bold">Pool VIS / X904</div>
                   <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
