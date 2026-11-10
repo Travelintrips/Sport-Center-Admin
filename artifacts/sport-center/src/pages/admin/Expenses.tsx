@@ -155,7 +155,15 @@ export default function AdminExpenses() {
   const qc = useQueryClient();
 
   // Separate the income and expense workflows without changing their existing APIs.
-  const [financeSection, setFinanceSection] = useState<"income" | "expenses" | "details">("income");
+  const [financeSection, setFinanceSection] = useState<"income" | "expenses" | "details" | "test">("income");
+  const [testDirection, setTestDirection] = useState<"IN" | "OUT">("IN");
+  const [testEntryKey, setTestEntryKey] = useState(() => crypto.randomUUID());
+  const [testSaving, setTestSaving] = useState(false);
+  const [testForm, setTestForm] = useState({
+    transactionDate: new Date().toLocaleDateString("sv-SE", {timeZone:"Asia/Jakarta"}),
+    sourceName:"",senderBank:"",receivingAccount:"",method:"Transfer Bank",
+    bankReference:"",notes:"",amount:""
+  });
   const [detailKind, setDetailKind] = useState<"all" | "income" | "expense">("all");
   const [unifiedSearch, setUnifiedSearch] = useState("");
   const [expandedTransactionIds, setExpandedTransactionIds] = useState<string[]>([]);
@@ -318,6 +326,59 @@ export default function AdminExpenses() {
       return response.json();
     },
   });
+
+  const {data:financeTestData,refetch:refetchFinanceTest,isError:financeTestReadError} = useQuery<{
+    entries:Array<{id:number;testNo:string;direction:"IN"|"OUT";transactionDate:string;
+      sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
+      sheetSyncError:string|null;senderBank:string;receivingAccount:string}>;
+    summary:{income:number;expense:number;balance:number;pending:number;count:number};
+    writeEnabled:boolean;
+  }>({
+    queryKey:["sc-finance-test-entries"],
+    enabled:financeSection==="test",
+    retry:false,
+    queryFn:async()=>{
+      const r=await fetch(`${API}/admin/finance-test`,{headers:authHeaders()});
+      if(!r.ok)throw Error("Ledger uji belum tersedia atau memerlukan Super Admin");
+      return r.json();
+    }
+  });
+  async function saveFinanceTest() {
+    if(testSaving)return;
+    setTestSaving(true);
+    try {
+      const response=await fetch(`${API}/admin/finance-test`,{
+        method:"POST",headers:authHeaders(),
+        body:JSON.stringify({
+          ...testForm,direction:testDirection,entryKey:testEntryKey,
+          amount:Number(normalizeExpenseRupiahInput(testForm.amount))
+        })
+      });
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error??"Gagal menyimpan uji");
+      toast({title:`Transaksi uji ${result.testNo} tercatat`,
+        description:result.sheetState==="synced"
+          ?"Baris uji kas besar sc terbaca ulang; bukan mutasi bank resmi."
+          :"Belum tertulis ke kas besar sc. Pencatatan hanya ada pada ledger uji."});
+      setTestEntryKey(crypto.randomUUID());
+      setTestForm(f=>({...f,sourceName:"",amount:"",bankReference:"",notes:""}));
+      await refetchFinanceTest();
+    }catch(error:any){
+      toast({title:"Uji Kas Besar belum berhasil",description:error?.message,variant:"destructive"});
+    }finally{setTestSaving(false);}
+  }
+  async function retryFinanceTestRow(id:number){
+    try {
+      const response=await fetch(`${API}/admin/finance-test/${id}/retry`,{
+        method:"POST",headers:authHeaders()
+      });
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error??"Pengiriman belum tersedia");
+      toast({title:data.sheetState==="synced"?"Baris uji tersinkron":"Uji masih menunggu pengiriman"});
+    }catch(error:any){
+      toast({title:"Pengiriman uji diblokir",description:error?.message,variant:"destructive"});
+    }finally{await refetchFinanceTest();}
+  }
 
   async function saveIncome(confirmSimilar = false) {
     if (!incomePreview || incomeSaving) return;
@@ -652,7 +713,7 @@ export default function AdminExpenses() {
           <h1 className="text-2xl font-black text-gray-900">Keuangan Sport Center</h1>
           <p className="text-gray-500 text-sm mt-0.5">Catatan pemasukan dan pengeluaran operasional, terpisah dari rekonsiliasi BizPortal.</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
           <button type="button" role="tab" aria-selected={financeSection === "income"}
             className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "income" ? "bg-emerald-50 border-emerald-500 ring-1 ring-emerald-200" : "bg-white hover:bg-emerald-50"}`}
             onClick={() => setFinanceSection("income")}>
@@ -676,6 +737,16 @@ export default function AdminExpenses() {
               <Receipt className="h-5 w-5" /> Detail Transaksi
             </span>
             <span className="block text-sm text-gray-600 mt-1">Lihat seluruh pemasukan dan pengeluaran dalam satu tempat</span>
+          </button>
+          <button type="button" role="tab" aria-selected={financeSection==="test"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection==="test"?"bg-violet-50 border-violet-500 ring-1 ring-violet-200":"bg-white hover:bg-violet-50"}`}
+            onClick={()=>setFinanceSection("test")}>
+            <span className="flex gap-2 items-center font-semibold text-violet-800">
+              <Receipt className="h-5 w-5"/> Uji Kas Besar
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">
+              Pemasukan, pengeluaran, saldo uji. Tidak membuat jurnal.
+            </span>
           </button>
         </div>
       </div>
@@ -909,6 +980,128 @@ export default function AdminExpenses() {
                 </table>
                 {(isLoading || incomeHistoryLoading) && !unifiedTransactions.length && <p className="text-sm text-gray-500 p-5">Memuat transaksi...</p>}
                 {!isLoading && !incomeHistoryLoading && !visibleTransactions.length && <p className="text-sm text-gray-500 p-5 text-center">Tidak ada transaksi yang sesuai filter.</p>}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      ) : financeSection==="test" ? (
+        <section role="tabpanel" aria-label="Uji Kas Besar SC" className="space-y-4">
+          <div className="rounded-xl border border-violet-300 bg-violet-50 p-4">
+            <h2 className="text-lg font-bold text-violet-900">Mode Uji Kas Besar SC</h2>
+            <p className="text-sm text-violet-900">
+              Semua angka di sini adalah simulasi, bukan transaksi riil.
+              Tidak menambah mutasi BizPortal, jurnal, atau saldo resmi.
+              Pengiriman Sheets tetap OFF sampai guard BizPortal dan konfigurasi diverifikasi.
+            </p>
+          </div>
+          {financeTestReadError && <p className="text-red-700 text-sm">Akses ledger uji memerlukan Super Admin dan migrasi database yang sudah terpasang.</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Card className="border-l-4 border-emerald-500"><CardContent className="p-4">
+              <p className="text-xs text-gray-600">Uang Masuk Uji — tersinkron</p>
+              <p className="text-xl font-bold text-emerald-700">{formatIDR(financeTestData?.summary.income??0)}</p>
+            </CardContent></Card>
+            <Card className="border-l-4 border-orange-500"><CardContent className="p-4">
+              <p className="text-xs text-gray-600">Pengeluaran Uji — tersinkron</p>
+              <p className="text-xl font-bold text-orange-700">{formatIDR(financeTestData?.summary.expense??0)}</p>
+            </CardContent></Card>
+            <Card className="border-l-4 border-violet-500"><CardContent className="p-4">
+              <p className="text-xs text-gray-600">Sisa Saldo Uji (bukan saldo bank)</p>
+              <p className="text-xl font-bold">{formatIDR(financeTestData?.summary.balance??0)}</p>
+            </CardContent></Card>
+          </div>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Input Transaksi Uji</CardTitle></CardHeader>
+            <CardContent>
+              <form onSubmit={event=>{event.preventDefault();void saveFinanceTest();}} className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant={testDirection==="IN"?"default":"outline"}
+                    onClick={()=>setTestDirection("IN")}>Uang Masuk (TEST)</Button>
+                  <Button type="button" variant={testDirection==="OUT"?"default":"outline"}
+                    onClick={()=>setTestDirection("OUT")}>Pengeluaran (TEST)</Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="test-date">Tanggal</Label>
+                    <Input id="test-date" type="date" required value={testForm.transactionDate}
+                      onChange={e=>setTestForm({...testForm,transactionDate:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-name">{testDirection==="IN"?"Pengirim":"Penerima"}</Label>
+                    <Input id="test-name" required value={testForm.sourceName}
+                      onChange={e=>setTestForm({...testForm,sourceName:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-bank">Bank / Sumber Dana</Label>
+                    <Input id="test-bank" value={testForm.senderBank}
+                      onChange={e=>setTestForm({...testForm,senderBank:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-account">Akun tujuan / Rekening</Label>
+                    <Input id="test-account" value={testForm.receivingAccount}
+                      onChange={e=>setTestForm({...testForm,receivingAccount:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-method">Metode</Label>
+                    <Input id="test-method" value={testForm.method}
+                      onChange={e=>setTestForm({...testForm,method:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-amount">Nominal Uji (Rp, maksimum 1 juta)</Label>
+                    <Input id="test-amount" required inputMode="numeric"
+                      value={formatExpenseRupiahInput(testForm.amount)}
+                      onChange={e=>setTestForm({...testForm,amount:normalizeExpenseRupiahInput(e.target.value)})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-reference">Referensi Uji</Label>
+                    <Input id="test-reference" value={testForm.bankReference}
+                      onChange={e=>setTestForm({...testForm,bankReference:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-note">Keterangan</Label>
+                    <Input id="test-note" value={testForm.notes}
+                      onChange={e=>setTestForm({...testForm,notes:e.target.value})}/>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <p className="text-xs text-gray-600">
+                    {financeTestData?.writeEnabled?"Penulisan uji diaktifkan (guard tetap diperiksa).":"Pengiriman Sheets masih nonaktif."}
+                  </p>
+                  <Button type="submit" disabled={testSaving || !testForm.sourceName.trim()
+                    || Number(testForm.amount)<=0 || Number(testForm.amount)>1000000}>
+                    {testSaving?"Menyimpan...":"Simpan Transaksi Uji"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Ledger Uji ({financeTestData?.summary.count??0})</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-xs text-gray-600">
+                Saldo uji = total masuk tersinkron - total keluar tersinkron. Belum tersinkron: {financeTestData?.summary.pending??0}.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b text-left">
+                    <th className="p-2">ID Uji</th><th className="p-2">Tanggal</th>
+                    <th className="p-2">Nama / Jenis</th><th className="p-2 text-right">Nominal</th>
+                    <th className="p-2">Status Sheets</th><th className="p-2">Aksi</th>
+                  </tr></thead>
+                  <tbody>{(financeTestData?.entries??[]).map(x=>(
+                    <tr key={x.id} className="border-b">
+                      <td className="p-2 font-mono">{x.testNo}</td>
+                      <td className="p-2">{x.transactionDate}</td>
+                      <td className="p-2">{x.sourceName}<span className="block text-xs text-gray-500">
+                        {x.direction==="IN"?"Pemasukan Uji":"Pengeluaran Uji"}</span></td>
+                      <td className="p-2 text-right whitespace-nowrap">{x.direction==="IN"?"+":"−"}{formatIDR(Number(x.amount))}</td>
+                      <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow}`:x.sheetSyncState}</td>
+                      <td className="p-2">{x.sheetSyncState!=="synced" &&
+                        <Button type="button" size="sm" variant="outline" onClick={()=>void retryFinanceTestRow(x.id)}>
+                          Coba kirim
+                        </Button>}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
               </div>
             </CardContent>
           </Card>
