@@ -2619,13 +2619,24 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   } catch (err: any) {
     req.log.error({ err }, "Update payment error");
     if (res.headersSent) return;
-    const message = String(err instanceof Error ? err.message : err ?? "");
+    // Drizzle can wrap a PostgreSQL error as "Failed query" while its
+    // canonical/mirror guard identifier is carried in the original cause.
+    // Only the stable allowlisted error code is exposed to clients.
+    const message = String(err instanceof Error ? err.message : err ?? "")
+      + " " + String((err as { cause?: { message?: unknown } })?.cause?.message ?? "");
     const isAccountingConflict =
       message.includes("POSTED_ACCOUNTING_JOURNAL") ||
       message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS");
     const isPaymentMigrationPending =
       message === "PAYMENT_MIRROR_MIGRATION_PENDING" ||
       message === "PAYMENT_MIRROR_MIGRATION_FAILED";
+    const diagnosticCode = isPaymentMigrationPending ? "PAYMENT_MIRROR_NOT_READY"
+      : message.includes("CANONICAL_PROVIDER_RULE_UNRESOLVED") ? "SETTLEMENT_RULE_UNRESOLVED"
+      : message.includes("CANONICAL_BANK_ACCOUNT_UNRESOLVED") || message.includes("MIRROR_BANK_ACCOUNT_UNRESOLVED") ? "RECEIVING_ACCOUNT_UNRESOLVED"
+      : message.includes("CANONICAL_COMPANY_UNRESOLVED") || message.includes("MIRROR_COMPANY_UNRESOLVED") ? "PAYMENT_COMPANY_UNRESOLVED"
+      : message.includes("MIRROR_") || message.includes("CANONICAL_") ? "PAYMENT_PROJECTION_REJECTED"
+      : isAccountingConflict ? "ACCOUNTING_LOCKED" : "PAYMENT_UPDATE_FAILED";
+    req.log.error({ diagnosticCode, paymentId: req.params.id }, "Payment confirmation rejected");
     const safeError =
       message === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED"
         ? "Rekening penerima pembayaran belum dikonfigurasi."
@@ -2652,6 +2663,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             : 422,
     ).json({
       error: safeError,
+      code: diagnosticCode,
     });
   }
 });
