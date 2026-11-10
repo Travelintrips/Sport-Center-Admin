@@ -367,6 +367,20 @@ export default function AdminExpenses() {
       toast({title:"Uji Kas Besar belum berhasil",description:error?.message,variant:"destructive"});
     }finally{setTestSaving(false);}
   }
+  async function reconcileFinanceTestRows(){
+    try{
+      const response=await fetch(`${API}/admin/finance-test/reconcile`,{
+        method:"POST",headers:authHeaders()
+      });
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error??"Baca ulang Sheets gagal");
+      toast({title:"Ledger uji diperiksa ulang",
+        description:`Baris dihapus: ${data.removed}, berubah: ${data.mismatched}, bergeser: ${data.moved}`});
+    }catch(error:any){
+      toast({title:"Pemeriksaan Sheets gagal",description:error?.message,variant:"destructive"});
+    }finally{await refetchFinanceTest();}
+  }
+
   async function retryFinanceTestRow(id:number){
     try {
       const response=await fetch(`${API}/admin/finance-test/${id}/retry`,{
@@ -1077,9 +1091,17 @@ export default function AdminExpenses() {
           <Card>
             <CardHeader><CardTitle className="text-base">Ledger Uji ({financeTestData?.summary.count??0})</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              <p className="text-xs text-gray-600">
-                Saldo uji = total masuk tersinkron - total keluar tersinkron. Belum tersinkron: {financeTestData?.summary.pending??0}.
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-600">
+                  Saldo uji = total masuk yang masih ada di Sheets - total keluar yang masih ada di Sheets.
+                  Baris belum sinkron atau sudah dihapus tidak dihitung.
+                </p>
+                <Button type="button" size="sm" variant="outline"
+                  onClick={()=>void reconcileFinanceTestRows()}>
+                  Periksa Ulang Sheets
+                </Button>
+              </div>
+              <p className="text-xs text-gray-600">Belum tersinkron: {financeTestData?.summary.pending??0}.</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b text-left">
@@ -1094,8 +1116,10 @@ export default function AdminExpenses() {
                       <td className="p-2">{x.sourceName}<span className="block text-xs text-gray-500">
                         {x.direction==="IN"?"Pemasukan Uji":"Pengeluaran Uji"}</span></td>
                       <td className="p-2 text-right whitespace-nowrap">{x.direction==="IN"?"+":"−"}{formatIDR(Number(x.amount))}</td>
-                      <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow}`:x.sheetSyncState}</td>
-                      <td className="p-2">{x.sheetSyncState!=="synced" &&
+                      <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow}`:
+                        x.sheetSyncState==="removed"?"Dihapus dari Sheets":
+                        x.sheetSyncState==="mismatch"?"Data Sheets tidak cocok":x.sheetSyncState}</td>
+                      <td className="p-2">{["pending","failed"].includes(x.sheetSyncState) &&
                         <Button type="button" size="sm" variant="outline" onClick={()=>void retryFinanceTestRow(x.id)}>
                           Coba kirim
                         </Button>}</td>

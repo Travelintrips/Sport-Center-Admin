@@ -34,8 +34,10 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     expect(testSummary([
       {direction:"IN",amount:"10000",sheet_sync_state:"synced"},
       {direction:"OUT",amount:"3000",sheet_sync_state:"synced"},
+      {direction:"IN",amount:"10000",sheet_sync_state:"removed"},
+      {direction:"OUT",amount:"5000",sheet_sync_state:"mismatch"},
       {direction:"OUT",amount:"15000",sheet_sync_state:"pending"},
-    ])).toEqual({income:10000,expense:3000,balance:7000,pending:1,count:3});
+    ])).toEqual({income:10000,expense:3000,balance:7000,pending:1,count:5});
   });
   it("finds exactly one row for each stable ID on retry",()=>{
     expect(testNo(1,"IN")).toBe("SC-TEST-IN-000001");
@@ -61,6 +63,20 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     expect(source).toContain("testRowIndexes");
     expect(source).toContain("startScFinanceTestRetryWorker");
     expect(source).not.toContain("INSERT INTO public.bank_mutations");
+  });
+  it("read-back reconciliation excludes manually deleted rows and never re-appends them",()=>{
+    expect(source).toContain("reconcileScFinanceTestSheets");
+    expect(source).toContain("startScFinanceTestSheetReconciliationWorker");
+    expect(source).toContain("sheet_sync_state='removed'");
+    expect(source).toContain("sheet_sync_state='mismatch'");
+    expect(source).toContain('sheet_row=NULL');
+    expect(source).toContain('testRowIndexes(rows.map');
+    expect(source).toContain("SC_TEST_SHEET_CONTENT_MISMATCH");
+    expect(source).toContain("sheet_sync_state IN ('pending','failed')");
+    expect(route).toContain('router.post("/admin/finance-test/reconcile"');
+    expect(ui).toContain("Periksa Ulang Sheets");
+    expect(ui).toContain("Dihapus dari Sheets");
+    expect(ui).toContain('["pending","failed"].includes(x.sheetSyncState)');
   });
   it("maintains separate test table and Super Admin authorization",()=>{
     expect(migration).toContain("sc_finance_test_entries");

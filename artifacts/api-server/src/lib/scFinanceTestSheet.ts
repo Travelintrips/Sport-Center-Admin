@@ -119,6 +119,83 @@ export async function syncScFinanceTestRow(id:number):Promise<"synced"|"pending"
   }
 }
 
+// Read-back reconciliation: detect rows removed manually in Google Sheets.
+ // IMPORTANT: this never appends any rows, creates bank mutations or journals.
+export async function reconcileScFinanceTestSheets():Promise<{
+  inspected:number;removed:number;restored:number;mismatched:number;moved:number
+}>{
+  if(!testSheetWritingEnabled())throw Error("SC_TEST_SHEET_DISABLED");
+  if(!process.env.GOOGLE_SERVICE_ACCOUNT_JSON)throw Error("SC_TEST_SHEET_CREDENTIALS_MISSING");
+  await assertCashSheetConfiguration();
+  const sheets=googleSheetsClient();
+  const read=await sheets.spreadsheets.values.get({
+    spreadsheetId:CASH_SHEET_ID,range:"'kas besar sc'!A1:M",
+    valueRenderOption:"UNFORMATTED_VALUE"
+  });
+  const rows=(read.data.values??[]) as unknown[][];
+  assertHeaders((rows[0]??[]) as string[]);
+  const entries=resultRows(await db.execute(sql`SELECT id,direction,transaction_date::text,source_name,
+    sender_bank,receiving_account,method,bank_reference,notes,amount::text,
+    sheet_row,sheet_sync_state FROM sport_center.sc_finance_test_entries
+    WHERE sheet_sync_state IN ('synced','removed','mismatch')
+    ORDER BY id LIMIT 1000`));
+  const totals={inspected:0,removed:0,restored:0,mismatched:0,moved:0};
+  for(const entry of entries){
+    const id=Number(entry.id);
+    const matches=testRowIndexes(rows.map(row=>[row?.[1]??""]),testNo(id,entry.direction));
+    if(matches.length>1) {
+      // Fail closed and don't silently pick one ambiguous row.
+      await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
+        sheet_sync_state='mismatch',sheet_row=NULL,sheet_sync_error='DUPLICATE_TEST_ID_IN_SHEET',updated_at=now()
+        WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
+      totals.mismatched++; totals.inspected++;
+      continue;
+    }
+    if(matches.length===0){
+      if(entry.sheet_sync_state!=='removed'){
+        await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
+          sheet_sync_state='removed',sheet_row=NULL,sheet_sync_error='REMOVED_FROM_SHEET',
+          updated_at=now() WHERE id=${id}
+          AND sheet_sync_state IN ('synced','mismatch')`);
+        totals.removed++;
+      }
+      totals.inspected++;
+      continue;
+    }
+    const actual=rows[matches[0]-1]??[];
+    const expected=testSheetRow(entry);
+    if(String(actual[1]??"")!==expected[1] ||
+       Number(actual[2]||0)!==Number(expected[2]||0) ||
+       Number(actual[3]||0)!==Number(expected[3]||0) ||
+       String(actual[5]??"")!==expected[5] ||
+       String(actual[6]??"")!=="" ||
+       String(actual[7]??"")!=="SC_TEST_ONLY"){
+      await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
+        sheet_sync_state='mismatch',sheet_row=NULL,sheet_sync_error='SC_TEST_SHEET_CONTENT_MISMATCH',
+        updated_at=now() WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
+      totals.mismatched++;totals.inspected++;
+      continue;
+    }
+    if(entry.sheet_sync_state!=='synced' || Number(entry.sheet_row)!==matches[0]){
+      await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
+        sheet_sync_state='synced',sheet_row=${matches[0]},sheet_sync_error=NULL,
+        updated_at=now() WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
+      if(entry.sheet_sync_state!=='synced')totals.restored++;
+      else totals.moved++;
+    }
+    totals.inspected++;
+  }
+  return totals;
+}
+export function startScFinanceTestSheetReconciliationWorker(){
+  if(!testSheetWritingEnabled())return;
+  const timer=setInterval(async()=>{
+    try{await reconcileScFinanceTestSheets();}
+    catch(e){console.warn("[SC_FINANCE_TEST_SHEET_RECONCILE]",e instanceof Error?e.message:"UNAVAILABLE");}
+  },60000);
+  timer.unref();
+}
+
 // A bounded retry worker lets a confirmed Super Admin test complete after
 // a temporary Google/BizPortal outage. All writes still require live guard proof.
 export function startScFinanceTestRetryWorker(){

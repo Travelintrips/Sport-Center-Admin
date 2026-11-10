@@ -5,7 +5,7 @@ import {superAdminMiddleware} from "../lib/auth";
 import {getUserFromReq,logAudit,getClientInfo} from "../lib/auditLog";
 import {resultRows} from "../lib/scIncomeOperational";
 import {parseTestInput,testNo,testSummary} from "../lib/scFinanceTestValidation";
-import {syncScFinanceTestRow,testSheetWritingEnabled} from "../lib/scFinanceTestSheet";
+import {syncScFinanceTestRow,testSheetWritingEnabled,reconcileScFinanceTestSheets} from "../lib/scFinanceTestSheet";
 
 const router=Router();
 router.get("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
@@ -67,6 +67,11 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
       balanceIsTestOnly:true});
   }catch(e){req.log.error({err:e},"SC finance test creation failed");
     res.status(503).json({error:"SC_TEST_SAVE_FAILED"});}
+});
+router.post("/admin/finance-test/reconcile",superAdminMiddleware,async(req,res)=>{
+  try{res.json(await reconcileScFinanceTestSheets());}
+  catch(e){req.log.warn({err:e},"SC finance test reconciliation unavailable");
+    res.status(503).json({error:"SC_TEST_SHEET_RECONCILIATION_UNAVAILABLE"});}
 });
 router.post("/admin/finance-test/:id/retry",superAdminMiddleware,async(req,res)=>{
   const id=Number(req.params.id);
