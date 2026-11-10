@@ -16,6 +16,13 @@ describe("paid Gym membership one-pass registration contract", () => {
     expect(section).toContain('if (!proof || !mime || !extensions[mime])');
   });
 
+  it("cleans up a pre-transaction proof when registration fails, but not after commit", () => {
+    expect(section).toContain("uploadedProofUrl = proofUrl");
+    expect(section).toContain("registrationCommitted = true");
+    expect(section).toContain("if (uploadedProofUrl && !registrationCommitted)");
+    expect(section).toContain("await deleteUploadedProofStrict(uploadedProofUrl)");
+  });
+
   it("creates customer, membership and one payment in a single transaction", () => {
     expect(section).toContain("await db.transaction(async tx =>");
     expect(section).toContain("tx.insert(usersTable)");
