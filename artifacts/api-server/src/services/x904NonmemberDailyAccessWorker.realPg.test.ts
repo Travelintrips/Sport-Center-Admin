@@ -1266,3 +1266,64 @@ test("ADMIN LAPANGAN E2E: confirmed payment on cancelled booking cannot issue AC
     delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   }
 });
+
+test("ADMIN LAPANGAN HTTP: actual VIS handover rejects invalid requests and releases exactly one paid grant", async () => {
+  process.env.SESSION_SECRET ||= "isolated-admin-vis-http-test";
+  const { default: express } = await import("express");
+  const { default: supertest } = await import("supertest");
+  const { default: bookingsRouter } = await import("../routes/bookings.js");
+  const { createToken } = await import("../lib/auth.js");
+  const app=express();
+  app.use(express.json()); app.use("/api",bookingsRouter);
+  const request=supertest(app);
+  await run(readFileSync("../../scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql","utf8"));
+  const id=9811,pay=9811;
+  const dateParts=new Intl.DateTimeFormat("en-CA",{
+    timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"
+  }).formatToParts(new Date());
+  const wd=Object.fromEntries(dateParts.map(p=>[p.type,p.value]));
+  const today=`${wd.year}-${wd.month}-${wd.day}`;
+  const hour=Number(new Intl.DateTimeFormat("en-GB",{
+    timeZone:"Asia/Jakarta",hour:"2-digit",hourCycle:"h23"
+  }).format(new Date()));
+  const url=`/api/bookings/${id}/x904-admin-card-handover`;
+  await run("ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS role text");
+  await run("UPDATE sport_center.users SET role='staff',account_status='active' WHERE id=301");
+  const token=createToken(301,"staff");
+  // The shared fixture's VIS001 entitlement is not a new live customer.
+  await run("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired' WHERE booking_id=9001 AND access_state='pending'");
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','78',338,'VIS 001',0)");
+  await run(`INSERT INTO sport_center.sport_bookings
+    (id,booking_date,start_time,source,status,order_number,customer_name,grand_total,total_price)
+    VALUES($1,$2,'06:00','admin','confirmed','TEST-ADMIN-HTTP-9811','VIS 001',30000,30000)`,[id,today]);
+  await run(`INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+    VALUES('TDBD234200545','card','VIS001','78',338,'VIS 001',9811,'pending','pending')`);
+  await run(`INSERT INTO sport_center.sport_payments
+    (id,booking_id,status,amount,confirmed_at,proof_url)
+    VALUES(9811,9811,'pending',30000,now(),'/fixture/valid-confirmed-proof.png');
+    UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9811`);
+  const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9811")).rows[0].access_id);
+  const unauth=await request.post(url).send({identityChecked:true,physicalCardHandedOver:true});
+  expect([401,403]).toContain(unauth.status);
+  const denied=await request.post(url).set("Authorization",`Bearer ${token}`)
+    .send({identityChecked:true,physicalCardHandedOver:false});
+  expect(denied.status).toBe(400);
+  expect((await run("SELECT verification_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].verification_state).toBe("pending");
+  await addSnapshot(new Date(),"78","VIS 001",2);
+  if (hour>=6 && hour<23) {
+    const approved=await request.post(url).set("Authorization",`Bearer ${token}`)
+      .send({identityChecked:true,physicalCardHandedOver:true});
+    expect(approved.status).toBe(200);
+    expect(approved.body).toMatchObject({success:true,accessId,cardCode:"VIS001",accessState:"pending"});
+    expect((await run("SELECT verification_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].verification_state).toBe("verified");
+    const replay=await request.post(url).set("Authorization",`Bearer ${token}`)
+      .send({identityChecked:true,physicalCardHandedOver:true});
+    expect(replay.status).toBe(409); // no second handover
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined(); // worker owns commands
+  } else {
+    const closed=await request.post(url).set("Authorization",`Bearer ${token}`)
+      .send({identityChecked:true,physicalCardHandedOver:true});
+    expect(closed.status).toBe(409);
+  }
+});
