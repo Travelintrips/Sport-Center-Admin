@@ -4,6 +4,10 @@ import { join } from "node:path";
 describe("gym public guest end-to-end hardening", () => {
   const wa = readFileSync(join(process.cwd(), "src/routes/whatsapp.ts"), "utf8");
   const payments = readFileSync(join(process.cwd(), "src/routes/payments.ts"), "utf8");
+  test("guest proof with unreadable OCR amount goes to manual review, never auto-confirm", () => {
+    expect(wa).toContain('if (!proofValidation.amountMatch && booking.source !== "gym_public_guest")');
+    expect(wa).toContain('const nextStatus = "waiting_confirmation" as const');
+  });
   test("proof auto-confirm is blocked for gym_public_guest", () => {
     expect(wa).toContain('booking.source !== "gym_public_guest"');
   });

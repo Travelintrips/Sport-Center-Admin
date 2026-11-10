@@ -1978,7 +1978,9 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 
     // Temporary WA proof-upload test: only a matching amount is required.
     // Keep the other OCR results for audit/review, but do not block submission on them.
-    if (!proofValidation.amountMatch) {
+    // Gym guests must reach manual bank verification even when OCR cannot read
+    // the amount. Never auto-confirm or grant X904 access from OCR alone.
+    if (!proofValidation.amountMatch && booking.source !== "gym_public_guest") {
       const reasons = [
         !proofValidation.amountMatch
           ? proofOcr.amount == null
