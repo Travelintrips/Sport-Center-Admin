@@ -100,8 +100,9 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
           AND user_pin=${pin} AND command_type='SUSPEND_USER' AND state='completed'
           AND payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
         FOR UPDATE`);
-      if(command.rows.length!==1 || command.rows[0].result?.readBackConfirmed!==true ||
-          Number(command.rows[0].result?.deviceUid)!==uid || Number(command.rows[0].result?.afterGroup)!==2) return;
+      const commandResult=command.rows[0]?.result as {readBackConfirmed?:boolean;deviceUid?:number;afterGroup?:number}|null;
+      if(command.rows.length!==1 || commandResult?.readBackConfirmed!==true ||
+          Number(commandResult?.deviceUid)!==uid || Number(commandResult?.afterGroup)!==2) return;
       const latest=await tx.execute(sql`SELECT observed_at,user_count,users FROM sport_center.gym_x904_access_snapshots
         WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
       if(latest.rows.length!==1 || !row.completed_at ||
