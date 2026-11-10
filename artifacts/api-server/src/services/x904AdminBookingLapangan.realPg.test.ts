@@ -239,8 +239,10 @@ test("ADMIN LAPANGAN HTTP: actual VIS handover rejects invalid requests and rele
   }).format(new Date()));
   const url=`/api/bookings/${id}/x904-admin-card-handover`;
   await run("ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS role text");
-  await run("UPDATE sport_center.users SET role='staff',account_status='active' WHERE id=301");
-  const token=createToken(301,"staff");
+  // Keep the X904 automation service (301) inactive and immutable.
+  // HTTP requests use a separate synthetic operator, as in production.
+  await run("INSERT INTO sport_center.users(id,name,registration_source,account_status,role) VALUES(302,'CI ADMIN BOOKING','ci','active','staff')");
+  const token=createToken(302,"staff");
   // The shared fixture's VIS001 entitlement is not a new live customer.
   await run("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired' WHERE booking_id=9001 AND access_state='pending'");
   await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','78',338,'VIS 001',0)");
@@ -277,4 +279,87 @@ test("ADMIN LAPANGAN HTTP: actual VIS handover rejects invalid requests and rele
       .send({identityChecked:true,physicalCardHandedOver:true});
     expect(closed.status).toBe(409);
   }
+});
+
+
+test("ADMIN LAPANGAN EXPIRY: never handed-over paid VIS closes after booking day without X904 commands", async () => {
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN="15";
+  try {
+    await run(readFileSync("../../scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql","utf8"));
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,status,order_number,customer_name,grand_total,total_price)
+      VALUES(9901,'2026-11-06','06:00','admin','confirmed','ADMIN-EXPIRY-9901','VIS 006',30000,30000);
+      INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+      VALUES('TDBD234200545','card','VIS006','15',15,'VIS 006',9901,'pending','pending');
+      INSERT INTO sport_center.sport_payments(id,booking_id,status,amount,confirmed_at,proof_url)
+      VALUES(9901,9901,'pending',30000,'2026-11-06T01:00:00Z','/fixture/payment.png');
+      UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9901;`);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9901")).rows[0].access_id);
+    expect((await run("SELECT verification_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].verification_state).toBe("pending");
+    const at=new Date("2026-11-07T01:00:00Z");
+    // Prior HTTP fixtures may have wall-clock snapshots newer than this
+    // historical simulated date. This is a disposable PostgreSQL test only.
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots WHERE observed_at > $1",[at]);
+    await addSnapshot(new Date(at.getTime()-1000),"15","VIS 006",2);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("expired");
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+    expect(await commandFor("SUSPEND_USER",accessId)).toBeUndefined();
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+2000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("expired");
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
+test("ADMIN LAPANGAN EXPIRY: Group1, stale snapshot and command in flight block unactivated card cleanup", async () => {
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN="90";
+  try {
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,status,order_number,customer_name,total_price)
+      VALUES(9902,'2026-11-06','06:00','admin','pending_payment','ADMIN-EXPIRY-9902','VIS 002',30000);
+      INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+      VALUES('TDBD234200545','card','VIS002','90',339,'VIS 002',9902,'pending','pending');`);
+    const id=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9902")).rows[0].access_id);
+    const at=new Date("2026-11-07T01:00:00Z");
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots WHERE observed_at > $1",[at]);
+    await addSnapshot(new Date(at.getTime()-1000),"90","VIS 002",1);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("pending");
+    await addSnapshot(new Date(at.getTime()-1000),"90","VIS 002",2);
+    await run(`INSERT INTO sport_center.x904_user_commands
+      (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
+      VALUES('TDBD234200545','SUSPEND_USER','90','{}'::jsonb,301,'ADMIN-EXPIRY-9902-INFLIGHT')`);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("pending");
+    await run("UPDATE sport_center.x904_user_commands SET state='failed' WHERE idempotency_key='ADMIN-EXPIRY-9902-INFLIGHT'");
+    await addSnapshot(new Date(at.getTime()-20*60_000),"90","VIS 002",2);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("pending");
+    await addSnapshot(new Date(at.getTime()+1000),"90","VIS 002",2);
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+2000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("expired");
+    expect(await commandFor("ACTIVATE_USER",id)).toBeUndefined();
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
+test("ADMIN LAPANGAN EXPIRY: same-day unused VIS stays pending until 23:00 WIB", async () => {
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN="13";
+  try {
+    const at=new Date("2026-11-06T12:00:00Z"); // 19:00 WIB; before closing
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots WHERE observed_at > $1",[at]);
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,status,order_number,customer_name,total_price)
+      VALUES(9903,'2026-11-06','06:00','admin','confirmed','ADMIN-EXPIRY-9903','VIS 003',30000);
+      INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+      VALUES('TDBD234200545','card','VIS003','13',13,'VIS 003',9903,'pending','pending');`);
+    const id=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9903")).rows[0].access_id);
+    await addSnapshot(new Date(at.getTime()-1000),"13","VIS 003",2);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("pending");
+    await addSnapshot(new Date("2026-11-06T15:59:59Z"),"13","VIS 003",2);
+    await processX904NonmemberDailyAccess(db as any,new Date("2026-11-06T16:00:00Z"));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("expired");
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
 });
