@@ -279,8 +279,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         console.warn("[x904-nonmember] booking schedule invalid; access held", JSON.stringify({accessId:Number(a.access_id)}));
         return;
       }
-      // A paid future reservation is not an authorization to use the door
-      // before its booking date/time. Existing activated grants can finish.
+      // GYM late arrivals remain eligible on the SAME booking day after the
+      // displayed one-hour session has ended. That tariff window is not the
+      // X904 entitlement expiry. Never activate before scheduled start, on a
+      // different day, or after 23:00 WIB. Existing grants can finish.
       if (a.activated_at == null && now.getTime() < scheduledStart) return;
       // A pending booking belongs to its scheduled WIB date. If activation
       // was missed, never activate it after the facility reopens next day.
