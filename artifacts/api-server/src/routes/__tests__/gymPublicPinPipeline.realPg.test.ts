@@ -467,14 +467,13 @@ suite(
         await tick(at);
         expect(await commands()).toHaveLength(0);
         const pay = await confirm(id);
+        // Confirmed full payment automatically authorizes an already verified
+        // machine PIN; no second staff approval is needed.
         expect(await grant(id)).toMatchObject({
           payment_id: pay,
-          access_state: "review_required",
-          verification_state: "review_required",
+          access_state: "pending",
+          verification_state: "verified",
         });
-        await tick(at);
-        expect(await commands()).toHaveLength(0);
-        expect((await approve(id)).status).toBe(200);
         await tick(at);
         await tick(at);
         const [activate] = await commands();
