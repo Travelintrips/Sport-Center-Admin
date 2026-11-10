@@ -104,14 +104,14 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         AND c.result->>'afterGroup'='2')`);
   const count = Number(overdue.rows[0]?.overdue_count ?? 0);
   if (count > 0) {
-    console.error("[x904-new-user-default-suspend] 3min read-back SLA exceeded", JSON.stringify({
+    console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
       overdueCount: count, action: "investigate_vmsc_and_device",
     }));
   }
 
   // A snapshot arrives about every three minutes. Retain the transition for
   // 75 minutes so skipped worker ticks never silently lose a newly enrolled PIN.
-  // The 3 minute deadline is measured from FIRST OBSERVATION, not an invented
+  // The 30 minute maximum is measured from FIRST OBSERVATION, not an invented
   // device creation timestamp. Physical completion still requires ACK/read-back.
   const snapshots = await store.execute(sql`SELECT snapshot_id, observed_at, user_count, users
     FROM sport_center.gym_x904_access_snapshots
@@ -206,7 +206,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     // must continue to refer to exactly the same ordinary identity.
     const observedFirst = history[firstIndex];
     const firstSeen = new Date(String(observedFirst.observed_at));
-    const deadline = new Date(firstSeen.getTime() + 3 * 60_000);
+    const deadline = new Date(firstSeen.getTime() + 30 * 60_000);
     if (!Number.isFinite(firstSeen.getTime())) continue;
     if (history.slice(firstIndex).some(row =>
       (row.users as SnapshotUser[]).filter(u =>

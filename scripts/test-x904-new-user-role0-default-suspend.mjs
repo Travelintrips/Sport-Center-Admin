@@ -56,8 +56,8 @@ test("missed worker tick retains first observation and overdue read-back detecti
   assert.match(worker, /suspendDeadlineAt/);
   assert.match(worker, /readBackConfirmed/);
   assert.match(worker, /afterGroup/);
-  assert.match(worker, /3min read-back SLA exceeded/);
-  assert.match(worker, /firstSeen\.getTime\(\) \+ 3 \* 60_000/);
+  assert.match(worker, /30min read-back SLA exceeded/);
+  assert.match(worker, /firstSeen\.getTime\(\) \+ 30 \* 60_000/);
   assert.match(worker, /users @> jsonb_build_array/);
 });
 
@@ -70,10 +70,11 @@ test("no role4 or role14 suspension and active access 12h policy unchanged", () 
 test("safe re-enrollment and registry candidate require physical suspend evidence",()=>{
   assert.match(worker,/previous\.length===0/);
   assert.match(worker,/AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND/);
-  assert.match(stageFn,/verification_state\)\n  VALUES .*'review_required'/s);
+  assert.match(stageFn,/verification_state,verified_by,verified_at\)\n  VALUES .*'verified'/s);
   assert.match(stageFn,/result->>'afterGroup'='2'/);
   assert.match(stageFn,/latest\.observed_at<=c\.completed_at/);
   assert.match(stageFn,/SECURITY DEFINER/);
+  assert.match(stageFn,/system:auto-new-role0/);
   assert.match(stageFn,/X904_STAGE_CANDIDATE_UNAUTHORIZED/);
 });
 
