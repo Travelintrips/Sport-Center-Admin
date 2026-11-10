@@ -696,6 +696,26 @@ router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, a
           ORDER BY access_id DESC LIMIT 1`)
       : null;
     const pinRow = linkedPin?.rows[0] as any;
+    // PIN bookings have no VIS handover. Return the persisted identity without
+    // depending on VIS pool/snapshot queries, which can fail independently.
+    // A conflicting VIS reservation must not be hidden by this fast path.
+    if (pinRow) {
+      const conflictingCard = await db.execute(sql`SELECT 1
+        FROM sport_center.gym_vis_card_reservations
+        WHERE booking_id=${booking.id} AND state IN ('reserved','collected') LIMIT 1`);
+      if (conflictingCard.rows.length === 0) {
+        res.json({
+          bookingStatus: booking.status,
+          pinGrant: {
+            accessId:Number(pinRow.access_id),userPin:String(pinRow.user_pin),deviceUid:Number(pinRow.device_uid),
+            verifiedName:String(pinRow.verified_name),verificationState:String(pinRow.verification_state),
+            accessState:String(pinRow.access_state),
+          },
+          pool: [], reservation: null, access: null,
+        });
+        return;
+      }
+    }
     const detail = await db.execute(sql`SELECT r.card_code,r.state AS card_state,r.user_pin,r.device_uid,
         r.reserved_at,r.collected_at,r.returned_at,a.access_id,a.verification_state,a.access_state,a.activated_at,a.expires_at
       FROM sport_center.gym_vis_card_reservations r
