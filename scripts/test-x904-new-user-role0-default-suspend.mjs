@@ -5,6 +5,7 @@ const read = p => readFileSync(new URL("../" + p, import.meta.url), "utf8");
 const worker = read("artifacts/api-server/src/services/x904NewOrdinaryUserDefaultSuspend.ts");
 const policy = read("artifacts/api-server/src/services/x904NonmemberAccessPolicy.ts");
 const startup = read("artifacts/api-server/src/index.ts");
+const stageFn = read("artifacts/api-server/migrations/20261110_x904_stage_new_nonmember_candidate_fn.sql");
 
 test("new user automation requires explicit opt-in and a fresh baseline", () => {
   assert.match(worker, /GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED/);
@@ -69,7 +70,13 @@ test("no role4 or role14 suspension and active access 12h policy unchanged", () 
 test("safe re-enrollment and registry candidate require physical suspend evidence",()=>{
   assert.match(worker,/previous\.length===0/);
   assert.match(worker,/AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND/);
-  assert.match(worker,/verification_state\)\n        VALUES .*'review_required'/s);
-  assert.match(worker,/Number\(commandResult\?\.afterGroup\)!==2/);
-  assert.match(worker,/new Date\(String\(latest\.rows\[0\]\.observed_at\)\)\.getTime\(\)<=new Date\(String\(row\.completed_at\)\)\.getTime\(\)/);
+  assert.match(stageFn,/verification_state\)\n  VALUES .*'review_required'/s);
+  assert.match(stageFn,/result->>'afterGroup'='2'/);
+  assert.match(stageFn,/latest\.observed_at<=c\.completed_at/);
+  assert.match(stageFn,/SECURITY DEFINER/);
+  assert.match(stageFn,/X904_STAGE_CANDIDATE_UNAUTHORIZED/);
+});
+
+test("registry staging is delegated to a guarded database function",()=>{
+  assert.match(worker,/x904_stage_new_nonmember_candidate/);
 });

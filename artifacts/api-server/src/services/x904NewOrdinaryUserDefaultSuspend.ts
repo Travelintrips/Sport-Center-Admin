@@ -79,7 +79,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   // A new/re-enrolled ordinary PIN becomes a nonmember *candidate* only after
   // the physical safety action is proven: completed SUSPEND ACK, matching UID,
   // Group 2, and a newer authenticated snapshot. This never auto-verifies it.
-  const completedNewUsers = await store.execute(sql`SELECT c.command_id,c.user_pin,c.completed_at,c.payload,c.result
+  const completedNewUsers = await store.execute(sql`SELECT c.command_id
     FROM sport_center.x904_user_commands c
     WHERE c.device_serial=${DEVICE}
       AND c.command_type='SUSPEND_USER' AND c.state='completed'
@@ -89,44 +89,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       AND c.created_at >= ${new Date(now.getTime()-75*60_000)}
     ORDER BY c.completed_at DESC LIMIT 25`);
   for (const row of completedNewUsers.rows as any[]) {
-    await store.transaction(async tx=>{
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(904216)`);
-      const pin=String(row.user_pin);
-      const uid=Number(row.payload?.expectedUid);
-      const name=String(row.payload?.expectedName??'').trim().replace(/\s+/g,' ');
-      if(!/^[0-9]{1,8}$/.test(pin) || !Number.isSafeInteger(uid) || uid<=0 || name.length<2) return;
-      const command=await tx.execute(sql`SELECT completed_at,result,payload FROM sport_center.x904_user_commands
-        WHERE command_id=${String(row.command_id)}::uuid AND device_serial=${DEVICE}
-          AND user_pin=${pin} AND command_type='SUSPEND_USER' AND state='completed'
-          AND payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
-        FOR UPDATE`);
-      const commandResult=command.rows[0]?.result as {readBackConfirmed?:boolean;deviceUid?:number;afterGroup?:number}|null;
-      if(command.rows.length!==1 || commandResult?.readBackConfirmed!==true ||
-          Number(commandResult?.deviceUid)!==uid || Number(commandResult?.afterGroup)!==2) return;
-      const latest=await tx.execute(sql`SELECT observed_at,user_count,users FROM sport_center.gym_x904_access_snapshots
-        WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
-      if(latest.rows.length!==1 || !row.completed_at ||
-          new Date(String(latest.rows[0].observed_at)).getTime()<=new Date(String(row.completed_at)).getTime()) return;
-      const users=Array.isArray(latest.rows[0].users)?latest.rows[0].users:[];
-      if(users.length!==Number(latest.rows[0].user_count)) return;
-      const matches=users.filter((u:any)=>String(u.pin)===pin && String(u.name??'').trim().replace(/\s+/g,' ').toLocaleUpperCase('id-ID')===name.toLocaleUpperCase('id-ID') && Number(u.role)===0 && Number(u.group)===2 && u.enabled===true);
-      if(matches.length!==1) return;
-      const inventory=await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_lan_users
-        WHERE device_serial=${DEVICE} AND user_pin=${pin} AND device_uid=${uid}
-          AND display_name=${name} AND device_role=0`);
-      if(inventory.rows.length!==1) return;
-      const ownership=await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
-        WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
-      if(ownership.rows.length) return;
-      const grant=await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
-        WHERE device_serial=${DEVICE} AND user_pin=${pin}
-          AND (access_state IN ('pending','active') OR activated_at IS NOT NULL) LIMIT 1`);
-      if(grant.rows.length) return;
-      await tx.execute(sql`INSERT INTO sport_center.x904_verified_nonmember_identities
-        (device_serial,user_pin,device_uid,display_name,verification_state)
-        VALUES (${DEVICE},${pin},${uid},${name},'review_required')
-        ON CONFLICT (device_serial,user_pin) DO NOTHING`);
-    });
+    await store.execute(sql`SELECT sport_center.x904_stage_new_nonmember_candidate(${String(row.command_id)}::uuid)`);
   }
 
   // Read-only SLA monitor. A queued command or completed command without
