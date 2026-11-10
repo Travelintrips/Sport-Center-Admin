@@ -20,6 +20,16 @@ describe("Admin Lapangan DEV read-only HTTP readiness", () => {
     protectedUrl.searchParams.set("options", "-c default_transaction_read_only=on");
     process.env.SUPABASE_DATABASE_URL_DEV = protectedUrl.toString();
     const { pool } = await import("@workspace/db");
+    // Use the single application connection for this read-only smoke. The
+    // session is explicitly locked READ ONLY before an authenticated request.
+    const client = await pool.connect();
+    try {
+      await client.query("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
+      const locked = await client.query("SHOW default_transaction_read_only");
+      expect(locked.rows[0].default_transaction_read_only).toBe("on");
+    } finally {
+      client.release();
+    }
     const { default: express } = await import("express");
     const { default: supertest } = await import("supertest");
     const { default: routes } = await import("../waBookingsAdmin.js");
