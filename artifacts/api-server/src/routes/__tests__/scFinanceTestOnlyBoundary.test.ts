@@ -92,3 +92,25 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     expect(ui).toContain("Sisa Saldo Uji");
   });
 });
+
+describe("Main Keuangan SC forms stay test-only until explicitly cut over", () => {
+  it("keeps both income and expense submissions routed to the isolated ledger during TEST",()=>{
+    expect(ui).toContain("const FINANCE_SC_TEST_ONLY = true");
+    expect(ui).toContain('if(FINANCE_SC_TEST_ONLY){');
+    expect(ui).toContain('} else if(FINANCE_SC_TEST_ONLY){');
+    expect(ui).toContain('fetch(`${API}/admin/finance-test`');
+    expect(ui).toContain('direction:"IN"');
+    expect(ui).toContain('direction:"OUT"');
+    expect(ui).toContain('entryKey:incomeEntryKey,direction:"IN"');
+    expect(ui).toContain('entryKey:expenseTestEntryKey,direction:"OUT"');
+    expect(ui).toContain('amount:gross');
+    expect(ui).toContain("Input Uang Masuk (TEST)");
+    expect(ui).toContain("Tambah Pengeluaran (TEST)");
+    expect(ui).toContain("MODE TEST AKTIF");
+  });
+  it("does not create journals or direct BizPortal mutations from the test entry endpoint",()=>{
+    expect(route).toContain('router.post("/admin/finance-test",superAdminMiddleware');
+    expect(route).not.toContain("INSERT INTO public.bank_mutations");
+    expect(route).not.toContain("INSERT INTO public.accounting_entries");
+  });
+});
