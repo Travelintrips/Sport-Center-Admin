@@ -419,7 +419,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         return;
       }
 
-      const prior = await tx.execute(sql`SELECT command_id,command_type,state,result,completed_at,created_at,attempts
+      const prior = await tx.execute(sql`SELECT command_id,command_type,state,result,payload,completed_at,created_at,attempts
         FROM sport_center.x904_user_commands
         WHERE device_serial=${DEVICE}
           AND payload->>'source' IN ('AUTO_NONMEMBER_GYM_12H','MANUAL_NONMEMBER_ACCESS_CLOSE')
