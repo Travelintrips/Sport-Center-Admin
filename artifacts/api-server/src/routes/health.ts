@@ -42,8 +42,30 @@ router.get("/health", (_req, res) => {
  */
 router.get("/healthz", (_req, res) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
+  const onlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  const scope = onlyPin === undefined ? "all"
+    : onlyPin === "700" ? "pin700"
+      : /^[0-9]{1,8}$/.test(onlyPin) ? "other_pin" : "invalid";
+  const nonmemberEnabled = process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true";
+  const manualAccessEnabled = process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true";
+  const userWriteEnabled = process.env.GYM_X904_USER_WRITE_ENABLED === "true";
+  const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
+  const actorConfigured = Number.isSafeInteger(actor) && actor > 0;
+  const pin700Eligible = nonmemberEnabled && manualAccessEnabled && userWriteEnabled &&
+    actorConfigured && scope !== "invalid" && scope !== "other_pin";
   res.setHeader("Cache-Control", "no-store");
-  res.json({ ...data, ...buildIdentity });
+  res.json({
+    ...data,
+    ...buildIdentity,
+    x904NonmemberWorker: {
+      nonmemberEnabled,
+      manualAccessEnabled,
+      userWriteEnabled,
+      actorConfigured,
+      scope,
+      pin700Eligible,
+    },
+  });
 });
 
 /**

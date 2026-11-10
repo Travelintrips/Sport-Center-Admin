@@ -23,7 +23,8 @@ const liveAccessIndexMigration = readFileSync("migrations/20261107_x904_review_r
 
 beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
-  await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text);
+  await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text,role text NOT NULL DEFAULT 'customer');
+    CREATE TABLE sport_center.audit_logs(id serial primary key,user_id int,user_name text,user_role text,action text NOT NULL,entity text,entity_id int,"before" jsonb,"after" jsonb,ip_address text,user_agent text,created_at timestamptz DEFAULT now());
     CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
     CREATE TABLE sport_center.sport_bookings(id int primary key, booking_date text NOT NULL DEFAULT '2026-11-06', start_time text NOT NULL DEFAULT '06:00', source text, notes text, status text NOT NULL DEFAULT 'confirmed');
     CREATE TABLE sport_center.sport_payments(id int primary key,booking_id int references sport_center.sport_bookings(id),status text,confirmed_at timestamptz,paid_at timestamptz);
@@ -71,7 +72,7 @@ beforeAll(async () => {
       ('TDBD234200545','17',17,'VIS 004',0),
       ('TDBD234200545','90',339,'VIS 002',0),
       ('TDBD234200545','15',15,'VIS 006',0);`);
-  await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
+  await run(`INSERT INTO sport_center.users(id,name,registration_source,account_status,email,password_hash,role) VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null,'staff'),(302,'CI ACTIVE STAFF','isolated-test','active',null,null,'staff');
     INSERT INTO sport_center.sport_bookings(id) VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','card','VIS001','78',338,'VIS 001',9001);
@@ -650,9 +651,274 @@ test("public PIN review gate: checkout and confirmed payment alone never activat
     expect(activated.access_state).toBe("active");
     expect(new Date(activated.activated_at).getTime()).toBe(ackAt.getTime());
     expect(new Date(activated.expires_at).getTime()-ackAt.getTime()).toBe(12*60*60*1000);
+
+    // End-to-end completion for the anonymous-booking identity review path:
+    // expiry must suspend through the same worker, with a matching X904 ACK,
+    // never by writing a group or changing the real machine directly.
+    const expiryAt = new Date(new Date(activated.expires_at).getTime() + 3000);
+    await addSnapshot(new Date(expiryAt.getTime() - 1000), pin, name, 1);
+    await processX904NonmemberDailyAccess(db as any, expiryAt);
+    const suspension = await commandFor("SUSPEND_USER", accessId);
+    expect(suspension?.payload).toMatchObject({
+      source: "AUTO_NONMEMBER_GYM_12H", accessId, expectedUid: uid,
+    });
+    const suspendAckAt = new Date(expiryAt.getTime() + 1000);
+    await ack(String(suspension.command_id), suspendAckAt, pin, name, uid, 2);
+    await processX904NonmemberDailyAccess(db as any, new Date(suspendAckAt.getTime() + 3000));
+    const expiredGrant = (await run(
+      "SELECT access_state,activated_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",
+      [accessId],
+    )).rows[0];
+    expect(expiredGrant.access_state).toBe("expired");
+    expect(new Date(expiredGrant.activated_at).getTime()).toBe(ackAt.getTime());
+    const commandsBeforeRetry = Number((await run(
+      "SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",
+      [String(accessId)],
+    )).rows[0].n);
+    expect(commandsBeforeRetry).toBe(2);
+    await addSnapshot(new Date(suspendAckAt.getTime() + 4000), pin, name, 2);
+    await processX904NonmemberDailyAccess(db as any, new Date(suspendAckAt.getTime() + 5000));
+    expect(Number((await run(
+      "SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",
+      [String(accessId)],
+    )).rows[0].n)).toBe(commandsBeforeRetry);
   } finally {
     delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   }
+});
+
+test("public verified PIN at closing: 22:40 activation, automatic 23:00 suspend, never reopens tomorrow", async () => {
+  // Disposable PostgreSQL only. Never use a live PIN, booking, payment or X904.
+  const pin = "607", uid = 607, name = "CI CLOSING PIN";
+  const bookingId = 9607, paymentId = 9707;
+  const paidAt = new Date("2026-11-06T15:40:00Z"); // 22:40 WIB
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = pin;
+  try {
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)", [pin, uid, name]);
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+      VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`, [pin,uid,name]);
+    await run(`INSERT INTO sport_center.sport_bookings
+      (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+      VALUES($1,'2026-11-06','22:30','gym_public_guest',
+        'Registered PIN booked without login; staff review required',
+        'pending_payment','SC-CI-CLOSING-PIN-9607',$2,30000)`, [bookingId,name]);
+    await run(`INSERT INTO sport_center.x904_nonmember_daily_access
+      (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+       booking_id,verification_state,access_state)
+      VALUES('TDBD234200545','pin','PIN VERIFIED',$1,$2,$3,$4,
+        'review_required','review_required')`, [pin,uid,name,bookingId]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status) VALUES($1,$2,'pending')", [paymentId,bookingId]);
+    const accessId = Number((await run(
+      "SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId],
+    )).rows[0].access_id);
+
+    await addSnapshot(new Date(paidAt.getTime()-1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,paidAt);
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+    await run("UPDATE sport_center.sport_bookings SET status='confirmed' WHERE id=$1",[bookingId]);
+    await run("UPDATE sport_center.sport_payments SET status='confirmed',confirmed_at=$2 WHERE id=$1",[paymentId,paidAt]);
+    await processX904NonmemberDailyAccess(db as any,new Date(paidAt.getTime()+1000));
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
+
+    // Operator-attested PIN and funds are separately approved after payment.
+    await run(`UPDATE sport_center.x904_nonmember_daily_access
+      SET verification_state='verified',access_state='pending'
+      WHERE access_id=$1 AND payment_id=$2`,[accessId,paymentId]);
+    await addSnapshot(new Date(paidAt.getTime()+2000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(paidAt.getTime()+3000));
+    const activate = await commandFor("ACTIVATE_USER",accessId);
+    expect(activate?.payload).toMatchObject({source:"AUTO_NONMEMBER_GYM_12H",expectedUid:uid,accessId});
+    const activationAckAt = new Date("2026-11-06T15:45:00Z"); // 22:45 WIB
+    await ack(String(activate.command_id),activationAckAt,pin,name,uid,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(activationAckAt.getTime()+2000));
+    const active = (await run(
+      "SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",
+      [accessId],
+    )).rows[0];
+    expect(active.access_state).toBe("active");
+    expect(new Date(active.activated_at).getTime()).toBe(activationAckAt.getTime());
+    expect(new Date(active.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
+
+    // At 22:59 the grant is still live, without premature SUSPEND_USER.
+    const beforeClose = new Date("2026-11-06T15:59:00Z");
+    await addSnapshot(new Date(beforeClose.getTime()-1000),pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,beforeClose);
+    expect(await commandFor("SUSPEND_USER",accessId)).toBeUndefined();
+
+    // After 23:00, the real worker must queue the suspend (never a manual command).
+    const afterClose = new Date("2026-11-06T16:00:03Z");
+    await addSnapshot(new Date(afterClose.getTime()-1000),pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,afterClose);
+    const suspend = await commandFor("SUSPEND_USER",accessId);
+    expect(suspend?.payload).toMatchObject({source:"AUTO_NONMEMBER_GYM_12H",expectedUid:uid,accessId});
+    const suspendAckAt = new Date(afterClose.getTime()+1000);
+    await ack(String(suspend.command_id),suspendAckAt,pin,name,uid,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(suspendAckAt.getTime()+2000));
+    expect((await run(
+      "SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",
+      [accessId],
+    )).rows[0].access_state).toBe("expired");
+
+    // A past-day booking must neither reopen nor enqueue duplicate suspend commands.
+    const tomorrow = new Date("2026-11-07T01:00:00Z"); // 08:00 next day WIB
+    await addSnapshot(new Date(tomorrow.getTime()-1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,tomorrow);
+    expect(Number((await run(
+      "SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",
+      [String(accessId)],
+    )).rows[0].n)).toBe(2);
+  } finally {
+    delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  }
+});
+
+test("registered PIN checkout row lock works under production-like RLS, registry writes remain denied", async () => {
+  // Mimics PROD sport_center_app precisely, including SELECT-only RLS followed
+  // by SELECT ... FOR SHARE in POST /api/wa/booking. Disposable PostgreSQL only.
+  const pin = "608", uid = 608, name = "CI RLS PIN";
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+  await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+    (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+    VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+  await run("CREATE ROLE sport_center_app");
+  await run("GRANT USAGE ON SCHEMA sport_center TO sport_center_app");
+  await run("GRANT SELECT,UPDATE ON sport_center.x904_verified_nonmember_identities TO sport_center_app");
+  await run(`CREATE POLICY gym_nonmember_registry_backend_read
+    ON sport_center.x904_verified_nonmember_identities
+    FOR SELECT TO sport_center_app USING (true)`);
+
+  const readSql = `SELECT 1 FROM sport_center.x904_verified_nonmember_identities
+    WHERE device_serial='TDBD234200545' AND user_pin=$1 AND device_uid=$2
+      AND upper(regexp_replace(trim(display_name),'[[:space:]]+',' ','g'))=
+          upper(regexp_replace(trim($3::text),'[[:space:]]+',' ','g'))
+      AND verification_state='verified' AND revoked_at IS NULL`;
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL ROLE sport_center_app");
+    expect((await c.query(readSql,[pin,uid,name])).rowCount).toBe(1);
+    // The original production regression: visible in plain SELECT but not
+    // visible under FOR SHARE because UPDATE RLS policy is absent.
+    expect((await c.query(readSql+" FOR SHARE",[pin,uid,name])).rowCount).toBe(0);
+    await c.query("ROLLBACK");
+  } finally { c.release(); }
+
+  await run(readFileSync("migrations/20261109_x904_verified_registry_for_share_rls.sql","utf8"));
+  const app = await pool.connect();
+  try {
+    await app.query("BEGIN");
+    await app.query("SET LOCAL ROLE sport_center_app");
+    expect((await app.query(readSql+" FOR SHARE",[pin,uid,name])).rowCount).toBe(1);
+    await app.query("ROLLBACK");
+    await app.query("BEGIN");
+    await app.query("SET LOCAL ROLE sport_center_app");
+    await expect(app.query(
+      "UPDATE sport_center.x904_verified_nonmember_identities SET display_name='FORGED' WHERE user_pin=$1",
+      [pin],
+    )).rejects.toThrow(/row-level security policy/i);
+    await app.query("ROLLBACK");
+  } finally { app.release(); }
+  expect((await run("SELECT display_name FROM sport_center.x904_verified_nonmember_identities WHERE user_pin=$1",[pin])).rows[0].display_name).toBe(name);
+});
+
+test("production-style RLS accepts only held public registered PIN grant, never active or unauthorized", async () => {
+  // RLS integration test uses an isolated localhost PostgreSQL role, not PROD.
+  // The earlier registry lock test creates sport_center_app and registry policies.
+  const pin = "609", uid = 609, name = "CI PUBLIC REVIEW RLS", bookingId = 9609;
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+  await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+    (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+    VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+  await run(`INSERT INTO sport_center.sport_bookings
+    (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+    VALUES ($1,'2026-11-09','15:00','gym_public_guest','test','pending_payment','SC-CI-RLS-9609',$2,30000)`,[bookingId,name]);
+  await run("GRANT SELECT ON sport_center.sport_bookings, sport_center.gym_x904_member_mapping TO sport_center_app");
+  await run("GRANT SELECT, INSERT ON sport_center.x904_nonmember_daily_access TO sport_center_app");
+  await run("ALTER TABLE sport_center.x904_nonmember_daily_access ENABLE ROW LEVEL SECURITY");
+  // Reproduce the actual restrictive production rule: ordinary backend inserts
+  // can create verified pending grants, but not review_required anonymous grants.
+  await run(`CREATE POLICY x904_nonmember_app_insert ON sport_center.x904_nonmember_daily_access
+    FOR INSERT TO sport_center_app
+    WITH CHECK (device_serial='TDBD234200545' AND access_state='pending'
+                AND activated_at IS NULL AND verification_state='verified'
+                AND payment_id IS NULL AND confirmed_at IS NULL AND expires_at IS NULL)`);
+
+  const insertSql = `INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+      booking_id,verification_state,access_state)
+    VALUES('TDBD234200545','pin','PIN:'||$1,$1,$2,$3,$4,'review_required','review_required')`;
+  const conn = await pool.connect();
+  const attempt = async (actualUid: number, actualPin = pin) => {
+    await conn.query("BEGIN");
+    await conn.query("SET LOCAL ROLE sport_center_app");
+    try {
+      await conn.query(insertSql,[actualPin,actualUid,name,bookingId]);
+      await conn.query("ROLLBACK");
+      return "allowed";
+    } catch (err) {
+      await conn.query("ROLLBACK");
+      return String((err as { code?: string }).code ?? "error");
+    }
+  };
+  try {
+    expect(await attempt(uid)).toBe("42501"); // pre-fix RLS denial
+    await run(readFileSync("migrations/20261109_x904_public_pin_review_insert_rls.sql","utf8"));
+    expect(await attempt(uid)).toBe("allowed");
+    expect(await attempt(uid+1)).toBe("42501"); // cannot forge X904 UID
+    expect(await attempt(uid,"237")).toBe("42501"); // special PIN excluded
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].n).toBe(0);
+  } finally { conn.release(); }
+});
+
+test("single-checkout DB transaction commits held PIN and receipt together, or rolls both back", async () => {
+  // Real disposable PostgreSQL with actual PIN registry RLS and protected grant
+  // policy. No machine, external payment, PROD DB, or fake verified funds.
+  const pin="610",uid=610,name="CI ATOMIC GYM CHECKOUT";
+  await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+  await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+    (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+    VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`,[pin,uid,name]);
+  await run("GRANT SELECT,INSERT,UPDATE ON sport_center.sport_bookings TO sport_center_app");
+  await run("GRANT SELECT,INSERT ON sport_center.sport_payments TO sport_center_app");
+  const create = async (bookingId:number,paymentId:number) => {
+    const client=await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE sport_center_app");
+      await client.query(`INSERT INTO sport_center.sport_bookings
+        (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
+        VALUES($1,'2026-11-09','16:12','gym_public_guest','single multipart proof',
+          'pending_payment',$2,$3,30000)`,[bookingId,`SC-CI-ATOMIC-${bookingId}`,name]);
+      await client.query(`INSERT INTO sport_center.x904_nonmember_daily_access
+        (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+          booking_id,verification_state,access_state)
+        VALUES('TDBD234200545','pin','PIN:'||$1,$1,$2,$3,$4,'review_required','review_required')`,
+        [pin,uid,name,bookingId]);
+      await client.query(`INSERT INTO sport_center.sport_payments
+        (id,booking_id,status,amount,proof_url)
+        VALUES($1,$2,'pending',30000,'ci://durable-proof-receipt')`,[paymentId,bookingId]);
+      await client.query("UPDATE sport_center.sport_bookings SET status='waiting_confirmation' WHERE id=$1",[bookingId]);
+      await client.query("COMMIT");
+      return "committed";
+    } catch(err) {
+      await client.query("ROLLBACK");
+      return String((err as {code?:string}).code ?? "error");
+    } finally {client.release();}
+  };
+  expect(await create(9610,9710)).toBe("committed");
+  expect((await run("SELECT status FROM sport_center.sport_bookings WHERE id=9610")).rows[0].status).toBe("waiting_confirmation");
+  expect((await run("SELECT status,proof_url FROM sport_center.sport_payments WHERE booking_id=9610")).rows[0])
+    .toMatchObject({status:"pending",proof_url:"ci://durable-proof-receipt"});
+  expect((await run("SELECT verification_state,access_state,payment_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9610")).rows[0])
+    .toMatchObject({verification_state:"review_required",access_state:"review_required",payment_id:null});
+  const grantId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9610")).rows[0].access_id);
+  expect(await commandFor("ACTIVATE_USER",grantId)).toBeUndefined();
+  // A late payment INSERT error must roll back booking and grant too.
+  expect(await create(9611,9710)).toBe("23505");
+  expect((await run("SELECT count(*)::int n FROM sport_center.sport_bookings WHERE id=9611")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9611")).rows[0].n).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=9611")).rows[0].n).toBe(0);
 });
 
 test("HTTP staff PIN approval: rejects anonymous and unverified funds, then releases a real isolated grant", async () => {
@@ -699,14 +965,14 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
        booking_id,verification_state,access_state)
       VALUES('TDBD234200545','pin','PIN VERIFIED',$1,$2,$3,$4,
        'review_required','review_required')`,[pin,uid,name,id]);
-    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at) VALUES($1,$2,'confirmed',now())",[pay,id]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed',now(),30000,'ci://validated-proof')",[pay,id]);
     const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id])).rows[0].access_id);
     const before=(await run("SELECT verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(before).toMatchObject({verification_state:"review_required",access_state:"review_required"});
 
     const anonymous=await request.post(endpoint).send({identityChecked:true,officialFundsChecked:true,officialBankReference:"CI-BANK-9706"});
-    expect(anonymous.status).toBe(403);
-    const token=createToken(301,"staff");
+    expect(anonymous.status).toBe(401);
+    const token=createToken(302,"staff");
     const invalid=await request.post(endpoint).set("Authorization",`Bearer ${token}`)
       .send({identityChecked:true,officialFundsChecked:false,officialBankReference:"CI-BANK-9706"});
     expect(invalid.status).toBe(400);
@@ -736,6 +1002,10 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
   // Isolate snapshot history from earlier scenarios with later simulated timestamps.
   await run("DELETE FROM sport_center.gym_x904_access_snapshots");
   // Isolated local PostgreSQL; never send machine commands to a real X904.
+  // Previous scenarios may insert simulated snapshots after this clock.
+  // Reset only the future slice of the disposable fixture, preserving the
+  // historical observations used to detect reused PINs.
+  await run("DELETE FROM sport_center.gym_x904_access_snapshots WHERE observed_at >= '2026-11-08T23:59:00Z'");
   process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED = "true";
   process.env.GYM_X904_NEW_USER_BASELINE_AT = "2026-11-08T23:59:00.000Z";
   // First sighting at 00:01; worker only processes at 00:03, after a new
@@ -777,6 +1047,103 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
     });
     // No automatic commands for 651 role4, 652 role14 or existing 653.
     expect(cmds.some((c:any) => ["651","652","653"].includes(c.user_pin))).toBe(false);
+  } finally {
+    delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
+    delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
+  }
+});
+
+
+test("unrestricted role-0 rollout handles two fresh PINs and protects special, mapped, registered and reused PINs", async () => {
+  process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED="true";
+  process.env.GYM_X904_NEW_USER_BASELINE_AT="2026-11-08T23:59:00.000Z";
+  delete process.env.GYM_X904_NEW_USER_ONLY_PIN;
+  try {
+    await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
+      VALUES ('TDBD234200545','660',660,'NEW MULTI SPACE',0),
+             ('TDBD234200545','661',661,'SECOND ORDINARY',0),
+             ('TDBD234200545','662',662,'NEW SPECIAL FOUR',4),
+             ('TDBD234200545','663',663,'NEW SPECIAL ADMIN',14),
+             ('TDBD234200545','664',664,'NEW MAPPED MEMBER',0),
+             ('TDBD234200545','665',665,'NEW REGISTERED',0),
+             ('TDBD234200545','668',668,'REUSED HISTORICAL',0)`);
+    await run("INSERT INTO sport_center.gym_x904_member_mapping(membership_id,user_pin,device_serial) VALUES(9664,'664','TDBD234200545')");
+    await run(`INSERT INTO sport_center.x904_verified_nonmember_identities
+      (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at)
+      VALUES ('TDBD234200545','665',665,'NEW REGISTERED','verified','ci',now())`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:03:00Z',user_count+1,
+        users || '[{"pin":"668","name":"REUSED HISTORICAL","role":0,"group":1,"enabled":true}]'::jsonb
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:04:00Z',user_count-1,
+        (SELECT jsonb_agg(item) FROM jsonb_array_elements(users) item WHERE item->>'pin'<>'668')
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:05:00Z',user_count+7,
+        users || '[
+          {"pin":"660","name":"NEW MULTI SPACE","role":0,"group":1,"enabled":true},
+          {"pin":"661","name":"SECOND ORDINARY","role":0,"group":1,"enabled":true},
+          {"pin":"662","name":"NEW SPECIAL FOUR","role":4,"group":1,"enabled":true},
+          {"pin":"663","name":"NEW SPECIAL ADMIN","role":14,"group":1,"enabled":true},
+          {"pin":"664","name":"NEW MAPPED MEMBER","role":0,"group":1,"enabled":true},
+          {"pin":"665","name":"NEW REGISTERED","role":0,"group":1,"enabled":true},
+          {"pin":"668","name":"REUSED HISTORICAL","role":0,"group":1,"enabled":true}
+        ]'::jsonb
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    const at=new Date("2026-11-09T00:06:00.000Z");
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,at);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,at);
+    const rows=(await run(`SELECT user_pin,command_type,state,payload FROM sport_center.x904_user_commands
+      WHERE payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND' ORDER BY user_pin`)).rows;
+    expect(rows.map((r:any)=>r.user_pin)).toEqual(["650","660","661"]);
+    expect(rows.every((r:any)=>r.command_type==="SUSPEND_USER" && r.state==="queued")).toBe(true);
+    expect(rows.find((r:any)=>r.user_pin==="660").payload).toMatchObject({
+      expectedUid:660,expectedName:"NEW MULTI SPACE",expectedRole:0,
+      firstObservedAt:"2026-11-09T00:05:00.000Z",
+      suspendDeadlineAt:"2026-11-09T00:35:00.000Z"
+    });
+  } finally {
+    delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
+    delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
+  }
+});
+
+
+test("collector outage does not freeze later enrollment; no duplicate on retry", async () => {
+  process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED="true";
+  process.env.GYM_X904_NEW_USER_BASELINE_AT="2026-11-08T23:59:00.000Z";
+  delete process.env.GYM_X904_NEW_USER_ONLY_PIN;
+  try {
+    await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
+      VALUES('TDBD234200545','670',670,'POST GAP VISITOR',0)`);
+    // A 15-minute collection gap follows earlier complete snapshots. A clean
+    // baseline after recovery must permit NEW enrollments, not old PINs.
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:20:00Z',user_count,users
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    await run(`INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users)
+      SELECT 'TDBD234200545','2026-11-09T00:21:00Z',user_count+1,
+        users || '[{"pin":"670","name":"POST GAP VISITOR","role":0,"group":1,"enabled":true}]'::jsonb
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+    const time=new Date("2026-11-09T00:22:00.000Z");
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,time);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,time);
+    const matches=(await run(`SELECT user_pin,command_type,state,payload FROM sport_center.x904_user_commands
+      WHERE user_pin='670' AND payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({user_pin:"670",command_type:"SUSPEND_USER",state:"queued",
+      payload:{expectedUid:670,expectedRole:0,firstObservedAt:"2026-11-09T00:21:00.000Z",
+        suspendDeadlineAt:"2026-11-09T00:51:00.000Z"}});
+    const old=(await run(`SELECT user_pin FROM sport_center.x904_user_commands
+      WHERE user_pin IN ('662','663','664','665','668') AND
+        payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;
+    expect(old).toHaveLength(0);
   } finally {
     delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
     delete process.env.GYM_X904_NEW_USER_BASELINE_AT;

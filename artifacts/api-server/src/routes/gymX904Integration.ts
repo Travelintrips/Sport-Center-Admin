@@ -367,13 +367,39 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
             return res.status(409).json({error:"PREVIOUS_COMMAND_AWAITING_VERIFIED_SNAPSHOT",command_id:last.command_id});
         }
       }
-      const result=await db.execute(sql`INSERT INTO sport_center.x904_user_commands
-        (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
-        VALUES (${expectedSerial},${commandType},${userPin},
-          ${JSON.stringify({expectedUid,expectedName})}::jsonb,${actor.userId},${idempotencyKey})
-        ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
-      if(!result.rows.length) return res.status(409).json({error:"DUPLICATE_COMMAND"});
-      return res.status(202).json({command_id:result.rows[0].command_id,state:"queued"});
+      const queued=await db.transaction(async tx=>{
+        let payload:any={expectedUid,expectedName};
+        // Manual suspension of a verified paid nonmember entitlement means
+        // "end this entitlement now", not merely move the shared device user
+        // temporarily to Group 2. Otherwise the automatic worker would see the
+        // still-live grant and immediately reactivate it after the manual ACK.
+        if(commandType==="SUSPEND_USER"){
+          const grants=await tx.execute(sql`SELECT a.access_id
+            FROM sport_center.x904_nonmember_daily_access a
+            JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+            WHERE a.device_serial=${expectedSerial} AND a.user_pin=${userPin}
+              AND a.device_uid=${expectedUid} AND a.verified_name=${expectedName}
+              AND a.verification_state='verified' AND a.access_state='active'
+              AND a.activated_at IS NOT NULL AND p.status::text='confirmed'
+            FOR UPDATE OF a`);
+          if(grants.rows.length>1) throw new Error("AMBIGUOUS_ACTIVE_NONMEMBER_GRANT");
+          if(grants.rows.length===1){
+            const accessId=Number((grants.rows[0] as any).access_id);
+            await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+              SET access_state='review_required'
+              WHERE access_id=${accessId} AND access_state='active'`);
+            payload={...payload,source:"MANUAL_NONMEMBER_ACCESS_CLOSE",accessId};
+          }
+        }
+        const result=await tx.execute(sql`INSERT INTO sport_center.x904_user_commands
+          (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
+          VALUES (${expectedSerial},${commandType},${userPin},
+            ${JSON.stringify(payload)}::jsonb,${actor.userId},${idempotencyKey})
+          ON CONFLICT (idempotency_key) DO NOTHING RETURNING command_id`);
+        return result.rows;
+      });
+      if(!queued.length) return res.status(409).json({error:"DUPLICATE_COMMAND"});
+      return res.status(202).json({command_id:queued[0].command_id,state:"queued"});
     }catch{return res.status(503).json({error:"MANUAL_ACCESS_QUEUE_UNAVAILABLE"});}
   }
   const isCreate=commandType==="CREATE_USER";

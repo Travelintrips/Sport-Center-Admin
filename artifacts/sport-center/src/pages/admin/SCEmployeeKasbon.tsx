@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2, LockKeyhole } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, ExternalLink, Trash2, RefreshCw, CheckCircle2, LockKeyhole, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,28 +32,45 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
  const [actionPassword,setActionPassword]=useState("");
  const [actionGrant,setActionGrant]=useState<{recordId:number;authorization:string;expiresAt:number}|null>(null);
  const hasActionGrant=(recordId:number)=>actionGrant?.recordId===recordId&&actionGrant.expiresAt>Date.now();
- const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string}|null>(null);
- type SalaryCheck={matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}};
+ const [salaryPreview,setSalaryPreview]=useState<{name:string;cell:string;amount:number;previous:string;period:string;tab:string}|null>(null);
+ type SalaryCheck={period:string;tab:string;previous?:string;employeeMissing?:boolean;matched:boolean;allSynced:boolean;syncedRecordIds:number[];name:string;cell:string;amount:number;sheetRow:{row:number;number:string;name:string;uangMakan:string;hariKerja:string;persentase:string;totalSalary:string;kasbon:string|number;sisaGaji:string|number}|null};
  const [salaryCheck,setSalaryCheck]=useState<SalaryCheck|null>(null);
  const [checkOpen,setCheckOpen]=useState(false);
+ const [selectedPeriod,setSelectedPeriod]=useState(()=>{const d=new Date();const value=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");return value<"2026-10"?"2026-10":value;});
+ const [showAllMonths,setShowAllMonths]=useState(false);
+ const monthLabel=new Date(selectedPeriod+"-01T12:00:00").toLocaleDateString("id-ID",{month:"long",year:"numeric"});
+ const monthRecords=(records:Kasbon[])=>records.filter(r=>r.kasbonDate.slice(0,7)===selectedPeriod);
+
  const key=["admin-sc-employee-kasbon",employee.employeeId];
  const {data:records=[],isLoading,isError,error}=useQuery<Kasbon[]>({queryKey:key,queryFn:()=>api(endpoint(employee.employeeId))});
- const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,records.map(r=>r.id+":"+r.amount).join("|")];
- const {data:initialSalaryCheck,isFetching:isSalaryChecking,isError:isSalaryCheckError}=useQuery<SalaryCheck>({
+ const monthlyRecords=monthRecords(records);
+ const visibleRecords=showAllMonths?records:monthlyRecords;
+ const syncKey=["admin-sc-kasbon-salary-check",employee.employeeId,selectedPeriod,monthlyRecords.map(r=>r.id+":"+r.amount).join("|")];
+ const {data:initialSalaryCheck,isFetching:isSalaryChecking,isError:isSalaryCheckError,error:salaryCheckLoadError}=useQuery<SalaryCheck>({
   queryKey:syncKey,
-  queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
-  enabled:!isLoading&&!isError&&records.length>0,
+  queryFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
+  enabled:!showAllMonths&&!isLoading&&!isError,
   staleTime:0,
   refetchOnWindowFocus:true,
   retry:false,
  });
  const sisaGaji = useMemo(() => calculateSisaGaji(employee.salary, records), [employee.salary, records]);
- const totalKasbon = useMemo(() => records.reduce((sum,record) => sum + Number(record.amount), 0), [records]);
- const syncEvidence=initialSalaryCheck??salaryCheck;
- const isSalarySynced=Boolean(!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched&&syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
+ const totalKasbon = monthlyRecords.reduce((sum,record) => sum + Number(record.amount), 0);
+ const syncEvidence=showAllMonths?null:(initialSalaryCheck??salaryCheck);
+ const isSalarySynced=Boolean(!syncEvidence?.employeeMissing&&!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched&&syncEvidence?.allSynced && Number(syncEvidence.amount)===totalKasbon);
  // Historical receipt alone cannot prove the current payroll G cell matches.
  const syncedRecordIds=new Set(syncEvidence?.syncedRecordIds??[]);
- const payrollMatches=Boolean(!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
+ const payrollMatches=Boolean(!syncEvidence?.employeeMissing&&!showAllMonths&&!isSalaryChecking&&!isSalaryCheckError&&syncEvidence?.matched && Number(syncEvidence.amount)===totalKasbon);
+ // Historical payroll totals are an aggregate reference, never individual
+ // Kasbon transactions. The 2026-10 source predates the SC transaction ledger.
+ const historicalOctoberAmount=selectedPeriod==="2026-10"&&!showAllMonths&&monthlyRecords.length===0
+  &&!isSalaryChecking&&!isSalaryCheckError&&!syncEvidence?.employeeMissing
+  &&syncEvidence?.period==="2026-10"&&syncEvidence?.sheetRow
+  &&syncEvidence?.cell.startsWith("G")&&syncEvidence?.previous!==undefined
+  &&String(syncEvidence.previous).trim()!==""
+  ? Number(syncEvidence.previous):NaN;
+ const showHistoricalOctober=Number.isSafeInteger(historicalOctoberAmount)&&historicalOctoberAmount>0;
+
  const save=useMutation({
   mutationFn:async(payload:Form)=>{
    const isCreate=editing===null;
@@ -116,17 +133,17 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   }
  });
  const checkSalary=useMutation({
-  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
-  onSuccess:(result:SalaryCheck)=>{setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
-  onError:(e:Error)=>{setSalaryCheck(null);toast({title:"Check Sync gagal",description:e.message,variant:"destructive"});}
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
+  onSuccess:(result:SalaryCheck)=>{if(result.period!==selectedPeriod)return;setSalaryCheck(result);qc.setQueryData(syncKey,result);setCheckOpen(true);},
+  onError:(e:Error)=>{setSalaryCheck(null);toast({title:e.message==="SALARY_WORKSHEET_NOT_VERIFIED"?"Tab Gaji belum tersedia":"Check Sync gagal",description:e.message,variant:"destructive"});}
  });
  const previewSalary=useMutation({
-  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview"}),
-  onSuccess:result=>setSalaryPreview(result),
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"preview",period:selectedPeriod}),
+  onSuccess:result=>{if(result.period===selectedPeriod)setSalaryPreview(result);},
   onError:(e:Error)=>toast({title:"Pratinjau Sync gagal",description:e.message,variant:"destructive"})
  });
  const syncSalary=useMutation({
-  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync"}),
+  mutationFn:()=>api(endpoint(employee.employeeId)+"/salary-sync","POST",{action:"sync",period:selectedPeriod}),
   onSuccess:result=>{setSalaryPreview(null);setSalaryCheck(null);setCheckOpen(false);qc.invalidateQueries({queryKey:syncKey.slice(0,2)});toast({title:"Total Kasbon berhasil Sync ke laporan gaji",description:result.cell+" — "+currency(result.amount)});},
   onError:(e:Error)=>{setSalaryPreview(null);setSalaryCheck(null);toast({title:"Sync belum berhasil",description:e.message,variant:"destructive"});}
  });
@@ -148,14 +165,30 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <Button onClick={()=>{setEditing(null);setForm(blank());setOpen(true);}}><Plus className="mr-2 h-4 w-4"/>Tambah Kasbon</Button>
    </div>
   </div>
+  <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border bg-background px-4 py-3">
+   <div className="space-y-1">
+    <Label htmlFor="kasbon-period"><CalendarDays className="mr-1 inline h-4 w-4"/>Bulan Kasbon &amp; Laporan Gaji</Label>
+    <Input id="kasbon-period" type="month" min="2026-10" max="2099-12" value={selectedPeriod}
+     disabled={checkSalary.isPending||syncSalary.isPending||previewSalary.isPending}
+     onChange={e=>{if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(e.target.value)||e.target.value<"2026-10")return;
+      setSelectedPeriod(e.target.value);setShowAllMonths(false);setSalaryCheck(null);setSalaryPreview(null);setCheckOpen(false);}}/>
+   </div>
+   <Button variant={showAllMonths?"default":"outline"} onClick={()=>{setShowAllMonths(v=>!v);setSalaryCheck(null);setSalaryPreview(null);setCheckOpen(false);}}
+    disabled={syncSalary.isPending||previewSalary.isPending||checkSalary.isPending}>Semua Bulan</Button>
+   <p className="w-full text-xs text-muted-foreground">{showAllMonths?"Menampilkan seluruh riwayat. Pilih satu bulan untuk Check Sync atau Sync Total.":"Tujuan sinkronisasi: GAJI JULI 2025 → Gaji "+monthLabel+" → Kolom G. Transaksi bulan lain tidak ikut."}</p>
+  </div>
   <div className="rounded-xl border bg-background px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><p className="font-semibold">Check Sync Total — Gaji</p><p className="text-xs text-muted-foreground">Lihat baris karyawan pada laporan gaji (bukan Kasbon POOL).</p></div>
-      <Button variant="outline" disabled={checkSalary.isPending||isLoading||isError} onClick={()=>{if(checkOpen){setCheckOpen(false);}else{checkSalary.mutate();}}}>
+      <div><p className="font-semibold">Check Sync Total — Gaji</p><p className="text-xs text-muted-foreground">Periksa Kasbon {monthLabel} pada kolom G tab gaji yang dipilih.</p></div>
+      <Button variant="outline" disabled={showAllMonths||checkSalary.isPending||isLoading||isError} onClick={()=>{if(checkOpen){setCheckOpen(false);}else{checkSalary.mutate();}}}>
         <RefreshCw className="mr-2 h-4 w-4"/>{checkSalary.isPending?"Memeriksa...":checkOpen?"Tutup":"Check Sync"}
       </Button>
     </div>
-    {checkOpen&&salaryCheck&&<div className="mt-4 space-y-3">
+    {isSalaryCheckError&&!showAllMonths&&<p role="alert" className="mt-2 text-xs text-destructive">{(salaryCheckLoadError as Error)?.message==="SALARY_WORKSHEET_NOT_VERIFIED"?"Tab gaji "+monthLabel+" belum tersedia. Buat tab terlebih dahulu dari Data Karyawan SC.":"Gagal memeriksa tab gaji "+monthLabel+". Silakan Check Sync ulang."}</p>}
+    {selectedPeriod==="2026-10"&&!showAllMonths&&<p role="status" className="mt-2 text-xs text-amber-700">Oktober 2026 merupakan periode historis. Check Sync hanya membaca Google Sheets; Sync Total dinonaktifkan agar angka Kasbon lama tidak tertimpa.</p>}
+    {monthlyRecords.length===0&&!showAllMonths&&selectedPeriod!=="2026-10"&&<p className="mt-2 text-xs text-muted-foreground">Tidak ada transaksi Kasbon bulan ini; Sync Total tidak akan menulis Rp0 ke Sheets.</p>}
+    {syncEvidence?.employeeMissing&&!showAllMonths&&<p role="status" className="mt-2 text-sm text-amber-700">Karyawan {employee.fullName} tidak tercatat di tab {syncEvidence.tab}. Tidak ada baris untuk diperiksa; Sync Total dinonaktifkan. Data Kasbon bulan ini tetap aman.</p>}
+    {checkOpen&&salaryCheck&&!salaryCheck.employeeMissing&&salaryCheck.sheetRow&&<div className="mt-4 space-y-3">
      <div className="flex flex-wrap items-center gap-2 text-sm"><span>Nama Sheets: <strong>{salaryCheck.name}</strong></span><span>· Sel: <strong>{salaryCheck.cell}</strong></span>
       <span className={salaryCheck.matched?"rounded-full bg-green-100 px-2 py-0.5 font-semibold text-green-700":"rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{salaryCheck.matched?"Total cocok dengan Sheets":"Total belum cocok"}</span>
      </div>
@@ -164,28 +197,39 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     </div>}
   </div>
   <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-   <CardTitle>Histori Kasbon ({records.length})</CardTitle>
+   <CardTitle>Histori Kasbon — {showAllMonths?"Semua Bulan":monthLabel} ({visibleRecords.length} transaksi SC{showHistoricalOctober?" · 1 ringkasan historis":""})</CardTitle>
    <div className="flex flex-wrap items-center gap-2">
-    <Button variant="outline" disabled={isSalaryChecking||isSalaryCheckError||checkSalary.isPending||isSalarySynced||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalaryChecking||checkSalary.isPending?"Sedang memeriksa laporan gaji; Sync Total belum tersedia":isSalaryCheckError?"Pemeriksaan Sheets gagal; lakukan Check Sync ulang":isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
+    <Button variant="outline" disabled={showAllMonths||isSalaryChecking||isSalaryCheckError||Boolean(syncEvidence?.employeeMissing)||checkSalary.isPending||isSalarySynced||selectedPeriod==="2026-10"||monthlyRecords.length===0||isLoading||isError||previewSalary.isPending||syncSalary.isPending||save.isPending||remove.isPending} title={isSalaryChecking||checkSalary.isPending?"Sedang memeriksa laporan gaji; Sync Total belum tersedia":isSalaryCheckError?"Pemeriksaan Sheets gagal; lakukan Check Sync ulang":isSalarySynced?"Seluruh transaksi sudah tersinkron dengan Google Sheets":selectedPeriod==="2026-10"?"Oktober historis hanya boleh Check Sync":monthlyRecords.length===0?"Bulan tanpa transaksi tidak dapat menulis Rp0":"Sync total kasbon ke kolom G laporan gaji, bukan ke Kasbon POOL"} onClick={()=>previewSalary.mutate()}>
       {isSalarySynced?<CheckCircle2 className="mr-2 h-4 w-4"/>:<RefreshCw className="mr-2 h-4 w-4"/>}
-      {isSalaryChecking||checkSalary.isPending||previewSalary.isPending?"Memeriksa Sheets...":isSalarySynced?"Synced":"Sync Total"}
+      {showAllMonths?"Pilih Bulan":isSalaryChecking||checkSalary.isPending||previewSalary.isPending?"Memeriksa Sheets...":isSalarySynced?"Synced":"Sync Total"}
     </Button>
    <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm" aria-label="Total Kasbon">
-    <span className="font-medium text-muted-foreground">Total Kasbon</span>
-    <span className="border-l pl-3 text-base font-semibold tabular-nums" aria-live="polite">{isLoading ? "Memuat..." : isError ? "—" : currency(totalKasbon)}</span>
+    <span className="font-medium text-muted-foreground">Total Kasbon {showAllMonths?"":monthLabel}</span>
+    <span className="border-l pl-3 text-base font-semibold tabular-nums" aria-live="polite">{isLoading ? "Memuat..." : isError ? "—" : currency(showAllMonths?records.reduce((sum,r)=>sum+Number(r.amount),0):totalKasbon)}</span>
+    {showHistoricalOctober&&<span className="border-l pl-3 text-sm font-semibold text-amber-700 tabular-nums" aria-label="Referensi Kasbon historis Google Sheets">Referensi Sheets: {currency(historicalOctoberAmount)}</span>}
    </div>
    </div>
   </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
-   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th><th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
-    {records.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td><td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
-    <td className="p-3">{isSalaryChecking?<span className="text-xs text-muted-foreground">Memeriksa Sheets...</span>:payrollMatches&&syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:syncedRecordIds.has(r.id)?<span className="text-xs font-medium text-amber-700">Perlu Sync Total</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
+   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th>{showAllMonths&&<th className="p-3">Bulan</th>}<th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
+    {visibleRecords.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td>{showAllMonths&&<td className="p-3 whitespace-nowrap">{new Date(r.kasbonDate+"T12:00:00").toLocaleDateString("id-ID",{month:"short",year:"numeric"})}</td>}<td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
+    <td className="p-3">{showAllMonths?<span className="text-xs text-muted-foreground">Pilih bulan untuk cek status</span>:isSalaryChecking?<span className="text-xs text-muted-foreground">Memeriksa Sheets...</span>:payrollMatches&&syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:syncedRecordIds.has(r.id)?<span className="text-xs font-medium text-amber-700">Perlu Sync Total</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
     {hasActionGrant(r.id)?<>
     <Button size="sm" variant="outline" onClick={()=>{setEditing(r.id);setForm({kasbonDate:r.kasbonDate,amount:fromDatabaseKasbonAmount(r.amount),notes:r.notes,proofUrl:r.proofUrl});setOpen(true);}}><Pencil className="mr-1 h-3 w-3"/>Edit</Button>
     <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={()=>setToDelete(r)}><Trash2 className="mr-1 h-3 w-3"/>Hapus</Button>
    </>:<Button size="sm" variant="outline" onClick={()=>{setActionGrant(null);setActionPassword("");setUnlockRecord(r);}}><LockKeyhole className="mr-1 h-3 w-3"/>Insert Password</Button>}</div></td></tr>)}
-   </tbody></table>{!records.length&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk karyawan ini.</p>}</div>}
+    {showHistoricalOctober&&<tr className="border-b bg-amber-50/60">
+      <td className="p-3 font-semibold text-amber-900">Saldo historis Sheets</td>
+      <td className="p-3">Oktober 2026 (tanggal transaksi tidak tersedia)</td>
+      <td className="p-3 font-semibold tabular-nums">{currency(historicalOctoberAmount)}</td>
+      <td className="p-3 text-muted-foreground">Tidak tersedia</td>
+      <td className="p-3">—</td>
+      <td className="p-3 text-xs">Referensi total dari {syncEvidence?.tab}, sel {syncEvidence?.cell}. Bukan transaksi Kasbon SC.</td>
+      <td className="p-3 text-xs font-medium text-amber-700">Historis · belum direkonsiliasi</td>
+      <td className="p-3 text-xs text-muted-foreground">Hanya baca</td>
+    </tr>}
+   </tbody></table>{!visibleRecords.length&&!showHistoricalOctober&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk periode yang dipilih.</p>}{showHistoricalOctober&&<p className="mt-3 text-xs text-muted-foreground">Ringkasan historis diambil dari Google Sheets, bukan dari transaksi individual database. ID, tanggal, dan bukti per transaksi tidak tersedia. Data tidak dapat diedit atau dihapus dari sini, dan tidak dijumlahkan ke total Kasbon SC.</p>}</div>}
   </CardContent></Card>
   <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
    <DialogContent className="max-w-md">
@@ -193,14 +237,14 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     <div className="space-y-2 text-sm">
      <p>Karyawan: <strong>{employee.fullName}</strong> ({employee.employeeId})</p>
      <p>Nama Google Sheets: <strong>{salaryPreview?.name}</strong></p>
-     <p>Tujuan: Gaji November 2026 — <strong>{salaryPreview?.cell}</strong> (kolom G)</p>
-     <p>Transaksi yang akan dicakup: <strong>{records.length} transaksi kasbon</strong></p>
-     <p>Total seluruh kasbon karyawan: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
+     <p>Tujuan: <strong>{salaryPreview?.tab}</strong> — <strong>{salaryPreview?.cell}</strong> (kolom G)</p>
+     <p>Transaksi yang akan dicakup: <strong>{monthlyRecords.length} transaksi kasbon {monthLabel}</strong></p>
+     <p>Total Kasbon bulan {monthLabel}: <strong>{currency(salaryPreview?.amount??0)}</strong></p>
      <p className="text-muted-foreground">Sync Total hanya mengganti total kasbon karyawan pada kolom G laporan gaji. Setelah read-back berhasil, setiap transaksi yang tercakup dicatat dalam bukti sinkronisasi. Jika data berubah, jalankan Sync Total kembali.</p>
     </div>
     <div className="flex justify-end gap-2">
      <Button variant="outline" disabled={syncSalary.isPending} onClick={()=>setSalaryPreview(null)}>Batal</Button>
-     <Button disabled={!salaryPreview||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Sync Total"}</Button>
+     <Button disabled={!salaryPreview||salaryPreview.period!==selectedPeriod||syncSalary.isPending} onClick={()=>syncSalary.mutate()}>{syncSalary.isPending?"Menyinkronkan...":"Konfirmasi Sync Total"}</Button>
     </div>
    </DialogContent>
   </Dialog>

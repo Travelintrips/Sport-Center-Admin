@@ -55,11 +55,38 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(form).toContain("Status Booking Gym");
     expect(form).toContain("Berhasil Dibuat");
     expect(form).toContain("Menunggu Verifikasi Admin");
+    // OCR preview and booking creation alone are not proof receipt.
+    // Only a successfully persisted waiting_confirmation response opens admin review.
+    expect(form).toContain('data?.success !== true');
+    expect(form).toContain('"waiting_confirmation", "confirmed"');
+    expect(form).toContain('proofUploadState === "received" ? "Menunggu Verifikasi Admin"');
+    expect(form).toContain('proofUploadState === "failed" ? "Bukti Belum Tersimpan"');
+    expect(form).toContain('void uploadProofForBooking(result)');
+    expect(form).toContain("Booking tetap tercatat; coba upload ulang tanpa membuat booking baru.");
+    expect(form).not.toContain("setProofConfirmed(confirmed)");
     expect(form).toContain("Belum Aktif");
     expect(form).toContain("aktivasi mesin serta read-back berhasil");
     expect(form).toContain("Cek Status Booking");
     expect(form).not.toContain("Booking Dikonfirmasi!");
     expect(form).not.toContain("Bukti pembayaran cocok dan booking otomatis dikonfirmasi.");
+  });
+
+  test("public Gym booking and proof commit together with staff-only review", () => {
+    // Verify the only public Gym submit now sends a single multipart request,
+    // not an acknowledged booking followed by a best-effort receipt POST.
+    expect(form).toContain('const requestOptions: RequestInit = publicGymGuest');
+    expect(form).toContain('fd.append("proof", proofFile)');
+    expect(form).toContain('bookingResult.proofStatus !== "waiting_confirmation"');
+    expect(api).toContain('router.post("/wa/booking", uploadProof.single("proof")');
+    expect(api).toContain('req.body.publicGymGuest === "true"');
+    expect(api).toContain("Booking belum dibuat");
+    expect(api).toContain('const url = await uploadProofWithFallback(req.file.buffer');
+    expect(api).toContain('await tx.insert(paymentsTable).values({');
+    expect(api).toContain('status: "pending",');
+    expect(api).toContain('status: "waiting_confirmation", updatedAt: new Date()');
+    expect(api).toContain('proofStatus: publicGymGuest && publicProof ? "waiting_confirmation" : null');
+    expect(api).toContain('access_state,');
+    expect(form).not.toContain('setProofUploadState(proofFile && form.paymentMethod ? "uploading" : "idle");\n      setResult(bookingResult);\n      if (proofFile');
   });
 
   test("Gym booking status is gated by payment, entitlement and X904 read-back", () => {

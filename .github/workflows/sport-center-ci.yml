@@ -129,6 +129,9 @@ jobs:
           console.log("DEV database URL structure PASS (actual PostgreSQL authentication is checked by tests).");
           NODE
 
+      - name: Verify real DEV Gym X904 RLS checkout policy parity (read-only)
+        run: pnpm --filter @workspace/api-server exec node scripts/verify-dev-x904-checkout-rls.mjs
+
       - name: Verify Gym X904 admin isolation and navigation
         run: node scripts/verify-gym-x904-admin-contract.mjs
 
@@ -209,6 +212,14 @@ jobs:
           }
           Write-Output 'X904_DURABLE_WORKER_POWERSHELL_PARSE_PASS'
 
+      - name: Compile PROD QRIS detection-only runtime (no execution)
+        run: |
+          pnpm --filter @workspace/api-server exec esbuild \
+            ../../scripts/qris-mandiri/qris-prod-detection-runtime.ts \
+            --bundle --platform=node --format=esm --packages=external \
+            --outfile=/tmp/sc-qris-prod-detection-runtime.mjs
+          node --check /tmp/sc-qris-prod-detection-runtime.mjs
+
       - name: Verify QRIS Gmail PROD detection safety contract
         run: node --test scripts/qris-mandiri/qris-prod-runtime-contract.test.mjs
 
@@ -223,6 +234,15 @@ jobs:
 
       - name: Verify Kasbon aggregate Sync receipts and transaction badges
         run: node --experimental-strip-types scripts/test-sc-kasbon-total-sync-snapshot.mjs
+
+      - name: Verify monthly Kasbon salary Sheets sync isolation
+        run: node --experimental-strip-types scripts/test-sc-kasbon-monthly-payroll.mjs
+
+      - name: Verify historical October and November salary employee mappings
+        run: node --experimental-strip-types scripts/test-sc-kasbon-historical-robby-identity.mjs
+
+      - name: Verify historical Kasbon summary does not fabricate transactions
+        run: node scripts/test-sc-kasbon-historical-history-summary.mjs
 
       - name: Verify green payroll badge requires current Sheets G match
         run: node scripts/test-sc-kasbon-total-badge-live-match.mjs
@@ -350,3 +370,84 @@ jobs:
           SUPABASE_DATABASE_URL_DEV: postgresql://postgres:vis_ci_only@127.0.0.1:55444/x904_nonmember_safe2
           NODE_ENV: test
         run: pnpm --filter @workspace/api-server test:x904-nonmember-real-pg
+
+  gym-checkout-real-postgres:
+    name: Gym checkout — actual multipart HTTP and isolated PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: checkout_ci_only
+          POSTGRES_DB: pin700_checkout_isolated
+        ports:
+          - 55444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pin700_checkout_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test real checkout HTTP, rollback, retry and concurrent submissions
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: isolated-checkout-ci-not-a-production-secret
+          SUPABASE_DATABASE_URL_DEV: postgresql://postgres:checkout_ci_only@127.0.0.1:55444/pin700_checkout_isolated
+          GYM_CHECKOUT_ISOLATED_PG_URL: postgresql://postgres:checkout_ci_only@127.0.0.1:55444/pin700_checkout_isolated
+        run: >-
+          pnpm --filter @workspace/api-server exec node --experimental-vm-modules
+          ./node_modules/jest/bin/jest.js --runInBand
+          src/routes/__tests__/gymPublicCheckout.realPg.test.ts
+
+  gym-pin-pipeline-real-postgres:
+    name: PIN pipeline — real routes, payment trigger, RLS and worker
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pipeline_ci_only
+          POSTGRES_DB: pin700_pipeline_isolated
+        ports:
+          - 55444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pin700_pipeline_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test complete application pipeline without PROD credentials
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: isolated-pin-pipeline-ci-not-production
+          SUPABASE_DATABASE_URL_DEV: postgresql://sport_center_app:pipeline_local_only@127.0.0.1:55444/pin700_pipeline_isolated
+          GYM_PIN_PIPELINE_PG_URL: postgresql://postgres:pipeline_ci_only@127.0.0.1:55444/pin700_pipeline_isolated
+        run: >-
+          pnpm --filter @workspace/api-server exec node --experimental-vm-modules
+          ./node_modules/jest/bin/jest.js --runInBand
+          src/routes/__tests__/gymPublicPinPipeline.realPg.test.ts

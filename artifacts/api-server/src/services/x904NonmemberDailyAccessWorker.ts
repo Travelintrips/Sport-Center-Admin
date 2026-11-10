@@ -183,7 +183,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           // A paid, currently valid grant takes priority over legacy cleanup.
           const grant = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
             WHERE device_serial=${DEVICE} AND user_pin=${pin}
-              AND access_state IN ('pending','active') LIMIT 1`);
+              AND (access_state IN ('pending','active')
+                OR (access_state='review_required' AND payment_id IS NOT NULL)) LIMIT 1`);
+          // A paid grant awaiting ACK recovery remains owned by the paid-access
+          // worker. Legacy cleanup must not enqueue a competing unscoped suspend.
           if (grant.rows.length) return;
           const existing = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
             WHERE device_serial=${DEVICE} AND user_pin=${pin}
@@ -245,8 +248,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       // Only the new self-service VIS flow requires witnessed physical handover.
       // Legacy verified-card/PIN grants retain their established behavior.
-      if (a.booking_source === "gym_public_guest" &&
-          String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) {
+      if (a.identity_type === "card" &&
+          ((a.booking_source === "gym_public_guest" &&
+            String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) ||
+            a.booking_source === "web")) {
         // A revoked booking must never initiate activation. Do not skip an
         // already activated entitlement, though: it must still reach the
         // regular SUSPEND_USER path and receive verified device read-back.
@@ -315,7 +320,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const expiry = activeStart
         ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
         : null;
-      const shouldBeActive = (a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status))) &&
+      // A web booking attached to a physical VIS must be confirmed to activate.
+      // Cancellation/completion causes the ordinary verified SUSPEND path.
+      const bookingEligible = a.booking_source === "web" && a.identity_type === "card"
+        ? a.booking_status === "confirmed"
+        : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
+      const shouldBeActive = bookingEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
@@ -409,14 +419,27 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         return;
       }
 
-      const prior = await tx.execute(sql`SELECT command_id,command_type,state,result,completed_at,created_at,attempts
+      const prior = await tx.execute(sql`SELECT command_id,command_type,state,result,payload,completed_at,created_at,attempts
         FROM sport_center.x904_user_commands
-        WHERE device_serial=${DEVICE} AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
+        WHERE device_serial=${DEVICE}
+          AND payload->>'source' IN ('AUTO_NONMEMBER_GYM_12H','MANUAL_NONMEMBER_ACCESS_CLOSE')
           AND payload->>'accessId'=${String(a.access_id)}
         ORDER BY created_at DESC LIMIT 1`);
       if (prior.rows.length) {
         const last = prior.rows[0] as any;
+        const lastSource = String((last as any).payload?.source ?? "");
         if (last.state === "queued" || last.state === "claimed") return;
+        if (lastSource === "MANUAL_NONMEMBER_ACCESS_CLOSE") {
+          if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true &&
+              Number((last.result as any)?.deviceUid) === Number(a.device_uid) &&
+              Number((last.result as any)?.afterGroup) === 2 && last.completed_at &&
+              observedAt.getTime() > new Date(String(last.completed_at)).getTime() && currentGroup === 2) {
+            await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+              SET access_state='expired'
+              WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+          }
+          return;
+        }
         if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true) {
           if (last.command_type !== commandType) {
             if (currentGroup === targetGroup && shouldBeActive) {
@@ -428,6 +451,14 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           }
           if (!last.completed_at || observedAt.getTime() <= new Date(String(last.completed_at)).getTime()) return;
           if (currentGroup === targetGroup && last.command_type === commandType) {
+            // Both activation AND suspension need the intended UID and group.
+            // A Group 2 snapshot alone cannot validate an ACK for another user.
+            if (Number((last.result as any)?.afterGroup) !== targetGroup ||
+                Number((last.result as any)?.deviceUid) !== Number(a.device_uid)) {
+              await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
+              return;
+            }
             if (shouldBeActive) {
               const ackGroup = Number((last.result as any)?.afterGroup);
               const ackUid = Number((last.result as any)?.deviceUid);

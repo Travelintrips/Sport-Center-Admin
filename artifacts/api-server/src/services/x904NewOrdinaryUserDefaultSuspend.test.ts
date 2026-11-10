@@ -1,4 +1,4 @@
-import { isNewOrdinaryX904Candidate } from "./x904NewOrdinaryUserDefaultSuspend";
+import { isNewOrdinaryX904Candidate, isSafeReenrollment } from "./x904NewOrdinaryUserDefaultSuspend";
 import { decideNonmemberX904Access, x904NonmemberEffectiveExpiry } from "./x904NonmemberAccessPolicy";
 
 describe("new ordinary X904 device user stays suspended until verified paid entitlement", () => {
@@ -39,4 +39,16 @@ describe("new ordinary X904 device user stays suspended until verified paid enti
     const b = new Date("2026-11-07T00:00:00Z"); // 07:00 WIB
     expect(x904NonmemberEffectiveExpiry(b)?.toISOString()).toBe("2026-11-07T12:00:00.000Z"); // 19:00 WIB
   });
+});
+
+describe("historical PIN reused after removal",()=>{
+ const toms={pin:"10",name:"TOMS",oldName:"KARTU 07",oldRole:0,absentSnapshots:2,gapMinutes:5500};
+ test("PIN 10 TOMS follows safe re-enrollment",()=>expect(isSafeReenrollment(toms)).toBe(true));
+ test("same identity or incomplete absence is held",()=>{
+  expect(isSafeReenrollment({...toms,name:"KARTU 07"})).toBe(false);
+  expect(isSafeReenrollment({...toms,absentSnapshots:1})).toBe(false);
+  expect(isSafeReenrollment({...toms,gapMinutes:3})).toBe(false);
+ });
+ test.each(["12","79","237"])("special PIN %s held",pin=>expect(isSafeReenrollment({...toms,pin})).toBe(false));
+ test.each([4,14])("special role %s held",role=>expect(isSafeReenrollment({...toms,oldRole:role})).toBe(false));
 });

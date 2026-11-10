@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
+import { autoReserveVisAfterFundsVerified, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { normalizeX904VisitorName } from "../services/x904VisitorName";
-import { db, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
+import { db, auditLogsTable, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -1516,7 +1517,7 @@ function getRequestRole(req: { headers: { authorization?: string } }): string | 
 // Staff-only handoff for a NO-LOGIN ordinary PIN booking. Never accepts a
 // client-selected PIN, UID, or payment assertion. This is a deliberate
 // in-person identity attestation, not automatic approval from a name match.
-router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
+router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async (req, res) => {
   try {
     const rawToken = String(req.headers.authorization ?? "");
     const principal = rawToken.startsWith("Bearer ") ? verifyToken(rawToken.slice(7)) : null;
@@ -1545,24 +1546,49 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
       res.status(409).json({ error: "Aktivasi PIN Gym hanya pada jam operasional 06.00–23.00 WIB." }); return;
     }
 
+    let approvedAccessState = "pending";
     const outcome = await db.transaction(async tx => {
+      // Serialize retries and keep authorization and its mandatory audit atomic.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('x904_guest_pin_approval'),${bookingId})`);
+      const actor = await tx.execute(sql`SELECT role,account_status FROM sport_center.users
+        WHERE id=${principal.userId} FOR SHARE`);
+      if (actor.rows.length !== 1 || actor.rows[0].account_status !== 'active' ||
+          actor.rows[0].role !== principal.role) return "actor_changed";
+      // Payment updates acquire their row lock before their grant trigger.
+      // Use the same order here, rather than approving a concurrently revoked payment.
+      await tx.execute(sql`SELECT p.id FROM sport_center.sport_payments p
+        JOIN sport_center.x904_nonmember_daily_access a ON a.payment_id=p.id AND a.booking_id=p.booking_id
+        WHERE a.booking_id=${bookingId} FOR UPDATE OF p`);
       const found = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.verification_state,a.access_state,
-          b.source,b.status::text AS booking_status,b.booking_date::text AS booking_date,p.status::text AS payment_status
+          b.source,b.status::text AS booking_status,b.booking_date::text AS booking_date,p.status::text AS payment_status,
+          p.proof_url,p.amount,p.confirmed_at AS payment_confirmed_at,
+          COALESCE(b.grand_total,b.total_price) AS payable_total
         FROM sport_center.x904_nonmember_daily_access a
         JOIN sport_center.sport_bookings b ON b.id=a.booking_id
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
         WHERE a.booking_id=${bookingId} AND a.identity_type='pin'
           AND a.device_serial='TDBD234200545'
-        FOR UPDATE OF a`);
+        FOR UPDATE OF a,b`);
       if (found.rows.length !== 1) return "not_found";
       const grant = found.rows[0] as any;
       if (grant.source !== "gym_public_guest" ||
           String(grant.booking_date).slice(0, 10) !== currentDate ||
           grant.payment_status !== "confirmed" || !grant.payment_id ||
           !["confirmed", "paid"].includes(String(grant.booking_status)) ||
-          grant.verification_state !== "review_required" ||
-          grant.access_state !== "review_required") return "not_ready";
+          !grant.payment_confirmed_at || !String(grant.proof_url ?? "").trim() ||
+          !Number.isFinite(Number(grant.payable_total)) || Number(grant.payable_total) <= 0 ||
+          !Number.isFinite(Number(grant.amount)) || Number(grant.amount) < Number(grant.payable_total)) return "not_ready";
+      if (grant.verification_state === "verified" && ["pending","active"].includes(String(grant.access_state))) {
+        const previous = await tx.execute(sql`SELECT 1 FROM sport_center.audit_logs
+          WHERE action='x904_guest_pin_staff_attestation' AND entity='booking' AND entity_id=${bookingId}
+            AND "after"->>'accessId'=${String(grant.access_id)}
+            AND "after"->>'paymentId'=${String(grant.payment_id)} LIMIT 1`);
+        if (previous.rows.length !== 1) return "approval_audit_missing";
+        approvedAccessState = String(grant.access_state);
+        return "already_approved";
+      }
+      if (grant.verification_state !== "review_required" || grant.access_state !== "review_required") return "not_ready";
       const pin = String(grant.user_pin);
       if (["12","79","237"].includes(pin)) return "exempt";
       const inventory = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_lan_users
@@ -1593,30 +1619,111 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", async (req, res) => {
           )
         LIMIT 1`);
       if (activeElsewhere.rows.length) return "pin_busy";
-      await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+      const updated = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
         SET verification_state='verified',access_state='pending'
         WHERE access_id=${Number(grant.access_id)}
-          AND verification_state='review_required' AND access_state='review_required'`);
+          AND verification_state='review_required' AND access_state='review_required'
+        RETURNING access_id`);
+      if (updated.rows.length !== 1) throw new Error("X904_PIN_APPROVAL_NOT_PERSISTED");
+      await tx.insert(auditLogsTable).values({
+        userId: principal.userId, userRole: principal.role,
+        action: "x904_guest_pin_staff_attestation", entity: "booking", entityId: bookingId,
+        before: {verificationState: grant.verification_state, accessState: grant.access_state},
+        after: {identityChecked:true, officialFundsChecked:true, officialBankReference,
+          verifiedBy:principal.userId, accessId:Number(grant.access_id), paymentId:Number(grant.payment_id),
+          userPin:String(grant.user_pin), deviceUid:Number(grant.device_uid), accessState:"pending"},
+      });
       return "approved";
     });
-    if (outcome !== "approved") {
-      res.status(outcome === "not_found" ? 404 : 409).json({
+    if (outcome !== "approved" && outcome !== "already_approved") {
+      res.status(outcome === "actor_changed" ? 401 : outcome === "not_found" ? 404 : 409).json({
         error: outcome === "not_found" ? "Booking PIN tanpa login tidak ditemukan." :
           "Verifikasi tidak dapat disahkan: identitas, pembayaran, tanggal, atau status akses tidak memenuhi syarat.",
         code: outcome,
       });
       return;
     }
-    await logAudit({
-      action: "x904_guest_pin_staff_attestation",
-      entity: "booking",
-      entityId: bookingId,
-      after: { identityChecked: true, officialFundsChecked: true, officialBankReference, verifiedBy: principal.userId, accessState: "pending" },
-    });
-    res.json({ success: true, accessState: "pending", message: "PIN disahkan petugas. Aktivasi menunggu worker dan ACK X904." });
+    res.json({ success: true, accessState: approvedAccessState, idempotent: outcome === "already_approved", message: "PIN disahkan petugas. Aktivasi menunggu worker dan ACK X904." });
   } catch (error) {
     console.error("[x904-guest-pin-approve]", error);
     res.status(500).json({ error: "Gagal mengesahkan akses PIN nonmember." });
+  }
+});
+
+// Assign a physical VIS card to an EXISTING paid Gym booking. Never create a
+// duplicate booking/payment and never issue an X904 device command here.
+// Handover and device read-back are separate, mandatory gates.
+router.post("/bookings/:bookingId/x904-vis-reserve", authMiddleware, async (req, res) => {
+  const authorization = String(req.headers.authorization ?? "");
+  const principal = authorization.startsWith("Bearer ")
+    ? verifyToken(authorization.slice(7)) : null;
+  if (!principal?.userId || !isOperationalBookingRole(principal.role)) {
+    res.status(403).json({ error: "Hanya petugas booking yang dapat menetapkan kartu VIS." });
+    return;
+  }
+  const bookingId = Number(req.params.bookingId);
+  if (!Number.isSafeInteger(bookingId) || bookingId <= 0 ||
+      req.body?.identityChecked !== true) {
+    res.status(400).json({ error: "Booking dan identitas pengunjung wajib diverifikasi petugas." });
+    return;
+  }
+  try {
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking || booking.source !== "web" || booking.status !== "confirmed" ||
+        booking.payerType !== "personal" || booking.bookingType === "event") {
+      res.status(409).json({ error: "Hanya booking web GYM personal yang sudah dikonfirmasi yang dapat memakai penetapan VIS ini." });
+      return;
+    }
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    if (!facility || !isGymFacility(facility)) {
+      res.status(409).json({ error: "Penetapan VIS hanya tersedia untuk booking GYM." });
+      return;
+    }
+    // The field operator never enters a bank statement reference or attests
+    // to a bank account they cannot access. Reuse exactly one previously
+    // confirmed booking payment, with proof and exact amount rechecked under
+    // the VIS transaction lock. ADMINPAY is an internal payment identity,
+    // NOT independent bank settlement confirmation.
+    const confirmedPayments = await db.select({ id: paymentsTable.id })
+      .from(paymentsTable)
+      .where(and(eq(paymentsTable.bookingId, booking.id), eq(paymentsTable.status, "confirmed")))
+      .limit(2);
+    if (confirmedPayments.length !== 1) {
+      res.status(409).json({
+        code: "payment_ambiguous",
+        error: "Pembayaran belum terkonfirmasi atau terdapat lebih dari satu pembayaran terkonfirmasi. Minta verifikasi bagian keuangan.",
+      });
+      return;
+    }
+    const confirmedPaymentId = Number(confirmedPayments[0].id);
+    const result = await autoReserveVisAfterFundsVerified({
+      orderNumber: booking.orderNumber,
+      officialBankReference: `ADMINPAY-${confirmedPaymentId}`,
+      officialFundsChecked: true,
+      confirmedPaymentId,
+      verifiedBy: `PAYMENT-CONFIRMED-${principal.userId}`,
+      allowWebBooking: true,
+    });
+    await logAudit({
+      userId: principal.userId,
+      userRole: principal.role,
+      action: "GYM_VIS_EXISTING_WEB_BOOKING_RESERVED",
+      entity: "booking",
+      entityId: booking.id,
+      after: { cardCode: result.cardCode, state: result.state, newReservation: result.newReservation,
+        confirmedPaymentId, evidenceType: "existing_confirmed_payment", bankSettlementIndependentlyChecked: false },
+      ...getClientInfo(req),
+    });
+    res.json({ success: true, ...result, message: "Kartu VIS direservasi untuk booking yang sudah dibayar; serah-terima fisik dan ACK mesin masih wajib." });
+  } catch (error) {
+    if (error instanceof VisReservationError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
+    req.log.error({ err: error }, "Reserve VIS for existing web booking failed");
+    res.status(503).json({ error: "Reservasi VIS tidak tersedia. Tidak ada akses baru diterbitkan." });
   }
 });
 
@@ -1755,7 +1862,21 @@ router.post("/bookings", async (req, res) => {
     // Admin-created guest bookings have no registered customer identity. Never
     // implicitly attach them to the logged-in operator (including super_admin).
     const isAdminGuestBooking = isAdminRequest && bookingSource === "admin" && req.body.customerId === null;
-    const effectiveCustomerId = isAdminGuestBooking ? null : bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
+    // A staff session is never the customer's identity, including when the
+    // staff member opens the public/web booking form for a walk-in guest.
+    // Keep bookedByUserId as the operator audit field instead.
+    const staffPersonalBooking = isAdminRequest && !isCompanyBilling && !isPendingCompany;
+    if (staffPersonalBooking && bodyCustomerId) {
+      const [selectedCustomer] = await db.select({ role: usersTable.role })
+        .from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
+      if (!selectedCustomer || selectedCustomer.role !== "customer") {
+        res.status(400).json({ error: "Akun petugas tidak boleh ditetapkan sebagai identitas pelanggan." });
+        return;
+      }
+    }
+    const effectiveCustomerId = staffPersonalBooking
+      ? bodyCustomerId
+      : isAdminGuestBooking ? null : bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
     const activityType = req.body.activityType || null;
     let numberOfPeople = req.body.numberOfPeople == null ? null : Number(req.body.numberOfPeople);
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -1796,6 +1917,33 @@ router.post("/bookings", async (req, res) => {
       /gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")) &&
       isAdminRequest && bookingSource === "admin" && isOperationalBookingRole(loggedInRole) &&
       normalizedBookingDate < getTodayWIB();
+    // Staff must reuse an already paid web Gym booking for the SAME visitor,
+    // date and facility rather than creating a second booking solely to
+    // generate a VIS grant. Ordinary repeat visits without a VIS selection
+    // keep their existing workflow.
+    if (isWalkIn && isAdminRequest && bookingSource === "admin" &&
+        req.body.x904IdentityType === "card" && normalizedBookingDate === getTodayWIB()) {
+      const existingPaid = await db.execute(sql`SELECT b.id,b.order_number
+        FROM sport_center.sport_bookings b
+        JOIN sport_center.sport_payments p ON p.booking_id=b.id
+        WHERE b.facility_id=${normalizedFacilityId}
+          AND b.booking_date=${normalizedBookingDate}
+          AND b.source IN ('web','gym_public_guest')
+          AND b.status::text='confirmed' AND p.status::text='confirmed'
+          AND b.customer_phone=${customerPhone}
+          AND upper(btrim(b.customer_name))=upper(btrim(${normalizedCustomerName}))
+        ORDER BY b.id DESC LIMIT 1`);
+      if (existingPaid.rows.length) {
+        const original = existingPaid.rows[0] as any;
+        res.status(409).json({
+          code: "EXISTING_PAID_GYM_BOOKING",
+          error: `Pengunjung sudah memiliki booking GYM terbayar ${String(original.order_number)}. Buka booking tersebut dan tetapkan kartu VIS di sana, tanpa membuat pembayaran atau booking baru.`,
+          existingBookingId: Number(original.id),
+          existingOrderNumber: String(original.order_number),
+        });
+        return;
+      }
+    }
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
     let x904VisitorName: string | null = null;
     const hasX904Identity = req.body.x904IdentityType != null || req.body.x904IdentityValue != null;
@@ -2180,11 +2328,11 @@ router.post("/bookings", async (req, res) => {
         let existingUser: typeof usersTable.$inferSelect | undefined;
         if (normalizedPhone) {
           [existingUser] = await db.select().from(usersTable)
-            .where(eq(usersTable.phone, normalizedPhone)).limit(1);
+            .where(and(eq(usersTable.phone, normalizedPhone), eq(usersTable.role, "customer"))).limit(1);
         }
         if (!existingUser && customerEmail) {
           [existingUser] = await db.select().from(usersTable)
-            .where(eq(usersTable.email, String(customerEmail))).limit(1);
+            .where(and(eq(usersTable.email, String(customerEmail)), eq(usersTable.role, "customer"))).limit(1);
         }
 
         if (existingUser) {
@@ -3443,10 +3591,66 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       res.status(400).json({ error: `Invalid status: ${status}` });
       return;
     }
+    if (adminNotes !== undefined && (typeof adminNotes !== "string" || adminNotes.length > 2000)) {
+      res.status(400).json({ error: "Catatan admin harus berupa teks maksimal 2.000 karakter." });
+      return;
+    }
 
     const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!beforeUpdate) {
       res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    // Notes-only must never masquerade as a status transition or trigger
+    // payment synchronization, finance reversal, or customer notification.
+    if (!status && adminNotes !== undefined && !hasAdditionalChargesUpdate) {
+      const [saved] = await db.update(bookingsTable)
+        .set({ adminNotes, updatedAt: new Date() })
+        .where(eq(bookingsTable.id, id))
+        .returning({ id: bookingsTable.id });
+      if (!saved) { res.status(404).json({ error: "Not found" }); return; }
+      await db.insert(bookingHistoryTable).values({
+        bookingId: id,
+        fromStatus: beforeUpdate.status,
+        toStatus: beforeUpdate.status,
+        changedBy: getUserFromReq(req).userId ?? null,
+        changedByName: getUserFromReq(req).userName ?? "Admin",
+        note: "Catatan admin internal diperbarui (tanpa perubahan status)",
+      });
+      const refreshed = await getBookingWithPayment(id);
+      res.json(refreshed);
+      return;
+    }
+
+    // Refund requires independent proof of money actually returned.
+    // No direct status shortcut is allowed.
+    if (status === "refunded" && beforeUpdate.status !== "refunded") {
+      res.status(409).json({
+        code: "REFUND_REQUIRES_VERIFIED_FINANCIAL_WORKFLOW",
+        error: "Status Dikembalikan tidak boleh diatur manual. Verifikasi dana benar-benar dikembalikan melalui proses keuangan.",
+      });
+      return;
+    }
+    if (status === "confirmed" && beforeUpdate.status !== "confirmed") {
+      const confirmedPayment = await db.select({ id: paymentsTable.id })
+        .from(paymentsTable)
+        .where(and(eq(paymentsTable.bookingId, id), eq(paymentsTable.status, "confirmed")))
+        .limit(1);
+      if (!confirmedPayment.length && beforeUpdate.membershipPaymentId == null) {
+        res.status(409).json({
+          code: "BOOKING_CONFIRM_REQUIRES_PAYMENT_VERIFICATION",
+          error: "Konfirmasi booking harus mengikuti verifikasi pembayaran, bukan hanya pilihan status.",
+        });
+        return;
+      }
+    }
+    if (status && ["pending_payment", "paid"].includes(status) &&
+        ["confirmed", "completed", "cancelled", "refunded"].includes(beforeUpdate.status)) {
+      res.status(409).json({
+        code: "BOOKING_STATUS_DOWNGRADE_BLOCKED",
+        error: "Booking yang sudah dikonfirmasi/selesai/dibatalkan tidak boleh diturunkan langsung ke status pembayaran awal.",
+      });
       return;
     }
 
@@ -3795,7 +3999,9 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     }
 
     if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {
-      const completion = await completeBooking(id, getUserFromReq(req));
+      const completion = await completeBooking(id, getUserFromReq(req), new Date(), {
+        withoutCheckInReason: req.body?.withoutCheckInReason,
+      });
       if (!completion.ok) {
         res.status(400).json({ error: completion.reason });
         return;

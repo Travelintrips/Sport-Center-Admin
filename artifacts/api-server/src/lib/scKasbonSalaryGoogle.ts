@@ -1,12 +1,11 @@
 import { google } from "googleapis";
 import { planKasbonSalaryColumnG, type KasbonTotal } from "./scKasbonTotalSheetPlan";
+import {salaryTabForKasbonPeriod} from "./scKasbonMonthlyPeriod";
+import {resolvePayrollIdentity} from "./scKasbonSalaryVerifiedIdentity";
 
 const SPREADSHEET_ID = "1_Zq5gX7xW35YdI46zeLNguvc6TNb6qP7_vGhTqDAtXg";
-const GID = 1429288652;
-const TAB = "Gaji November 2026";
-const tabRange = (cell: string) => "'" + TAB.replace(/'/g, "''") + "'!" + cell;
+const NOVEMBER_GID = 1429288652;
 const aliases: Record<string,string> = {
-  SC003: "ROBBY",
   SC004: "TRI WISUDO",
   SC008: "SONIK",
 };
@@ -22,31 +21,45 @@ function googleClient() {
  const auth=new google.auth.GoogleAuth({credentials,scopes:["https://www.googleapis.com/auth/spreadsheets"]});
  return google.sheets({version:"v4",auth});
 }
-export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean) {
+export async function syncEmployeeKasbonToSalary(input:KasbonTotal, dryRun:boolean,period:string) {
+ const tab=salaryTabForKasbonPeriod(period);
+ const tabRange=(cell:string)=>"'" + tab.replace(/'/g,"''") + "'!" + cell;
  // Preview is read-only and must never be blocked by the write switch.
  // Only explicit admin-confirmed sync requests can write; deployment can disable writes with false.
  if(!dryRun && process.env.SC_KASBON_SALARY_SYNC_ENABLED==="false")throw Error("SALARY_SYNC_DISABLED");
  if(process.env.APP_ENV!=="production" || process.env.NODE_ENV!=="production")throw Error("SALARY_PRODUCTION_ENV_REQUIRED");
  const sheets=googleClient();
  const meta=await sheets.spreadsheets.get({spreadsheetId:SPREADSHEET_ID,fields:"sheets(properties(sheetId,title,gridProperties(rowCount)),protectedRanges,merges)"});
- const target=(meta.data.sheets??[]).find(s=>s.properties?.sheetId===GID&&s.properties?.title===TAB);
- if(!target)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ const matches=(meta.data.sheets??[]).filter(s=>s.properties?.title===tab);
+ if(matches.length!==1)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ const target=matches[0];const gid=target.properties?.sheetId;
+ if(typeof gid!=="number"||!Number.isSafeInteger(gid)||gid<0)throw Error("SALARY_WORKSHEET_NOT_VERIFIED");
+ if(period==="2026-11"&&gid!==NOVEMBER_GID)throw Error("SALARY_NOVEMBER_WORKSHEET_ID_CHANGED");
  const rowCount=target.properties?.gridProperties?.rowCount??0;
  if(!Number.isSafeInteger(rowCount)||rowCount<22||rowCount>10000)throw Error("SALARY_ROWS_UNEXPECTED");
  const range=tabRange("A1:H"+rowCount);
  // FORMULA returns formulas, allowing the planner to protect existing formula cells.
  const result=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range,valueRenderOption:"FORMULA"});
  const rows=result.data.values??[];
- // The payroll sheet shortens Robby Rahman to ROBBY: bind only to the known SC003 identity.
- if(input.employeeId==="SC003" && input.fullName.trim().toUpperCase()!=="ROBBY RAHMAN" && input.fullName.trim().toUpperCase()!=="ROBBY")
-  throw Error("SALARY_EMPLOYEE_ALIAS_IDENTITY_CHANGED");
- const plan=planKasbonSalaryColumnG([input],rows,aliases);
+ // Use exact verified name for each historical month, never fuzzy matching.
+ const identity=resolvePayrollIdentity(input.employeeId,input.fullName,period);
+ const periodAliases={...aliases,[input.employeeId]:input.employeeId==="SC003"?identity.name:(aliases[input.employeeId]??identity.name)};
+ const plan=planKasbonSalaryColumnG([input],rows,periodAliases);
  const entry=plan.writes[0];
- if(!entry)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
+ if(!entry){
+  // Missing historical employee: preview only. Never invent a salary row.
+  if(!dryRun)throw Error("SALARY_EMPLOYEE_NAME_NOT_FOUND");
+  return {status:"preview" as const,employeeMissing:true,matched:false,
+   employeeId:input.employeeId,name:periodAliases[input.employeeId],
+   cell:"",amount:Number(input.total),spreadsheetId:SPREADSHEET_ID,gid,period,tab,
+   sheetRow:null};
+ }
+ if(identity.expectedRow!==null && entry.row!==identity.expectedRow)
+  throw Error("SALARY_VERIFIED_EMPLOYEE_ROW_CHANGED");
  const existing=String(rows[entry.row-1]?.[6]??"");
  if(existing.startsWith("="))throw Error("SALARY_KASBON_FORMULA_PROTECTED");
  const cell=tabRange(entry.range);
- const report={employeeId:input.employeeId,name:entry.name,cell:entry.range,previous:existing,amount:entry.amount,spreadsheetId:SPREADSHEET_ID,gid:GID};
+ const report={employeeId:input.employeeId,name:entry.name,cell:entry.range,previous:existing,amount:entry.amount,spreadsheetId:SPREADSHEET_ID,gid,period,tab};
  if(dryRun){
   // Live Sheets row, not a hardcoded G9/G11 mapping. Read-only on-demand check.
   const raw=rows[entry.row-1]??[];

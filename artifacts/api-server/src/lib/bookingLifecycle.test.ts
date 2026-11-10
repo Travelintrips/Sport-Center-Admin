@@ -4,6 +4,7 @@ import {
   hasBookingSessionEnded,
   hasBookingSessionStarted,
   isBookingConfirmableStatus,
+  normalizeBookingCompletionExceptionReason,
 } from "./bookingLifecycleRules";
 
 describe("booking lifecycle guard contracts", () => {
@@ -42,6 +43,16 @@ describe("booking lifecycle guard contracts", () => {
         new Date("2026-08-23T00:00:00+07:00"),
       ),
     ).toBe(true);
+  });
+
+  it("requires a meaningful audit reason when completing without check-in", () => {
+    expect(normalizeBookingCompletionExceptionReason(undefined)).toBeNull();
+    expect(normalizeBookingCompletionExceptionReason("")).toBeNull();
+    expect(normalizeBookingCompletionExceptionReason("WA ada")).toBeNull();
+    expect(normalizeBookingCompletionExceptionReason("   ")).toBeNull();
+    expect(normalizeBookingCompletionExceptionReason("x".repeat(1001))).toBeNull();
+    expect(normalizeBookingCompletionExceptionReason("Petugas  mengonfirmasi  sesi telah lewat"))
+      .toBe("Petugas mengonfirmasi sesi telah lewat");
   });
 
   it("does not allow check-in before the scheduled start", () => {

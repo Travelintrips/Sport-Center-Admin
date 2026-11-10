@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { snapshotKasbonRecords, getKasbonReceiptStatus, type SalarySyncReceipt } from "../lib/scKasbonSalarySnapshot";
+import {assertKasbonPeriod,recordsForKasbonPeriod,monthlyKasbonTotal} from "../lib/scKasbonMonthlyPeriod";
 import { syncEmployeeKasbonToSalary } from "../lib/scKasbonSalaryGoogle";
 import { kasbonPoolTick } from "../lib/scKasbonPoolAutoWorker";
 import {verifyKasbonPassword,issueKasbonGrant,checkKasbonGrant} from "../lib/scKasbonActionGate";
@@ -178,7 +179,9 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
  const employeeId=String(req.params.employeeId||"").toUpperCase();
  if(!employeePattern.test(employeeId)){res.status(400).json({error:"ID karyawan tidak valid"});return;}
  const action=req.body?.action;
- if(!["preview","sync"].includes(action)||Object.keys(req.body??{}).some(k=>k!=="action")){
+ const period=req.body?.period;
+ try {assertKasbonPeriod(period);}catch{res.status(400).json({error:"SALARY_PERIOD_INVALID"});return;}
+ if(!["preview","sync"].includes(action)||Object.keys(req.body??{}).some(k=>!["action","period"].includes(k))){
   res.status(400).json({error:"Aksi sinkronisasi tidak valid"});return;
  }
  try {
@@ -187,28 +190,46 @@ router.post("/admin/sc-employees/:employeeId/kasbon/salary-sync",adminMiddleware
   const records=await db.select({id:scEmployeeKasbonTable.id,amount:scEmployeeKasbonTable.amount,
    kasbonDate:scEmployeeKasbonTable.kasbonDate,updatedAt:scEmployeeKasbonTable.updatedAt})
    .from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
-  const snapshot=snapshotKasbonRecords(records);
-  const total=records.reduce((sum,record)=>sum+Number(record.amount),0);
+  const monthly=recordsForKasbonPeriod(records,period);
+  const snapshot=snapshotKasbonRecords(monthly);
+  const total=monthlyKasbonTotal(records,period);
+  // October predates the reliable SC Kasbon ledger. An empty/newly backfilled
+  // month must not overwrite historical payroll G with Rp0.
+  if(action==="sync" && period==="2026-10"){
+   res.status(409).json({error:"SALARY_HISTORICAL_OCTOBER_READ_ONLY"});return;
+  }
+  if(action==="sync" && monthly.length===0){
+   res.status(409).json({error:"SALARY_MONTH_HAS_NO_KASBON_RECORDS"});return;
+  }
   if(!Number.isSafeInteger(total)||total<0)throw Error("INVALID_KASBON_TOTAL");
-  const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview");
+  const outcome=await syncEmployeeKasbonToSalary({employeeId,fullName:employee.fullName,total},action==="preview",period);
+  if("employeeMissing" in outcome && outcome.employeeMissing){
+   // No matching payroll employee row: informative preview, no salary write or sync receipt.
+   res.setHeader("Cache-Control","no-store");
+   res.json({...outcome,allSynced:false,syncedRecordIds:[]});return;
+  }
   if(action==="sync"){
    // The Google API already read back the exact G value. Ensure DB hasn't changed
    // during the external request before recording a durable receipt.
    const latest=await db.select({id:scEmployeeKasbonTable.id,amount:scEmployeeKasbonTable.amount,
     kasbonDate:scEmployeeKasbonTable.kasbonDate,updatedAt:scEmployeeKasbonTable.updatedAt})
     .from(scEmployeeKasbonTable).where(eq(scEmployeeKasbonTable.employeeId,employeeId));
-   if(JSON.stringify(snapshotKasbonRecords(latest))!==JSON.stringify(snapshot))
+   if(JSON.stringify(snapshotKasbonRecords(recordsForKasbonPeriod(latest,period)))!==JSON.stringify(snapshot))
     throw Error("KASBON_CHANGED_DURING_SYNC_RETRY");
    await logAudit({...getUserFromReq(req),action:"SC_KASBON_SALARY_SHEET_SYNCED",entity:"sc_employee_kasbon",
-    after:{...outcome,records:snapshot},...getClientInfo(req)});
+    after:{...outcome,period,records:snapshot},...getClientInfo(req)});
   }
   const [last]=await db.select({after:auditLogsTable.after}).from(auditLogsTable)
    .where(and(eq(auditLogsTable.action,"SC_KASBON_SALARY_SHEET_SYNCED"),
-    sql`${auditLogsTable.after}->>'employeeId' = ${employeeId}`))
+    sql`${auditLogsTable.after}->>'employeeId' = ${employeeId}`,
+    sql`(${auditLogsTable.after}->>'period' = ${period} OR (${period} = '2026-11' AND ${auditLogsTable.after}->>'period' IS NULL))`))
    .orderBy(desc(auditLogsTable.id)).limit(1);
   const rawReceipt=(last?.after??null) as SalarySyncReceipt|null;
   // Legacy entries have no per-transaction evidence: keep them unverified.
-  const receipt=rawReceipt && Array.isArray(rawReceipt.records)?rawReceipt:null;
+  const receipt=rawReceipt && Array.isArray(rawReceipt.records) &&
+   ((rawReceipt as SalarySyncReceipt & {period?:string}).period===period ||
+    (period==="2026-11" && !(rawReceipt as SalarySyncReceipt & {period?:string}).period &&
+     rawReceipt.records.every(r=>r.kasbonDate.slice(0,7)==="2026-11"))) ? rawReceipt : null;
   const status=getKasbonReceiptStatus(snapshot,receipt,action==="sync" || (outcome.status==="preview" && outcome.matched));
   res.json({...outcome,...status});
  }catch(e){

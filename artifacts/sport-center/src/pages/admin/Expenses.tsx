@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,13 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ChevronsUpDown, Check } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Plus, Search, TrendingDown, Clock, CheckCircle2,
-  Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
-  Upload, Loader2, Trash2, BookOpen, Building2,
+  Plus, Search, TrendingDown, Banknote,
+  Eye, Edit2, ThumbsUp, ThumbsDown, X, Receipt,
+  Upload, Loader2, Trash2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -63,6 +63,63 @@ function formatIDR(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
+// UI displays digit grouping, but database payload stays an unformatted number.
+export function normalizeExpenseRupiahInput(value: string): string {
+  const compact = value.trim().replace(/\s/g, "").replace(/^Rp/i, "");
+  // Bank screenshot formats: 100.000,00 or 100,000.00; strip cents.
+  const noCents = /[.,]\d{2}$/.test(compact)
+    ? compact.replace(/[.,]\d{2}$/, "") : compact;
+  return noCents.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 15);
+}
+export function formatExpenseRupiahInput(value: string): string {
+  const digits = normalizeExpenseRupiahInput(value);
+  return digits ? new Intl.NumberFormat("id-ID").format(Number(digits)) : "";
+}
+
+const INCOME_SOURCE_OPTIONS = ["Felicia Justiani", "Cahaya Sejati Teknologi", "Angelia Nirwana"];
+const INCOME_BANK_OPTIONS = ["Mandiri", "BCA", "blu by BCA Digital", "BNI", "BRI", "Kas Tunai", "Kas Besar SC"];
+
+type IncomeDropdownProps = {
+  id: string;
+  value: string;
+  options: string[];
+  placeholder: string;
+  otherPlaceholder: string;
+  required?: boolean;
+  onChange: (value: string) => void;
+};
+
+/** Consistent with the Metode select. Unknown values remain manually editable. */
+function IncomeDropdown({ id, value, options, placeholder, otherPlaceholder, required, onChange }: IncomeDropdownProps) {
+  const manual = value !== "" && !options.includes(value);
+  return (
+    <div className="space-y-2">
+      <Select
+        value={manual ? "__manual__" : value || undefined}
+        onValueChange={(next) => onChange(next === "__manual__" ? " " : next)}
+      >
+        <SelectTrigger id={id} aria-required={required}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+          <SelectItem value="__manual__">Lainnya (isi manual)</SelectItem>
+        </SelectContent>
+      </Select>
+      {manual && (
+        <Input
+          aria-label={otherPlaceholder}
+          value={value.trimStart()}
+          onChange={(event) => onChange(event.target.value === "" ? " " : event.target.value)}
+          placeholder={otherPlaceholder}
+          required={required}
+          autoComplete="off"
+        />
+      )}
+    </div>
+  );
+}
+
 const EMPTY_FORM = {
   expenseDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
   coaAccountId: "",
@@ -76,6 +133,7 @@ const EMPTY_FORM = {
   paymentAccount: "",
   receiptUrls: [] as string[],
   notes: "",
+  bankReference: "",
 };
 
 interface Vendor {
@@ -92,19 +150,60 @@ interface CoaAccount {
   sortOrder: number;
 }
 
+// Explicit cutover gate: normal Finance SC forms are still used for TEST only.
+// Releasing real transactions requires a separate reviewed change.
+const FINANCE_SC_TEST_ONLY = true;
+
 export default function AdminExpenses() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  // Separate the income and expense workflows without changing their existing APIs.
+  const [financeSection, setFinanceSection] = useState<"income" | "expenses" | "details" | "test">("income");
+  const [testDirection, setTestDirection] = useState<"IN" | "OUT">("IN");
+  const [testEntryKey, setTestEntryKey] = useState(() => crypto.randomUUID());
+  const [testSaving, setTestSaving] = useState(false);
+  const [expenseTestSaving,setExpenseTestSaving] = useState(false);
+  const [expenseTestEntryKey,setExpenseTestEntryKey] = useState(() => crypto.randomUUID());
+  const [testForm, setTestForm] = useState({
+    transactionDate: new Date().toLocaleDateString("sv-SE", {timeZone:"Asia/Jakarta"}),
+    sourceName:"",senderBank:"",receivingAccount:"",method:"Transfer Bank",
+    bankReference:"",notes:"",amount:""
+  });
+  const [detailKind, setDetailKind] = useState<"all" | "income" | "expense">("all");
+  const [unifiedSearch, setUnifiedSearch] = useState("");
+  const [expandedTransactionIds, setExpandedTransactionIds] = useState<string[]>([]);
+  const [transactionDateMode, setTransactionDateMode] = useState<"all" | "single" | "range">("all");
+  const [transactionSingleDate, setTransactionSingleDate] = useState("");
+  const [transactionDateFrom, setTransactionDateFrom] = useState("");
+  const [transactionDateTo, setTransactionDateTo] = useState("");
+  const [transactionStatus, setTransactionStatus] = useState("all");
+  const [transactionSort, setTransactionSort] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
+  // Saved incoming funds are operational and unverified, never journal postings.
+  const [incomeOpen, setIncomeOpen] = useState(false);
+  const [incomeHistoryOpen, setIncomeHistoryOpen] = useState(false);
+  const [incomeSaving, setIncomeSaving] = useState(false);
+  const [incomeDuplicateWarning, setIncomeDuplicateWarning] = useState(false);
+  const [incomeEntryKey, setIncomeEntryKey] = useState(() => crypto.randomUUID());
+  const [incomePreview, setIncomePreview] = useState(false);
+  const [cashReceiptConfirmed, setCashReceiptConfirmed] = useState(false);
+  const [incomeForm, setIncomeForm] = useState({
+    transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
+    sourceName: "",
+    method: "Transfer Bank",
+    bank: "",
+    receivingAccount: "",
+    bankReference: "",
+    amount: "",
+  });
   const [formOpen, setFormOpen] = useState(false);
-  const [coaOpen, setCoaOpen] = useState(false);
-  const [vendorOpen, setVendorOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [recipientFocused, setRecipientFocused] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
@@ -120,7 +219,7 @@ export default function AdminExpenses() {
 
   const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
-    amount: number | null; date: string | null; recipient: string | null;
+    amount: number | null; date: string | null; bankReference: string | null; recipient: string | null;
     paymentMethod: string; engine: string; verified: boolean;
   } | null>(null);
   const [scanningProof, setScanningProof] = useState(false);
@@ -170,7 +269,7 @@ export default function AdminExpenses() {
           });
           if (!response.ok) throw new Error("OCR unavailable");
           const preview = await response.json();
-          if (preview.amount != null || preview.date || preview.recipient) setProofPreview(preview);
+          if (preview.amount != null || preview.date || preview.recipient || preview.bankReference) setProofPreview(preview);
           else toast({ title: "Bukti tersimpan", description: "Data bukti belum terbaca, silakan isi form manual." });
         } catch {
           toast({ title: "Bukti tersimpan", description: "Pratinjau otomatis tidak tersedia; isikan detail secara manual." });
@@ -191,12 +290,16 @@ export default function AdminExpenses() {
       ...prev,
       expenseDate: proofPreview.date && /^\d{4}-\d{2}-\d{2}$/.test(proofPreview.date)
         ? proofPreview.date : prev.expenseDate,
-      amount: proofPreview.amount != null && Number.isFinite(proofPreview.amount) && proofPreview.amount > 0
+      amount: proofPreview.amount != null && Number.isSafeInteger(proofPreview.amount) && proofPreview.amount > 0
         ? String(proofPreview.amount) : prev.amount,
-      paymentMethod: proofPreview.paymentMethod === "QRIS" ? "QRIS"
-        : proofPreview.paymentMethod === "Transfer Bank" ? "Transfer Bank" : prev.paymentMethod,
+      bankReference: proofPreview.bankReference ?? prev.bankReference,
+      vendorName: proofPreview.recipient && proofPreview.recipient.trim()
+        ? proofPreview.recipient.trim() : prev.vendorName,
+      vendorId: proofPreview.recipient ? "" : prev.vendorId,
+      paymentMethod: PAYMENT_METHODS.includes(proofPreview.paymentMethod)
+        ? proofPreview.paymentMethod : prev.paymentMethod,
     }));
-    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, dan metode sebelum membuat pengeluaran." });
+    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, penerima, nomor referensi, dan metode sebelum menyimpan." });
     setProofPreview(null);
   }
 
@@ -207,14 +310,190 @@ export default function AdminExpenses() {
   const params = new URLSearchParams();
   if (startDate) params.set("startDate", startDate);
   if (endDate) params.set("endDate", endDate);
-  if (filterStatus !== "all") params.set("status", filterStatus);
   if (filterCategory !== "all") params.set("category", filterCategory);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["expenses", startDate, endDate, filterStatus, filterCategory],
+    queryKey: ["expenses", startDate, endDate, filterCategory],
     queryFn: () =>
       fetch(`${API}/admin/expenses?${params}`, { headers: authHeaders() }).then((r) => r.json()),
   });
+
+  const { data: incomeData, refetch: refetchIncome, isError: incomeHistoryError, isFetching: incomeHistoryLoading } = useQuery<{
+    entries: Array<{ id: number; incomeNo: string; cashSheetState: string; cashSheetRow: number | null; transactionDate: string; sourceName: string;
+      senderBank: string; receivingAccount: string; amount: string;
+      method: string; bankReference: string | null;
+      sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
+    summary: { manualThisMonth: number; awaitingSync: number };
+  }>({
+    queryKey: ["sc-income-entries"],
+    queryFn: async () => {
+      const response = await fetch(`${API}/admin/income`, { headers: authHeaders() });
+      if (!response.ok) throw new Error("Daftar Uang Masuk belum tersedia");
+      return response.json();
+    },
+  });
+
+  const {data:financeTestData,refetch:refetchFinanceTest,isError:financeTestReadError} = useQuery<{
+    entries:Array<{id:number;testNo:string;direction:"IN"|"OUT";transactionDate:string;
+      sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
+      sheetSyncError:string|null;sheetVerifiedAt:string|null;senderBank:string;receivingAccount:string;
+      method:string;bankReference:string|null;notes:string|null}>;
+    summary:{income:number;expense:number;balance:number;pending:number;count:number};
+    writeEnabled:boolean;
+  }>({
+    queryKey:["sc-finance-test-entries"],
+    enabled:FINANCE_SC_TEST_ONLY || financeSection==="test",
+    retry:false,
+    queryFn:async()=>{
+      const r=await fetch(`${API}/admin/finance-test`,{headers:authHeaders()});
+      if(!r.ok)throw Error("Ledger uji belum tersedia atau memerlukan Super Admin");
+      return r.json();
+    }
+  });
+  async function saveFinanceTest() {
+    if(testSaving)return;
+    setTestSaving(true);
+    try {
+      const response=await fetch(`${API}/admin/finance-test`,{
+        method:"POST",headers:authHeaders(),
+        body:JSON.stringify({
+          ...testForm,direction:testDirection,entryKey:testEntryKey,
+          amount:Number(normalizeExpenseRupiahInput(testForm.amount))
+        })
+      });
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error??"Gagal menyimpan uji");
+      toast({title:`Transaksi uji ${result.testNo} tercatat`,
+        description:result.sheetState==="synced"
+          ?"Baris uji kas besar sc terbaca ulang; bukan mutasi bank resmi."
+          :"Belum tertulis ke kas besar sc. Pencatatan hanya ada pada ledger uji."});
+      setTestEntryKey(crypto.randomUUID());
+      setTestForm(f=>({...f,sourceName:"",amount:"",bankReference:"",notes:""}));
+      await refetchFinanceTest();
+    }catch(error:any){
+      toast({title:"Uji Kas Besar belum berhasil",description:error?.message,variant:"destructive"});
+    }finally{setTestSaving(false);}
+  }
+  async function reconcileFinanceTestRows(){
+    try{
+      const response=await fetch(`${API}/admin/finance-test/reconcile`,{
+        method:"POST",headers:authHeaders()
+      });
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error??"Baca ulang Sheets gagal");
+      toast({title:"Ledger uji diperiksa ulang",
+        description:`Baris dihapus: ${data.removed}, berubah: ${data.mismatched}, bergeser: ${data.moved}`});
+    }catch(error:any){
+      toast({title:"Pemeriksaan Sheets gagal",description:error?.message,variant:"destructive"});
+    }finally{await refetchFinanceTest();}
+  }
+
+  async function retryFinanceTestRow(id:number){
+    try {
+      const response=await fetch(`${API}/admin/finance-test/${id}/retry`,{
+        method:"POST",headers:authHeaders()
+      });
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error??"Pengiriman belum tersedia");
+      toast({title:data.sheetState==="synced"?"Baris uji tersinkron":"Uji masih menunggu pengiriman"});
+    }catch(error:any){
+      toast({title:"Pengiriman uji diblokir",description:error?.message,variant:"destructive"});
+    }finally{await refetchFinanceTest();}
+  }
+
+  // Both existing input forms use the isolated SC_TEST_ONLY ledger during testing.
+  // No operational income/expense, BizPortal bank mutation or journal is created.
+  async function postTestEntry(payload: {
+    entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
+    senderBank:string;receivingAccount:string;method:string;bankReference:string;
+    notes:string;amount:number
+  }) {
+    const response=await fetch(`${API}/admin/finance-test`,{
+      method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
+    });
+    const result=await response.json();
+    if(!response.ok)throw Error(result.error??"Gagal menyimpan transaksi TEST");
+    return result as {testNo:string;sheetState:string;replayed?:boolean};
+  }
+
+  async function saveIncome(confirmSimilar = false) {
+    if (!incomePreview || incomeSaving) return;
+    setIncomeSaving(true);
+    try {
+      if(FINANCE_SC_TEST_ONLY){
+        const result=await postTestEntry({
+          entryKey:incomeEntryKey,direction:"IN",
+          transactionDate:incomeForm.transactionDate,sourceName:incomeForm.sourceName.trim(),
+          senderBank:incomeForm.bank.trim(),receivingAccount:incomeForm.receivingAccount.trim(),
+          method:incomeForm.method,bankReference:incomeForm.bankReference.trim(),
+          notes:"INPUT UANG MASUK SC - SIMULASI",amount:Number(incomeForm.amount)
+        });
+        toast({title:`Uang Masuk TEST: ${result.testNo}`,
+          description:result.sheetState==="synced"
+            ?"Tercatat ke kas besar sc, bukan ke BizPortal atau jurnal."
+            :"Belum tersinkron; cek ledger Uji Kas Besar. Jangan input ulang tanpa memeriksa ID."});
+        await refetchFinanceTest();
+        setIncomeOpen(false);setIncomePreview(false);setCashReceiptConfirmed(false);
+        setIncomeEntryKey(crypto.randomUUID());
+        return;
+      }
+      const response = await fetch(`${API}/admin/income`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entryKey: incomeEntryKey,
+          confirmSimilar,
+          transactionDate: incomeForm.transactionDate,
+          sourceName: incomeForm.sourceName.trim(),
+          senderBank: incomeForm.bank.trim(),
+          method: incomeForm.method,
+          receivingAccount: incomeForm.receivingAccount.trim(),
+          bankReference: incomeForm.bankReference.trim(),
+          amount: Number(incomeForm.amount),
+          confirmedCashReceived: cashReceiptConfirmed && incomeForm.method === "Tunai" &&
+            incomeForm.receivingAccount === "Kas Besar SC",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok && result.error === "POSSIBLE_DUPLICATE_INCOME") {
+        setIncomeDuplicateWarning(true);
+        return;
+      }
+      if (!response.ok) throw new Error(result.message || result.error || "Gagal menyimpan");
+      setIncomeDuplicateWarning(false);
+      toast({
+        title: "Uang Masuk berhasil dicatat",
+        description: `${result.incomeNo} — ${result.cashSheetStatus === "synced" ? "Kas Besar SC tersinkron (belum direkonsiliasi)." : result.cashSheetStatus === "disabled" ? "Penerimaan kas tersimpan; integrasi Kas Besar SC belum diaktifkan." : result.sheetStatus === "synced"
+          ? "Tercatat di tab SC Uang Masuk, belum terverifikasi bank."
+          : "Tersimpan di SC. Sinkronisasi Sheets belum selesai."}`,
+      });
+      await refetchIncome();
+      await qc.invalidateQueries({ queryKey: ["expenses"] });
+      setIncomeOpen(false);
+      setIncomePreview(false);
+      setCashReceiptConfirmed(false);
+      setIncomeEntryKey(crypto.randomUUID());
+    } catch (error: any) {
+      toast({ title: "Gagal menyimpan Uang Masuk",
+        description: error.message ?? "Periksa daftar sebelum mengulangi.",
+        variant: "destructive" });
+    } finally { setIncomeSaving(false); }
+  }
+
+  async function retryCashLedger(id: number) {
+    try {
+      const response = await fetch(`${API}/admin/income/${id}/retry-cash-sheet`, {
+        method: "POST", headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("Pengiriman kas belum tersedia");
+      const result = await response.json();
+      toast({ title: result.cashSheetStatus === "synced"
+        ? "Kas Besar SC tersinkron" : "Pengiriman kas belum selesai" });
+      await refetchIncome();
+    } catch {
+      toast({ title: "Kas Besar SC belum tersinkron", variant: "destructive" });
+    }
+  }
 
   const { data: facilities = [] } = useQuery({
     queryKey: ["facilities"],
@@ -235,6 +514,13 @@ export default function AdminExpenses() {
       fetch(`${API}/admin/vendors`, { headers: authHeaders() })
         .then((r) => r.json())
         .then((d) => (Array.isArray(d) ? d.filter((v: any) => v.isActive) : [])),
+  });
+
+  const { data: employees = [] } = useQuery<Array<{ employeeId: string; fullName: string; isActive: boolean }>>({
+    queryKey: ["sc-employees-expense-recipient"],
+    queryFn: () => fetch(`${API}/admin/sc-employees`, { headers: authHeaders() })
+      .then((r) => { if (!r.ok) throw new Error("Daftar karyawan gagal dimuat"); return r.json(); })
+      .then((rows) => Array.isArray(rows) ? rows.filter((e) => e.isActive) : []),
   });
 
   const { data: detail } = useQuery({
@@ -343,17 +629,83 @@ export default function AdminExpenses() {
   const summary = data?.summary ?? { totalThisMonth: 0, pendingApproval: 0, paid: 0, unpaid: 0 };
   const allExpenses: any[] = data?.expenses ?? [];
 
-  // Group COA accounts by type for display
-  const coaByType = (coaAccounts as CoaAccount[]).reduce((acc, a) => {
-    if (!acc[a.accountType]) acc[a.accountType] = [];
-    acc[a.accountType]!.push(a);
-    return acc;
-  }, {} as Record<string, CoaAccount[]>);
+  // Presentation only: reuse the existing SC income/expense reads without creating
+  // bank mutations, accounting entries, or extra writes to Google Sheets.
+  const unifiedTransactions = FINANCE_SC_TEST_ONLY
+    ? (financeTestData?.entries ?? []).map(entry => ({
+      key:`test-${entry.id}`, id:entry.testNo,
+      kind:entry.direction==="IN"?"income" as const:"expense" as const,
+      date:entry.transactionDate,name:entry.sourceName,amount:Number(entry.amount),
+      bank:entry.senderBank||"",account:entry.receivingAccount||"",
+      description:entry.notes||"Simulasi Sport Center",
+      method:entry.method||"Tidak ditentukan",
+      status:entry.sheetSyncState==="synced"?"TEST — Tersinkron":
+        entry.sheetSyncState==="removed"?"TEST — Dihapus dari Sheets":
+        entry.sheetSyncState==="mismatch"?"TEST — Tidak Cocok":
+        `TEST — ${entry.sheetSyncState}`,
+      sheet:`kas besar sc — ${entry.sheetSyncState==="synced"?"baris "+entry.sheetRow:entry.sheetSyncState}`,
+      cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
+        `Status ${entry.sheetSyncState}`,
+      reference:entry.bankReference||"",notes:entry.notes||"",
+    }))
+    : [
+    ...(incomeData?.entries ?? []).map(entry => ({
+      key: `income-${entry.id}`, id: entry.incomeNo, kind: "income" as const,
+      date: entry.transactionDate, name: entry.sourceName, amount: Number(entry.amount),
+      bank: entry.senderBank, account: entry.receivingAccount,
+      description: `Dana masuk dari ${entry.sourceName}`, method: entry.method || "Tidak tersedia",
+      status: entry.reconciliationState || "UNVERIFIED",
+      sheet: entry.sheetSyncState === "synced" ? "SC Uang Masuk — tersinkron (belum diverifikasi)" : entry.sheetSyncState,
+      cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
+        entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
+      reference: entry.bankReference || "", notes: "",
+    })),
+    ...allExpenses.map((expense: any) => ({
+      key: `expense-${expense.id}`, id: String(expense.expenseNo ?? `EXP-${expense.id}`),
+      kind: "expense" as const, date: String(expense.expenseDate ?? ""),
+      name: String(expense.vendorName ?? "Penerima belum diisi"),
+      amount: Number(expense.totalAmount ?? 0), bank: String(expense.paymentAccount ?? ""),
+      account: String(expense.paymentAccount ?? ""),
+      description: String(expense.description ?? ""), method: String(expense.paymentMethod ?? ""),
+      status: STATUS_LABELS[String(expense.paymentStatus)] ?? String(expense.paymentStatus ?? "Draft"),
+      sheet: "Belum dikonfirmasi sebagai mutasi bank",
+      cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
+      reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
+    })),
+  ];
+  const activeTestIncome = (financeTestData?.entries??[]).filter(x=>x.direction==="IN");
+  const activeTestExpense = (financeTestData?.entries??[]).filter(x=>x.direction==="OUT");
+  const visibleTestExpenses = activeTestExpense.filter(item=>{
+    const term=search.trim().toLowerCase();
+    return (!startDate||item.transactionDate>=startDate)
+      && (!endDate||item.transactionDate<=endDate)
+      && (!term||[item.testNo,item.sourceName,item.senderBank,item.receivingAccount,
+        item.bankReference??"",item.notes??""].some(x=>x.toLowerCase().includes(term)));
+  });
+  const transactionDateInvalid = transactionDateMode === "range"
+    && Boolean(transactionDateFrom && transactionDateTo && transactionDateFrom > transactionDateTo);
+  const visibleTransactions = unifiedTransactions.filter(tx =>
+    (detailKind === "all" || tx.kind === detailKind)
+    && (transactionStatus === "all" || tx.status === transactionStatus)
+    && (transactionDateMode !== "single" || !transactionSingleDate || tx.date === transactionSingleDate)
+    && (transactionDateMode !== "range" || (
+      (!transactionDateFrom || tx.date >= transactionDateFrom)
+      && (!transactionDateTo || tx.date <= transactionDateTo)))
+    && !transactionDateInvalid
+    && (!unifiedSearch.trim() || [tx.id, tx.name, tx.bank, tx.account, tx.description, tx.reference]
+      .some(value => value.toLowerCase().includes(unifiedSearch.trim().toLowerCase())))
+  ).sort((a,b) => transactionSort === "largest" ? b.amount - a.amount :
+    transactionSort === "smallest" ? a.amount - b.amount :
+      transactionSort === "oldest" ? a.date.localeCompare(b.date) || a.key.localeCompare(b.key) :
+        b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  const toggleExpandedTransaction = (key: string) =>
+    setExpandedTransactionIds(current => current.includes(key)
+      ? current.filter(id => id !== key) : [...current, key]);
 
-  // Get selected COA account info
-  const selectedCoa = form.coaAccountId
-    ? (coaAccounts as CoaAccount[]).find((a) => a.id === Number(form.coaAccountId)) ?? null
-    : null;
+  const recipientSuggestions = [
+    ...employees.map((e) => ({ key: `staff-${e.employeeId}`, name: e.fullName, kind: "Karyawan SC", vendorId: "" })),
+    ...vendors.map((v) => ({ key: `vendor-${v.id}`, name: v.name, kind: "Vendor", vendorId: String(v.id) })),
+  ].filter((entry) => entry.name.toLowerCase().includes(form.vendorName.trim().toLowerCase())).slice(0, 8);
 
   const filtered = allExpenses.filter((e: any) => {
     if (!search) return true;
@@ -361,6 +713,8 @@ export default function AdminExpenses() {
     return (
       e.expenseNo?.toLowerCase().includes(q) ||
       e.description?.toLowerCase().includes(q) ||
+      e.notes?.toLowerCase().includes(q) ||
+      e.bankReference?.toLowerCase().includes(q) ||
       e.vendorName?.toLowerCase().includes(q) ||
       e.category?.toLowerCase().includes(q) ||
       e.coaAccount?.name?.toLowerCase().includes(q) ||
@@ -371,6 +725,7 @@ export default function AdminExpenses() {
   function openCreate() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM });
+    setShowAdvanced(false);
     setProofPreview(null);
     setAutoReadProof(false);
     setFormOpen(true);
@@ -392,7 +747,8 @@ export default function AdminExpenses() {
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
-      notes: expense.notes ?? "",
+      notes: expense.notes || expense.description || "",
+      bankReference: expense.bankReference ?? "",
     });
     setProofPreview(null);
     setFormOpen(true);
@@ -408,78 +764,548 @@ export default function AdminExpenses() {
     const body = {
       expenseDate: form.expenseDate,
       coaAccountId: form.coaAccountId ? Number(form.coaAccountId) : null,
-      description: form.description,
+      description: form.notes.trim(),
       vendorId: form.vendorId ? Number(form.vendorId) : null,
       vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
-      amount: Number(form.amount),
+      amount: Number(normalizeExpenseRupiahInput(form.amount)),
       ppnAmount: Number(form.ppnAmount || 0),
       paymentMethod: form.paymentMethod || null,
       paymentAccount: form.paymentAccount || null,
       receiptUrls: form.receiptUrls,
       notes: form.notes.trim(),
+      bankReference: form.bankReference.trim(),
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, body });
+    } else if(FINANCE_SC_TEST_ONLY){
+      if(expenseTestSaving)return;
+      const rawAmount=Number(normalizeExpenseRupiahInput(form.amount));
+      const gross=rawAmount+Number(form.ppnAmount||0);
+      if(!Number.isSafeInteger(gross)||gross<=0||gross>1000000){
+        toast({title:"Nominal uji tidak valid",description:"Total termasuk PPN maksimal Rp1.000.000.",
+          variant:"destructive"});return;
+      }
+      setExpenseTestSaving(true);
+      void (async()=>{
+        try{
+          const result=await postTestEntry({
+            entryKey:expenseTestEntryKey,direction:"OUT",
+            transactionDate:form.expenseDate,
+            sourceName:(selectedV?.name??form.vendorName.trim()) || "PENGELUARAN SC TEST",
+            senderBank:form.paymentAccount || "SUMBER DANA TIDAK DIISI",
+            receivingAccount:form.vendorName.trim() || "PENERIMA BELUM DIISI",
+            method:form.paymentMethod || "Belum ditentukan",
+            bankReference:form.bankReference.trim(),
+            notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
+              ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
+            amount:gross
+          });
+          toast({title:`Pengeluaran TEST: ${result.testNo}`,
+            description:result.sheetState==="synced"
+              ?"Tercatat pada kolom D kas besar sc, tanpa mutasi atau jurnal BizPortal."
+              :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
+          await refetchFinanceTest();
+          setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
+          setExpenseTestEntryKey(crypto.randomUUID());
+        }catch(error:any){
+          toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
+        }finally{setExpenseTestSaving(false);}
+      })();
     } else {
       createMutation.mutate(body);
     }
   }
 
-  const totalNum = Number(form.amount || 0) + Number(form.ppnAmount || 0);
+  const totalNum = Number(normalizeExpenseRupiahInput(form.amount) || 0) + Number(form.ppnAmount || 0);
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-black text-gray-900">Pengeluaran</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Manajemen pengeluaran operasional Sport Center</p>
+          <h1 className="text-2xl font-black text-gray-900">Keuangan Sport Center</h1>
+          <p className="text-gray-500 text-sm mt-0.5">Catatan pemasukan dan pengeluaran SC, terpisah dari rekonsiliasi BizPortal.</p>
+          {FINANCE_SC_TEST_ONLY && <p className="mt-2 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-900">
+            MODE TEST AKTIF — kedua tombol input mengirim ke ledger uji kas besar sc;
+            tidak membuat transaksi operasional, mutasi BizPortal, atau jurnal.
+          </p>}
         </div>
-        <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
-          <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
-        </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
+          <button type="button" role="tab" aria-selected={financeSection === "income"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "income" ? "bg-emerald-50 border-emerald-500 ring-1 ring-emerald-200" : "bg-white hover:bg-emerald-50"}`}
+            onClick={() => setFinanceSection("income")}>
+            <span className="flex gap-2 items-center font-semibold text-emerald-800">
+              <Banknote className="h-5 w-5" /> Uang Masuk
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">Input penerimaan, histori, dan status pengiriman Sheets</span>
+          </button>
+          <button type="button" role="tab" aria-selected={financeSection === "expenses"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "expenses" ? "bg-orange-50 border-orange-500 ring-1 ring-orange-200" : "bg-white hover:bg-orange-50"}`}
+            onClick={() => setFinanceSection("expenses")}>
+            <span className="flex gap-2 items-center font-semibold text-orange-800">
+              <TrendingDown className="h-5 w-5" /> Pengeluaran
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">Input biaya, daftar pengeluaran, dan persetujuan</span>
+          </button>
+          <button type="button" role="tab" aria-selected={financeSection === "details"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "details" ? "bg-blue-50 border-blue-500 ring-1 ring-blue-200" : "bg-white hover:bg-blue-50"}`}
+            onClick={() => setFinanceSection("details")}>
+            <span className="flex gap-2 items-center font-semibold text-blue-800">
+              <Receipt className="h-5 w-5" /> Detail Transaksi
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">Lihat seluruh pemasukan dan pengeluaran dalam satu tempat</span>
+          </button>
+          <button type="button" role="tab" aria-selected={financeSection==="test"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection==="test"?"bg-violet-50 border-violet-500 ring-1 ring-violet-200":"bg-white hover:bg-violet-50"}`}
+            onClick={()=>setFinanceSection("test")}>
+            <span className="flex gap-2 items-center font-semibold text-violet-800">
+              <Receipt className="h-5 w-5"/> Uji Kas Besar
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">
+              Pemasukan, pengeluaran, saldo uji. Tidak membuat jurnal.
+            </span>
+          </button>
+        </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-orange-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingDown className="w-4 h-4 text-orange-500" />
-              <span className="text-xs text-gray-500 font-medium">Total Bulan Ini</span>
+      {financeSection === "income" ? (
+        <section role="tabpanel" aria-label="Uang Masuk SC" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-emerald-900">Uang Masuk SC</h2>
+              <p className="text-sm text-gray-500">Catatan penerimaan operasional. Tersinkron ke Sheets bukan berarti bank sudah terverifikasi.</p>
             </div>
-            <p className="text-xl font-black text-gray-900">{formatIDR(summary.totalThisMonth)}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-yellow-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Clock className="w-4 h-4 text-yellow-500" />
-              <span className="text-xs text-gray-500 font-medium">Pending Approval</span>
+            <div className="flex flex-wrap gap-2">
+              <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => {
+                setIncomeForm({
+                  transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
+                  sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
+                });
+                setIncomePreview(false);
+                setCashReceiptConfirmed(false);
+                setIncomeDuplicateWarning(false);
+                setIncomeEntryKey(crypto.randomUUID());
+                setIncomeOpen(true);
+              }}>
+                <Plus className="w-4 h-4 mr-2" /> {FINANCE_SC_TEST_ONLY?"Input Uang Masuk (TEST)":"Input Uang Masuk"}
+              </Button>
             </div>
-            <p className="text-xl font-black text-gray-900">{summary.pendingApproval} item</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-green-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <CheckCircle2 className="w-4 h-4 text-green-500" />
-              <span className="text-xs text-gray-500 font-medium">Sudah Dibayar</span>
-            </div>
-            <p className="text-xl font-black text-gray-900">{formatIDR(summary.paid)}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Banknote className="w-4 h-4 text-blue-500" />
-              <span className="text-xs text-gray-500 font-medium">Belum Dibayar</span>
-            </div>
-            <p className="text-xl font-black text-gray-900">{formatIDR(summary.unpaid)}</p>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card className="border-l-4 border-l-emerald-500">
+              <CardContent className="p-4">
+                <p className="text-sm font-medium text-gray-600">
+                  {FINANCE_SC_TEST_ONLY?"Total Uang Masuk TEST Aktif":"Total Input Uang Masuk — Bulan Ini"}
+                </p>
+                <p className="text-2xl font-bold text-emerald-800 mt-1">
+                  {FINANCE_SC_TEST_ONLY
+                    ? financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.income):"Memuat..."
+                    : incomeHistoryError ? "Tidak tersedia" : incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Memuat..."}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {FINANCE_SC_TEST_ONLY?"Hanya transaksi TEST yang masih ada di Sheets. Bukan kas resmi.":
+                    "Dari register SC, belum tentu cocok dengan mutasi bank."}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-slate-400">
+              <CardContent className="p-4">
+                {FINANCE_SC_TEST_ONLY ? <>
+                  <p className="text-sm font-medium text-gray-600">Sisa Saldo TEST Kas Besar SC</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    {financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.balance):"Memuat..."}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Pemasukan TEST dikurangi Pengeluaran TEST; bukan saldo bank.</p>
+                </> : <>
+                  <p className="text-sm font-medium text-gray-600">Mutasi Masuk Kas Besar CST — BizPortal</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    {typeof summary.incomingThisMonth === "number" ? formatIDR(summary.incomingThisMonth) : "Belum tersedia"}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Sumber terpisah, baca saja; tidak ditambahkan ke total input SC.
+                    {summary.incomingSheetSyncedAt && <> Sync terakhir {new Date(summary.incomingSheetSyncedAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB.</>}
+                  </p>
+                </>}
+              </CardContent>
+            </Card>
+          </div>
+          {FINANCE_SC_TEST_ONLY && <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Histori Uang Masuk (TEST) — {activeTestIncome.length}</CardTitle>
+              <p className="text-xs text-gray-500">Termasuk histori yang dihapus dari Sheets, tetapi tidak dihitung dalam total.</p>
+            </CardHeader>
+            <CardContent>
+              {financeTestReadError ? <p role="alert" className="text-red-700 text-sm">Ledger TEST gagal dibaca, jangan ulangi input sebelum memeriksa ID.</p> :
+                !financeTestData ? <p className="text-sm text-gray-500">Memuat histori TEST...</p> :
+                activeTestIncome.length===0 ? <p className="text-sm text-gray-500">Belum ada uang masuk TEST.</p> :
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b text-left">
+                      <th className="p-2">ID</th><th className="p-2">Tanggal</th>
+                      <th className="p-2">Pengirim / Bank</th><th className="p-2 text-right">Nominal</th>
+                      <th className="p-2">Status Sheets</th>
+                    </tr></thead>
+                    <tbody>{activeTestIncome.map(x=><tr className="border-b" key={x.id}>
+                      <td className="p-2 font-mono">{x.testNo}</td>
+                      <td className="p-2">{x.transactionDate}</td>
+                      <td className="p-2">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                      <td className="p-2 text-right">{formatIDR(Number(x.amount))}</td>
+                      <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
+                        x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>}
+            </CardContent>
+          </Card>}
+
+        </section>
+      ) : financeSection === "details" ? (
+        <section role="tabpanel" aria-label="Detail Transaksi Keuangan SC" className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-blue-900">Detail Transaksi Keuangan SC</h2>
+            <p className="text-sm text-gray-500">{FINANCE_SC_TEST_ONLY?
+              "Riwayat gabungan transaksi TEST dari kas besar sc (tidak membuat mutasi atau jurnal).":
+              "Riwayat gabungan baca-saja dari register Uang Masuk dan daftar Pengeluaran SC."}</p>
+          </div>
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Filter jenis transaksi">
+                  {([
+                    ["all", "Semua"], ["income", "Uang Masuk"], ["expense", "Pengeluaran"],
+                  ] as const).map(([kind, label]) => (
+                    <Button key={kind} size="sm" variant={detailKind === kind ? "default" : "outline"}
+                      onClick={() => setDetailKind(kind)}>{label}</Button>
+                  ))}
+                </div>
+                <Input aria-label="Cari transaksi keuangan" className="lg:ml-auto lg:max-w-sm"
+                  placeholder="Cari ID, nama, bank, rekening atau referensi..."
+                  value={unifiedSearch} onChange={e => setUnifiedSearch(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="finance-date-mode">Filter Tanggal</Label>
+                  <Select value={transactionDateMode} onValueChange={v => setTransactionDateMode(v as "all" | "single" | "range")}>
+                    <SelectTrigger id="finance-date-mode"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua tanggal</SelectItem>
+                      <SelectItem value="single">Tanggal tunggal</SelectItem>
+                      <SelectItem value="range">Rentang tanggal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {transactionDateMode === "single" && (
+                  <div className="space-y-1">
+                    <Label htmlFor="finance-single-date">Tanggal transaksi</Label>
+                    <Input id="finance-single-date" type="date" value={transactionSingleDate}
+                      onChange={e => setTransactionSingleDate(e.target.value)} />
+                  </div>
+                )}
+                {transactionDateMode === "range" && (
+                  <>
+                    <div className="space-y-1">
+                      <Label htmlFor="finance-from-date">Dari tanggal</Label>
+                      <Input id="finance-from-date" type="date" value={transactionDateFrom}
+                        max={transactionDateTo || undefined}
+                        onChange={e => setTransactionDateFrom(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="finance-to-date">Sampai tanggal</Label>
+                      <Input id="finance-to-date" type="date" value={transactionDateTo}
+                        min={transactionDateFrom || undefined}
+                        onChange={e => setTransactionDateTo(e.target.value)} />
+                    </div>
+                  </>
+                )}
+                <div className="space-y-1">
+                  <Label htmlFor="finance-status">Status</Label>
+                  <Select value={transactionStatus} onValueChange={setTransactionStatus}>
+                    <SelectTrigger id="finance-status"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua status</SelectItem>
+                      {Array.from(new Set(unifiedTransactions.map(tx => tx.status))).sort().map(value =>
+                        <SelectItem key={value} value={value}>{value}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="finance-sort">Urutkan</Label>
+                  <Select value={transactionSort} onValueChange={v => setTransactionSort(v as typeof transactionSort)}>
+                    <SelectTrigger id="finance-sort"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="newest">Tanggal terbaru</SelectItem>
+                      <SelectItem value="oldest">Tanggal terlama</SelectItem>
+                      <SelectItem value="largest">Nominal terbesar</SelectItem>
+                      <SelectItem value="smallest">Nominal terkecil</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {transactionDateInvalid && <p role="alert" className="text-sm text-red-700">
+                Tanggal awal tidak boleh lebih besar dari tanggal akhir.
+              </p>}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-500">
+                  Menampilkan {visibleTransactions.length} dari {unifiedTransactions.length} transaksi
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds(visibleTransactions.map(tx => tx.key))}>Buka Semua</Button>
+                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds([])}>Tutup Semua</Button>
+                  <Button variant="ghost" size="sm" onClick={() => {
+                    setDetailKind("all"); setUnifiedSearch(""); setTransactionStatus("all");
+                    setTransactionDateMode("all"); setTransactionSingleDate("");
+                    setTransactionDateFrom(""); setTransactionDateTo("");
+                    setTransactionSort("newest"); setExpandedTransactionIds([]);
+                  }}>Reset Filter</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          {(FINANCE_SC_TEST_ONLY?financeTestReadError:incomeHistoryError) && <p className="text-sm text-red-700">
+            {FINANCE_SC_TEST_ONLY?"Ledger TEST gagal dibaca.":"Pemasukan belum berhasil dimuat; daftar gabungan mungkin tidak lengkap."}</p>}
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base">Master Tabel Transaksi</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left border-b">
+                      <th className="p-3">ID / Tanggal</th>
+                      <th className="p-3">Nama / Jenis</th>
+                      <th className="p-3 text-right">Nominal / Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleTransactions.map(tx => (
+                      <Fragment key={tx.key}>
+                        <tr role="button" tabIndex={0} aria-expanded={expandedTransactionIds.includes(tx.key)}
+                          className={`cursor-pointer border-b hover:bg-blue-50 focus-visible:outline focus-visible:outline-blue-500 ${expandedTransactionIds.includes(tx.key) ? "bg-blue-50" : ""}`}
+                          onClick={() => toggleExpandedTransaction(tx.key)}
+                          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleExpandedTransaction(tx.key); } }}>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <ChevronsUpDown className="w-4 h-4 text-gray-500 shrink-0" />
+                              <div><p className="font-mono font-semibold">{tx.id}</p>
+                                <p className="text-xs text-gray-500">{tx.date}</p></div>
+                            </div>
+                          </td>
+                          <td className="p-3"><p className="font-semibold">{tx.name}</p>
+                            <p className={`text-xs ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
+                              {tx.kind === "income" ? "Uang Masuk" : "Pengeluaran"}
+                            </p>
+                          </td>
+                          <td className="p-3 text-right">
+                            <p className={`font-bold whitespace-nowrap ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
+                              {tx.kind === "income" ? "+" : "−"}{formatIDR(tx.amount)}
+                            </p>
+                            <p className="text-xs text-gray-500">{tx.status}</p>
+                          </td>
+                        </tr>
+                        {expandedTransactionIds.includes(tx.key) && (
+                          <tr className="bg-slate-50 border-b">
+                            <td colSpan={3} className="p-4 sm:p-5">
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="font-bold">Rincian {tx.kind === "income" ? "Pemasukan" : "Pengeluaran"} — {tx.id}</p>
+                                  <Badge variant="outline">Baca saja</Badge>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                  {([
+                                    ["Tanggal", tx.date],
+                                    [tx.kind === "income" ? "Pengirim" : "Penerima",tx.name],
+                                    ["Metode",tx.method || "Tidak tersedia"],
+                                    ["Bank / Sumber",tx.bank || "Tidak tersedia"],
+                                    ["Akun Tujuan",tx.account || "Tidak tersedia"],
+                                    ["Referensi Bank",tx.reference || "Tidak diisi"],
+                                    ["Status Transaksi",tx.status],
+                                    ["Register Sheets",tx.sheet],
+                                    ["Kas Besar SC",tx.cashSheet],
+                                    ["Keterangan",tx.description || "Tidak ada"],
+                                    ["Catatan",tx.notes || "Tidak ada"],
+                                  ] as Array<[string,string]>).map(([label,value]) => (
+                                    <div key={label} className="space-y-1 min-w-0">
+                                      <p className="text-xs text-gray-500">{label}</p>
+                                      <p className="font-medium text-sm break-words">{value}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex justify-end">
+                                  <Button size="sm" variant="outline" onClick={() => toggleExpandedTransaction(tx.key)}>Tutup Rincian</Button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+                {(FINANCE_SC_TEST_ONLY?!financeTestData&&!financeTestReadError:isLoading || incomeHistoryLoading) && !unifiedTransactions.length && <p className="text-sm text-gray-500 p-5">Memuat transaksi...</p>}
+                {(FINANCE_SC_TEST_ONLY?Boolean(financeTestData):!isLoading && !incomeHistoryLoading) && !visibleTransactions.length && <p className="text-sm text-gray-500 p-5 text-center">Tidak ada transaksi yang sesuai filter.</p>}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      ) : financeSection==="test" ? (
+        <section role="tabpanel" aria-label="Uji Kas Besar SC" className="space-y-4">
+          <div className="rounded-xl border border-violet-300 bg-violet-50 p-4">
+            <h2 className="text-lg font-bold text-violet-900">Mode Uji Kas Besar SC</h2>
+            <p className="text-sm text-violet-900">
+              Semua angka di sini adalah simulasi, bukan transaksi riil.
+              Tidak menambah mutasi BizPortal, jurnal, atau saldo resmi.
+              Pengiriman Sheets tetap OFF sampai guard BizPortal dan konfigurasi diverifikasi.
+            </p>
+          </div>
+          {financeTestReadError && <p className="text-red-700 text-sm">Akses ledger uji memerlukan Super Admin dan migrasi database yang sudah terpasang.</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Card className="border-l-4 border-emerald-500"><CardContent className="p-4">
+              <p className="text-xs text-gray-600">Uang Masuk Uji — tersinkron</p>
+              <p className="text-xl font-bold text-emerald-700">{formatIDR(financeTestData?.summary.income??0)}</p>
+            </CardContent></Card>
+            <Card className="border-l-4 border-orange-500"><CardContent className="p-4">
+              <p className="text-xs text-gray-600">Pengeluaran Uji — tersinkron</p>
+              <p className="text-xl font-bold text-orange-700">{formatIDR(financeTestData?.summary.expense??0)}</p>
+            </CardContent></Card>
+            <Card className="border-l-4 border-violet-500"><CardContent className="p-4">
+              <p className="text-xs text-gray-600">Sisa Saldo Uji (bukan saldo bank)</p>
+              <p className="text-xl font-bold">{formatIDR(financeTestData?.summary.balance??0)}</p>
+            </CardContent></Card>
+          </div>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Input Transaksi Uji</CardTitle></CardHeader>
+            <CardContent>
+              <form onSubmit={event=>{event.preventDefault();void saveFinanceTest();}} className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant={testDirection==="IN"?"default":"outline"}
+                    onClick={()=>setTestDirection("IN")}>Uang Masuk (TEST)</Button>
+                  <Button type="button" variant={testDirection==="OUT"?"default":"outline"}
+                    onClick={()=>setTestDirection("OUT")}>Pengeluaran (TEST)</Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="test-date">Tanggal</Label>
+                    <Input id="test-date" type="date" required value={testForm.transactionDate}
+                      onChange={e=>setTestForm({...testForm,transactionDate:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-name">{testDirection==="IN"?"Pengirim":"Penerima"}</Label>
+                    <Input id="test-name" required value={testForm.sourceName}
+                      onChange={e=>setTestForm({...testForm,sourceName:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-bank">Bank / Sumber Dana</Label>
+                    <Input id="test-bank" value={testForm.senderBank}
+                      onChange={e=>setTestForm({...testForm,senderBank:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-account">Akun tujuan / Rekening</Label>
+                    <Input id="test-account" value={testForm.receivingAccount}
+                      onChange={e=>setTestForm({...testForm,receivingAccount:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-method">Metode</Label>
+                    <Input id="test-method" value={testForm.method}
+                      onChange={e=>setTestForm({...testForm,method:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-amount">Nominal Uji (Rp, maksimum 1 juta)</Label>
+                    <Input id="test-amount" required inputMode="numeric"
+                      value={formatExpenseRupiahInput(testForm.amount)}
+                      onChange={e=>setTestForm({...testForm,amount:normalizeExpenseRupiahInput(e.target.value)})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-reference">Referensi Uji</Label>
+                    <Input id="test-reference" value={testForm.bankReference}
+                      onChange={e=>setTestForm({...testForm,bankReference:e.target.value})}/>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-note">Keterangan</Label>
+                    <Input id="test-note" value={testForm.notes}
+                      onChange={e=>setTestForm({...testForm,notes:e.target.value})}/>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <p className="text-xs text-gray-600">
+                    {financeTestData?.writeEnabled?"Penulisan uji diaktifkan (guard tetap diperiksa).":"Pengiriman Sheets masih nonaktif."}
+                  </p>
+                  <Button type="submit" disabled={testSaving || !testForm.sourceName.trim()
+                    || Number(testForm.amount)<=0 || Number(testForm.amount)>1000000}>
+                    {testSaving?"Menyimpan...":"Simpan Transaksi Uji"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Ledger Uji ({financeTestData?.summary.count??0})</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-600">
+                  Saldo uji = total masuk yang masih ada di Sheets - total keluar yang masih ada di Sheets.
+                  Baris belum sinkron atau sudah dihapus tidak dihitung.
+                </p>
+                <Button type="button" size="sm" variant="outline"
+                  onClick={()=>void reconcileFinanceTestRows()}>
+                  Periksa Ulang Sheets
+                </Button>
+              </div>
+              <p className="text-xs text-gray-600">Belum tersinkron: {financeTestData?.summary.pending??0}.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b text-left">
+                    <th className="p-2">ID Uji</th><th className="p-2">Tanggal</th>
+                    <th className="p-2">Nama / Jenis</th><th className="p-2 text-right">Nominal</th>
+                    <th className="p-2">Status Sheets</th><th className="p-2">Aksi</th>
+                  </tr></thead>
+                  <tbody>{(financeTestData?.entries??[]).map(x=>(
+                    <tr key={x.id} className="border-b">
+                      <td className="p-2 font-mono">{x.testNo}</td>
+                      <td className="p-2">{x.transactionDate}</td>
+                      <td className="p-2">{x.sourceName}<span className="block text-xs text-gray-500">
+                        {x.direction==="IN"?"Pemasukan Uji":"Pengeluaran Uji"}</span></td>
+                      <td className="p-2 text-right whitespace-nowrap">{x.direction==="IN"?"+":"−"}{formatIDR(Number(x.amount))}</td>
+                      <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow}`:
+                        x.sheetSyncState==="removed"?"Dihapus dari Sheets":
+                        x.sheetSyncState==="mismatch"?"Data Sheets tidak cocok":x.sheetSyncState}
+                        {x.sheetVerifiedAt && <span className="block text-xs text-gray-500">
+                          Diperiksa {new Date(x.sheetVerifiedAt).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})} WIB
+                        </span>}</td>
+                      <td className="p-2">{["pending","failed"].includes(x.sheetSyncState) &&
+                        <Button type="button" size="sm" variant="outline" onClick={()=>void retryFinanceTestRow(x.id)}>
+                          Coba kirim
+                        </Button>}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      ) : (
+        <section role="tabpanel" aria-label="Pengeluaran SC" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-orange-800">Pengeluaran SC</h2>
+              <p className="text-sm text-gray-500">Catatan biaya operasional dan alur persetujuan pengeluaran.</p>
+            </div>
+            <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
+              <Plus className="w-4 h-4 mr-2" /> {FINANCE_SC_TEST_ONLY?"Tambah Pengeluaran (TEST)":"Tambah Pengeluaran"}
+            </Button>
+          </div>
+          <Card className="border-l-4 border-l-orange-500">
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-gray-600">{FINANCE_SC_TEST_ONLY?"Total Pengeluaran TEST Aktif":"Pengeluaran Bulan Ini"}</p>
+              <p className="text-2xl font-bold text-orange-800 mt-1">
+                {FINANCE_SC_TEST_ONLY
+                  ? financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.expense):"Memuat..."
+                  : formatIDR(summary.totalThisMonth)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">{FINANCE_SC_TEST_ONLY?
+                "Hanya pengeluaran uji yang masih ada di Sheets; bukan pengeluaran resmi.":
+                "Catatan operasional SC; berbeda dari mutasi bank BizPortal."}</p>
+            </CardContent>
+          </Card>
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
@@ -487,23 +1313,12 @@ export default function AdminExpenses() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Cari nomor, deskripsi, vendor, akun COA..."
+                placeholder="Cari pengeluaran, cari nama, nomor ref..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
               />
             </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Status</SelectItem>
-                {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[150px]" />
             <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[150px]" />
           </div>
@@ -514,11 +1329,29 @@ export default function AdminExpenses() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-bold">
-            Daftar Pengeluaran <span className="text-gray-400 font-normal">({filtered.length})</span>
+            {FINANCE_SC_TEST_ONLY?"Histori Pengeluaran (TEST)":"Daftar Pengeluaran"} <span className="text-gray-400 font-normal">({FINANCE_SC_TEST_ONLY?visibleTestExpenses.length:filtered.length})</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {FINANCE_SC_TEST_ONLY ? (
+            financeTestReadError ?
+              <p role="alert" className="p-5 text-sm text-red-700">Ledger TEST gagal dibaca. Periksa transaksi sebelum input ulang.</p>
+              : !financeTestData ? <p className="p-5 text-gray-500 text-sm">Memuat histori TEST...</p> :
+              visibleTestExpenses.length===0 ? <p className="p-6 text-center text-gray-500">Belum ada pengeluaran TEST sesuai filter.</p> :
+              <div className="overflow-x-auto"><table className="w-full text-sm">
+                <thead className="bg-gray-50"><tr className="border-b text-left">
+                  <th className="p-3">ID / Tanggal</th><th className="p-3">Penerima / Sumber</th>
+                  <th className="p-3 text-right">Nominal</th><th className="p-3">Status Sheets</th>
+                </tr></thead>
+                <tbody>{visibleTestExpenses.map(x=><tr key={x.id} className="border-b">
+                  <td className="p-3 font-mono">{x.testNo}<span className="block text-xs text-gray-500">{x.transactionDate}</span></td>
+                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                  <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
+                  <td className="p-3">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
+                    x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
+                </tr>)}</tbody>
+              </table></div>
+          ) : isLoading ? (
             <div className="p-8 text-center text-gray-400">Memuat data...</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-gray-400">Belum ada pengeluaran</div>
@@ -640,221 +1473,240 @@ export default function AdminExpenses() {
         </CardContent>
       </Card>
 
+        </section>
+      )}
+
+      {/* Incoming funds: save to SC operational register, not bank movements. */}
+      {/* Historical receipts remain accessible without restoring the removed inline register. */}
+      <Dialog open={incomeHistoryOpen} onOpenChange={setIncomeHistoryOpen}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Histori Uang Masuk SC</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Pencatatan operasional, bukan mutasi bank terverifikasi. Status Tersinkron
+            berarti tercatat pada tab SC Uang Masuk, bukan pada tab kas besar sc.
+          </p>
+          {incomeHistoryLoading && !incomeData ? <p>Memuat histori...</p> :
+            incomeHistoryError ? <p className="text-red-700">Histori gagal dibaca. Data lama tidak dihapus.</p> :
+            !incomeData?.entries.length ? <p>Belum ada histori Uang Masuk.</p> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b text-left">
+                    <th className="p-2">ID Pemasukan</th><th className="p-2">Tanggal</th>
+                    <th className="p-2">Pengirim / Bank</th><th className="p-2">Akun Penerima</th>
+                    <th className="p-2">Nominal</th><th className="p-2">Status Sheets</th><th className="p-2">Kas Besar SC</th>
+                  </tr></thead>
+                  <tbody>{incomeData.entries.map((entry) => (
+                    <tr key={entry.id} className="border-b">
+                      <td className="p-2 font-mono">{entry.incomeNo}</td>
+                      <td className="p-2">{entry.transactionDate}</td>
+                      <td className="p-2">{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
+                      <td className="p-2">{entry.receivingAccount}</td>
+                      <td className="p-2">{formatIDR(Number(entry.amount))}</td>
+                      <td className="p-2">{entry.sheetSyncState === "synced" ? "Tersinkron — belum terverifikasi" : entry.sheetSyncState}</td>
+                      <td className="p-2">
+                        {entry.cashSheetState === "not_applicable" ? "Bukan transaksi kas" :
+                          entry.cashSheetState === "synced" ? `Baris ${entry.cashSheetRow}` : entry.cashSheetState}
+                        {(entry.cashSheetState === "pending" || entry.cashSheetState === "failed") &&
+                          <Button size="sm" variant="outline" onClick={() => retryCashLedger(entry.id)}>
+                            Coba sinkron kas
+                          </Button>}
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          <p className="text-xs text-gray-500">ID pemasukan tetap sama pada database dan respons API; tidak membuat jurnal atau payment.</p>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={incomeOpen} onOpenChange={(open) => {
+        setIncomeOpen(open);
+        if (!open) setIncomePreview(false);
+      }}>
+        <DialogContent className="w-[min(94vw,540px)] max-w-[540px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-black">{FINANCE_SC_TEST_ONLY?"Input Uang Masuk (TEST)":"Input Uang Masuk"}</DialogTitle>
+          </DialogHeader>
+          {FINANCE_SC_TEST_ONLY ?
+            <p className="rounded-lg border border-violet-300 bg-violet-50 p-3 text-sm text-violet-900">
+              SIMULASI SAJA. Setelah disimpan, nilai masuk ke kolom C tab kas besar sc
+              dengan penanda SC_TEST_ONLY. Tidak membuat mutasi BizPortal, jurnal, atau saldo resmi.
+              Maksimum Rp1.000.000 per transaksi uji.
+            </p> :
+            <p className="text-sm text-gray-500">
+              Catat pemasukan operasional. Setelah disimpan, data tetap belum terverifikasi bank.
+              Pencocokan mutasi dan jurnal tetap melalui BizPortal.
+            </p>}
+          <form className="space-y-4 pt-1" onSubmit={(event) => {
+            event.preventDefault();
+            setIncomePreview(true);
+          }}>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-date">Tanggal <span className="text-red-500">*</span></Label>
+              <Input id="income-date" type="date" required value={incomeForm.transactionDate}
+                onChange={(e) => { setIncomeForm({ ...incomeForm, transactionDate: e.target.value }); setIncomePreview(false); }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-source">Dana Masuk (Dari) <span className="text-red-500">*</span></Label>
+              <IncomeDropdown
+                id="income-source"
+                value={incomeForm.sourceName}
+                options={INCOME_SOURCE_OPTIONS}
+                placeholder="Pilih pengirim dana"
+                otherPlaceholder="Ketik nama pengirim atau perusahaan"
+                required
+                onChange={(value) => { setIncomeForm({ ...incomeForm, sourceName: value }); setIncomePreview(false); }}
+              />
+              <p className="text-xs text-gray-500">Contoh dari kas besar sc. Nama lain boleh diketik manual.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-bank">Bank Pengirim <span className="text-red-500">*</span></Label>
+              <IncomeDropdown
+                id="income-bank"
+                value={incomeForm.bank}
+                options={INCOME_BANK_OPTIONS}
+                placeholder="Pilih bank pengirim"
+                otherPlaceholder="Ketik bank pengirim"
+                required
+                onChange={(value) => { setIncomeForm({ ...incomeForm, bank: value }); setIncomePreview(false); }}
+              />
+              <p className="text-xs text-gray-500">Bank asal dana. Berbeda dengan bank atau akun penerima.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Metode <span className="text-red-500">*</span></Label>
+              <Select value={incomeForm.method} onValueChange={(value) => {
+                setIncomeForm({ ...incomeForm, method: value }); setIncomePreview(false);
+              }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Transfer Bank">Transfer Bank</SelectItem>
+                  <SelectItem value="Tunai">Tunai</SelectItem>
+                  <SelectItem value="QRIS">QRIS</SelectItem>
+                  <SelectItem value="Lainnya">Lainnya</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-receiving-account">
+                Bank / Akun Penerima {incomeForm.method === "Transfer Bank" ? <span className="text-red-500">*</span> : "(opsional)"}
+              </Label>
+              <IncomeDropdown
+                id="income-receiving-account"
+                value={incomeForm.receivingAccount}
+                options={INCOME_BANK_OPTIONS}
+                placeholder="Pilih bank atau akun penerima"
+                otherPlaceholder="Ketik bank atau akun penerima"
+                required={incomeForm.method === "Transfer Bank"}
+                onChange={(value) => {
+                  setIncomeForm({ ...incomeForm, receivingAccount: value });
+                  setIncomePreview(false);
+                }}
+              />
+              <p className="text-xs text-gray-500">Bank atau akun tujuan uang masuk. Pencocokan mutasi dilakukan terpisah.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-reference">Nomor Referensi Bank (opsional)</Label>
+              <Input id="income-reference" maxLength={120} placeholder="Nomor referensi pada bukti transfer"
+                value={incomeForm.bankReference} onChange={(event) => {
+                  setIncomeForm({ ...incomeForm, bankReference: event.target.value });
+                  setIncomePreview(false);
+                }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="income-amount">Nominal (Rp) <span className="text-red-500">*</span></Label>
+              <Input id="income-amount" type="text" inputMode="numeric" required
+                placeholder="Contoh: 500.000"
+                value={formatExpenseRupiahInput(incomeForm.amount)}
+                onChange={(e) => {
+                  setIncomeForm({ ...incomeForm, amount: normalizeExpenseRupiahInput(e.target.value) });
+                  setIncomePreview(false);
+                }} />
+            </div>
+            {!FINANCE_SC_TEST_ONLY && incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && (
+              <label className="flex gap-2 items-start text-sm rounded border p-3">
+                <input type="checkbox" checked={cashReceiptConfirmed}
+                  onChange={(e) => { setCashReceiptConfirmed(e.target.checked); setIncomePreview(false); }} />
+                <span>Saya memastikan kas tunai benar-benar telah diterima. Kirim data ke
+                  <strong> kas besar sc</strong> hanya jika pengiriman kas diaktifkan.
+                  Pencatatan ini akan masuk alur matching BizPortal; tidak mengisi saldo secara otomatis.</span>
+              </label>
+            )}
+            {incomePreview && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-1">
+                <p className="font-semibold text-emerald-800">Periksa Uang Masuk sebelum disimpan</p>
+                <p className="text-xs text-emerald-800">ID unik pemasukan diterbitkan setelah penyimpanan berhasil.</p>
+                <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
+                <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
+                <p>Bank / Akun Penerima: {incomeForm.receivingAccount.trim() || "Tidak ditentukan"}</p>
+                {incomeForm.bankReference.trim() && <p>Referensi bank: {incomeForm.bankReference.trim()}</p>}
+                <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
+              </div>
+            )}
+            {incomeDuplicateWarning && (
+              <div className="rounded-md border border-amber-300 p-3 text-sm space-y-2">
+                <p className="font-semibold">Ditemukan pencatatan Uang Masuk yang sangat mirip.</p>
+                <p>Jika ini transaksi berbeda dengan tanggal, bank, pengirim, dan nominal sama, periksa bukti lalu konfirmasi. Jika duplikat, batalkan.</p>
+                <Button type="button" variant="outline" disabled={incomeSaving} onClick={() => saveIncome(true)}>
+                  Tetap Simpan — Transaksi Berbeda
+                </Button>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setIncomeOpen(false)}>Batal</Button>
+              <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={!incomeForm.transactionDate || !incomeForm.sourceName.trim() ||
+                  !incomeForm.bank.trim() ||
+                  (incomeForm.method === "Transfer Bank" && !incomeForm.receivingAccount.trim()) ||
+                  Number(incomeForm.amount) <= 0 ||
+                  (!FINANCE_SC_TEST_ONLY && incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && !cashReceiptConfirmed) ||
+                  (FINANCE_SC_TEST_ONLY && Number(incomeForm.amount)>1000000)}>
+                Pratinjau Input
+              </Button>
+              {incomePreview && (
+                <Button type="button" disabled={incomeSaving} onClick={() => saveIncome()}
+                  className="bg-emerald-700 text-white hover:bg-emerald-800">
+                  {incomeSaving ? "Menyimpan..." : FINANCE_SC_TEST_ONLY?"Simpan Uang Masuk (TEST)":"Simpan Uang Masuk"}
+                </Button>
+              )}
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Form Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="w-[min(94vw,860px)] max-w-[860px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-black">{editingId ? "Edit Pengeluaran" : "Tambah Pengeluaran"}</DialogTitle>
+            <DialogTitle className="font-black">{editingId ? "Edit Pengeluaran" : FINANCE_SC_TEST_ONLY ? "Tambah Pengeluaran (TEST)" : "Tambah Pengeluaran"}</DialogTitle>
           </DialogHeader>
-          <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
-            <p className="font-semibold">Pencatatan Pengeluaran Sport Center</p>
-            <p className="mt-1">Isi data dan catatan tujuan transaksi, lalu lampirkan bukti transfer/QRIS (termasuk blu). Data tersimpan sebagai pencatatan operasional, bukan jurnal atau mutasi bank terverifikasi. BizPortal tetap menangani rekonsiliasi Google Sheets kas besar sc.</p>
-          </div>
+          {FINANCE_SC_TEST_ONLY && !editingId ?
+            <div className="rounded-lg border border-violet-300 bg-violet-50 p-3 text-sm text-violet-900">
+              <p className="font-semibold">Pengeluaran Simulasi — Kas Besar SC</p>
+              <p className="mt-1">Nominal dasar + PPN masuk ke kolom D tab kas besar sc
+                dengan status SC_TEST_ONLY; tidak membuat jurnal, mutasi BizPortal, atau saldo resmi.
+                Maksimum Rp1.000.000 termasuk PPN per transaksi.</p>
+            </div> :
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+              <p className="font-semibold">Pencatatan Pengeluaran Sport Center</p>
+              <p className="mt-1">Catat transaksi yang sudah dilakukan. Catatan tujuan wajib; bukti dapat dilampirkan untuk membantu pencocokan mutasi.</p>
+            </div>}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Tanggal <span className="text-red-500">*</span></Label>
-                <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
-              </div>
-              <div className="space-y-1">
-                <Label className="flex items-center gap-1">
-                  <BookOpen className="w-3.5 h-3.5 text-orange-500" />
-                  Kategori internal / COA referensi (opsional)
-                </Label>
-                <Popover open={coaOpen} onOpenChange={setCoaOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {selectedCoa
-                        ? <span><span className="font-mono text-xs text-gray-500 mr-1">{selectedCoa.code}</span>{selectedCoa.name}</span>
-                        : <span className="text-muted-foreground">Pilih akun COA...</span>
-                      }
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[320px] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Cari akun COA..." />
-                      <CommandList className="max-h-64">
-                        <CommandEmpty>Akun tidak ditemukan.</CommandEmpty>
-                        {Object.entries(coaByType).map(([type, accounts]) => (
-                          <CommandGroup key={type} heading={ACCOUNT_TYPE_LABELS[type] ?? type}>
-                            {accounts.map((acc) => (
-                              <CommandItem
-                                key={acc.id}
-                                value={`${acc.code} ${acc.name}`}
-                                onSelect={() => {
-                                  setForm({ ...form, coaAccountId: String(acc.id) });
-                                  setCoaOpen(false);
-                                }}
-                              >
-                                <Check className={`mr-2 h-4 w-4 ${form.coaAccountId === String(acc.id) ? "opacity-100" : "opacity-0"}`} />
-                                <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
-                                {acc.name}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        ))}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                {selectedCoa && (
-                  <div className="text-xs mt-1 p-2 rounded-md bg-orange-50 border border-orange-100 flex items-center gap-2">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${ACCOUNT_TYPE_COLORS[selectedCoa.accountType] ?? "bg-gray-100"}`}>
-                      {ACCOUNT_TYPE_LABELS[selectedCoa.accountType] ?? selectedCoa.accountType}
-                    </span>
-                    <span className="text-gray-600">
-                      Hanya klasifikasi internal. Jurnal dikelola BizPortal.
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Deskripsi <span className="text-red-500">*</span></Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="Deskripsi pengeluaran..."
-                rows={2}
-                required
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label>Catatan tujuan transaksi <span className="text-red-500">*</span></Label>
-              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Wajib: barang/jasa yang dibeli, tujuan pembayaran, atau alasan transfer..." rows={2} required minLength={3} />
-              <p className="text-xs text-gray-500">Berbeda dari deskripsi bank; catatan ini menjadi keterangan pembukuan Sport Center.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label className="flex items-center gap-1">
-                  <Building2 className="w-3.5 h-3.5 text-orange-500" />
-                  Vendor / Supplier
-                </Label>
-                <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {form.vendorId
-                        ? <span className="font-medium">{vendors.find((v) => v.id === Number(form.vendorId))?.name ?? "Pilih vendor..."}</span>
-                        : <span className="text-muted-foreground">Pilih vendor...</span>
-                      }
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[280px] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Cari vendor..." />
-                      <CommandList className="max-h-56">
-                        <CommandEmpty>
-                          <div className="text-center py-2">
-                            <p className="text-sm text-gray-500">Vendor tidak ditemukan.</p>
-                            <a href="/admin/vendors" className="text-xs text-orange-500 underline" target="_blank">
-                              Tambah vendor baru →
-                            </a>
-                          </div>
-                        </CommandEmpty>
-                        <CommandGroup>
-                          {vendors.map((v) => (
-                            <CommandItem
-                              key={v.id}
-                              value={v.name}
-                              onSelect={() => {
-                                setForm({ ...form, vendorId: String(v.id), vendorName: v.name });
-                                setVendorOpen(false);
-                              }}
-                            >
-                              <Check className={`mr-2 h-4 w-4 ${form.vendorId === String(v.id) ? "opacity-100" : "opacity-0"}`} />
-                              {v.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                {vendors.length === 0 && (
-                  <p className="text-xs text-amber-600">Belum ada vendor aktif. <a href="/admin/vendors" className="underline" target="_blank">Tambah vendor</a></p>
-                )}
-              </div>
-              <div className="space-y-1">
-                <Label>Fasilitas Terkait</Label>
-                <Select value={form.facilityId || "none"} onValueChange={(v) => setForm({ ...form, facilityId: v === "none" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="Pilih fasilitas (opsional)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tidak terkait fasilitas</SelectItem>
-                    {(facilities as any[]).map((f: any) => (
-                      <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <Label>Nominal (Rp) <span className="text-red-500">*</span></Label>
-                <Input
-                  type="number" min="0" step="1000"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  placeholder="0"
-                  required
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>PPN Masukan (Rp)</Label>
-                <Input
-                  type="number" min="0" step="1000"
-                  value={form.ppnAmount}
-                  onChange={(e) => setForm({ ...form, ppnAmount: e.target.value })}
-                  placeholder="0"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Total</Label>
-                <Input value={formatIDR(totalNum)} disabled className="bg-gray-50 font-bold" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Metode Pembayaran</Label>
-                <Select value={form.paymentMethod || "none"} onValueChange={(v) => setForm({ ...form, paymentMethod: v === "none" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="Pilih metode" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tidak ditentukan</SelectItem>
-                    {PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Rekening sumber pembayaran (keterangan)</Label>
-                <p className="text-xs text-gray-500">Misalnya: blu by BCA Digital, Mandiri, atau kas tunai. Bukan pemetaan COA otomatis.</p>
-                <Input value={form.paymentAccount} onChange={(e) => setForm({ ...form, paymentAccount: e.target.value })} placeholder="Nama bank / no. rekening" />
-              </div>
-            </div>
-
             <div className="space-y-2">
               <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
-              <p className="text-xs text-gray-500">Unggah screenshot atau bukti transaksi blu (seperti bukti yang dibagikan dari aplikasi). Periksa isian tanggal, nominal dan penerima secara manual.</p>
+              <p className="text-xs text-gray-500">Boleh unggah bukti dulu, lalu isi formulir. Periksa hasil pembacaan sebelum menyimpan.</p>
               <label className="flex items-start gap-2 text-xs text-gray-700">
                 <input type="checkbox" checked={autoReadProof} onChange={(e) => setAutoReadProof(e.target.checked)} className="mt-0.5" />
-                <span>Baca bukti otomatis (opsional). Jika diaktifkan, foto diproses oleh OCR server yang dapat memakai layanan AI terkonfigurasi sebagai cadangan; admin tetap harus memeriksa hasilnya.</span>
+                <span>Isi otomatis dari bukti (opsional, memerlukan persetujuan pemrosesan AI). Admin tetap memeriksa hasilnya.</span>
               </label>
               {scanningProof && <p className="text-xs text-teal-700">Membaca bukti pembayaran untuk saran isian...</p>}
               {proofPreview && (
                 <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
                   <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>
                   <p>Nominal: {proofPreview.amount == null ? "Tidak terbaca" : formatIDR(proofPreview.amount)} • Tanggal: {proofPreview.date ?? "Tidak terbaca"}</p>
+                  <p>Referensi blu: {proofPreview.bankReference ?? "Tidak terbaca"}</p>
                   <p>Penerima terdeteksi: {proofPreview.recipient ?? "Tidak terbaca"} • Metode: {proofPreview.paymentMethod}</p>
                   <div className="flex items-center gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={applyProofPreview}>Terapkan saran ke form</Button>
@@ -916,12 +1768,119 @@ export default function AdminExpenses() {
             </div>
 
 
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Tanggal transaksi <span className="text-red-500">*</span></Label>
+                <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
+              </div>
+              <div className="space-y-1">
+                <Label>Nominal (Rp) <span className="text-red-500">*</span></Label>
+                <Input type="text" inputMode="numeric" value={formatExpenseRupiahInput(form.amount)}
+                  onChange={(e) => setForm({ ...form, amount: normalizeExpenseRupiahInput(e.target.value) })}
+                  placeholder="Contoh: 100.000" required />
+                <p className="text-xs text-gray-500">Rupiah tanpa desimal — contoh 1.000, 2.500, 10.000, 100.000.</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Catatan / Tujuan Pengeluaran <span className="text-red-500">*</span></Label>
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Contoh: Reimburse pengisian daya kendaraan operasional" rows={3} minLength={3} required />
+              <p className="text-xs text-gray-500">Jelaskan kegunaan dana. Untuk kasbon atau talangan, tuliskan secara jelas agar tidak dianggap beban biasa.</p>
+            </div>
+            <div className="space-y-1 relative">
+              <Label>Penerima Pembayaran (opsional)</Label>
+              <Input value={form.vendorName} onFocus={() => setRecipientFocused(true)}
+                onBlur={() => window.setTimeout(() => setRecipientFocused(false), 150)}
+                onChange={(e) => setForm({ ...form, vendorName: e.target.value, vendorId: "" })}
+                placeholder="Ketik nama karyawan, toko, PLN, atau penerima lainnya" autoComplete="off" />
+              {recipientFocused && form.vendorName.trim().length > 0 && recipientSuggestions.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 top-full mt-1 rounded-md border bg-white shadow-md max-h-48 overflow-y-auto">
+                  {recipientSuggestions.map((entry) => (
+                    <button key={entry.key} type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-orange-50 text-sm flex justify-between gap-2"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => { setForm({ ...form, vendorName: entry.name, vendorId: entry.vendorId }); setRecipientFocused(false); }}>
+                      <span>{entry.name}</span><span className="text-gray-400 text-xs">{entry.kind}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-gray-500">Boleh pilih dari karyawan/vendor atau gunakan teks sendiri, tanpa membuat master baru.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Metode Pembayaran</Label>
+                <Select value={form.paymentMethod || "none"} onValueChange={(v) => setForm({ ...form, paymentMethod: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="Pilih metode" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Tidak ditentukan</SelectItem>
+                    {PAYMENT_METHODS.map((method) => <SelectItem key={method} value={method}>{method}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Sumber Dana (hanya keterangan)</Label>
+                <Select value={["blu by BCA Digital", "Mandiri", "Kas Tunai", "Lainnya"].includes(form.paymentAccount) ? form.paymentAccount : form.paymentAccount ? "Lainnya" : "none"}
+                  onValueChange={(value) => setForm({ ...form, paymentAccount: value === "none" ? "" : value })}>
+                  <SelectTrigger><SelectValue placeholder="Pilih sumber dana" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Tidak ditentukan</SelectItem>
+                    <SelectItem value="blu by BCA Digital">blu by BCA Digital</SelectItem>
+                    <SelectItem value="Mandiri">Mandiri</SelectItem>
+                    <SelectItem value="Kas Tunai">Kas Tunai</SelectItem>
+                    <SelectItem value="Lainnya">Lainnya (isi manual)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.paymentAccount === "Lainnya" && <Input className="mt-2" placeholder="Nama sumber dana lainnya"
+                  onChange={(e) => setForm({ ...form, paymentAccount: e.target.value ? `Lainnya: ${e.target.value}` : "Lainnya" })} />}
+                {form.paymentAccount.startsWith("Lainnya: ") && <Input className="mt-2" placeholder="Nama sumber dana lainnya"
+                  value={form.paymentAccount.slice(9)}
+                  onChange={(e) => setForm({ ...form, paymentAccount: e.target.value ? `Lainnya: ${e.target.value}` : "Lainnya" })} />}
+                <p className="text-xs text-gray-500">Tidak memetakan COA, tidak membuat jurnal, dan bukan bank tujuan penerima.</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Nomor Referensi Bank (opsional)</Label>
+              <Input value={form.bankReference} maxLength={120}
+                onChange={(e) => setForm({ ...form, bankReference: e.target.value })}
+                placeholder="Nomor referensi pada bukti transfer / QRIS" />
+              <p className="text-xs text-gray-500">Digunakan sebagai informasi pemeriksaan, bukan konfirmasi otomatis ke bank.</p>
+            </div>
+            <div className="rounded-lg border">
+              <button type="button" className="w-full text-left p-3 flex justify-between items-center text-sm font-medium"
+                onClick={() => setShowAdvanced(!showAdvanced)}>
+                <span>Pengaturan tambahan (fasilitas, pajak, kategori)</span>
+                <ChevronsUpDown className="h-4 w-4 text-gray-400" />
+              </button>
+              {showAdvanced && (
+                <div className="p-3 pt-0 space-y-3">
+                  <div className="space-y-1">
+                    <Label>Fasilitas terkait</Label>
+                    <Select value={form.facilityId || "none"} onValueChange={(v) => setForm({ ...form, facilityId: v === "none" ? "" : v })}>
+                      <SelectTrigger><SelectValue placeholder="Pilih fasilitas (opsional)" /></SelectTrigger>
+                      <SelectContent><SelectItem value="none">Tidak terkait fasilitas</SelectItem>
+                        {(facilities as any[]).map((f: any) => <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>PPN Masukan (Rp)</Label>
+                    <Input type="number" min="0" step="0.01" value={form.ppnAmount}
+                      onChange={(e) => setForm({ ...form, ppnAmount: e.target.value })} placeholder="0" />
+                    <p className="text-xs text-gray-500">Jika diisi, PPN ditambahkan di atas nominal dasar. Biaya admin pada bukti bank dicatat sebagai transaksi terpisah bila merupakan mutasi terpisah.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
+
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
                 Batal
               </Button>
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending}>
-                {editingId ? "Simpan Perubahan" : "Buat Pengeluaran"}
+              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving}>
+                {editingId ? "Simpan Perubahan" : FINANCE_SC_TEST_ONLY ? "Simpan Pengeluaran (TEST)" : "Buat Pengeluaran"}
               </Button>
             </div>
           </form>
@@ -993,8 +1952,9 @@ export default function AdminExpenses() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-gray-500">Tanggal</span><p className="font-semibold">{detail.expenseDate}</p></div>
                 <div><span className="text-gray-500">Kategori</span><p className="font-semibold">{detail.category}</p></div>
-                <div className="col-span-2"><span className="text-gray-500">Deskripsi</span><p className="font-semibold">{detail.description}</p></div>
-                {detail.vendorName && <div><span className="text-gray-500">Vendor</span><p className="font-semibold">{detail.vendorName}</p></div>}
+                <div className="col-span-2"><span className="text-gray-500">Catatan / Tujuan</span><p className="font-semibold">{detail.description}</p></div>
+                {detail.vendorName && <div><span className="text-gray-500">Penerima</span><p className="font-semibold">{detail.vendorName}</p></div>}
+                {detail.bankReference && <div className="col-span-2"><span className="text-gray-500">Referensi bank</span><p className="font-mono break-all">{detail.bankReference}</p></div>}
                 {detail.facilityName && <div><span className="text-gray-500">Fasilitas</span><p className="font-semibold">{detail.facilityName}</p></div>}
                 <div><span className="text-gray-500">Nominal</span><p className="font-semibold">{formatIDR(detail.amount)}</p></div>
                 {detail.ppnAmount > 0 && <div><span className="text-gray-500">PPN Masukan</span><p className="font-semibold">{formatIDR(detail.ppnAmount)}</p></div>}

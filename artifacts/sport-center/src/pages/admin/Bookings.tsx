@@ -1376,6 +1376,7 @@ function BookingDetailDrawer({
   groupBookings = [],
   onClose,
   onUpdateStatus,
+  onSaveAdminNotes,
   onConfirmPayment,
   onRejectPayment,
   onSyncCompanyInvoicePayment,
@@ -1398,6 +1399,7 @@ function BookingDetailDrawer({
   groupBookings?: any[];
   onClose: () => void;
   onUpdateStatus: (status: string, notes?: string) => void;
+  onSaveAdminNotes: (notes: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
   onSyncCompanyInvoicePayment: (bookingId: number) => void;
@@ -1451,6 +1453,7 @@ function BookingDetailDrawer({
     total: groupInvoiceAmount,
     confirmedAmount: confirmedGroupTotal,
     hasConfirmedDp: hasConfirmedGroupDp,
+    hasConfirmedPartial: hasConfirmedGroupPartial,
   } = getBookingPaymentCapture(booking, allPayments);
   const systemRepairPayments = allPayments.filter((payment: any) =>
     (payment?.status === "rejected" || payment?.status === "cancelled") &&
@@ -1504,7 +1507,7 @@ function BookingDetailDrawer({
   });
   const { data: gymGuestAdminDetail } = useQuery({
     queryKey: ["admin-gym-guest-detail", booking.orderNumber],
-    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
     refetchOnMount: "always",
     queryFn: async () => {
@@ -1517,11 +1520,12 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const { data: gymX904Monitoring } = useQuery({
+  const { data: gymX904Monitoring, isError: gymX904MonitoringFailed, error: gymX904MonitoringError, refetch: retryGymX904Monitoring } = useQuery({
     queryKey: ["admin-gym-x904-monitoring", booking.orderNumber],
-    enabled: booking.source === "gym_public_guest" && Boolean(booking.orderNumber),
+    enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
     refetchInterval: 15000,
+    refetchOnMount: "always",
     queryFn: async () => {
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/x904-monitoring`, {
         cache: "no-store",
@@ -1532,7 +1536,9 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const gymVisReservation = gymGuestAdminDetail?.visCardReservation ?? gymX904Monitoring?.reservation ?? null;
+  // Monitoring is the current source of truth for VIS reservations on web Gym bookings.
+  // Legacy detail may be null or stale; never let it override read-back status.
+  const gymVisReservation = gymX904Monitoring?.reservation ?? gymGuestAdminDetail?.visCardReservation ?? null;
   const gymVisAccess = gymX904Monitoring?.access ?? null;
   const gymVisPool = gymX904Monitoring?.pool ?? [];
   const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
@@ -1548,6 +1554,9 @@ function BookingDetailDrawer({
     qrisDetectionPayment?.status ??
     null;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
+  useEffect(() => {
+    setAdminNotes(booking.adminNotes ?? "");
+  }, [booking.id]);
   const [cancellationNoteError, setCancellationNoteError] = useState("");
   const [cancellationReason, setCancellationReason] = useState("");
   const [newPaymentMethod, setNewPaymentMethod] = useState<"QRIS" | "Transfer Bank">("QRIS");
@@ -1555,6 +1564,8 @@ function BookingDetailDrawer({
   const [savingNewPayment, setSavingNewPayment] = useState(false);
   const [newPaymentError, setNewPaymentError] = useState("");
   const [visPhysicalReturned, setVisPhysicalReturned] = useState(false);
+  const [visPhysicalHandedOver, setVisPhysicalHandedOver] = useState(false);
+  const [visIdentityChecked, setVisIdentityChecked] = useState(false);
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
   const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
@@ -1582,8 +1593,40 @@ function BookingDetailDrawer({
     },
   });
 
+  const assignExistingWebVisMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/bookings/${booking.id}/x904-vis-reserve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({
+          identityChecked: visIdentityChecked,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (result: any) => {
+      await Promise.all([
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] }),
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] }),
+      ]);
+      paymentToast.toast({
+        title: "Kartu VIS disiapkan tanpa booking baru",
+        description: `${result?.cardCode ?? "Kartu"} telah direservasi. Serahkan kartu fisik dan verifikasi ACK X904 sebelum menyatakan akses aktif.`,
+      });
+    },
+    onError: (error: any) => paymentToast.toast({
+      title: "Kartu VIS belum dapat dialokasikan",
+      description: String(error?.message ?? error), variant: "destructive",
+    }),
+  });
+
   const handoverGymVisMutation = useMutation({
     mutationFn: async () => {
+      if (gymX904MonitoringFailed || !gymX904Monitoring?.reservation || gymX904Monitoring.reservation.state !== "reserved") {
+        throw new Error("Monitoring VIS belum tervalidasi; lakukan pemeriksaan ulang sebelum serah-terima.");
+      }
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/collect-vis`, {
         method: "POST",
         headers: {
@@ -1598,6 +1641,8 @@ function BookingDetailDrawer({
     },
     onSuccess: async (payload: any) => {
       await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] });
+      setVisPhysicalHandedOver(false);
       paymentToast.toast({
         title: `${payload?.cardCode ?? "Kartu VIS"} diserahkan`,
         description: "Serah-terima tercatat. Worker X904 sekarang boleh menerbitkan perintah ACTIVATE_USER dan menunggu ACK/read-back.",
@@ -1952,9 +1997,35 @@ function BookingDetailDrawer({
             detection={qrisEmailDetection}
             paymentStatus={qrisEmailPaymentStatus}
           />
-          {booking.source === "gym_public_guest" && (
+          {(booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && gymX904MonitoringFailed && (
+            <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <div className="font-semibold">Status kartu VIS/X904 belum dapat diverifikasi.</div>
+              <p>{String((gymX904MonitoringError as Error)?.message ?? "Monitoring tidak tersedia")}. Jangan serahkan atau menetapkan kartu sebelum status terbaru terbaca.</p>
+              <button type="button" onClick={() => void retryGymX904Monitoring()}
+                className="rounded-lg border border-amber-400 bg-white px-3 py-2 font-semibold">Coba lagi monitoring VIS</button>
+            </div>
+          )}
+          {booking.source === "web" &&
+            /gym|fitness/i.test(String(booking.facilityName ?? "")) &&
+            booking.status === "confirmed" && !gymVisReservation && !gymX904MonitoringFailed &&
+            String(booking.bookingDate ?? "").slice(0, 10) === new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }) && (
+            <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+              <div className="font-semibold">Tetapkan kartu VIS ke booking ini</div>
+              <p className="text-xs leading-relaxed">Gunakan booking yang sudah dibayar, tanpa membuat booking atau pembayaran kedua. Petugas cukup mencocokkan identitas pengunjung. Sistem membaca pembayaran yang sudah dikonfirmasi dan bukti tersimpan; tidak perlu mengunggah ulang bukti atau mengakses mutasi bank. Status pembayaran terkonfirmasi bukan bukti settlement bank. Aktivasi tetap menunggu serah-terima fisik dan ACK mesin.</p>
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" checked={visIdentityChecked} onChange={event => setVisIdentityChecked(event.target.checked)} />
+                Saya sudah mencocokkan identitas pengunjung secara fisik.
+              </label>
+              <button type="button" disabled={!visIdentityChecked || assignExistingWebVisMutation.isPending}
+                onClick={() => assignExistingWebVisMutation.mutate()}
+                className="rounded-lg bg-sky-800 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                {assignExistingWebVisMutation.isPending ? "Memeriksa dan mereservasi..." : "Reservasi VIS untuk booking ini"}
+              </button>
+            </div>
+          )}
+          {(booking.source === "gym_public_guest" || (booking.source === "web" && gymVisReservation)) && (
             <div className={`rounded-xl border p-4 text-sm ${gymVisReservation ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-              <div className="font-bold">Akses Gym Mandiri — Kartu / X904</div>
+              <div className="font-bold">Akses Gym — Kartu / X904</div>
               {gymVisReservation ? (
                 <>
                   <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
@@ -1962,16 +2033,23 @@ function BookingDetailDrawer({
                   <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
                   <div className="mt-2 text-xs font-semibold">Kartu belum berarti pintu aktif; tunggu serah-terima, worker, ACK dan read-back X904.</div>
                   {gymVisReservation.state === "reserved" && (
-                    <button
-                      type="button"
-                      onClick={() => handoverGymVisMutation.mutate()}
-                      disabled={handoverGymVisMutation.isPending}
-                      className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                    >
-                      {handoverGymVisMutation.isPending
-                        ? "Mencatat serah-terima..."
-                        : `${gymVisReservation.cardCode} Sudah Diserahkan → Aktifkan Akses`}
-                    </button>
+                    <div className="mt-3 space-y-2">
+                      <label className="flex items-start gap-2 text-xs">
+                        <input type="checkbox" checked={visPhysicalHandedOver}
+                          onChange={event => setVisPhysicalHandedOver(event.target.checked)} />
+                        Saya menyaksikan kartu fisik benar-benar diserahkan kepada pengunjung.
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handoverGymVisMutation.mutate()}
+                        disabled={!visPhysicalHandedOver || gymX904MonitoringFailed || !gymX904Monitoring?.reservation || handoverGymVisMutation.isPending}
+                        className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        {handoverGymVisMutation.isPending
+                          ? "Mencatat serah-terima..."
+                          : `Konfirmasi serah-terima ${gymVisReservation.cardCode}`}
+                      </button>
+                    </div>
                   )}
                   {gymVisReservation.state === "collected" && (
                     <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">
@@ -1997,7 +2075,7 @@ function BookingDetailDrawer({
                             <input type="checkbox" checked={visPhysicalReturned} onChange={(e) => setVisPhysicalReturned(e.target.checked)} />
                             Kartu fisik sudah benar-benar kembali ke petugas.
                           </label>
-                          <button type="button" disabled={!visPhysicalReturned || returnGymVisMutation.isPending}
+                          <button type="button" disabled={!visPhysicalReturned || gymX904MonitoringFailed || !gymX904Monitoring?.access?.returnReady || returnGymVisMutation.isPending}
                             onClick={() => returnGymVisMutation.mutate()}
                             className="rounded bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-50">
                             {returnGymVisMutation.isPending ? "Memverifikasi..." : "Kembalikan Kartu ke Pool"}
@@ -2365,17 +2443,21 @@ function BookingDetailDrawer({
             </div>
           )}
 
-          {/* Show pelunasan after confirmed DP, including a DP paid on a sibling booking. */}
+          {/* Show remaining-balance collection after any confirmed partial payment,
+              including an original full_payment followed by added booking hours. */}
               {canRecordGroupPayment && (
                 <div className="rounded-lg border p-3 space-y-3 mb-3">
-                  <div className="font-semibold text-sm">{hasConfirmedGroupDp ? "Catat Pelunasan" : "Catat Pembayaran Pelanggan"}</div>
+                  <div className="font-semibold text-sm">{hasConfirmedGroupPartial ? "Catat Pelunasan" : "Catat Pembayaran Pelanggan"}</div>
                   <p className="text-xs text-muted-foreground">
                     {booking.groupRef ? "Grup " + booking.groupRef : "Order " + booking.orderNumber}
-                    {" · "} {hasConfirmedGroupDp ? "Sisa pelunasan " : "Tagihan "}
+                    {" · "} {hasConfirmedGroupPartial ? "Sisa pelunasan " : "Tagihan "}
                     {paymentAmountToRecord.toLocaleString("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0})}
                   </p>
-                  {hasConfirmedGroupDp && (
-                    <p className="text-xs text-muted-foreground">Total grup {formatCurrency(groupInvoiceAmount)} · DP terkonfirmasi {formatCurrency(confirmedGroupTotal)}. Satu bukti pelunasan berlaku untuk seluruh grup.</p>
+                  {hasConfirmedGroupPartial && (
+                    <p className="text-xs text-muted-foreground">
+                      Total {formatCurrency(groupInvoiceAmount)} · Pembayaran terkonfirmasi {formatCurrency(confirmedGroupTotal)}.
+                      {booking.groupRef ? " Satu bukti pelunasan berlaku untuk seluruh grup." : " Bukti pembayaran sebelumnya tetap tersimpan."}
+                    </p>
                   )}
                   <Label>Metode pembayaran</Label>
                   <Select value={newPaymentMethod} onValueChange={(v)=>setNewPaymentMethod(v as "QRIS"|"Transfer Bank")}>
@@ -2867,7 +2949,7 @@ function BookingDetailDrawer({
               className="text-sm rounded-xl border-slate-200 dark:border-slate-700 resize-none"
             />
             <button
-              onClick={() => onUpdateStatus(booking.status, adminNotes)}
+              onClick={() => onSaveAdminNotes(adminNotes)}
               disabled={isUpdating}
               className="text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
             >
@@ -2884,6 +2966,7 @@ function BookingDetailDrawer({
               {/* Status Dropdown */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-500">Ubah Status Langsung</label>
+                <p className="text-[11px] text-slate-500">Perubahan status bukan verifikasi pembayaran atau bukti pengembalian dana.</p>
                 <Select
                   value={booking.status}
                   onValueChange={(val) => {
@@ -2898,9 +2981,10 @@ function BookingDetailDrawer({
                     {[
                       { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
                       { value: "paid",            label: "💳 Menunggu Verifikasi" },
+                      { value: "confirmed",       label: "✅ Dikonfirmasi" },
                       { value: "completed",       label: "✅ Selesai" },
                       { value: "cancelled",       label: "❌ Dibatalkan" },
-                      { value: "refunded",        label: "↩️ Dikembalikan" },
+                      ...(booking.status === "refunded" ? [{ value: "refunded", label: "↩️ Dikembalikan" }] : []),
                     ].map((o: {value:string;label:string}) => (
                       <SelectItem key={o.value} value={o.value} className="text-xs">
                         {o.label}
@@ -2957,16 +3041,9 @@ function BookingDetailDrawer({
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">
                 {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
-                  <ActionButton
-                    action="refunded"
-                    label="Kembalikan Dana"
-                    description="Ubah status → Dikembalikan"
-                    icon={RotateCcw}
-                    confirmAction={confirmAction}
-                    onClick={() => handleAction("refunded")}
-                    isUpdating={isUpdating}
-                    variant="purple"
-                  />
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
+                    Pengembalian dana harus dibuktikan dan dibukukan melalui alur keuangan; mengubah status booking saja tidak melakukan refund.
+                  </p>
                 )}
 
                 {booking.status === "paid" && (
@@ -3118,7 +3195,6 @@ const STATUS_OPTIONS = [
   { value: "paid",            label: "💳 Pembayaran Selesai" },
   { value: "confirmed",       label: "✅ Dikonfirmasi" },
   { value: "cancelled",       label: "❌ Dibatalkan" },
-  { value: "refunded",        label: "↩️ Pengembalian Dana" },
 ];
 
 function isBookingTimePast(bookingDate: string, endTime: string): boolean {
@@ -3230,7 +3306,7 @@ function InlineCheckInSelect({
           <SelectItem value="complete" className="text-xs">
             <span className="flex items-center gap-1.5">
               <CheckCircle2 size={11} className="text-emerald-600" />
-              Tandai Selesai
+              Selesaikan tanpa check-in...
             </span>
           </SelectItem>
         </SelectContent>
@@ -3244,10 +3320,7 @@ function InlineCheckInSelect({
     return (
       <Select
         value=""
-        onValueChange={(val) => {
-          if (val === "checkin") onCheckIn(booking.id);
-          else if (val === "complete") onComplete(booking.id);
-        }}
+        onValueChange={(val) => { if (val === "checkin") onCheckIn(booking.id); }}
         disabled={isLoading}
       >
         <SelectTrigger
@@ -3264,12 +3337,6 @@ function InlineCheckInSelect({
               Check-in Sekarang
             </span>
           </SelectItem>
-          <SelectItem value="complete" className="text-xs">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={11} className="text-blue-600" />
-              Tandai Selesai
-            </span>
-          </SelectItem>
         </SelectContent>
       </Select>
     );
@@ -3280,10 +3347,7 @@ function InlineCheckInSelect({
     return (
       <Select
         value=""
-        onValueChange={(val) => {
-          if (val === "checkin") onCheckIn(booking.id);
-          else if (val === "complete") onComplete(booking.id);
-        }}
+        onValueChange={(val) => { if (val === "checkin") onCheckIn(booking.id); }}
         disabled={isLoading}
       >
         <SelectTrigger
@@ -3300,12 +3364,6 @@ function InlineCheckInSelect({
               Check-in (mulai {booking.startTime?.slice(0, 5)})
             </span>
           </SelectItem>
-          <SelectItem value="complete" className="text-xs">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={11} className="text-blue-600" />
-              Tandai Selesai
-            </span>
-          </SelectItem>
         </SelectContent>
       </Select>
     );
@@ -3319,7 +3377,7 @@ function InlineCheckInSelect({
         value=""
         onValueChange={(val) => {
           if (val === "checkin") onCheckIn(booking.id);
-          else if (val === "complete") onComplete(booking.id);
+          else if (val === "complete" && hasEnded) onComplete(booking.id);
         }}
         disabled={isLoading}
       >
@@ -3337,12 +3395,14 @@ function InlineCheckInSelect({
               Check-in Manual
             </span>
           </SelectItem>
-          <SelectItem value="complete" className="text-xs">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={11} className="text-blue-600" />
-              Tandai Selesai
-            </span>
-          </SelectItem>
+          {hasEnded && (
+            <SelectItem value="complete" className="text-xs">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 size={11} className="text-blue-600" />
+                Selesaikan tanpa check-in...
+              </span>
+            </SelectItem>
+          )}
         </SelectContent>
       </Select>
     );
@@ -3666,6 +3726,10 @@ export default function AdminBookings() {
     isGroup: boolean;
   } | null>(null);
   const [tableCancellationReason, setTableCancellationReason] = useState("");
+  const [completionWithoutCheckin, setCompletionWithoutCheckin] = useState<{
+    id: number; orderNumber: string; customerName: string;
+  } | null>(null);
+  const [completionWithoutCheckinReason, setCompletionWithoutCheckinReason] = useState("");
   // Paginated group rows are summaries. Always load the authoritative booking
   // detail, including payment rows linked to *any* member of the group.
   useEffect(() => {
@@ -4116,7 +4180,7 @@ export default function AdminBookings() {
           });
           return;
         }
-        toast({ title: "Status booking diperbarui" });
+        toast({ title: variables?.data?.adminNotes !== undefined && variables?.data?.status === undefined ? "Catatan admin tersimpan" : "Status booking diperbarui" });
         setSelectedBooking(
           (refreshed.data?.items as any[] | undefined)?.find((booking) => booking.id === data?.id) ?? data,
         );
@@ -4559,6 +4623,14 @@ export default function AdminBookings() {
     updateBookingMutation.mutate({
       id: selectedBooking.id,
       data: { status: status as any, adminNotes },
+    });
+  };
+
+  const handleSaveAdminNotes = (notes: string) => {
+    if (!selectedBooking) return;
+    updateBookingMutation.mutate({
+      id: selectedBooking.id,
+      data: { adminNotes: notes } as any,
     });
   };
 
@@ -5968,7 +6040,17 @@ export default function AdminBookings() {
                             <InlineCheckInSelect
                               booking={b}
                               onCheckIn={(id) => checkInMutation.mutate({ id })}
-                              onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
+                              onComplete={(id) => {
+                                if (!b.checkedInAt) {
+                                  setCompletionWithoutCheckin({
+                                    id, orderNumber: b.orderNumber ?? String(id),
+                                    customerName: b.customerName ?? "Pelanggan",
+                                  });
+                                  setCompletionWithoutCheckinReason("");
+                                } else {
+                                  updateBookingMutation.mutate({ id, data: { status: "completed" } });
+                                }
+                              }}
                               isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
                               isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                             />
@@ -6296,6 +6378,7 @@ export default function AdminBookings() {
           }
           onClose={() => setSelectedBooking(null)}
           onUpdateStatus={handleStatusUpdate}
+          onSaveAdminNotes={handleSaveAdminNotes}
           onConfirmPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "confirmed" } })
           }
@@ -6326,6 +6409,76 @@ export default function AdminBookings() {
            onUpdateAdditionalCharges={handleAdditionalChargesUpdate}
         />
       )}
+
+      <Dialog
+        open={Boolean(completionWithoutCheckin)}
+        onOpenChange={(open) => {
+          if (!open && !updateBookingMutation.isPending) {
+            setCompletionWithoutCheckin(null);
+            setCompletionWithoutCheckinReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle size={18} className="text-amber-600" />
+              Selesaikan Booking Tanpa Check-in
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              {completionWithoutCheckin?.orderNumber} — {completionWithoutCheckin?.customerName}
+            </p>
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              Booking ini belum tercatat check-in resmi. Pesan pemakaian atau scan
+              X904 di WhatsApp bukan otomatis check-in untuk booking ini.
+              Tindakan ini hanya menutup status booking; tidak mengubah kehadiran,
+              transaksi pembayaran, ataupun waktu scan mesin.
+            </p>
+            <Label htmlFor="booking-complete-without-checkin-reason">
+              Alasan penyelesaian administratif (wajib)
+            </Label>
+            <Textarea
+              id="booking-complete-without-checkin-reason"
+              value={completionWithoutCheckinReason}
+              maxLength={1000}
+              onChange={(event) => setCompletionWithoutCheckinReason(event.target.value)}
+              placeholder="Contoh: Sesi telah lewat, petugas mengonfirmasi penggunaan lapangan tetapi check-in tidak tercatat."
+              rows={3}
+            />
+            <p className="text-xs text-slate-500">
+              Minimal 12 karakter. Alasan, identitas admin, dan perubahan status tersimpan dalam riwayat audit.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={updateBookingMutation.isPending}
+                onClick={() => { setCompletionWithoutCheckin(null); setCompletionWithoutCheckinReason(""); }}>
+                Batal
+              </Button>
+              <Button disabled={!completionWithoutCheckin ||
+                completionWithoutCheckinReason.trim().replace(/\s+/g, " ").length < 12 ||
+                updateBookingMutation.isPending}
+                onClick={() => {
+                  if (!completionWithoutCheckin) return;
+                  updateBookingMutation.mutate({
+                    id: completionWithoutCheckin.id,
+                    data: {
+                      status: "completed",
+                      withoutCheckInReason: completionWithoutCheckinReason.trim(),
+                    } as any,
+                  }, {
+                    onSuccess: () => {
+                      setCompletionWithoutCheckin(null);
+                      setCompletionWithoutCheckinReason("");
+                    },
+                  });
+                }}>
+                {updateBookingMutation.isPending ? "Menyimpan..." : "Konfirmasi Selesai"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(tableCancellation)}

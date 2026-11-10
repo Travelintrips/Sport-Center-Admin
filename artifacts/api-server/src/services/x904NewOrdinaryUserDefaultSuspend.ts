@@ -37,6 +37,20 @@ export function isNewOrdinaryX904Candidate(
     String(user.name ?? "").trim().length >= 2;
 }
 
+export function isSafeReenrollment(input: {pin:string;name:string;oldName:string;oldRole:number;absentSnapshots:number;gapMinutes:number}): boolean {
+  const norm=(x:string)=>x.trim().replace(/\s+/g," ").toUpperCase();
+  const current=norm(input.name);
+  const previous=norm(input.oldName);
+  // Older X904 snapshots may contain an empty display name. A long, proven
+  // absence followed by one stable named role-0 identity is a safe re-enrollment
+  // candidate; a previously named identity still has to change names.
+  const previousIdentityAllowsReenrollment = previous.length===0 ||
+    (previous.length>=2 && current!==previous);
+  return !isX904AutoSuspendExempt(input.pin,input.oldRole) && input.oldRole===0 &&
+    current.length>=2 && previousIdentityAllowsReenrollment &&
+    input.absentSnapshots>=2 && input.gapMinutes>=6;
+}
+
 export async function processX904NewOrdinaryUserDefaultSuspend(
   store: Store = db,
   now = new Date(),
@@ -62,6 +76,22 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
 
+  // A new/re-enrolled ordinary PIN becomes a nonmember *candidate* only after
+  // the physical safety action is proven: completed SUSPEND ACK, matching UID,
+  // Group 2, and a newer authenticated snapshot. This never auto-verifies it.
+  const completedNewUsers = await store.execute(sql`SELECT c.command_id
+    FROM sport_center.x904_user_commands c
+    WHERE c.device_serial=${DEVICE}
+      AND c.command_type='SUSPEND_USER' AND c.state='completed'
+      AND c.payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
+      AND c.result->>'readBackConfirmed'='true' AND c.result->>'afterGroup'='2'
+      AND c.completed_at IS NOT NULL
+      AND c.created_at >= ${new Date(now.getTime()-75*60_000)}
+    ORDER BY c.completed_at DESC LIMIT 25`);
+  for (const row of completedNewUsers.rows as any[]) {
+    await store.execute(sql`SELECT sport_center.x904_stage_new_nonmember_candidate(${String(row.command_id)}::uuid)`);
+  }
+
   // Read-only SLA monitor. A queued command or completed command without
   // device read-back is never counted as successful suspension.
   const overdue = await store.execute(sql`SELECT count(*)::int AS overdue_count
@@ -81,16 +111,32 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
 
   // A snapshot arrives about every three minutes. Retain the transition for
   // 75 minutes so skipped worker ticks never silently lose a newly enrolled PIN.
-  // The 30 minute deadline is measured from FIRST OBSERVATION, not an invented
+  // The 30 minute maximum is measured from FIRST OBSERVATION, not an invented
   // device creation timestamp. Physical completion still requires ACK/read-back.
   const snapshots = await store.execute(sql`SELECT snapshot_id, observed_at, user_count, users
     FROM sport_center.gym_x904_access_snapshots
     WHERE device_serial=${DEVICE}
       AND observed_at >= ${new Date(baseline)}
       AND observed_at >= ${new Date(now.getTime() - 75 * 60_000)}
+      -- Ignore snapshots dated after the supplied evaluation clock.
+      -- This is essential for deterministic historical replay and for
+      -- fail-closed behavior when a collector clock jumps ahead.
+      AND observed_at <= ${now}
     ORDER BY snapshot_id DESC LIMIT 80`);
   if (snapshots.rows.length < 2) return;
-  const history = (snapshots.rows as any[]).reverse();
+  const allHistory = (snapshots.rows as any[]).reverse();
+  // A collector outage must not freeze registration processing for the whole
+  // 75-minute window. Use only the newest contiguous segment and still verify
+  // the PIN has NEVER appeared in any older snapshot before queuing a command.
+  let segmentStart = 0;
+  for (let i = 1; i < allHistory.length; i++) {
+    const before = new Date(String(allHistory[i - 1].observed_at)).getTime();
+    const current = new Date(String(allHistory[i].observed_at)).getTime();
+    if (Number.isFinite(before) && Number.isFinite(current) &&
+        current - before > 10 * 60_000) segmentStart = i;
+  }
+  const history = allHistory.slice(segmentStart);
+  if (history.length < 2) return;
   const latest = history[history.length - 1];
   const latestTime = new Date(String(latest.observed_at)).getTime();
   if (!Number.isFinite(latestTime) || latestTime > now.getTime() ||
@@ -113,12 +159,48 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
   if (!newCandidates.length) return;
+  const firstIndexOf = (pin: string): number => history.findIndex(row =>
+    (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
 
+  // A snapshot with >10 newly enrolled ordinary identities is anomalous.
+  // Restrict only THAT transition, not independent legitimate enrollments
+  // across many different snapshots during the 75-minute detection window.
+  const byTransition = new Map<number, SnapshotUser[]>();
   for (const candidate of newCandidates) {
+    const first = firstIndexOf(String(candidate.pin));
+    if (first <= 0) continue;
+    byTransition.set(first, [...(byTransition.get(first) ?? []), candidate]);
+  }
+  const allowedCandidates: SnapshotUser[] = [];
+  for (const [firstIndex, candidates] of byTransition) {
+    if (candidates.length > 10) {
+      console.error("[x904-new-user-default-suspend] unexpected-bulk-enrollment",
+        JSON.stringify({ snapshotId: history[firstIndex].snapshot_id,
+          candidates: candidates.length, maximumPerSnapshot: 10,
+          action: "review_snapshot_before_automatic_commands" }));
+      continue;
+    }
+    allowedCandidates.push(...candidates);
+  }
+  if (!allowedCandidates.length) return;
+
+  // Skip already processed or manually handled PINs BEFORE opening a
+  // transaction. This prevents repeated advisory locks and history scans
+  // every minute for the same registration during the 75-minute lookback.
+  const pins = allowedCandidates.map(u => String(u.pin));
+  const existing = await store.execute(sql`SELECT DISTINCT user_pin
+    FROM sport_center.x904_user_commands
+    WHERE device_serial=${DEVICE} AND user_pin IN (${sql.join(pins.map(pin => sql`${pin}`), sql`,`)})`);
+  const previouslyHandled = new Set(existing.rows.map(row => String(row.user_pin)));
+  let queuedThisCycle = 0;
+  for (const candidate of allowedCandidates) {
     const pin = String(candidate.pin);
+    if (previouslyHandled.has(pin)) continue;
+    // Small bounded batches prevent device command floods and keep
+    // PostgreSQL/VMSC capacity available for bookings and paid access.
+    if (queuedThisCycle >= 5) break;
     const name = String(candidate.name).trim().replace(/\s+/g, " ");
-    const firstIndex = history.findIndex(row =>
-      (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
+    const firstIndex = firstIndexOf(pin);
     if (firstIndex <= 0) continue;
     // The preceding snapshot must prove absence; all subsequent snapshots
     // must continue to refer to exactly the same ordinary identity.
@@ -129,12 +211,12 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     if (history.slice(firstIndex).some(row =>
       (row.users as SnapshotUser[]).filter(u =>
         String(u.pin ?? "") === pin &&
-        String(u.name ?? "").trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID") ===
+        String(u.name ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") ===
           name.toLocaleUpperCase("id-ID") &&
         Number(u.role) === 0).length !== 1)) continue;
     const onlyPin = process.env.GYM_X904_NEW_USER_ONLY_PIN;
     if (onlyPin && pin !== onlyPin) continue;
-    await store.transaction(async tx => {
+    const enqueued = await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904215)`);
       // Fail closed if a new snapshot appeared or if the PIN had existed in
       // any historical snapshot, including before our activation baseline.
@@ -142,11 +224,24 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
       if (check.rows.length !== 1 ||
           Number(check.rows[0].snapshot_id) !== Number(latest.snapshot_id)) return;
-      const everSeen = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_access_snapshots
-        WHERE device_serial=${DEVICE} AND snapshot_id < ${Number(observedFirst.snapshot_id)}
-          AND users @> jsonb_build_array(jsonb_build_object('pin', ${pin}::text))
-        LIMIT 1`);
-      if (everSeen.rows.length) return;
+      const prior = await tx.execute(sql`SELECT snapshot_id,observed_at,
+        (SELECT item FROM jsonb_array_elements(users) item WHERE item->>'pin'=${pin} LIMIT 1) AS previous
+        FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial=${DEVICE} AND snapshot_id<${Number(observedFirst.snapshot_id)}
+          AND users @> jsonb_build_array(jsonb_build_object('pin',${pin}::text))
+        ORDER BY snapshot_id DESC LIMIT 1`);
+      if (prior.rows.length) {
+        const old=prior.rows[0] as any;
+        const absent=await tx.execute(sql`SELECT count(*)::int AS n
+          FROM sport_center.gym_x904_access_snapshots
+          WHERE device_serial=${DEVICE} AND snapshot_id>${Number(old.snapshot_id)}
+            AND snapshot_id<${Number(observedFirst.snapshot_id)}
+            AND jsonb_array_length(users)=user_count
+            AND NOT users @> jsonb_build_array(jsonb_build_object('pin',${pin}::text))`);
+        if (!isSafeReenrollment({pin,name,oldName:String(old.previous?.name??''),
+          oldRole:Number(old.previous?.role),absentSnapshots:Number(absent.rows[0]?.n??0),
+          gapMinutes:(firstSeen.getTime()-new Date(String(old.observed_at)).getTime())/60000})) return;
+      }
       const inventory = await tx.execute(sql`SELECT device_uid,display_name,device_role
         FROM sport_center.gym_x904_lan_users
         WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
@@ -190,7 +285,9 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         (device_serial,command_type,user_pin,payload,requested_by,idempotency_key)
         VALUES (${DEVICE},'SUSPEND_USER',${pin},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
+      return true;
     });
+    if (enqueued) queuedThisCycle += 1;
   }
 
 }

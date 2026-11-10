@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { scanPaymentProof } from "../lib/paymentProofOcr";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -77,6 +78,7 @@ async function syncToPublic(expense: typeof expensesTable.$inferSelect, facility
         totalAmount: expense.totalAmount,
         paymentMethod: expense.paymentMethod,
         paymentAccount: expense.paymentAccount,
+        bankReference: expense.bankReference,
         paymentStatus: expense.paymentStatus,
         receiptUrl: expense.receiptUrl,
         receiptUrls: expense.receiptUrls ?? [],
@@ -102,6 +104,7 @@ async function syncToPublic(expense: typeof expensesTable.$inferSelect, facility
           totalAmount: expense.totalAmount,
           paymentMethod: expense.paymentMethod,
           paymentAccount: expense.paymentAccount,
+          bankReference: expense.bankReference,
           paymentStatus: expense.paymentStatus,
           receiptUrl: expense.receiptUrl,
           receiptUrls: expense.receiptUrls ?? [],
@@ -141,12 +144,25 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
       res.status(400).json({ error: "Persetujuan pemrosesan OCR diperlukan" });
       return;
     }
-    const result = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    const result = await scanPaymentProof(req.file.buffer, req.file.mimetype, { fullMetadata: true });
+    const bankReference = parseBluProofReference(result.rawText);
+    const date = parseBluProofDate(result.rawText) ?? result.date;
+    const textAmount = parseBluExpenseAmount(result.rawText);
+    const bluProof = /\bBLU\b|BCA\s*DIGITAL/i.test(result.rawText) || Boolean(bankReference);
+    const recipient = parseBluProofRecipient(result.rawText);
+    const genericRecipient = bluProof ? null : result.recipient;
+    // This endpoint is explicitly opt-in. Missing metadata gets an image vision
+    // fallback; generic payment confirmation/booking OCR remains unchanged.
+    const fallback = (!bankReference || !date || !textAmount || !(recipient ?? genericRecipient))
+      ? await readExpenseBluMissingFieldsWithVision(req.file.buffer, req.file.mimetype)
+      : null;
     res.json({
-      amount: result.amount,
-      date: result.date,
-      recipient: result.recipient,
-      paymentMethod: result.paymentMethod,
+      amount: textAmount ?? fallback?.amount ?? result.amount,
+      date: date ?? fallback?.date ?? null,
+      bankReference: bankReference ?? fallback?.bankReference ?? null,
+      recipient: recipient ?? fallback?.recipient ?? genericRecipient ?? null,
+      paymentMethod: /PLN\s+PRABAYAR/i.test(result.rawText) ? "PLN Prabayar" :
+        /BI[\s-]*FAST/i.test(result.rawText) ? "BI-FAST" : result.paymentMethod,
       engine: result.engine,
       // Suggestions only, never verified payment evidence.
       verified: false,
@@ -235,6 +251,42 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
         .reduce((s, e) => s + Number(e.totalAmount), 0),
     };
 
+    // Separate, read-only bank-sheet summary. Never insert imported bank rows
+    // into SC expense records and never infer that a draft expense is a bank movement.
+    let incomingThisMonth: number | null = null;
+    let incomingSheetSyncedAt: string | null = null;
+    try {
+      const bankSheet = await db.execute(sql`
+        SELECT bsc.id,
+               bsc.last_synced_at::text AS last_synced_at,
+               COALESCE(SUM(bm.amount), 0)::text AS incoming_amount
+        FROM public.bank_sheet_configs bsc
+        LEFT JOIN public.bank_mutations bm
+          ON bm.sheet_config_id = bsc.id
+         AND bm.company_id = bsc.company_id
+         AND bm.bank_account_id = bsc.bank_account_id::text
+         AND bm.direction = 'IN'
+         AND bm.transaction_date >= date_trunc('month', timezone('Asia/Jakarta', now()))::date
+         AND bm.transaction_date < (date_trunc('month', timezone('Asia/Jakarta', now())) + interval '1 month')::date
+        WHERE lower(trim(bsc.tab_name)) = 'kas besar sc'
+          AND bsc.is_active = true
+          AND bsc.bank_account_id IS NOT NULL
+        GROUP BY bsc.id, bsc.last_synced_at
+        ORDER BY bsc.id DESC
+        LIMIT 1
+      `);
+      const rows = (bankSheet as any).rows ?? bankSheet;
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (row) {
+        incomingThisMonth = Number(row.incoming_amount);
+        incomingSheetSyncedAt = row.last_synced_at ?? null;
+      }
+    } catch (bankError) {
+      // Unavailable banking data must not break the SC expense page or
+      // masquerade as Rp0. Leave the value explicitly unavailable.
+      req.log.warn({ err: bankError }, "Expense read-only bank-sheet summary unavailable");
+    }
+
     res.json({
       expenses: filtered.map((e) => {
         const vendorId = (e as any).vendorId as number | null;
@@ -250,7 +302,7 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
           vendorName: vendor?.name ?? e.vendorName ?? null,
         };
       }),
-      summary,
+      summary: { ...summary, incomingThisMonth, incomingSheetSyncedAt },
       categories: EXPENSE_CATEGORIES,
     });
   } catch (err) {
@@ -372,7 +424,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     const { ipAddress, userAgent } = getClientInfo(req);
     const {
       expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
-      amount, ppnAmount = 0, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
+      amount, ppnAmount = 0, paymentMethod, paymentAccount, bankReference, receiptUrl, receiptUrls, notes,
     } = req.body;
 
     if (!expenseDate || !description || !amount) {
@@ -380,6 +432,10 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       return;
     }
 
+    if (typeof bankReference !== "undefined" && (typeof bankReference !== "string" || bankReference.length > 120)) {
+      res.status(400).json({ error: "Referensi bank maksimal 120 karakter" });
+      return;
+    }
     if (typeof notes !== "string" || notes.trim().length < 3) {
       res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
       return;
@@ -426,6 +482,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       totalAmount: String(totalNum),
       paymentMethod: paymentMethod || null,
       paymentAccount: paymentAccount || null,
+      bankReference: typeof bankReference === "string" ? bankReference.trim() || null : null,
       paymentStatus: "draft",
       receiptUrl: receiptUrl || null,
       receiptUrls: Array.isArray(receiptUrls) ? receiptUrls : [],
@@ -485,9 +542,13 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
 
     const {
       expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
-      amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
+      amount, ppnAmount, paymentMethod, paymentAccount, bankReference, receiptUrl, receiptUrls, notes,
     } = req.body;
 
+    if (bankReference !== undefined && (typeof bankReference !== "string" || bankReference.length > 120)) {
+      res.status(400).json({ error: "Referensi bank maksimal 120 karakter" });
+      return;
+    }
     if (notes !== undefined && (typeof notes !== "string" || notes.trim().length < 3)) {
       res.status(400).json({ error: "Catatan tujuan transaksi wajib diisi (minimal 3 karakter)" });
       return;
@@ -527,6 +588,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       totalAmount: String(totalNum),
       paymentMethod: paymentMethod !== undefined ? paymentMethod || null : existing.paymentMethod,
       paymentAccount: paymentAccount !== undefined ? paymentAccount || null : existing.paymentAccount,
+      bankReference: bankReference !== undefined ? bankReference.trim() || null : existing.bankReference,
       receiptUrl: receiptUrl !== undefined ? receiptUrl || null : existing.receiptUrl,
       receiptUrls: receiptUrls !== undefined ? (Array.isArray(receiptUrls) ? receiptUrls : []) : (existing.receiptUrls ?? []),
       notes: notes !== undefined ? notes || null : existing.notes,
