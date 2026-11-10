@@ -1542,7 +1542,12 @@ function BookingDetailDrawer({
   const gymVisAccess = gymX904Monitoring?.access ?? null;
   const gymVisPool = gymX904Monitoring?.pool ?? [];
   const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
-  const gymIdentityRoute = gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
+  // A persisted booking-bound X904 PIN grant is stronger identity evidence than
+  // a fresh name-registry lookup, which can be temporarily unavailable.
+  // This selects the correct UI route only; it never approves ownership or access.
+  const gymIdentityRoute = gymPinGrant?.accessId && gymPinGrant?.userPin && gymPinGrant?.deviceUid
+    ? "registered"
+    : gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
 
   const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
   const qrisEmailDetection =
@@ -2026,7 +2031,7 @@ function BookingDetailDrawer({
           {(booking.source === "gym_public_guest" || (booking.source === "web" && gymVisReservation)) && (
             <div className={`rounded-xl border p-4 text-sm ${gymVisReservation ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
               <div className="font-bold">{gymIdentityRoute === "registered" ? "Akses Gym — PIN X904" : "Akses Gym — Kartu / X904"}</div>
-              {gymIdentityRoute === "registered" && !gymVisReservation ? (
+              {gymIdentityRoute === "registered" ? (
                 <div className="mt-2 space-y-2 text-xs">
                   <div>Booking memakai PIN X904 terdaftar. Tidak perlu kartu VIS; verifikasi identitas fisik dan dana resmi sebelum pengesahan akses.</div>
                   {gymPinGrant && (
