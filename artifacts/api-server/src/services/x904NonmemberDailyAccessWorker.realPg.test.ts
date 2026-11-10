@@ -23,7 +23,8 @@ const liveAccessIndexMigration = readFileSync("migrations/20261107_x904_review_r
 
 beforeAll(async () => {
   await run("CREATE SCHEMA sport_center");
-  await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text);
+  await run(`CREATE TABLE sport_center.users(id int primary key,name text,registration_source text,account_status text,email text,password_hash text,role text NOT NULL DEFAULT 'customer');
+    CREATE TABLE sport_center.audit_logs(id serial primary key,user_id int,user_name text,user_role text,action text NOT NULL,entity text,entity_id int,"before" jsonb,"after" jsonb,ip_address text,user_agent text,created_at timestamptz DEFAULT now());
     CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
     CREATE TABLE sport_center.sport_bookings(id int primary key, booking_date text NOT NULL DEFAULT '2026-11-06', start_time text NOT NULL DEFAULT '06:00', source text, notes text, status text NOT NULL DEFAULT 'confirmed');
     CREATE TABLE sport_center.sport_payments(id int primary key,booking_id int references sport_center.sport_bookings(id),status text,confirmed_at timestamptz,paid_at timestamptz);
@@ -71,7 +72,7 @@ beforeAll(async () => {
       ('TDBD234200545','17',17,'VIS 004',0),
       ('TDBD234200545','90',339,'VIS 002',0),
       ('TDBD234200545','15',15,'VIS 006',0);`);
-  await run(`INSERT INTO sport_center.users VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null);
+  await run(`INSERT INTO sport_center.users(id,name,registration_source,account_status,email,password_hash,role) VALUES(301,'X904 AUTOMATION SERVICE','system_x904_automation','inactive',null,null,'staff'),(302,'CI ACTIVE STAFF','isolated-test','active',null,null,'staff');
     INSERT INTO sport_center.sport_bookings(id) VALUES(9001);
     INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id)
     VALUES('TDBD234200545','card','VIS001','78',338,'VIS 001',9001);
@@ -964,14 +965,14 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
        booking_id,verification_state,access_state)
       VALUES('TDBD234200545','pin','PIN VERIFIED',$1,$2,$3,$4,
        'review_required','review_required')`,[pin,uid,name,id]);
-    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at) VALUES($1,$2,'confirmed',now())",[pay,id]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed',now(),30000,'ci://validated-proof')",[pay,id]);
     const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id])).rows[0].access_id);
     const before=(await run("SELECT verification_state,access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(before).toMatchObject({verification_state:"review_required",access_state:"review_required"});
 
     const anonymous=await request.post(endpoint).send({identityChecked:true,officialFundsChecked:true,officialBankReference:"CI-BANK-9706"});
-    expect(anonymous.status).toBe(403);
-    const token=createToken(301,"staff");
+    expect(anonymous.status).toBe(401);
+    const token=createToken(302,"staff");
     const invalid=await request.post(endpoint).set("Authorization",`Bearer ${token}`)
       .send({identityChecked:true,officialFundsChecked:false,officialBankReference:"CI-BANK-9706"});
     expect(invalid.status).toBe(400);

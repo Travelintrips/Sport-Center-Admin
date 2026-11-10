@@ -412,3 +412,42 @@ jobs:
           pnpm --filter @workspace/api-server exec node --experimental-vm-modules
           ./node_modules/jest/bin/jest.js --runInBand
           src/routes/__tests__/gymPublicCheckout.realPg.test.ts
+
+  gym-pin-pipeline-real-postgres:
+    name: PIN pipeline — real routes, payment trigger, RLS and worker
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pipeline_ci_only
+          POSTGRES_DB: pin700_pipeline_isolated
+        ports:
+          - 55444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pin700_pipeline_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test complete application pipeline without PROD credentials
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: isolated-pin-pipeline-ci-not-production
+          SUPABASE_DATABASE_URL_DEV: postgresql://sport_center_app:pipeline_local_only@127.0.0.1:55444/pin700_pipeline_isolated
+          GYM_PIN_PIPELINE_PG_URL: postgresql://postgres:pipeline_ci_only@127.0.0.1:55444/pin700_pipeline_isolated
+        run: >-
+          pnpm --filter @workspace/api-server exec node --experimental-vm-modules
+          ./node_modules/jest/bin/jest.js --runInBand
+          src/routes/__tests__/gymPublicPinPipeline.realPg.test.ts
