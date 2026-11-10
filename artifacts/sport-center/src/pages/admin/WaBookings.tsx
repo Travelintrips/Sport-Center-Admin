@@ -69,6 +69,17 @@ type DetailData = {
   session: Record<string, any> | null;
   messages: any[];
   history: any[];
+  payments: Array<{
+    id: number;
+    amount: string;
+    status: string;
+    paymentMethod: string | null;
+    proofUrl: string | null;
+    ocrAmount: string | null;
+    ocrDate: string | null;
+    confirmedAt: string | null;
+    createdAt: string;
+  }>;
   auditLogs: any[];
 };
 
@@ -617,6 +628,38 @@ export default function AdminWaBookings() {
                     </p>
                   </div>
                 )}
+                {detail.booking.source === "gym_public_guest" && (
+                  <section className="rounded-lg border p-3 text-sm" aria-label="Bukti pembayaran Gym Mandiri">
+                    <h3 className="font-semibold">Bukti & status pembayaran</h3>
+                    {(!detail.payments || detail.payments.length === 0) ? (
+                      <p className="mt-2 text-amber-700">Belum ada pembayaran atau bukti yang tercatat. Jangan tandai lunas.</p>
+                    ) : (
+                      <div className="mt-2 space-y-3">
+                        {detail.payments.map((payment: DetailData["payments"][number]) => (
+                          <div key={payment.id} className="rounded-md bg-muted/40 p-3 space-y-1">
+                            <p><span className="text-muted-foreground">Status:</span> <strong>{payment.status}</strong></p>
+                            <p><span className="text-muted-foreground">Metode:</span> {payment.paymentMethod || "-"}</p>
+                            <p><span className="text-muted-foreground">Nominal tercatat:</span> {formatIDR(payment.amount)}</p>
+                            {payment.ocrAmount != null && (
+                              <p><span className="text-muted-foreground">Nominal terbaca OCR:</span> {formatIDR(payment.ocrAmount)}</p>
+                            )}
+                            {payment.confirmedAt && (
+                              <p><span className="text-muted-foreground">Dikonfirmasi:</span> {formatDate(payment.confirmedAt)}</p>
+                            )}
+                            {payment.proofUrl && /^https?:\/\//i.test(payment.proofUrl) && (
+                              <a className="inline-block font-semibold text-primary underline"
+                                href={payment.proofUrl} target="_blank" rel="noopener noreferrer">
+                                Lihat bukti pembayaran
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-muted-foreground">Bukti/OCR bukan konfirmasi dana masuk. Periksa mutasi rekening sebelum verifikasi.</p>
+                  </section>
+                )}
+
                 {detail.booking.source === "gym_public_guest" && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <p className="font-semibold">Gym Mandiri — pembayaran perlu verifikasi dana.</p>

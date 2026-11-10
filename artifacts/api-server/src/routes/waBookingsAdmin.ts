@@ -130,12 +130,32 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
     .where(eq(facilitiesTable.id, booking.facilityId))
     .limit(1);
 
-  const session = await db
-    .select()
-    .from(waBookingSessionsTable)
-    .where(eq(waBookingSessionsTable.phone, booking.customerPhone))
-    .orderBy(desc(waBookingSessionsTable.createdAt))
-    .limit(1);
+  // A self-service Gym reservation is NOT an inbound WhatsApp conversation.
+  // Never attach unrelated chat history merely because the phone number matches.
+  const session = booking.source === "gym_public_guest"
+    ? []
+    : await db
+        .select()
+        .from(waBookingSessionsTable)
+        .where(eq(waBookingSessionsTable.phone, booking.customerPhone))
+        .orderBy(desc(waBookingSessionsTable.createdAt))
+        .limit(1);
+
+  // Read-only evidence for admin review. This endpoint NEVER confirms funds.
+  const payments = await db.select({
+    id: paymentsTable.id,
+    amount: paymentsTable.amount,
+    status: paymentsTable.status,
+    paymentMethod: paymentsTable.paymentMethod,
+    proofUrl: paymentsTable.proofUrl,
+    ocrAmount: paymentsTable.ocrAmount,
+    ocrDate: paymentsTable.ocrDate,
+    confirmedAt: paymentsTable.confirmedAt,
+    createdAt: paymentsTable.createdAt,
+  }).from(paymentsTable)
+    .where(eq(paymentsTable.bookingId, booking.id))
+    .orderBy(desc(paymentsTable.createdAt))
+    .limit(20);
 
   const history = await db
     .select()
@@ -216,6 +236,7 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
         }
       : { route: x904IdentityMatch?.route ?? "staff_review", userPin: null, deviceUid: null, ownershipVerified: false },
     facility: facility ?? null,
+    payments,
     session: session[0] ?? null,
     messages: (session[0] as any)?.messages ?? [],
     history,

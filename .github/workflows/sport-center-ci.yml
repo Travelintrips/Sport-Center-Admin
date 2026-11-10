@@ -138,6 +138,9 @@ jobs:
       - name: Verify concurrent public Gym guest booking lock
         run: node --test scripts/test-gym-guest-duplicate-lock.mjs
 
+      - name: Verify guest payment evidence read-only and no unrelated WA chat history
+        run: node --test scripts/test-wa-approval-guest-payment-evidence.mjs
+
       - name: Verify Gym public bookings appear in WA Approval without unsafe paid action
         run: node --test scripts/test-wa-approval-gym-guest.mjs
 
