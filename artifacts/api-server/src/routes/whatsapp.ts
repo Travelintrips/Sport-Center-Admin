@@ -1145,7 +1145,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
         return;
       }
       const ocr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
-      if (ocr.amount == null || Number(ocr.amount) !== totalPrice) {
+      if (ocr.amount != null && Number(ocr.amount) !== totalPrice) {
         res.status(422).json({
           error: "Nominal pada bukti pembayaran tidak sesuai tagihan; booking belum dibuat.",
           code: "GYM_PUBLIC_PROOF_AMOUNT_MISMATCH",
@@ -1305,7 +1305,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
           bankAccountId: publicProof.bankAccountId,
           expectedSettlementDate: publicProof.expectedSettlementDate,
           ocrName: publicProof.ocr.name ?? null,
-          ocrAmount: String(publicProof.ocr.amount),
+          ocrAmount: publicProof.ocr.amount == null ? null : String(publicProof.ocr.amount),
           ocrDate: publicProof.ocr.date ?? null,
           ocrRaw: publicProof.ocr.rawText ?? null,
           ocrData: {
@@ -1315,7 +1315,7 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
             recipient: publicProof.ocr.recipient,
             engine: publicProof.ocr.engine,
             scannedAt: publicProof.ocr.scannedAt,
-            amountMatch: true,
+            amountMatch: publicProof.ocr.amount == null ? null : true,
             fromSingleCheckout: true,
           },
           status: "pending",

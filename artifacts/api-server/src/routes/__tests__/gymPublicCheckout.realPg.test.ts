@@ -37,7 +37,7 @@ if (
 suite("public Gym multipart HTTP checkout with real PostgreSQL", () => {
   let request: any;
   let storageFailure = false;
-  let scanAmount = 30000;
+  let scanAmount: number | null = 30000;
   let storageCalls = 0;
   let order = 0;
   const today = new Intl.DateTimeFormat("en-CA", {
@@ -234,6 +234,17 @@ suite("public Gym multipart HTTP checkout with real PostgreSQL", () => {
     expect((await submit()).status).toBe(422);
     expect(storageCalls).toBe(0);
     expect(await counts()).toEqual({ bookings: 0, payments: 0, grants: 0 });
+  });
+  test("unreadable OCR amount retains proof and holds PIN for manual verification", async () => {
+    scanAmount = null;
+    const response = await submit();
+    expect(response.status).toBe(201);
+    expect(response.body.status).toBe("waiting_confirmation");
+    expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 1 });
+    const receipt = (await pool.query("SELECT status,ocr_amount,proof_url FROM sport_center.sport_payments")).rows[0];
+    expect(receipt).toMatchObject({ status: "pending", ocr_amount: null, proof_url: "https://isolated.invalid/payment-proof.jpeg" });
+    const grant = (await pool.query("SELECT verification_state,access_state,activated_at FROM sport_center.x904_nonmember_daily_access")).rows[0];
+    expect(grant).toEqual({ verification_state: "review_required", access_state: "review_required", activated_at: null });
   });
   test("blob failure creates no half-booking", async () => {
     storageFailure = true;
