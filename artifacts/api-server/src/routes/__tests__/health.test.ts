@@ -78,10 +78,52 @@ describe("GET /health", () => {
 // ── /healthz (legacy alias) ───────────────────────────────────────────────────
 
 describe("GET /healthz", () => {
-  it("returns 200 with status ok", async () => {
+  const keys = [
+    "GYM_X904_NONMEMBER_ACCESS_ENABLED",
+    "GYM_X904_MANUAL_ACCESS_ENABLED",
+    "GYM_X904_USER_WRITE_ENABLED",
+    "GYM_X904_AUTOMATIC_REQUESTED_BY",
+    "GYM_X904_NONMEMBER_ONLY_PIN",
+  ] as const;
+  const saved = new Map(keys.map((key) => [key, process.env[key]]));
+
+  afterEach(() => {
+    for (const key of keys) {
+      const value = saved.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("returns 200 with status ok and non-secret PIN 700 worker readiness", async () => {
+    process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED = "true";
+    process.env.GYM_X904_MANUAL_ACCESS_ENABLED = "true";
+    process.env.GYM_X904_USER_WRITE_ENABLED = "true";
+    process.env.GYM_X904_AUTOMATIC_REQUESTED_BY = "301";
+    delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
     const res = await request.get("/healthz");
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
+    expect(res.body.x904NonmemberWorker).toEqual({
+      nonmemberEnabled: true,
+      manualAccessEnabled: true,
+      userWriteEnabled: true,
+      actorConfigured: true,
+      scope: "all",
+      pin700Eligible: true,
+    });
+    expect(JSON.stringify(res.body)).not.toMatch(/password|secret|token|301/);
+  });
+
+  it("fails PIN 700 eligibility when rollout is scoped to another PIN", async () => {
+    process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED = "true";
+    process.env.GYM_X904_MANUAL_ACCESS_ENABLED = "true";
+    process.env.GYM_X904_USER_WRITE_ENABLED = "true";
+    process.env.GYM_X904_AUTOMATIC_REQUESTED_BY = "301";
+    process.env.GYM_X904_NONMEMBER_ONLY_PIN = "15";
+    const res = await request.get("/healthz");
+    expect(res.body.x904NonmemberWorker.scope).toBe("other_pin");
+    expect(res.body.x904NonmemberWorker.pin700Eligible).toBe(false);
   });
 });
 
