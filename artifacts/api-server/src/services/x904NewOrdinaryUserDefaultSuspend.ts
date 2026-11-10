@@ -37,6 +37,13 @@ export function isNewOrdinaryX904Candidate(
     String(user.name ?? "").trim().length >= 2;
 }
 
+export function isSafeReenrollment(input: {pin:string;name:string;oldName:string;oldRole:number;absentSnapshots:number;gapMinutes:number}): boolean {
+  const norm=(x:string)=>x.trim().replace(/\s+/g," ").toUpperCase();
+  return !isX904AutoSuspendExempt(input.pin,input.oldRole) && input.oldRole===0 &&
+    norm(input.name).length>=2 && norm(input.oldName).length>=2 &&
+    norm(input.name)!==norm(input.oldName) && input.absentSnapshots>=2 && input.gapMinutes>=6;
+}
+
 export async function processX904NewOrdinaryUserDefaultSuspend(
   store: Store = db,
   now = new Date(),
@@ -74,14 +81,14 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         AND c.result->>'afterGroup'='2')`);
   const count = Number(overdue.rows[0]?.overdue_count ?? 0);
   if (count > 0) {
-    console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
+    console.error("[x904-new-user-default-suspend] 3min read-back SLA exceeded", JSON.stringify({
       overdueCount: count, action: "investigate_vmsc_and_device",
     }));
   }
 
   // A snapshot arrives about every three minutes. Retain the transition for
   // 75 minutes so skipped worker ticks never silently lose a newly enrolled PIN.
-  // The 30 minute deadline is measured from FIRST OBSERVATION, not an invented
+  // The 3 minute deadline is measured from FIRST OBSERVATION, not an invented
   // device creation timestamp. Physical completion still requires ACK/read-back.
   const snapshots = await store.execute(sql`SELECT snapshot_id, observed_at, user_count, users
     FROM sport_center.gym_x904_access_snapshots
@@ -176,7 +183,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     // must continue to refer to exactly the same ordinary identity.
     const observedFirst = history[firstIndex];
     const firstSeen = new Date(String(observedFirst.observed_at));
-    const deadline = new Date(firstSeen.getTime() + 30 * 60_000);
+    const deadline = new Date(firstSeen.getTime() + 3 * 60_000);
     if (!Number.isFinite(firstSeen.getTime())) continue;
     if (history.slice(firstIndex).some(row =>
       (row.users as SnapshotUser[]).filter(u =>
@@ -194,11 +201,24 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
         WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
       if (check.rows.length !== 1 ||
           Number(check.rows[0].snapshot_id) !== Number(latest.snapshot_id)) return;
-      const everSeen = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_access_snapshots
-        WHERE device_serial=${DEVICE} AND snapshot_id < ${Number(observedFirst.snapshot_id)}
-          AND users @> jsonb_build_array(jsonb_build_object('pin', ${pin}::text))
-        LIMIT 1`);
-      if (everSeen.rows.length) return;
+      const prior = await tx.execute(sql`SELECT snapshot_id,observed_at,
+        (SELECT item FROM jsonb_array_elements(users) item WHERE item->>'pin'=${pin} LIMIT 1) AS previous
+        FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial=${DEVICE} AND snapshot_id<${Number(observedFirst.snapshot_id)}
+          AND users @> jsonb_build_array(jsonb_build_object('pin',${pin}::text))
+        ORDER BY snapshot_id DESC LIMIT 1`);
+      if (prior.rows.length) {
+        const old=prior.rows[0] as any;
+        const absent=await tx.execute(sql`SELECT count(*)::int AS n
+          FROM sport_center.gym_x904_access_snapshots
+          WHERE device_serial=${DEVICE} AND snapshot_id>${Number(old.snapshot_id)}
+            AND snapshot_id<${Number(observedFirst.snapshot_id)}
+            AND jsonb_array_length(users)=user_count
+            AND NOT users @> jsonb_build_array(jsonb_build_object('pin',${pin}::text))`);
+        if (!isSafeReenrollment({pin,name,oldName:String(old.previous?.name??''),
+          oldRole:Number(old.previous?.role),absentSnapshots:Number(absent.rows[0]?.n??0),
+          gapMinutes:(firstSeen.getTime()-new Date(String(old.observed_at)).getTime())/60000})) return;
+      }
       const inventory = await tx.execute(sql`SELECT device_uid,display_name,device_role
         FROM sport_center.gym_x904_lan_users
         WHERE device_serial=${DEVICE} AND user_pin=${pin}`);
