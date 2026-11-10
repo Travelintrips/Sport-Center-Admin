@@ -44,3 +44,15 @@ describe("separated financial navigation", () => {
     expect(ui).toContain("Total Input Uang Masuk — Bulan Ini");
   });
 });
+
+describe("unified transaction detail view", () => {
+  it("shows read-only combined income/expense details with clear filters", () => {
+    expect(ui).toContain('aria-label="Detail Transaksi Keuangan SC"');
+    expect(ui).toContain("unifiedTransactions");
+    expect(ui).toContain("incomeData?.entries");
+    expect(ui).toContain("allExpenses.map");
+    expect(ui).toContain("Cari transaksi keuangan");
+    expect(ui).toContain("Rincian Transaksi");
+    expect(ui).toContain("Salin Detail");
+  });
+});

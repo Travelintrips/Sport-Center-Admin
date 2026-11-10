@@ -155,7 +155,10 @@ export default function AdminExpenses() {
   const qc = useQueryClient();
 
   // Separate the income and expense workflows without changing their existing APIs.
-  const [financeSection, setFinanceSection] = useState<"income" | "expenses">("income");
+  const [financeSection, setFinanceSection] = useState<"income" | "expenses" | "details">("income");
+  const [detailKind, setDetailKind] = useState<"all" | "income" | "expense">("all");
+  const [unifiedSearch, setUnifiedSearch] = useState("");
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [startDate, setStartDate] = useState("");
@@ -298,6 +301,7 @@ export default function AdminExpenses() {
   const { data: incomeData, refetch: refetchIncome, isError: incomeHistoryError, isFetching: incomeHistoryLoading } = useQuery<{
     entries: Array<{ id: number; incomeNo: string; cashSheetState: string; cashSheetRow: number | null; transactionDate: string; sourceName: string;
       senderBank: string; receivingAccount: string; amount: string;
+      method: string; bankReference: string | null;
       sheetSyncState: string; reconciliationState: string; sheetSyncError: string | null }>;
     summary: { manualThisMonth: number; awaitingSync: number };
   }>({
@@ -505,6 +509,40 @@ export default function AdminExpenses() {
   const summary = data?.summary ?? { totalThisMonth: 0, pendingApproval: 0, paid: 0, unpaid: 0 };
   const allExpenses: any[] = data?.expenses ?? [];
 
+  // Presentation only: reuse the existing SC income/expense reads without creating
+  // bank mutations, accounting entries, or extra writes to Google Sheets.
+  const unifiedTransactions = [
+    ...(incomeData?.entries ?? []).map(entry => ({
+      key: `income-${entry.id}`, id: entry.incomeNo, kind: "income" as const,
+      date: entry.transactionDate, name: entry.sourceName, amount: Number(entry.amount),
+      bank: entry.senderBank, account: entry.receivingAccount,
+      description: `Dana masuk dari ${entry.sourceName}`, method: entry.method || "Tidak tersedia",
+      status: entry.reconciliationState || "UNVERIFIED",
+      sheet: entry.sheetSyncState === "synced" ? "SC Uang Masuk — tersinkron (belum diverifikasi)" : entry.sheetSyncState,
+      cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
+        entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
+      reference: entry.bankReference || "", notes: "",
+    })),
+    ...allExpenses.map((expense: any) => ({
+      key: `expense-${expense.id}`, id: String(expense.expenseNo ?? `EXP-${expense.id}`),
+      kind: "expense" as const, date: String(expense.expenseDate ?? ""),
+      name: String(expense.vendorName ?? "Penerima belum diisi"),
+      amount: Number(expense.totalAmount ?? 0), bank: String(expense.paymentAccount ?? ""),
+      account: String(expense.paymentAccount ?? ""),
+      description: String(expense.description ?? ""), method: String(expense.paymentMethod ?? ""),
+      status: STATUS_LABELS[String(expense.paymentStatus)] ?? String(expense.paymentStatus ?? "Draft"),
+      sheet: "Belum dikonfirmasi sebagai mutasi bank",
+      cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
+      reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
+    })),
+  ].sort((a,b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  const visibleTransactions = unifiedTransactions.filter(tx =>
+    (detailKind === "all" || tx.kind === detailKind)
+    && (!unifiedSearch.trim() || [tx.id, tx.name, tx.description, tx.reference]
+      .some(value => value.toLowerCase().includes(unifiedSearch.trim().toLowerCase())))
+  );
+  const selectedTransaction = visibleTransactions.find(tx => tx.key === selectedTransactionId) ?? visibleTransactions[0];
+
   const recipientSuggestions = [
     ...employees.map((e) => ({ key: `staff-${e.employeeId}`, name: e.fullName, kind: "Karyawan SC", vendorId: "" })),
     ...vendors.map((v) => ({ key: `vendor-${v.id}`, name: v.name, kind: "Vendor", vendorId: String(v.id) })),
@@ -595,7 +633,7 @@ export default function AdminExpenses() {
           <h1 className="text-2xl font-black text-gray-900">Keuangan Sport Center</h1>
           <p className="text-gray-500 text-sm mt-0.5">Catatan pemasukan dan pengeluaran operasional, terpisah dari rekonsiliasi BizPortal.</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
           <button type="button" role="tab" aria-selected={financeSection === "income"}
             className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "income" ? "bg-emerald-50 border-emerald-500 ring-1 ring-emerald-200" : "bg-white hover:bg-emerald-50"}`}
             onClick={() => setFinanceSection("income")}>
@@ -611,6 +649,14 @@ export default function AdminExpenses() {
               <TrendingDown className="h-5 w-5" /> Pengeluaran
             </span>
             <span className="block text-sm text-gray-600 mt-1">Input biaya, daftar pengeluaran, dan persetujuan</span>
+          </button>
+          <button type="button" role="tab" aria-selected={financeSection === "details"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "details" ? "bg-blue-50 border-blue-500 ring-1 ring-blue-200" : "bg-white hover:bg-blue-50"}`}
+            onClick={() => setFinanceSection("details")}>
+            <span className="flex gap-2 items-center font-semibold text-blue-800">
+              <Receipt className="h-5 w-5" /> Detail Transaksi
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">Lihat seluruh pemasukan dan pengeluaran dalam satu tempat</span>
           </button>
         </div>
       </div>
@@ -696,6 +742,92 @@ export default function AdminExpenses() {
                 </div>}
             </CardContent>
           </Card>
+        </section>
+      ) : financeSection === "details" ? (
+        <section role="tabpanel" aria-label="Detail Transaksi Keuangan SC" className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-blue-900">Detail Transaksi Keuangan SC</h2>
+            <p className="text-sm text-gray-500">Riwayat gabungan baca-saja dari register Uang Masuk dan daftar Pengeluaran SC.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex gap-2 flex-wrap" role="group" aria-label="Filter jenis transaksi">
+              {([
+                ["all", "Semua"], ["income", "Uang Masuk"], ["expense", "Pengeluaran"],
+              ] as const).map(([kind, label]) => (
+                <Button key={kind} size="sm" variant={detailKind === kind ? "default" : "outline"}
+                  onClick={() => {setDetailKind(kind); setSelectedTransactionId(null);}}>
+                  {label}
+                </Button>
+              ))}
+            </div>
+            <Input aria-label="Cari transaksi keuangan" className="sm:ml-auto sm:max-w-xs"
+              placeholder="Cari ID, pengirim, penerima atau referensi..."
+              value={unifiedSearch} onChange={e => {setUnifiedSearch(e.target.value); setSelectedTransactionId(null);}} />
+          </div>
+          {incomeHistoryError && <p className="text-sm text-red-700">Pemasukan gagal dibaca; daftar gabungan mungkin belum lengkap.</p>}
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] gap-4 items-start">
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Daftar Transaksi ({visibleTransactions.length})</CardTitle></CardHeader>
+              <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
+                {(!visibleTransactions.length && (isLoading || incomeHistoryLoading)) ? <p className="text-sm text-gray-500">Memuat transaksi...</p>
+                 : !visibleTransactions.length ? <p className="text-sm text-gray-500">Tidak ada transaksi yang cocok.</p>
+                 : visibleTransactions.map(tx => (
+                  <button type="button" key={tx.key} onClick={() => setSelectedTransactionId(tx.key)}
+                    className={`w-full text-left rounded-lg border p-3 hover:bg-gray-50 ${selectedTransaction?.key === tx.key ? "border-blue-500 bg-blue-50" : "border-gray-200"}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`font-semibold text-sm ${tx.kind === "income" ? "text-emerald-800" : "text-orange-800"}`}>
+                          {tx.kind === "income" ? "↓ Uang Masuk" : "↑ Pengeluaran"} · {tx.name}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">{tx.id} · {tx.date}</p>
+                      </div>
+                      <span className={`font-bold whitespace-nowrap ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
+                        {tx.kind === "income" ? "+" : "−"}{formatIDR(tx.amount)}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Rincian Transaksi</CardTitle></CardHeader>
+              <CardContent>
+                {!selectedTransaction ? <p className="text-sm text-gray-500">Pilih transaksi untuk melihat rinciannya.</p> : (
+                  <div className="space-y-3">
+                    <div className={`rounded-lg p-4 ${selectedTransaction.kind === "income" ? "bg-emerald-50" : "bg-orange-50"}`}>
+                      <p className="text-xs text-gray-600">{selectedTransaction.kind === "income" ? "Uang Masuk" : "Pengeluaran"}</p>
+                      <p className="text-2xl font-bold mt-1">{formatIDR(selectedTransaction.amount)}</p>
+                      <p className="text-xs font-mono mt-2">{selectedTransaction.id}</p>
+                    </div>
+                    {([
+                      ["Tanggal", selectedTransaction.date],
+                      [selectedTransaction.kind === "income" ? "Pengirim" : "Penerima",selectedTransaction.name],
+                      ["Keterangan", selectedTransaction.description],
+                      ["Bank / Sumber Dana", selectedTransaction.bank || "Tidak tersedia"],
+                      ["Akun Penerima / Tujuan", selectedTransaction.account || "Tidak tersedia"],
+                      ["Metode", selectedTransaction.method || "Tidak tersedia"],
+                      ["Nomor Referensi", selectedTransaction.reference || "Tidak diisi"],
+                      ["Status", selectedTransaction.status],
+                      ["Register Sheets", selectedTransaction.sheet],
+                      ["Kas Besar SC", selectedTransaction.cashSheet],
+                      ["Catatan", selectedTransaction.notes || "Tidak ada"],
+                    ] as Array<[string,string]>).map(([label,value]) => (
+                      <div key={label} className="grid grid-cols-[125px_minmax(0,1fr)] gap-2 text-sm border-b pb-2">
+                        <span className="text-gray-500">{label}</span>
+                        <span className="break-words font-medium">{value}</span>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={() => {
+                      void navigator.clipboard.writeText(
+                        `ID: ${selectedTransaction.id}\nTanggal: ${selectedTransaction.date}\nNama: ${selectedTransaction.name}\nNominal: ${formatIDR(selectedTransaction.amount)}\nStatus: ${selectedTransaction.status}`
+                      ).then(() => toast({title:"Detail disalin"})).catch(() => toast({title:"Gagal menyalin detail",variant:"destructive"}));
+                    }}>Salin Detail</Button>
+                    <p className="text-xs text-gray-500">Detail baca-saja; persetujuan dan jurnal tetap mengikuti proses masing-masing.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </section>
       ) : (
         <section role="tabpanel" aria-label="Pengeluaran SC" className="space-y-4">
