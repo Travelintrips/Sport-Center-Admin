@@ -200,13 +200,13 @@ suite("public Gym multipart HTTP checkout with real PostgreSQL", () => {
       "TRUNCATE sport_center.sport_bookings CASCADE; TRUNCATE sport_center.booking_history,sport_center.wa_action_tokens,sport_center.audit_logs",
     );
   });
-  function submit(attach = true) {
+  function submit(attach = true, bookingDate = today) {
     let r = request
       .post("/api/wa/booking")
       .field("customerName", "TEST AUTO SUSPEND")
       .field("customerPhone", "628111222333")
       .field("facilityId", "6")
-      .field("bookingDate", today)
+      .field("bookingDate", bookingDate)
       .field("startTime", "20:00")
       .field("durationHours", "1")
       .field("publicGymGuest", "true")
@@ -303,4 +303,80 @@ suite("public Gym multipart HTTP checkout with real PostgreSQL", () => {
     expect(r.map((x) => x.status).sort()).toEqual([201, 409]);
     expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 1 });
   });
+  test.each([0, 1])(
+    "expired historical PIN grant does not block a new booking %i day(s) ahead",
+    async (daysAhead) => {
+      const oldDay = new Date(Date.parse(`${today}T12:00:00+07:00`) - 86400000)
+        .toISOString()
+        .slice(0, 10);
+      const nextDay = new Date(
+        Date.parse(`${today}T12:00:00+07:00`) + daysAhead * 86400000,
+      )
+        .toISOString()
+        .slice(0, 10);
+      // Synthetic copy of SC-1763's state. Never read or change the PROD booking.
+      await pool.query(
+        `INSERT INTO sport_center.sport_bookings
+      (id,order_number,customer_name,customer_email,customer_phone,facility_id,
+       booking_date,start_time,end_time,duration_hours,total_price,grand_total,status,source)
+      VALUES(1799,'SC-1763-ISOLATED','TEST AUTO SUSPEND','','628111222333',6,
+       $1,'16:12','17:12',1,30000,30000,'expired','gym_public_guest')`,
+        [oldDay],
+      );
+      await pool.query(`INSERT INTO sport_center.x904_nonmember_daily_access
+      (access_id,device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+       booking_id,verification_state,access_state)
+      VALUES(16,'TDBD234200545','pin','PIN:700','700',343,'TEST AUTO SUSPEND',1799,
+       'review_required','review_required')`);
+      const oldState = async () =>
+        (
+          await pool.query(`SELECT to_jsonb(b) AS booking,to_jsonb(a) AS grant
+      FROM sport_center.sport_bookings b JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=b.id
+      WHERE b.id=1799`)
+        ).rows[0];
+      const before = await oldState();
+      const response = await submit(true, nextDay);
+      expect(response.status).toBe(201);
+      expect(response.body).toMatchObject({
+        status: "waiting_confirmation",
+        proofStatus: "waiting_confirmation",
+        bookingDate: nextDay,
+      });
+      expect(response.body.id).not.toBe(1799);
+      expect(await oldState()).toEqual(before);
+      expect(await counts()).toEqual({ bookings: 2, payments: 1, grants: 2 });
+      expect(
+        (
+          await pool.query(
+            "SELECT count(*)::int AS count FROM sport_center.sport_payments WHERE booking_id=1799",
+          )
+        ).rows[0].count,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            `SELECT p.status,p.confirmed_at,p.paid_at,a.access_state,a.verification_state,
+      a.payment_id,a.activated_at,a.user_pin,a.device_uid
+      FROM sport_center.sport_payments p JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=p.booking_id
+      WHERE p.booking_id=$1`,
+            [response.body.id],
+          )
+        ).rows[0],
+      ).toEqual({
+        status: "pending",
+        confirmed_at: null,
+        paid_at: null,
+        access_state: "review_required",
+        verification_state: "review_required",
+        payment_id: null,
+        activated_at: null,
+        user_pin: "700",
+        device_uid: 343,
+      });
+      // A retry belongs to the same new transaction; it must not create a third booking.
+      expect((await submit(true, nextDay)).status).toBe(409);
+      expect(await counts()).toEqual({ bookings: 2, payments: 1, grants: 2 });
+      expect(await oldState()).toEqual(before);
+    },
+  );
 });
