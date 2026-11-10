@@ -427,7 +427,19 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         ORDER BY created_at DESC LIMIT 1`);
       if (prior.rows.length) {
         const last = prior.rows[0] as any;
+        const lastSource = String((last as any).payload?.source ?? "");
         if (last.state === "queued" || last.state === "claimed") return;
+        if (lastSource === "MANUAL_NONMEMBER_ACCESS_CLOSE") {
+          if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true &&
+              Number((last.result as any)?.deviceUid) === Number(a.device_uid) &&
+              Number((last.result as any)?.afterGroup) === 2 && last.completed_at &&
+              observedAt.getTime() > new Date(String(last.completed_at)).getTime() && currentGroup === 2) {
+            await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+              SET access_state='expired'
+              WHERE access_id=${Number(a.access_id)} AND verification_state='verified'`);
+          }
+          return;
+        }
         if (last.state === "completed" && (last.result as any)?.readBackConfirmed === true) {
           if (last.command_type !== commandType) {
             if (currentGroup === targetGroup && shouldBeActive) {
