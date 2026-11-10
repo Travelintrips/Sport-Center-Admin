@@ -1152,17 +1152,20 @@ test("ADMIN LAPANGAN E2E: paid VIS stays closed before physical handover; activa
   const now = new Date("2026-11-06T01:00:00Z");
   const booked = 9801;
   const pay = 9801;
-  const pin = "17";
+  const pin = "78";
   process.env.GYM_X904_NONMEMBER_ONLY_PIN = pin;
   try {
+    // The shared isolated fixture seeds an unrelated unpaid VIS001 record (#9001).
+    // Release only that synthetic fixture so this case tests a separate booking.
+    await run("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired' WHERE booking_id=9001 AND access_state='pending'");
     // Reuse only the DEV-confirmed payment trigger; never touch actual production.
     const devTrigger = readFileSync("../../scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql","utf8");
     await run(devTrigger);
     await run(`INSERT INTO sport_center.sport_bookings (id,booking_date,start_time,source,status,order_number,customer_name,grand_total,total_price)
-      VALUES (9801,'2026-11-06','06:00','admin','confirmed','TEST-ADMIN-9801','VIS 004',30000,30000);
+      VALUES (9801,'2026-11-06','06:00','admin','confirmed','TEST-ADMIN-9801','VIS 001',30000,30000);
       INSERT INTO sport_center.x904_nonmember_daily_access
       (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
-      VALUES ('TDBD234200545','card','VIS004','17',17,'VIS 004',9801,'pending','pending');
+      VALUES ('TDBD234200545','card','VIS001','78',338,'VIS 001',9801,'pending','pending');
       INSERT INTO sport_center.sport_payments(id,booking_id,status,amount,confirmed_at,proof_url)
       VALUES (9801,9801,'pending',30000,'2026-11-06T01:00:00Z','/fixture/evidence.png');
       UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9801;`);
@@ -1170,7 +1173,7 @@ test("ADMIN LAPANGAN E2E: paid VIS stays closed before physical handover; activa
     expect(grant.payment_id).toBe(pay);
     expect(grant.verification_state).toBe("pending");
     const accessId = Number(grant.access_id);
-    await addSnapshot(new Date(now.getTime()-1000),pin,"VIS 004",2);
+    await addSnapshot(new Date(now.getTime()-1000),pin,"VIS 001",2);
     await processX904NonmemberDailyAccess(db as any,new Date(now.getTime()+100));
     expect(await commandFor("ACTIVATE_USER",accessId)).toBeUndefined();
 
@@ -1179,21 +1182,21 @@ test("ADMIN LAPANGAN E2E: paid VIS stays closed before physical handover; activa
     await run("UPDATE sport_center.x904_nonmember_daily_access SET verification_state='verified' WHERE booking_id=9801 AND verification_state='pending'");
     await processX904NonmemberDailyAccess(db as any,new Date(now.getTime()+500));
     const first = await commandFor("ACTIVATE_USER",accessId);
-    expect(first?.payload).toMatchObject({expectedUid:17,accessId,source:"AUTO_NONMEMBER_GYM_12H"});
+    expect(first?.payload).toMatchObject({expectedUid:338,accessId,source:"AUTO_NONMEMBER_GYM_12H"});
     expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='ACTIVATE_USER' AND payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(1);
     const actAt = new Date(now.getTime()+3000);
-    await ack(String(first.command_id),actAt,pin,"VIS 004",17,1);
+    await ack(String(first.command_id),actAt,pin,"VIS 001",338,1);
     await processX904NonmemberDailyAccess(db as any,new Date(actAt.getTime()+2000));
     expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9801")).rows[0].access_state).toBe("active");
 
     // Before 23:00 WIB the grant expires at exactly 12h after verified activation.
     const effective = (await run("SELECT expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9801")).rows[0];
     const expires = new Date(effective.expires_at);
-    await addSnapshot(new Date(expires.getTime()+1000),pin,"VIS 004",1);
+    await addSnapshot(new Date(expires.getTime()+1000),pin,"VIS 001",1);
     await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+2000));
     const stop = await commandFor("SUSPEND_USER",accessId);
-    expect(stop?.payload).toMatchObject({expectedUid:17,accessId,source:"AUTO_NONMEMBER_GYM_12H"});
-    await ack(String(stop.command_id),new Date(expires.getTime()+3500),pin,"VIS 004",17,2);
+    expect(stop?.payload).toMatchObject({expectedUid:338,accessId,source:"AUTO_NONMEMBER_GYM_12H"});
+    await ack(String(stop.command_id),new Date(expires.getTime()+3500),pin,"VIS 001",338,2);
     await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+6000));
     const final = (await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9801")).rows[0];
     expect(final.access_state).toBe("expired");
