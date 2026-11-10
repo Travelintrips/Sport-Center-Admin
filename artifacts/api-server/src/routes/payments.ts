@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   db,
+  auditLogsTable,
   paymentsTable,
   bookingsTable,
   bookingHistoryTable,
@@ -2295,6 +2296,67 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             null,
             null,
           );
+        }
+
+        // A verified machine PIN needs no second financial confirmation.
+        // Fail closed on any identity ambiguity; never enqueue a device command here.
+        if (status === "confirmed" && claimed.paymentType !== "dp" && booking?.source === "gym_public_guest") {
+          const eligible = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name
+            FROM sport_center.x904_nonmember_daily_access a
+            JOIN sport_center.x904_verified_nonmember_identities r
+              ON r.device_serial=a.device_serial AND r.user_pin=a.user_pin
+              AND r.device_uid=a.device_uid AND r.verification_state='verified'
+              AND r.revoked_at IS NULL
+              AND upper(trim(r.display_name))=upper(trim(a.verified_name))
+            JOIN sport_center.gym_x904_lan_users u
+              ON u.device_serial=a.device_serial AND u.user_pin=a.user_pin
+              AND u.device_uid=a.device_uid AND u.device_role=0
+              AND upper(trim(u.display_name))=upper(trim(a.verified_name))
+            WHERE a.booking_id=${claimed.bookingId} AND a.payment_id=${claimed.id}
+              AND a.identity_type='pin' AND a.device_serial='TDBD234200545'
+              AND a.verification_state='review_required' AND a.access_state='review_required'
+              AND a.user_pin NOT IN ('12','79','237')
+              AND ${claimed.proofUrl ?? null}::text IS NOT NULL
+              AND ${Number(claimed.amount)}::numeric >=
+                (SELECT COALESCE(b.grand_total,b.total_price) FROM sport_center.sport_bookings b WHERE b.id=a.booking_id)
+              AND NOT EXISTS (SELECT 1 FROM sport_center.gym_x904_member_mapping m
+                WHERE m.device_serial=a.device_serial AND m.user_pin=a.user_pin)
+              AND NOT EXISTS (SELECT 1 FROM sport_center.x904_nonmember_daily_access other
+                WHERE other.device_serial=a.device_serial AND other.user_pin=a.user_pin
+                  AND other.access_id<>a.access_id AND other.access_state IN ('pending','active'))
+            FOR UPDATE OF a`);
+          if (eligible.rows.length === 1) {
+            const grant = eligible.rows[0] as any;
+            const snap = await tx.execute(sql`SELECT observed_at,user_count,users
+              FROM sport_center.gym_x904_access_snapshots
+              WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+            const last = snap.rows[0] as any;
+            const observedAt = last ? new Date(String(last.observed_at)).getTime() : NaN;
+            const users = Array.isArray(last?.users) ? last.users : [];
+            const matches = users.filter((u:any) => String(u.pin)===String(grant.user_pin)
+              && Number(u.role)===0 && u.enabled===true && [1,2].includes(Number(u.group))
+              && String(u.name ?? '').trim().replace(/\s+/g,' ').toLocaleUpperCase('id-ID')===
+                String(grant.verified_name).trim().replace(/\s+/g,' ').toLocaleUpperCase('id-ID'));
+            if (Number.isFinite(observedAt) && Date.now()>=observedAt &&
+                Date.now()-observedAt<=300000 && users.length===Number(last.user_count) &&
+                matches.length===1) {
+              const changed = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+                SET verification_state='verified',access_state='pending'
+                WHERE access_id=${Number(grant.access_id)}
+                  AND verification_state='review_required' AND access_state='review_required'
+                RETURNING access_id`);
+              if (changed.rows.length===1) {
+                await tx.insert(auditLogsTable).values({
+                  userId: userInfo.userId, userRole: userInfo.userRole,
+                  action: 'x904_guest_pin_payment_auto_authorized',entity:'booking',entityId:claimed.bookingId,
+                  before:{verificationState:'review_required',accessState:'review_required'},
+                  after:{verificationState:'verified',accessState:'pending',paymentId:claimed.id,
+                    accessId:Number(grant.access_id),userPin:String(grant.user_pin),deviceUid:Number(grant.device_uid),
+                    basis:'confirmed_payment_and_verified_machine_registry'},
+                });
+              }
+            }
+          }
         }
 
         return claimed;
