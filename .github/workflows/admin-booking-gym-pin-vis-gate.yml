@@ -7,9 +7,12 @@ on:
       - 'artifacts/api-server/src/routes/waBookingsAdmin.ts'
       - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_payment_handover_gate.sql'
+      - 'artifacts/api-server/migrations/20261110_admin_booking_vis_initial_pending_rls.sql'
+      - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.realPg.test.ts'
       - 'artifacts/api-server/src/routes/__tests__/adminBookingGymPinVisPaymentActivationSuspendContract.test.ts'
       - 'artifacts/sport-center/src/pages/admin/Bookings.tsx'
       - 'scripts/test-admin-booking-vis-payment-gate-pg.mjs'
+      - 'scripts/test-admin-booking-vis-initial-rls-pg.mjs'
       - 'scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql'
   workflow_dispatch:
 jobs:
@@ -20,8 +23,10 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_PASSWORD: isolated_dev_fixture_only
+          POSTGRES_DB: x904_nonmember
         ports:
           - 55443:5432
+          - 55445:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
@@ -41,3 +46,14 @@ jobs:
         run: pnpm --filter @workspace/api-server exec jest --runInBand src/routes/__tests__/adminBookingGymPinVisPaymentActivationSuspendContract.test.ts src/routes/__tests__/gymExistingWebBookingVisIdentityContract.test.ts src/services/x904NonmemberGrantScope.test.ts
       - name: Confirmed payment trigger on isolated real PostgreSQL
         run: node scripts/test-admin-booking-vis-payment-gate-pg.mjs
+      - name: Admin VIS initial pending RLS on isolated role
+        env:
+          ADMIN_VIS_RLS_TEST_URL: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember
+        run: node scripts/test-admin-booking-vis-initial-rls-pg.mjs
+      - name: Direct Admin booking VIS/PIN real worker ACK and suspend
+        env:
+          SUPABASE_DATABASE_URL_DEV: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember
+          X904_NONMEMBER_ISOLATED_PG_URL: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember
+          NODE_ENV: test
+          NODE_OPTIONS: --experimental-vm-modules
+        run: pnpm --filter @workspace/api-server exec jest --runInBand src/services/x904NonmemberDailyAccessWorker.realPg.test.ts --testNamePattern='ADMIN LAPANGAN E2E'
