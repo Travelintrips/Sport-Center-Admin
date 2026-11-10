@@ -154,6 +154,8 @@ export default function AdminExpenses() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  // Separate the income and expense workflows without changing their existing APIs.
+  const [financeSection, setFinanceSection] = useState<"income" | "expenses">("income");
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [startDate, setStartDate] = useState("");
@@ -588,72 +590,131 @@ export default function AdminExpenses() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-black text-gray-900">Pengeluaran SC</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Manajemen pengeluaran operasional Sport Center</p>
+          <h1 className="text-2xl font-black text-gray-900">Keuangan Sport Center</h1>
+          <p className="text-gray-500 text-sm mt-0.5">Catatan pemasukan dan pengeluaran operasional, terpisah dari rekonsiliasi BizPortal.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            className="border-emerald-500 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => {
-              setIncomeForm({
-                transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
-                sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
-              });
-              setIncomePreview(false);
-              setCashReceiptConfirmed(false);
-              setIncomeDuplicateWarning(false);
-              setIncomeEntryKey(crypto.randomUUID());
-              setIncomeOpen(true);
-            }}
-          >
-            <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
-          </Button>
-          <Button variant="outline" onClick={() => {
-            setIncomeHistoryOpen(true);
-            void refetchIncome();
-          }}>
-            <Eye className="w-4 h-4 mr-2" /> Histori Uang Masuk
-          </Button>
-          <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
-            <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
-          </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
+          <button type="button" role="tab" aria-selected={financeSection === "income"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "income" ? "bg-emerald-50 border-emerald-500 ring-1 ring-emerald-200" : "bg-white hover:bg-emerald-50"}`}
+            onClick={() => setFinanceSection("income")}>
+            <span className="flex gap-2 items-center font-semibold text-emerald-800">
+              <Banknote className="h-5 w-5" /> Uang Masuk
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">Input penerimaan, histori, dan status pengiriman Sheets</span>
+          </button>
+          <button type="button" role="tab" aria-selected={financeSection === "expenses"}
+            className={`rounded-xl border p-4 text-left transition-colors ${financeSection === "expenses" ? "bg-orange-50 border-orange-500 ring-1 ring-orange-200" : "bg-white hover:bg-orange-50"}`}
+            onClick={() => setFinanceSection("expenses")}>
+            <span className="flex gap-2 items-center font-semibold text-orange-800">
+              <TrendingDown className="h-5 w-5" /> Pengeluaran
+            </span>
+            <span className="block text-sm text-gray-600 mt-1">Input biaya, daftar pengeluaran, dan persetujuan</span>
+          </button>
         </div>
       </div>
 
-      {/* Ringkasan: SC expenses vs. imported bank-sheet inflows (distinct sources). */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card className="border-l-4 border-l-orange-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingDown className="w-4 h-4 text-orange-500" />
-              <span className="text-sm text-gray-600 font-medium">Pengeluaran Bulan Ini (Rp)</span>
+      {financeSection === "income" ? (
+        <section role="tabpanel" aria-label="Uang Masuk SC" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-emerald-900">Uang Masuk SC</h2>
+              <p className="text-sm text-gray-500">Catatan penerimaan operasional. Tersinkron ke Sheets bukan berarti bank sudah terverifikasi.</p>
             </div>
-            <p className="text-xl font-black text-gray-900">{formatIDR(summary.totalThisMonth)}</p>
-            <p className="text-xs text-gray-500 mt-1">Catatan operasional Pengeluaran SC bulan berjalan</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-emerald-500">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Banknote className="w-4 h-4 text-emerald-600" />
-              <span className="text-sm text-gray-600 font-medium">Uang Masuk (Rp)</span>
+            <div className="flex flex-wrap gap-2">
+              <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => {
+                setIncomeForm({
+                  transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
+                  sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
+                });
+                setIncomePreview(false);
+                setCashReceiptConfirmed(false);
+                setIncomeDuplicateWarning(false);
+                setIncomeEntryKey(crypto.randomUUID());
+                setIncomeOpen(true);
+              }}>
+                <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
+              </Button>
+              <Button variant="outline" onClick={() => { setIncomeHistoryOpen(true); void refetchIncome(); }}>
+                <Eye className="w-4 h-4 mr-2" /> Histori Lengkap
+              </Button>
             </div>
-            <p className="text-xl font-black text-gray-900">
-              {typeof summary.incomingThisMonth === "number" ? formatIDR(summary.incomingThisMonth) : "Belum tersedia"}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Mutasi masuk bulan berjalan dari kas besar sc (BizPortal, baca saja).
-              {summary.incomingSheetSyncedAt && (
-                <> Sinkron terakhir: {new Date(summary.incomingSheetSyncedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB.</>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card className="border-l-4 border-l-emerald-500">
+              <CardContent className="p-4">
+                <p className="text-sm font-medium text-gray-600">Total Input Uang Masuk — Bulan Ini</p>
+                <p className="text-2xl font-bold text-emerald-800 mt-1">
+                  {incomeHistoryError ? "Tidak tersedia" : incomeData ? formatIDR(incomeData.summary.manualThisMonth) : "Memuat..."}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Dari register SC, belum tentu cocok dengan mutasi bank.</p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-slate-400">
+              <CardContent className="p-4">
+                <p className="text-sm font-medium text-gray-600">Mutasi Masuk Kas Besar CST — BizPortal</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  {typeof summary.incomingThisMonth === "number" ? formatIDR(summary.incomingThisMonth) : "Belum tersedia"}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Sumber terpisah, baca saja; tidak ditambahkan ke total input SC.
+                  {summary.incomingSheetSyncedAt && <> Sync terakhir {new Date(summary.incomingSheetSyncedAt).toLocaleString("id-ID", {timeZone:"Asia/Jakarta"})} WIB.</>}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">Riwayat Pemasukan</CardTitle>
+              <p className="text-xs text-gray-500">Status tujuan Sheets ditampilkan terpisah: register SC Uang Masuk dan kas besar sc.</p>
+            </CardHeader>
+            <CardContent>
+              {incomeHistoryLoading && !incomeData ? <p className="text-sm text-gray-500">Memuat data pemasukan...</p>
+                : incomeHistoryError ? <p className="text-sm text-red-700">Riwayat belum dapat dibaca. Jangan ulangi input sebelum memeriksa data.</p>
+                : !incomeData?.entries?.length ? <p className="text-sm text-gray-500 py-5 text-center">Belum ada pemasukan yang dicatat.</p>
+                : <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b text-left">
+                      <th className="p-2">ID</th><th className="p-2">Tanggal</th><th className="p-2">Pengirim</th>
+                      <th className="p-2">Penerima</th><th className="p-2 text-right">Nominal</th>
+                      <th className="p-2">SC Uang Masuk</th><th className="p-2">kas besar sc</th>
+                    </tr></thead>
+                    <tbody>{incomeData.entries.slice(0, 10).map(entry => <tr key={entry.id} className="border-b">
+                      <td className="p-2 font-mono">{entry.incomeNo}</td>
+                      <td className="p-2">{entry.transactionDate}</td>
+                      <td className="p-2">{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
+                      <td className="p-2">{entry.receivingAccount}</td>
+                      <td className="p-2 text-right whitespace-nowrap">{formatIDR(Number(entry.amount))}</td>
+                      <td className="p-2">{entry.sheetSyncState === "synced" ? "Tersinkron (belum diverifikasi)" : entry.sheetSyncState}</td>
+                      <td className="p-2">{entry.cashSheetState === "not_applicable" ? "Tidak berlaku" :
+                        entry.cashSheetState === "synced" ? `Tersinkron · baris ${entry.cashSheetRow}` : entry.cashSheetState}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>}
+            </CardContent>
+          </Card>
+        </section>
+      ) : (
+        <section role="tabpanel" aria-label="Pengeluaran SC" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-orange-800">Pengeluaran SC</h2>
+              <p className="text-sm text-gray-500">Catatan biaya operasional dan alur persetujuan pengeluaran.</p>
+            </div>
+            <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
+              <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
+            </Button>
+          </div>
+          <Card className="border-l-4 border-l-orange-500">
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-gray-600">Pengeluaran Bulan Ini</p>
+              <p className="text-2xl font-bold text-orange-800 mt-1">{formatIDR(summary.totalThisMonth)}</p>
+              <p className="text-xs text-gray-500 mt-1">Catatan operasional SC; berbeda dari mutasi bank BizPortal.</p>
+            </CardContent>
+          </Card>
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
@@ -802,6 +863,9 @@ export default function AdminExpenses() {
           )}
         </CardContent>
       </Card>
+
+        </section>
+      )}
 
       {/* Incoming funds: save to SC operational register, not bank movements. */}
       {/* Historical receipts remain accessible without restoring the removed inline register. */}

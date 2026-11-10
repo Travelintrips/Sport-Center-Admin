@@ -31,3 +31,16 @@ describe("incoming money operational UI",()=>{
  });
 
 });
+
+
+describe("separated financial navigation", () => {
+  it("isolates the visible income and expense workflows in their own tab panels", () => {
+    expect(ui).toContain('financeSection');
+    expect(ui).toContain('role="tablist"');
+    expect(ui).toContain('aria-label="Uang Masuk SC"');
+    expect(ui).toContain('aria-label="Pengeluaran SC"');
+    expect(ui).toContain("Riwayat Pemasukan");
+    expect(ui).toContain("Mutasi Masuk Kas Besar CST — BizPortal");
+    expect(ui).toContain("Total Input Uang Masuk — Bulan Ini");
+  });
+});
