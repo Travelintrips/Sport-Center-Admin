@@ -270,6 +270,9 @@ test("ADMIN LAPANGAN HTTP: actual VIS handover rejects invalid requests and rele
     expect(approved.status).toBe(200);
     expect(approved.body).toMatchObject({success:true,accessId,cardCode:"VIS001",accessState:"pending"});
     expect((await run("SELECT verification_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].verification_state).toBe("verified");
+    const handover = (await run("SELECT state,card_code,funds_reference FROM sport_center.gym_vis_card_reservations WHERE booking_id=9811")).rows;
+    expect(handover).toHaveLength(1);
+    expect(handover[0]).toMatchObject({state:"collected",card_code:"VIS001",funds_reference:"ADMINVIS-HANDOVER-9811"});
     const replay=await request.post(url).set("Authorization",`Bearer ${token}`)
       .send({identityChecked:true,physicalCardHandedOver:true});
     expect(replay.status).toBe(409); // no second handover
@@ -362,4 +365,91 @@ test("ADMIN LAPANGAN EXPIRY: same-day unused VIS stays pending until 23:00 WIB",
     await processX904NonmemberDailyAccess(db as any,new Date("2026-11-06T16:00:00Z"));
     expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("expired");
   } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
+
+test("ADMIN LAPANGAN HTTP: physical VIS return requires matching X904 suspend ACK", async () => {
+  process.env.SESSION_SECRET ||= "isolated-admin-vis-http-test";
+  const { default: express } = await import("express");
+  const { default: supertest } = await import("supertest");
+  const { default: bookingsRouter } = await import("../routes/bookings.js");
+  const { createToken } = await import("../lib/auth.js");
+  const app=express(); app.use(express.json()); app.use("/api",bookingsRouter);
+  const request=supertest(app);
+  const token=createToken(302,"staff");
+  const id=9811;
+  const url=`/api/bookings/${id}/x904-admin-card-return`;
+  const physical = (await run("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[id])).rows[0];
+  const hour=Number(new Intl.DateTimeFormat("en-GB",{
+    timeZone:"Asia/Jakarta",hour:"2-digit",hourCycle:"h23"
+  }).format(new Date()));
+  if (hour<6 || hour>=23) {
+    // Handover is correctly forbidden outside operating hours.
+    expect(physical).toBeUndefined();
+    return;
+  }
+  expect(physical?.state).toBe("collected");
+  const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id])).rows[0].access_id);
+  const early=await request.post(url).set("Authorization",`Bearer ${token}`).send({physicalCardReturned:true});
+  expect(early.status).toBe(409);
+  const noCard=await request.post(url).set("Authorization",`Bearer ${token}`).send({physicalCardReturned:false});
+  expect(noCard.status).toBe(400);
+  await run("UPDATE sport_center.gym_vis_card_reservations SET collected_at=now()-interval '1 minute' WHERE booking_id=9811");
+  await run(`UPDATE sport_center.x904_nonmember_daily_access
+    SET activated_at=now()-interval '13 hours',
+        expires_at=LEAST(now()-interval '1 hour',
+          (((now()-interval '13 hours') AT TIME ZONE 'Asia/Jakarta')::date
+            + time '23:00') AT TIME ZONE 'Asia/Jakarta'),
+        access_state='expired' WHERE booking_id=9811`);
+  await run(`INSERT INTO sport_center.x904_user_commands
+    (device_serial,command_type,user_pin,payload,requested_by,idempotency_key,
+     state,created_at,completed_at,result)
+    VALUES ('TDBD234200545','SUSPEND_USER','78',
+      jsonb_build_object('accessId',${accessId},'source','AUTO_NONMEMBER_GYM_12H'),
+      301,'CI-ADMIN-9811-SUSPEND','completed',now(),
+      now(),
+      '{"readBackConfirmed":true,"afterGroup":2,"deviceUid":999}'::jsonb)`);
+  await addSnapshot(new Date(),"78","VIS 001",2);
+  const wrong=await request.post(url).set("Authorization",`Bearer ${token}`).send({physicalCardReturned:true});
+  expect(wrong.status).toBe(409);
+  expect((await run("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=9811")).rows[0].state).toBe("collected");
+  await run("UPDATE sport_center.x904_user_commands SET result=jsonb_build_object('readBackConfirmed',true,'afterGroup',2,'deviceUid',338) WHERE idempotency_key='CI-ADMIN-9811-SUSPEND'");
+  const returned=await request.post(url).set("Authorization",`Bearer ${token}`).send({physicalCardReturned:true});
+  expect(returned.status).toBe(200);
+  expect(returned.body).toMatchObject({success:true,cardCode:"VIS001",state:"returned"});
+  expect((await run("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=9811")).rows[0].state).toBe("returned");
+  const replay=await request.post(url).set("Authorization",`Bearer ${token}`).send({physicalCardReturned:true});
+  expect(replay.status).toBe(200);
+  expect(replay.body.alreadyReturned).toBe(true);
+});
+
+
+test("ADMIN LAPANGAN PAYMENT GATE: partial and duplicate confirmed receipts cannot activate PIN", async () => {
+  const at=new Date("2026-11-06T01:00:00Z");
+  await run("DELETE FROM sport_center.gym_x904_access_snapshots WHERE observed_at > $1",[at]);
+  await run(readFileSync("../../scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql","utf8"));
+  await run(`INSERT INTO sport_center.sport_bookings
+    (id,booking_date,start_time,source,status,order_number,customer_name,total_price,grand_total)
+    VALUES(9820,'2026-11-06','06:00','admin','confirmed','CI-ADMIN-PARTIAL','TEST 606',30000,30000),
+          (9821,'2026-11-06','06:00','admin','confirmed','CI-ADMIN-DUPLICATE','TEST 607',30000,30000);
+    INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state)
+    VALUES('TDBD234200545','pin','PIN:606','606',606,'TEST 606',9820,'verified','pending'),
+          ('TDBD234200545','pin','PIN:607','607',607,'TEST 607',9821,'verified','pending');
+    INSERT INTO sport_center.sport_payments(id,booking_id,status,amount,confirmed_at)
+    VALUES(9820,9820,'pending',10000,'2026-11-06T01:00:00Z'),
+          (9821,9821,'pending',30000,'2026-11-06T01:00:00Z');
+    UPDATE sport_center.sport_payments SET status='confirmed' WHERE id IN (9820,9821);
+    INSERT INTO sport_center.sport_payments(id,booking_id,status,amount,confirmed_at)
+    VALUES(9822,9821,'confirmed',30000,'2026-11-06T01:00:00Z')`);
+  for(const [pin,bookingId] of [["606",9820],["607",9821]] as const) {
+    process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+    try {
+      await addSnapshot(new Date(at.getTime()-1000),pin,`TEST ${pin}`,2);
+      await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+100));
+      const id=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].access_id);
+      expect(await commandFor("ACTIVATE_USER",id)).toBeUndefined();
+      expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[id])).rows[0].access_state).toBe("review_required");
+    } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+  }
 });

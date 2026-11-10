@@ -208,6 +208,8 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
     accessId: number; identityType: string; identityLabel: string;
     userPin: string; verificationState: string; accessState: string;
     paymentStatus: string | null; activatedAt: string | null; expiresAt: string | null;
+    cardState: string | null; currentMachineGroup: number | null;
+    latestCommand: string | null; readBackConfirmed: boolean; returnReady: boolean;
   } = null;
   if (booking.source === "admin" && facility && (facility.bookingMode === "walk_in" || /gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")))) {
     const grants = await db.execute(sql`SELECT a.access_id,a.identity_type,a.identity_label,a.user_pin,
@@ -219,6 +221,80 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
         AND a.identity_type IN ('pin','card') ORDER BY a.access_id DESC LIMIT 2`);
     if (grants.rows.length === 1) {
       const grant = grants.rows[0] as any;
+      // Only direct Admin Lapangan cards use this physical handover record.
+      const cards = grant.identity_type === "card"
+        ? await db.execute(sql`SELECT state,collected_at,device_uid
+            FROM sport_center.gym_vis_card_reservations
+            WHERE booking_id=${booking.id}
+              AND funds_reference=('ADMINVIS-HANDOVER-' || payment_id::text)
+            LIMIT 1`) : { rows: [] };
+      const card = cards.rows[0] as any | undefined;
+      const snap = await db.execute(sql`SELECT observed_at,user_count,users
+        FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1`);
+      const snapshot = snap.rows[0] as any | undefined;
+      const users: any[] = Array.isArray(snapshot?.users) ? snapshot.users : [];
+      const groupUsers = users.filter(u =>
+        String(u.pin) === String(grant.user_pin) && Number(u.role) === 0 &&
+        u.enabled === true && Number(u.group) === 2 &&
+        String(u.name ?? "").replace(/\s+/g,"").toUpperCase() ===
+          String(grant.identity_label).replace(/\s+/g,"").toUpperCase());
+      const snapshotTime = new Date(String(snapshot?.observed_at ?? "")).getTime();
+      const group2 = groupUsers.length === 1 &&
+        users.filter(u => String(u.pin) === String(grant.user_pin)).length === 1 &&
+        users.length === Number(snapshot?.user_count) &&
+        Number.isFinite(snapshotTime) && snapshotTime <= Date.now() &&
+        Date.now()-snapshotTime <= 5*60_000;
+      const commands = grant.identity_type === "card" && card?.state === "collected"
+        ? await db.execute(sql`SELECT command_type,state,payload,completed_at,result
+            FROM sport_center.x904_user_commands
+            WHERE device_serial='TDBD234200545' AND user_pin=${String(grant.user_pin)}
+              AND created_at>=${card.collected_at}
+            ORDER BY created_at DESC,command_id DESC LIMIT 1`) : { rows: [] };
+      const last = commands.rows[0] as any | undefined;
+      const blocking = card?.state === "collected"
+        ? await db.execute(sql`SELECT
+            EXISTS(SELECT 1 FROM sport_center.x904_user_commands c
+              WHERE c.device_serial='TDBD234200545' AND c.user_pin=${String(grant.user_pin)}
+                AND c.state IN ('queued','claimed')) AS command_in_flight,
+            EXISTS(SELECT 1 FROM sport_center.x904_nonmember_daily_access a
+              WHERE a.device_serial='TDBD234200545' AND a.user_pin=${String(grant.user_pin)}
+                AND a.access_id<>${Number(grant.access_id)}
+                AND a.access_state IN ('pending','active')) AS another_access,
+            EXISTS(SELECT 1 FROM sport_center.gym_x904_member_mapping m
+              WHERE m.device_serial='TDBD234200545' AND m.user_pin=${String(grant.user_pin)}) AS member_owned,
+            EXISTS(SELECT 1 FROM sport_center.x904_user_commands c
+              WHERE c.device_serial='TDBD234200545' AND
+                c.payload->>'accessId'=${String(grant.access_id)}) AS ever_commanded`) : { rows: [] };
+      const blockers = blocking.rows[0] as any | undefined;
+      const safePool = blockers && !blockers.command_in_flight &&
+        !blockers.another_access && !blockers.member_owned;
+      const paidDoorClosed = grant.activated_at != null &&
+        grant.access_state === "expired" &&
+        (new Date(String(grant.expires_at)).getTime() <= Date.now() ||
+          ["cancelled","refunded","rejected","expired"].includes(String(booking.status))) &&
+        last?.command_type === "SUSPEND_USER" &&
+        last?.state === "completed" && last.result?.readBackConfirmed === true &&
+        Number(last.result?.deviceUid) === Number(card?.device_uid) &&
+        Number(last.result?.afterGroup) === 2 &&
+        String(last.payload?.accessId) === String(grant.access_id) &&
+        last.completed_at && new Date(String(last.completed_at)).getTime() <= snapshotTime;
+      const dayParts = new Intl.DateTimeFormat("en-CA", {
+        timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit",
+      }).formatToParts(new Date());
+      const dateParts = Object.fromEntries(dayParts.map(p => [p.type,p.value]));
+      const wib = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+      const hourWib = Number(new Intl.DateTimeFormat("en-GB", {
+        timeZone:"Asia/Jakarta",hour:"2-digit",hourCycle:"h23",
+      }).format(new Date()));
+      const closingPassed = String(booking.bookingDate) < wib ||
+        (String(booking.bookingDate) === wib && hourWib >= 23);
+      const unactivatedDoorClosed = grant.activated_at == null &&
+        !last && !blockers?.ever_commanded && (closingPassed ||
+          ["cancelled","refunded","rejected","expired"].includes(String(booking.status)));
+      const returnReady = Boolean(card?.state === "collected" && group2 && safePool &&
+        snapshotTime >= new Date(String(card.collected_at)).getTime() &&
+        (paidDoorClosed || unactivatedDoorClosed));
       adminGymAccess = {
         accessId: Number(grant.access_id), identityType: String(grant.identity_type),
         identityLabel: String(grant.identity_label), userPin: String(grant.user_pin),
@@ -226,6 +302,11 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
         paymentStatus: grant.payment_status == null ? null : String(grant.payment_status),
         activatedAt: grant.activated_at == null ? null : String(grant.activated_at),
         expiresAt: grant.expires_at == null ? null : String(grant.expires_at),
+        cardState: card?.state == null ? null : String(card.state),
+        currentMachineGroup: groupUsers.length === 1 ? 2 : null,
+        latestCommand: last?.command_type == null ? null : String(last.command_type),
+        readBackConfirmed: last?.result?.readBackConfirmed === true,
+        returnReady,
       };
     }
   }

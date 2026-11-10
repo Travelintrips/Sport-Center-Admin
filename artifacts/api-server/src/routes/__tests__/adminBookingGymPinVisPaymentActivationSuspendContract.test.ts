@@ -72,4 +72,33 @@ describe("Admin Lapangan direct Gym booking: payment -> PIN/VIS -> X904 -> suspe
     expect(adminUi).toContain("Konfirmasi Penyerahan VIS");
     expect(adminUi).not.toContain("Konfirmasi Pembayaran dan Buka Pintu");
   });
+
+  test("direct Admin Lapangan VIS handover and return are tied to one physical card", () => {
+    const handoverStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-admin-card-handover"');
+    const returnStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-admin-card-return"');
+    const webStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-vis-reserve"', returnStart);
+    expect(handoverStart).toBeGreaterThan(-1);
+    expect(returnStart).toBeGreaterThan(handoverStart);
+    expect(webStart).toBeGreaterThan(returnStart);
+    const handover = bookingRoute.slice(handoverStart,returnStart);
+    const returned = bookingRoute.slice(returnStart,webStart);
+    expect(handover).toContain("INSERT INTO sport_center.gym_vis_card_reservations");
+    expect(handover).toContain("state IN ('reserved','collected')");
+    expect(handover).toContain("ADMINVIS-HANDOVER-");
+    expect(returned).toContain("req.body?.physicalCardReturned !== true");
+    expect(returned).toContain("readBackConfirmed");
+    expect(returned).toContain("machine_group2_not_confirmed");
+    expect(returned).toContain("suspend_ack_missing");
+    expect(returned).toContain("returned_at=now()");
+    expect(returned).not.toContain("INSERT INTO sport_center.x904_user_commands");
+    expect(adminUi).toContain("/x904-admin-card-return");
+    expect(adminUi).toContain("Konfirmasi Pengembalian VIS");
+  });
+
+  test("admin paid PIN and VIS cannot activate from partial or duplicate confirmation", () => {
+    expect(worker).toContain("adminPaymentEligible");
+    expect(worker).toContain("confirmed_payment_count");
+    expect(worker).toContain("Number(a.payment_amount) >= Number(a.amount_due)");
+    expect(worker).toContain("Number(a.confirmed_payment_count) === 1");
+  });
 });

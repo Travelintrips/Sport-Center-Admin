@@ -233,7 +233,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.booking_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
-          p.status::text AS payment_status,
+          p.status::text AS payment_status, p.amount AS payment_amount,
+          p.confirmed_at AS payment_confirmed_at,
+          COALESCE(booking.grand_total,booking.total_price) AS amount_due,
+          (SELECT count(*)::int FROM sport_center.sport_payments cp
+            WHERE cp.booking_id=a.booking_id AND cp.status::text='confirmed') AS confirmed_payment_count,
           booking.booking_date AS booking_date, booking.start_time AS booking_start_time,
           booking.source AS booking_source, booking.notes AS booking_notes,
           booking.status::text AS booking_status,
@@ -332,7 +336,18 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         : a.booking_source === "admin"
           ? a.booking_status === "confirmed"
           : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
-      const shouldBeActive = bookingEligible &&
+      // Direct Admin Lapangan Gym grants require exactly one fully paid,
+      // independently confirmed payment. "confirmed" alone is insufficient
+      // if the amount is partial or multiple receipts conflict.
+      // Other booking sources retain their existing behavior.
+      const adminPaymentEligible = a.booking_source !== "admin" ||
+        (Number(a.confirmed_payment_count) === 1 &&
+          a.payment_confirmed_at != null && a.amount_due != null &&
+          Number.isFinite(Number(a.payment_amount)) &&
+          Number.isFinite(Number(a.amount_due)) &&
+          Number(a.amount_due) > 0 &&
+          Number(a.payment_amount) >= Number(a.amount_due));
+      const shouldBeActive = bookingEligible && adminPaymentEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&

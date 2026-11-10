@@ -7,6 +7,8 @@ on:
       - 'artifacts/api-server/src/routes/waBookingsAdmin.ts'
       - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts'
       - 'artifacts/api-server/src/services/x904AdminVisPendingExpiry.ts'
+      - 'artifacts/api-server/migrations/20261110_admin_vis_physical_handover_return_rls.sql'
+      - 'artifacts/api-server/migrations/20261110_admin_vis_rls_match_outer_booking.sql'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_payment_handover_gate.sql'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_initial_pending_rls.sql'
       - 'artifacts/api-server/src/services/x904AdminBookingLapangan.realPg.test.ts'
@@ -14,6 +16,7 @@ on:
       - 'artifacts/sport-center/src/pages/admin/Bookings.tsx'
       - 'scripts/test-admin-booking-vis-payment-gate-pg.mjs'
       - 'scripts/test-admin-booking-vis-initial-rls-pg.mjs'
+      - 'scripts/test-admin-vis-handover-return-rls-pg.mjs'
       - 'scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql'
   workflow_dispatch:
 jobs:
@@ -51,6 +54,10 @@ jobs:
         env:
           ADMIN_VIS_RLS_TEST_URL: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember
         run: node scripts/test-admin-booking-vis-initial-rls-pg.mjs
+      - name: Admin VIS physical handover and return RLS on isolated PostgreSQL
+        env:
+          ADMIN_VIS_RLS_TEST_URL: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember
+        run: node scripts/test-admin-vis-handover-return-rls-pg.mjs
       - name: Direct Admin booking VIS/PIN real worker ACK and suspend
         env:
           SUPABASE_DATABASE_URL_DEV: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember

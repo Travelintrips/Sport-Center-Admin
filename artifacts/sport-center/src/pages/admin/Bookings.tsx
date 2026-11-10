@@ -1650,6 +1650,31 @@ function BookingDetailDrawer({
       description: String(error?.message ?? error), variant: "destructive" }),
   });
 
+  const returnAdminGymVisMutation = useMutation({
+    mutationFn: async () => {
+      if (adminGymAccess?.identityType !== "card" || adminGymAccess?.cardState !== "collected" ||
+          adminGymAccess?.returnReady !== true || !visPhysicalReturned) {
+        throw new Error("Kartu atau bukti suspend belum siap untuk pengembalian.");
+      }
+      const response = await fetch(`/api/bookings/${booking.id}/x904-admin-card-return`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ physicalCardReturned: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (result: any) => {
+      setVisPhysicalReturned(false);
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      paymentToast.toast({ title: `${result?.cardCode ?? "VIS"} kembali ke inventaris`,
+        description: "Kartu fisik dicatat kembali setelah status aman pada mesin X904 terbukti." });
+    },
+    onError: (error: any) => paymentToast.toast({ title: "Pengembalian VIS ditahan",
+      description: String(error?.message ?? error), variant: "destructive" }),
+  });
+
   const handoverGymVisMutation = useMutation({
     mutationFn: async () => {
       if (gymX904MonitoringFailed || !gymX904Monitoring?.reservation || gymX904Monitoring.reservation.state !== "reserved") {
@@ -2051,6 +2076,35 @@ function BookingDetailDrawer({
                     </button>
                   </div>
                 )}
+              {adminGymAccess.identityType === "card" && (
+                <div className="space-y-2 border-t border-sky-200 pt-2 text-xs">
+                  <div>Status fisik VIS: <strong>{adminGymAccess.cardState === "collected" ? "Diserahkan ke pengunjung" :
+                    adminGymAccess.cardState === "returned" ? "Sudah kembali ke petugas" : "Belum diserahkan"}</strong></div>
+                  <div>Mesin: Grup {adminGymAccess.currentMachineGroup ?? "belum terbukti Grup 2"} ·
+                    Perintah terakhir: {adminGymAccess.latestCommand ?? "-"} ·
+                    ACK/read-back: {adminGymAccess.readBackConfirmed ? "terkonfirmasi" : "belum terkonfirmasi"}</div>
+                  {adminGymAccess.cardState === "collected" && (
+                    <div className="space-y-2 rounded-lg border border-sky-300 bg-white p-3">
+                      <div className="font-semibold">{adminGymAccess.returnReady ?
+                        "Akses sudah aman — kartu dapat dikembalikan secara fisik." :
+                        "Kartu masih di tangan pengunjung atau bukti suspend X904 belum lengkap."}</div>
+                      <label className="flex items-start gap-2">
+                        <input type="checkbox" checked={visPhysicalReturned}
+                          onChange={event => setVisPhysicalReturned(event.target.checked)}
+                          disabled={!adminGymAccess.returnReady} />
+                        Saya menyaksikan kartu fisik telah dikembalikan ke petugas.
+                      </label>
+                      <button type="button"
+                        disabled={!adminGymAccess.returnReady || !visPhysicalReturned ||
+                          returnAdminGymVisMutation.isPending}
+                        onClick={() => returnAdminGymVisMutation.mutate()}
+                        className="rounded bg-sky-800 px-3 py-2 font-semibold text-white disabled:opacity-50">
+                        {returnAdminGymVisMutation.isPending ? "Memeriksa mesin..." : "Konfirmasi Pengembalian VIS"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="text-xs font-medium">Akses aktif dan suspend hanya sah setelah ACK/read-back serta snapshot Grup 1/2 cocok.</div>
             </div>
           )}
