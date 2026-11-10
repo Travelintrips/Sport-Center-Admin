@@ -2025,8 +2025,19 @@ function BookingDetailDrawer({
           )}
           {(booking.source === "gym_public_guest" || (booking.source === "web" && gymVisReservation)) && (
             <div className={`rounded-xl border p-4 text-sm ${gymVisReservation ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-              <div className="font-bold">Akses Gym — Kartu / X904</div>
-              {gymVisReservation ? (
+              <div className="font-bold">{gymIdentityRoute === "registered" ? "Akses Gym — PIN X904" : "Akses Gym — Kartu / X904"}</div>
+              {gymIdentityRoute === "registered" && !gymVisReservation ? (
+                <div className="mt-2 space-y-2 text-xs">
+                  <div>Booking memakai PIN X904 terdaftar. Tidak perlu kartu VIS; verifikasi identitas fisik dan dana resmi sebelum pengesahan akses.</div>
+                  {gymPinGrant && (
+                    <div className="rounded border border-sky-200 bg-white/70 p-2">
+                      <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
+                      <div>Verifikasi: {gymPinGrant.verificationState} · Akses: {gymPinGrant.accessState}</div>
+                      <div>Aktivasi harus dibuktikan dengan ACK/read-back X904.</div>
+                    </div>
+                  )}
+                </div>
+              ) : gymVisReservation ? (
                 <>
                   <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
                   <div className="mt-1 text-2xl font-black">{gymVisReservation.cardCode}</div>
@@ -2116,7 +2127,7 @@ function BookingDetailDrawer({
                   )}
                 </>
               )}
-              {gymVisPool.length > 0 && (
+              {gymIdentityRoute !== "registered" && gymVisPool.length > 0 && (
                 <div className="mt-4 border-t border-emerald-200 pt-3">
                   <div className="mb-2 text-xs font-bold">Pool VIS / X904</div>
                   <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
