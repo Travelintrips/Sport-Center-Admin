@@ -48,5 +48,16 @@ jobs:
           test -n "$SESSION_SECRET"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck:libs
+      - name: Verify public HTTPS DEV staging access gate (external runner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 8 --max-time 20 https://dev.cstlogistic.co.id:8443/)
+          if [ "$status" != "401" ]; then
+            echo "::error::Sport Center DEV HTTPS staging unavailable or unauthenticated ($status)"
+            exit 1
+          fi
+          curl --fail --silent --show-error --output /dev/null --connect-timeout 8 --max-time 20 https://dev.cstlogistic.co.id/
+          echo "PUBLIC_SC_DEV_HTTPS_GATE_PASS"
       - name: Exercise authenticated Admin Lapangan GET using read-only PostgreSQL
         run: pnpm --filter @workspace/api-server exec jest --runInBand src/routes/__tests__/adminBookingDevReadonlySmoke.test.ts
