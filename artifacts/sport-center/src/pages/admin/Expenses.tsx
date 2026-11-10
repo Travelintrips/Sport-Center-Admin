@@ -682,9 +682,6 @@ export default function AdminExpenses() {
               }}>
                 <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
               </Button>
-              <Button variant="outline" onClick={() => { setIncomeHistoryOpen(true); void refetchIncome(); }}>
-                <Eye className="w-4 h-4 mr-2" /> Histori Lengkap
-              </Button>
             </div>
           </div>
 
