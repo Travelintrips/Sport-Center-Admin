@@ -386,7 +386,7 @@ router.post("/admin/gym-x904/user-command", adminMiddleware, async (req, res) =>
           if(grants.rows.length===1){
             const accessId=Number((grants.rows[0] as any).access_id);
             await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
-              SET expires_at=LEAST(COALESCE(expires_at,now()),now())
+              SET access_state='review_required'
               WHERE access_id=${accessId} AND access_state='active'`);
             payload={...payload,source:"MANUAL_NONMEMBER_ACCESS_CLOSE",accessId};
           }
