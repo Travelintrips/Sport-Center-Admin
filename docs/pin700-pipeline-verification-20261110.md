@@ -1,41 +1,30 @@
-# PIN 700 payment/access pipeline — verification record
+# PIN 700 application-pipeline verification — 10 November 2026
 
-Scope: anonymous Gym booking, pending proof, canonical payment HTTP confirmation, PIN identity approval, the paid-access worker, simulated activation ACK and scheduled suspension. Historical bookings and all PROD business data remain unchanged.
+## Boundary
+This change fixes runtime PIN approval and paid-access recovery. It does not cancel historical bookings, create PROD bookings/payments, verify bank receipts, or send commands to X904. Existing member and VIS runtime entrypoints are not changed.
 
-## Baseline defects reproduced
+## Reproduced failures on base c1531a28
+The initial full application pipeline had **1 passed / 5 failed** assertions. Failures reproduced missing mandatory-audit rollback, acceptance of disabled/demoted staff tokens (two assertions), non-idempotent approval retry, and interference from legacy cleanup during paid-grant ACK recovery.
 
-Baseline source: `c1531a28fafac84e013a73610a8d5fb5194104b7`.
-The isolated PostgreSQL/HTTP suite reported 1 passed and 5 failed (6 total). Recorded at `/opt/sc-pin700-pipeline-red.json` on srv1792369.
+## Runtime corrections
+- PIN approval now uses current-account authentication and revalidates the actor under transaction lock.
+- Payment, booking, held access, and mandatory audit are checked/written within the guarded approval transaction. Audit failure rolls the authorization back.
+- Missing proof/confirmation timestamp and insufficient or rejected payment cannot authorize access.
+- Retry and concurrent approvals return the persisted authorization with exactly one matching audit.
+- Paid access awaiting recovery stays under the paid-access worker, not legacy cleanup.
+- Both ACTIVATE and SUSPEND ACKs must match the intended UID and target group.
 
-- Approval returned HTTP 200 when its mandatory audit insert failed.
-- Disabled operator token was accepted (HTTP 200 rather than 401).
-- Demoted operator token was accepted (HTTP 200 rather than 401).
-- Approval retry returned 409 rather than the already committed outcome.
-- Recovery after an invalid activation ACK permitted legacy cleanup to compete with the paid-grant flow; the scoped suspend lifecycle did not finish.
+## Observed verification
+- Original six-assertion pipeline after fixes: **6/6 passed**.
+- Expanded real HTTP + PostgreSQL pipeline: **14/14 passed**. Covers application-role RLS, real name and payment configuration resolution, payment HTTP confirmation, actual payment-to-grant trigger, staff approval, concurrent retry, stale snapshots, wrong activation/suspend UID, 12-hour expiry and 23:00 WIB cutoff.
+- Existing nonmember/VIS worker integration: **26/26 passed**.
+- Three pre-existing fixture assertions expected a 30-minute default-enrollment deadline; runtime already uses 3 minutes. The assertions were corrected to the existing 3-minute contract. No default-enrollment runtime code or operational timeout was changed.
+- Initial TypeScript and source-contract checks passed before the additional assertions; CI must verify the final published commit again.
 
-## Runtime corrections in this branch
+## Evidence and limitations
+The machine-readable results and raw-result hashes are in `docs/evidence/pin700-application-tests-20261110.json`. Tests use network-isolated disposable PostgreSQL containers; the application pipeline connects as `sport_center_app`, without superuser or BYPASSRLS. Schema setup and failure injection use a separate local fixture account.
 
-`bookings.ts`: current-account authentication, an in-transaction account recheck, serialized approval, payment-before-grant lock order, confirmed payment/proof/amount checks, mandatory audit in the same transaction as grant verification, and an idempotent response bound to the saved grant/payment audit.
+Unmocked: checkout HTTP route, identity lookup, payment enrichment, payment confirmation HTTP route, payment-to-access trigger, RLS policies, staff authorization/audit, and access worker. Mocked: OCR, blob transport, external notifications/invoices, accounting startup/projection; device ACKs and snapshots are simulated. This is **not full production or physical-door PASS**.
 
-`x904NonmemberDailyAccessWorker.ts`: a paid grant in review retains ownership of its cleanup instead of competing with legacy nonmember cleanup; both activation and suspension ACKs must identify the intended UID and group.
-
-No changes to membership checkout, general payment confirmation, bank-verification policy, production configuration, device executors or business records are included.
-
-## Verification completed after corrections
-
-- Workspace libraries and API TypeScript checks: passed.
-- Diff whitespace check: passed.
-- Source-contract suites `x904NoLoginPinReviewSafety` and `x904PublicPinInputContract`: 13/13 passed.
-- Read-only PROD catalog audit: application role is neither superuser nor BYPASSRLS; required SELECT/UPDATE/INSERT grants and the existing users RLS policy are present for the newly used locks. No privileges or policies were changed.
-
-## Verification NOT completed
-
-The post-fix PostgreSQL pipeline run has not produced a result. A previous fixture reset stopped on role dependencies. A fresh network-isolated database test invocation was submitted for Desktop Commander review; it has not been reported as executed at this checkpoint. This is NOT an integration PASS and must not be merged/deployed as verified on these results alone.
-
-The dedicated CI job is prepared but has not been published or executed for this fix. Previous green jobs for PRs #728 and #735 are not evidence for these new runtime changes.
-
-## Test boundary
-
-The application uses its real HTTP routes, identity lookup, enrichment, payment-to-grant trigger, RLS policies, audit path and worker, connected as sport_center_app rather than the provisioning superuser. External OCR, blob storage, message transport, financial accounting projection/startup, device ACKs and snapshots remain controlled test doubles. Test clock and device messages are synthetic. These tests do not prove live bank receipt, Supabase Storage operation, VMSC execution, door movement, or field auto-suspension.
-
-No physical E2E PASS may be inferred from compilation, contract tests, this record or simulated device messages.
+## Release gate
+Require green CI for the exact head commit before merge. Verify the deployed source commit separately. Then assess live upload/read-back and current worker configuration before a controlled transaction; physical door acceptance and rejection require observed on-site evidence. Do not infer live-bank receipt, storage success or door movement from these test results.
