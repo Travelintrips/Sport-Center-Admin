@@ -70,6 +70,6 @@ test("safe re-enrollment and registry candidate require physical suspend evidenc
   assert.match(worker,/previous\.length===0/);
   assert.match(worker,/AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND/);
   assert.match(worker,/verification_state\)\n        VALUES .*'review_required'/s);
-  assert.match(worker,/Number\(command\.rows\[0\]\.result\?\.afterGroup\)!==2/);
+  assert.match(worker,/Number\(commandResult\?\.afterGroup\)!==2/);
   assert.match(worker,/new Date\(String\(latest\.rows\[0\]\.observed_at\)\)\.getTime\(\)<=new Date\(String\(row\.completed_at\)\)\.getTime\(\)/);
 });
