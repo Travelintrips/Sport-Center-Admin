@@ -150,6 +150,10 @@ interface CoaAccount {
   sortOrder: number;
 }
 
+// Explicit cutover gate: normal Finance SC forms are still used for TEST only.
+// Releasing real transactions requires a separate reviewed change.
+const FINANCE_SC_TEST_ONLY = true;
+
 export default function AdminExpenses() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -159,6 +163,8 @@ export default function AdminExpenses() {
   const [testDirection, setTestDirection] = useState<"IN" | "OUT">("IN");
   const [testEntryKey, setTestEntryKey] = useState(() => crypto.randomUUID());
   const [testSaving, setTestSaving] = useState(false);
+  const [expenseTestSaving,setExpenseTestSaving] = useState(false);
+  const [expenseTestEntryKey,setExpenseTestEntryKey] = useState(() => crypto.randomUUID());
   const [testForm, setTestForm] = useState({
     transactionDate: new Date().toLocaleDateString("sv-SE", {timeZone:"Asia/Jakarta"}),
     sourceName:"",senderBank:"",receivingAccount:"",method:"Transfer Bank",
@@ -394,10 +400,42 @@ export default function AdminExpenses() {
     }finally{await refetchFinanceTest();}
   }
 
+  // Both existing input forms use the isolated SC_TEST_ONLY ledger during testing.
+  // No operational income/expense, BizPortal bank mutation or journal is created.
+  async function postTestEntry(payload: {
+    entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
+    senderBank:string;receivingAccount:string;method:string;bankReference:string;
+    notes:string;amount:number
+  }) {
+    const response=await fetch(`${API}/admin/finance-test`,{
+      method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
+    });
+    const result=await response.json();
+    if(!response.ok)throw Error(result.error??"Gagal menyimpan transaksi TEST");
+    return result as {testNo:string;sheetState:string;replayed?:boolean};
+  }
+
   async function saveIncome(confirmSimilar = false) {
     if (!incomePreview || incomeSaving) return;
     setIncomeSaving(true);
     try {
+      if(FINANCE_SC_TEST_ONLY){
+        const result=await postTestEntry({
+          entryKey:incomeEntryKey,direction:"IN",
+          transactionDate:incomeForm.transactionDate,sourceName:incomeForm.sourceName.trim(),
+          senderBank:incomeForm.bank.trim(),receivingAccount:incomeForm.receivingAccount.trim(),
+          method:incomeForm.method,bankReference:incomeForm.bankReference.trim(),
+          notes:"INPUT UANG MASUK SC - SIMULASI",amount:Number(incomeForm.amount)
+        });
+        toast({title:`Uang Masuk TEST: ${result.testNo}`,
+          description:result.sheetState==="synced"
+            ?"Tercatat ke kas besar sc, bukan ke BizPortal atau jurnal."
+            :"Belum tersinkron; cek ledger Uji Kas Besar. Jangan input ulang tanpa memeriksa ID."});
+        await refetchFinanceTest();
+        setIncomeOpen(false);setIncomePreview(false);setCashReceiptConfirmed(false);
+        setIncomeEntryKey(crypto.randomUUID());
+        return;
+      }
       const response = await fetch(`${API}/admin/income`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -713,6 +751,40 @@ export default function AdminExpenses() {
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, body });
+    } else if(FINANCE_SC_TEST_ONLY){
+      if(expenseTestSaving)return;
+      const rawAmount=Number(normalizeExpenseRupiahInput(form.amount));
+      const gross=rawAmount+Number(form.ppnAmount||0);
+      if(!Number.isSafeInteger(gross)||gross<=0||gross>1000000){
+        toast({title:"Nominal uji tidak valid",description:"Total termasuk PPN maksimal Rp1.000.000.",
+          variant:"destructive"});return;
+      }
+      setExpenseTestSaving(true);
+      void (async()=>{
+        try{
+          const result=await postTestEntry({
+            entryKey:expenseTestEntryKey,direction:"OUT",
+            transactionDate:form.expenseDate,
+            sourceName:(selectedV?.name??form.vendorName.trim()) || "PENGELUARAN SC TEST",
+            senderBank:form.paymentAccount || "SUMBER DANA TIDAK DIISI",
+            receivingAccount:form.vendorName.trim() || "PENERIMA BELUM DIISI",
+            method:form.paymentMethod || "Belum ditentukan",
+            bankReference:form.bankReference.trim(),
+            notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
+              ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
+            amount:gross
+          });
+          toast({title:`Pengeluaran TEST: ${result.testNo}`,
+            description:result.sheetState==="synced"
+              ?"Tercatat pada kolom D kas besar sc, tanpa mutasi atau jurnal BizPortal."
+              :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
+          await refetchFinanceTest();
+          setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
+          setExpenseTestEntryKey(crypto.randomUUID());
+        }catch(error:any){
+          toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
+        }finally{setExpenseTestSaving(false);}
+      })();
     } else {
       createMutation.mutate(body);
     }
@@ -725,7 +797,11 @@ export default function AdminExpenses() {
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-black text-gray-900">Keuangan Sport Center</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Catatan pemasukan dan pengeluaran operasional, terpisah dari rekonsiliasi BizPortal.</p>
+          <p className="text-gray-500 text-sm mt-0.5">Catatan pemasukan dan pengeluaran SC, terpisah dari rekonsiliasi BizPortal.</p>
+          {FINANCE_SC_TEST_ONLY && <p className="mt-2 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-900">
+            MODE TEST AKTIF — kedua tombol input mengirim ke ledger uji kas besar sc;
+            tidak membuat transaksi operasional, mutasi BizPortal, atau jurnal.
+          </p>}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3" role="tablist" aria-label="Jenis transaksi Sport Center">
           <button type="button" role="tab" aria-selected={financeSection === "income"}
@@ -784,7 +860,7 @@ export default function AdminExpenses() {
                 setIncomeEntryKey(crypto.randomUUID());
                 setIncomeOpen(true);
               }}>
-                <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
+                <Plus className="w-4 h-4 mr-2" /> {FINANCE_SC_TEST_ONLY?"Input Uang Masuk (TEST)":"Input Uang Masuk"}
               </Button>
             </div>
           </div>
@@ -1141,7 +1217,7 @@ export default function AdminExpenses() {
               <p className="text-sm text-gray-500">Catatan biaya operasional dan alur persetujuan pengeluaran.</p>
             </div>
             <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
-              <Plus className="w-4 h-4 mr-2" /> Tambah Pengeluaran
+              <Plus className="w-4 h-4 mr-2" /> {FINANCE_SC_TEST_ONLY?"Tambah Pengeluaran (TEST)":"Tambah Pengeluaran"}
             </Button>
           </div>
           <Card className="border-l-4 border-l-orange-500">
@@ -1355,12 +1431,18 @@ export default function AdminExpenses() {
       }}>
         <DialogContent className="w-[min(94vw,540px)] max-w-[540px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-black">Input Uang Masuk</DialogTitle>
+            <DialogTitle className="font-black">{FINANCE_SC_TEST_ONLY?"Input Uang Masuk (TEST)":"Input Uang Masuk"}</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-gray-500">
-            Catat pemasukan operasional. Setelah disimpan, data tetap belum terverifikasi bank.
-            Pencocokan mutasi dan jurnal tetap melalui BizPortal.
-          </p>
+          {FINANCE_SC_TEST_ONLY ?
+            <p className="rounded-lg border border-violet-300 bg-violet-50 p-3 text-sm text-violet-900">
+              SIMULASI SAJA. Setelah disimpan, nilai masuk ke kolom C tab kas besar sc
+              dengan penanda SC_TEST_ONLY. Tidak membuat mutasi BizPortal, jurnal, atau saldo resmi.
+              Maksimum Rp1.000.000 per transaksi uji.
+            </p> :
+            <p className="text-sm text-gray-500">
+              Catat pemasukan operasional. Setelah disimpan, data tetap belum terverifikasi bank.
+              Pencocokan mutasi dan jurnal tetap melalui BizPortal.
+            </p>}
           <form className="space-y-4 pt-1" onSubmit={(event) => {
             event.preventDefault();
             setIncomePreview(true);
@@ -1446,7 +1528,7 @@ export default function AdminExpenses() {
                   setIncomePreview(false);
                 }} />
             </div>
-            {incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && (
+            {!FINANCE_SC_TEST_ONLY && incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && (
               <label className="flex gap-2 items-start text-sm rounded border p-3">
                 <input type="checkbox" checked={cashReceiptConfirmed}
                   onChange={(e) => { setCashReceiptConfirmed(e.target.checked); setIncomePreview(false); }} />
@@ -1482,13 +1564,14 @@ export default function AdminExpenses() {
                   !incomeForm.bank.trim() ||
                   (incomeForm.method === "Transfer Bank" && !incomeForm.receivingAccount.trim()) ||
                   Number(incomeForm.amount) <= 0 ||
-                  (incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && !cashReceiptConfirmed)}>
+                  (!FINANCE_SC_TEST_ONLY && incomeForm.method === "Tunai" && incomeForm.receivingAccount === "Kas Besar SC" && !cashReceiptConfirmed) ||
+                  (FINANCE_SC_TEST_ONLY && Number(incomeForm.amount)>1000000)}>
                 Pratinjau Input
               </Button>
               {incomePreview && (
                 <Button type="button" disabled={incomeSaving} onClick={() => saveIncome()}
                   className="bg-emerald-700 text-white hover:bg-emerald-800">
-                  {incomeSaving ? "Menyimpan..." : "Simpan Uang Masuk"}
+                  {incomeSaving ? "Menyimpan..." : FINANCE_SC_TEST_ONLY?"Simpan Uang Masuk (TEST)":"Simpan Uang Masuk"}
                 </Button>
               )}
             </div>
@@ -1500,12 +1583,19 @@ export default function AdminExpenses() {
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="w-[min(94vw,860px)] max-w-[860px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-black">{editingId ? "Edit Pengeluaran" : "Tambah Pengeluaran"}</DialogTitle>
+            <DialogTitle className="font-black">{editingId ? "Edit Pengeluaran" : FINANCE_SC_TEST_ONLY ? "Tambah Pengeluaran (TEST)" : "Tambah Pengeluaran"}</DialogTitle>
           </DialogHeader>
-          <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
-            <p className="font-semibold">Pencatatan Pengeluaran Sport Center</p>
-            <p className="mt-1">Catat transaksi yang sudah dilakukan. Catatan tujuan wajib; bukti dapat dilampirkan untuk membantu pencocokan mutasi.</p>
-          </div>
+          {FINANCE_SC_TEST_ONLY && !editingId ?
+            <div className="rounded-lg border border-violet-300 bg-violet-50 p-3 text-sm text-violet-900">
+              <p className="font-semibold">Pengeluaran Simulasi — Kas Besar SC</p>
+              <p className="mt-1">Nominal dasar + PPN masuk ke kolom D tab kas besar sc
+                dengan status SC_TEST_ONLY; tidak membuat jurnal, mutasi BizPortal, atau saldo resmi.
+                Maksimum Rp1.000.000 termasuk PPN per transaksi.</p>
+            </div> :
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+              <p className="font-semibold">Pencatatan Pengeluaran Sport Center</p>
+              <p className="mt-1">Catat transaksi yang sudah dilakukan. Catatan tujuan wajib; bukti dapat dilampirkan untuk membantu pencocokan mutasi.</p>
+            </div>}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             <div className="space-y-2">
               <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
@@ -1692,8 +1782,8 @@ export default function AdminExpenses() {
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
                 Batal
               </Button>
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending}>
-                {editingId ? "Simpan Perubahan" : "Buat Pengeluaran"}
+              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving}>
+                {editingId ? "Simpan Perubahan" : FINANCE_SC_TEST_ONLY ? "Simpan Pengeluaran (TEST)" : "Buat Pengeluaran"}
               </Button>
             </div>
           </form>
