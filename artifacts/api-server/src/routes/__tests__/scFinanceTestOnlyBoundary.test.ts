@@ -114,3 +114,26 @@ describe("Main Keuangan SC forms stay test-only until explicitly cut over", () =
     expect(route).not.toContain("INSERT INTO public.accounting_entries");
   });
 });
+
+describe("main finance history reads the same isolated TEST ledger as the input forms",()=>{
+  it("reads test ledger across all four tabs, not only when the Test tab is selected",()=>{
+    expect(ui).toContain('enabled:FINANCE_SC_TEST_ONLY || financeSection==="test"');
+    expect(ui).toContain('const activeTestIncome =');
+    expect(ui).toContain('const activeTestExpense =');
+    expect(ui).toContain("Histori Uang Masuk (TEST)");
+    expect(ui).toContain("Histori Pengeluaran (TEST)");
+    expect(ui).toContain("FINANCE_SC_TEST_ONLY\n    ?");
+    expect(ui).toContain("financeTestData?.entries ?? []");
+    expect(ui).toContain("financeTestData.summary.income");
+    expect(ui).toContain("financeTestData.summary.expense");
+    expect(ui).toContain("financeTestData.summary.balance");
+    expect(ui).toContain("Tidak ada transaksi yang sesuai filter.");
+  });
+  it("labels removed entries explicitly, retains histories, and does not count them in active totals",()=>{
+    expect(ui).toContain('x.sheetSyncState==="removed"?"Dihapus dari Sheets"');
+    expect(ui).toContain('"TEST — Dihapus dari Sheets"');
+    expect(ui).toContain('Hanya transaksi TEST yang masih ada di Sheets');
+    expect(ui).toContain('financeTestReadError ?');
+    expect(ui).toContain('Ledger TEST gagal dibaca');
+  });
+});
