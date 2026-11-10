@@ -421,7 +421,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
 
       const prior = await tx.execute(sql`SELECT command_id,command_type,state,result,completed_at,created_at,attempts
         FROM sport_center.x904_user_commands
-        WHERE device_serial=${DEVICE} AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
+        WHERE device_serial=${DEVICE}
+          AND payload->>'source' IN ('AUTO_NONMEMBER_GYM_12H','MANUAL_NONMEMBER_ACCESS_CLOSE')
           AND payload->>'accessId'=${String(a.access_id)}
         ORDER BY created_at DESC LIMIT 1`);
       if (prior.rows.length) {
