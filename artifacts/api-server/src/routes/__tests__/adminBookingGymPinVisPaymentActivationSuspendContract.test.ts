@@ -75,13 +75,13 @@ describe("Admin Lapangan direct Gym booking: payment -> PIN/VIS -> X904 -> suspe
 
   test("direct Admin Lapangan VIS handover and return are tied to one physical card", () => {
     const handoverStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-admin-card-handover"');
+    const webStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-vis-reserve"', handoverStart);
     const returnStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-admin-card-return"');
-    const webStart = bookingRoute.indexOf('router.post("/bookings/:bookingId/x904-vis-reserve"', returnStart);
     expect(handoverStart).toBeGreaterThan(-1);
-    expect(returnStart).toBeGreaterThan(handoverStart);
-    expect(webStart).toBeGreaterThan(returnStart);
-    const handover = bookingRoute.slice(handoverStart,returnStart);
-    const returned = bookingRoute.slice(returnStart,webStart);
+    expect(webStart).toBeGreaterThan(handoverStart);
+    expect(returnStart).toBeGreaterThan(webStart);
+    const handover = bookingRoute.slice(handoverStart,webStart);
+    const returned = bookingRoute.slice(returnStart);
     expect(handover).toContain("INSERT INTO sport_center.gym_vis_card_reservations");
     expect(handover).toContain("state IN ('reserved','collected')");
     expect(handover).toContain("ADMINVIS-HANDOVER-");
