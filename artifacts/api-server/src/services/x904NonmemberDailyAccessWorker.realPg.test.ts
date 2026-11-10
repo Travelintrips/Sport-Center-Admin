@@ -43,8 +43,8 @@ beforeAll(async () => {
   await run(businessHoursMigration);
   await run(liveAccessIndexMigration);
   // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
-  await run("CREATE ROLE anon");
-  await run("CREATE ROLE authenticated");
+  await run("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF; END $$");
+  await run("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF; END $$");
   await run("ALTER TABLE sport_center.x904_nonmember_daily_access ADD COLUMN visitor_name text");
   await run(`ALTER TABLE sport_center.sport_bookings
     ADD COLUMN order_number text,
@@ -999,6 +999,8 @@ test("HTTP staff PIN approval: rejects anonymous and unverified funds, then rele
 
 
 test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and historical pins untouched", async () => {
+  // Isolate snapshot history from earlier scenarios with later simulated timestamps.
+  await run("DELETE FROM sport_center.gym_x904_access_snapshots");
   // Isolated local PostgreSQL; never send machine commands to a real X904.
   // Previous scenarios may insert simulated snapshots after this clock.
   // Reset only the future slice of the disposable fixture, preserving the
