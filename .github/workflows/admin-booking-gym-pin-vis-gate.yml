@@ -6,6 +6,7 @@ on:
       - 'artifacts/api-server/src/routes/bookings.ts'
       - 'artifacts/api-server/src/routes/waBookingsAdmin.ts'
       - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts'
+      - 'artifacts/api-server/src/services/x904AdminVisPendingExpiry.ts'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_payment_handover_gate.sql'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_initial_pending_rls.sql'
       - 'artifacts/api-server/src/services/x904AdminBookingLapangan.realPg.test.ts'
