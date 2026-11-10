@@ -319,7 +319,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         : null;
       // A web booking attached to a physical VIS must be confirmed to activate.
       // Cancellation/completion causes the ordinary verified SUSPEND path.
-      const bookingEligible = a.booking_source === "web" && a.identity_type === "card"
+      // Admin Lapangan bookings must remain confirmed. A cancelled admin booking
+      // with a confirmed payment is never an authorization to activate a PIN/VIS.
+      const bookingEligible = a.booking_source === "admin" ||
+        (a.booking_source === "web" && a.identity_type === "card")
         ? a.booking_status === "confirmed"
         : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
       const shouldBeActive = bookingEligible &&

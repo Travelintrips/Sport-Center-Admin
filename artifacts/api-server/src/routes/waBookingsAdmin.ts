@@ -202,9 +202,37 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
       console.warn("[gym-vis] admin reservation lookup unavailable", error);
     }
   }
+  // Only direct Admin Lapangan Gym bookings: show the already-linked PIN/VIS
+  // entitlement, not a synthetic payment/booking. Read-only operator status.
+  let adminGymAccess: null | {
+    accessId: number; identityType: string; identityLabel: string;
+    userPin: string; verificationState: string; accessState: string;
+    paymentStatus: string | null; activatedAt: string | null; expiresAt: string | null;
+  } = null;
+  if (booking.source === "admin" && facility && (facility.bookingMode === "walk_in" || /gym|fitness/i.test(String(facility.name ?? "") + " " + String(facility.category ?? "")))) {
+    const grants = await db.execute(sql`SELECT a.access_id,a.identity_type,a.identity_label,a.user_pin,
+        a.verification_state,a.access_state,a.activated_at,a.expires_at,
+        p.status::text AS payment_status
+      FROM sport_center.x904_nonmember_daily_access a
+      LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+      WHERE a.booking_id=${booking.id} AND a.device_serial='TDBD234200545'
+        AND a.identity_type IN ('pin','card') ORDER BY a.access_id DESC LIMIT 2`);
+    if (grants.rows.length === 1) {
+      const grant = grants.rows[0] as any;
+      adminGymAccess = {
+        accessId: Number(grant.access_id), identityType: String(grant.identity_type),
+        identityLabel: String(grant.identity_label), userPin: String(grant.user_pin),
+        verificationState: String(grant.verification_state), accessState: String(grant.access_state),
+        paymentStatus: grant.payment_status == null ? null : String(grant.payment_status),
+        activatedAt: grant.activated_at == null ? null : String(grant.activated_at),
+        expiresAt: grant.expires_at == null ? null : String(grant.expires_at),
+      };
+    }
+  }
   res.json({
     booking,
     visCardReservation,
+    adminGymAccess,
     x904PinGrant,
     x904IdentityMatch: x904IdentityMatch?.route === "registered"
       ? {
