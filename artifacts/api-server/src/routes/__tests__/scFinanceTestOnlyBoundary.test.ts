@@ -137,3 +137,33 @@ describe("main finance history reads the same isolated TEST ledger as the input 
     expect(ui).toContain('Ledger TEST gagal dibaca');
   });
 });
+
+describe("master financial table pagination and numeric running balance",()=>{
+  it("uses page sizes 20/50/100 and preserves exact/single/range date filter",()=>{
+    expect(ui).toContain('useState<20|50|100>(20)');
+    expect(ui).toContain('<SelectItem value="20">20</SelectItem>');
+    expect(ui).toContain('<SelectItem value="50">50</SelectItem>');
+    expect(ui).toContain('<SelectItem value="100">100</SelectItem>');
+    expect(ui).toContain('masterPageCount=Math.max(1,Math.ceil(visibleTransactions.length/masterPageSize))');
+    expect(ui).toContain('paginatedTransactions=visibleTransactions.slice(');
+    expect(ui).toContain("Sebelumnya");
+    expect(ui).toContain("Berikutnya");
+    expect(ui).toContain("Tanggal tunggal");
+    expect(ui).toContain("Rentang tanggal");
+    expect(ui).not.toContain('id="finance-sort"');
+    expect(ui).not.toContain('id="finance-status"');
+  });
+  it("shows numeric Masuk, Keluar and Saldo columns, using full chronological ledger for balance",()=>{
+    expect(ui).toContain('chronologicalTransactions=[...unifiedTransactions].sort');
+    expect(ui).toContain('tx.status==="TEST — Tersinkron"');
+    expect(ui).toContain('runningTestBalance+=tx.kind==="income"?tx.amount:-tx.amount');
+    expect(ui).toContain('runningBalanceById.set(tx.key,runningTestBalance)');
+    expect(ui).toContain('runningBalanceById.get(tx.key)');
+    expect(ui).toContain('<th className="p-3 text-right">Masuk</th>');
+    expect(ui).toContain('<th className="p-3 text-right">Keluar</th>');
+    expect(ui).toContain('<th className="p-3 text-right">Saldo</th>');
+    expect(ui).toContain('a.id.match(');
+    expect(ui).toContain('colSpan={5}');
+    expect(ui).toContain('setExpandedTransactionIds(paginatedTransactions.map(tx => tx.key))');
+  });
+});

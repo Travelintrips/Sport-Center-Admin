@@ -177,8 +177,8 @@ export default function AdminExpenses() {
   const [transactionSingleDate, setTransactionSingleDate] = useState("");
   const [transactionDateFrom, setTransactionDateFrom] = useState("");
   const [transactionDateTo, setTransactionDateTo] = useState("");
-  const [transactionStatus, setTransactionStatus] = useState("all");
-  const [transactionSort, setTransactionSort] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
+  const [masterPageSize,setMasterPageSize] = useState<20|50|100>(20);
+  const [masterPage,setMasterPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [startDate, setStartDate] = useState("");
@@ -684,9 +684,22 @@ export default function AdminExpenses() {
   });
   const transactionDateInvalid = transactionDateMode === "range"
     && Boolean(transactionDateFrom && transactionDateTo && transactionDateFrom > transactionDateTo);
+  // A running balance is computed over the full chronological TEST ledger BEFORE
+  // filtering or pagination. Removed/mismatched/unsynced entries never affect it.
+  // The account balance on Google Sheets is intentionally not overwritten.
+  const chronologicalTransactions=[...unifiedTransactions].sort((a,b)=>
+    a.date.localeCompare(b.date) || Number(a.id.match(/\d+$/)?.[0]??0)-
+      Number(b.id.match(/\d+$/)?.[0]??0));
+  let runningTestBalance=0;
+  const runningBalanceById=new Map<string,number>();
+  for(const tx of chronologicalTransactions){
+    if(FINANCE_SC_TEST_ONLY && tx.status==="TEST — Tersinkron"){
+      runningTestBalance+=tx.kind==="income"?tx.amount:-tx.amount;
+    }
+    runningBalanceById.set(tx.key,runningTestBalance);
+  }
   const visibleTransactions = unifiedTransactions.filter(tx =>
     (detailKind === "all" || tx.kind === detailKind)
-    && (transactionStatus === "all" || tx.status === transactionStatus)
     && (transactionDateMode !== "single" || !transactionSingleDate || tx.date === transactionSingleDate)
     && (transactionDateMode !== "range" || (
       (!transactionDateFrom || tx.date >= transactionDateFrom)
@@ -694,10 +707,15 @@ export default function AdminExpenses() {
     && !transactionDateInvalid
     && (!unifiedSearch.trim() || [tx.id, tx.name, tx.bank, tx.account, tx.description, tx.reference]
       .some(value => value.toLowerCase().includes(unifiedSearch.trim().toLowerCase())))
-  ).sort((a,b) => transactionSort === "largest" ? b.amount - a.amount :
-    transactionSort === "smallest" ? a.amount - b.amount :
-      transactionSort === "oldest" ? a.date.localeCompare(b.date) || a.key.localeCompare(b.key) :
-        b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  ).sort((a,b)=>a.date.localeCompare(b.date) ||
+    Number(a.id.match(/\d+$/)?.[0]??0)-Number(b.id.match(/\d+$/)?.[0]??0));
+  const masterPageCount=Math.max(1,Math.ceil(visibleTransactions.length/masterPageSize));
+  const effectiveMasterPage=Math.min(masterPage,masterPageCount);
+  const paginatedTransactions=visibleTransactions.slice(
+    (effectiveMasterPage-1)*masterPageSize,effectiveMasterPage*masterPageSize);
+  const masterVisibleStart=visibleTransactions.length?
+    (effectiveMasterPage-1)*masterPageSize+1:0;
+  const masterVisibleEnd=Math.min(effectiveMasterPage*masterPageSize,visibleTransactions.length);
   const toggleExpandedTransaction = (key: string) =>
     setExpandedTransactionIds(current => current.includes(key)
       ? current.filter(id => id !== key) : [...current, key]);
@@ -976,17 +994,17 @@ export default function AdminExpenses() {
                     ["all", "Semua"], ["income", "Uang Masuk"], ["expense", "Pengeluaran"],
                   ] as const).map(([kind, label]) => (
                     <Button key={kind} size="sm" variant={detailKind === kind ? "default" : "outline"}
-                      onClick={() => setDetailKind(kind)}>{label}</Button>
+                      onClick={() => {setDetailKind(kind);setMasterPage(1);setExpandedTransactionIds([]);}}>{label}</Button>
                   ))}
                 </div>
                 <Input aria-label="Cari transaksi keuangan" className="lg:ml-auto lg:max-w-sm"
                   placeholder="Cari ID, nama, bank, rekening atau referensi..."
-                  value={unifiedSearch} onChange={e => setUnifiedSearch(e.target.value)} />
+                  value={unifiedSearch} onChange={e => {setUnifiedSearch(e.target.value);setMasterPage(1);}} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 <div className="space-y-1">
                   <Label htmlFor="finance-date-mode">Filter Tanggal</Label>
-                  <Select value={transactionDateMode} onValueChange={v => setTransactionDateMode(v as "all" | "single" | "range")}>
+                  <Select value={transactionDateMode} onValueChange={v => {setTransactionDateMode(v as "all" | "single" | "range");setMasterPage(1);}}>
                     <SelectTrigger id="finance-date-mode"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Semua tanggal</SelectItem>
@@ -999,7 +1017,7 @@ export default function AdminExpenses() {
                   <div className="space-y-1">
                     <Label htmlFor="finance-single-date">Tanggal transaksi</Label>
                     <Input id="finance-single-date" type="date" value={transactionSingleDate}
-                      onChange={e => setTransactionSingleDate(e.target.value)} />
+                      onChange={e => {setTransactionSingleDate(e.target.value);setMasterPage(1);}} />
                   </div>
                 )}
                 {transactionDateMode === "range" && (
@@ -1008,55 +1026,49 @@ export default function AdminExpenses() {
                       <Label htmlFor="finance-from-date">Dari tanggal</Label>
                       <Input id="finance-from-date" type="date" value={transactionDateFrom}
                         max={transactionDateTo || undefined}
-                        onChange={e => setTransactionDateFrom(e.target.value)} />
+                        onChange={e => {setTransactionDateFrom(e.target.value);setMasterPage(1);}} />
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor="finance-to-date">Sampai tanggal</Label>
                       <Input id="finance-to-date" type="date" value={transactionDateTo}
                         min={transactionDateFrom || undefined}
-                        onChange={e => setTransactionDateTo(e.target.value)} />
+                        onChange={e => {setTransactionDateTo(e.target.value);setMasterPage(1);}} />
                     </div>
                   </>
                 )}
-                <div className="space-y-1">
-                  <Label htmlFor="finance-status">Status</Label>
-                  <Select value={transactionStatus} onValueChange={setTransactionStatus}>
-                    <SelectTrigger id="finance-status"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua status</SelectItem>
-                      {Array.from(new Set(unifiedTransactions.map(tx => tx.status))).sort().map(value =>
-                        <SelectItem key={value} value={value}>{value}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="finance-sort">Urutkan</Label>
-                  <Select value={transactionSort} onValueChange={v => setTransactionSort(v as typeof transactionSort)}>
-                    <SelectTrigger id="finance-sort"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="newest">Tanggal terbaru</SelectItem>
-                      <SelectItem value="oldest">Tanggal terlama</SelectItem>
-                      <SelectItem value="largest">Nominal terbesar</SelectItem>
-                      <SelectItem value="smallest">Nominal terkecil</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
               {transactionDateInvalid && <p role="alert" className="text-sm text-red-700">
                 Tanggal awal tidak boleh lebih besar dari tanggal akhir.
               </p>}
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-gray-500">
-                  Menampilkan {visibleTransactions.length} dari {unifiedTransactions.length} transaksi
+                  Menampilkan {masterVisibleStart}–{masterVisibleEnd} dari {visibleTransactions.length} transaksi
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds(visibleTransactions.map(tx => tx.key))}>Buka Semua</Button>
-                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds([])}>Tutup Semua</Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="master-page-size" className="text-xs">Baris</Label>
+                  <Select value={String(masterPageSize)} onValueChange={v => {
+                    setMasterPageSize(Number(v) as 20|50|100);
+                    setMasterPage(1);setExpandedTransactionIds([]);
+                  }}>
+                    <SelectTrigger id="master-page-size" className="w-20"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm"
+                    onClick={() => setExpandedTransactionIds(paginatedTransactions.map(tx => tx.key))}>
+                    Buka Semua
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds([])}>
+                    Tutup Semua
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => {
-                    setDetailKind("all"); setUnifiedSearch(""); setTransactionStatus("all");
-                    setTransactionDateMode("all"); setTransactionSingleDate("");
-                    setTransactionDateFrom(""); setTransactionDateTo("");
-                    setTransactionSort("newest"); setExpandedTransactionIds([]);
+                    setDetailKind("all");setUnifiedSearch("");
+                    setTransactionDateMode("all");setTransactionSingleDate("");
+                    setTransactionDateFrom("");setTransactionDateTo("");
+                    setMasterPage(1);setExpandedTransactionIds([]);
                   }}>Reset Filter</Button>
                 </div>
               </div>
@@ -1073,11 +1085,13 @@ export default function AdminExpenses() {
                     <tr className="text-left border-b">
                       <th className="p-3">ID / Tanggal</th>
                       <th className="p-3">Nama / Jenis</th>
-                      <th className="p-3 text-right">Nominal / Status</th>
+                      <th className="p-3 text-right">Masuk</th>
+                      <th className="p-3 text-right">Keluar</th>
+                      <th className="p-3 text-right">Saldo</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleTransactions.map(tx => (
+                    {paginatedTransactions.map(tx => (
                       <Fragment key={tx.key}>
                         <tr role="button" tabIndex={0} aria-expanded={expandedTransactionIds.includes(tx.key)}
                           className={`cursor-pointer border-b hover:bg-blue-50 focus-visible:outline focus-visible:outline-blue-500 ${expandedTransactionIds.includes(tx.key) ? "bg-blue-50" : ""}`}
@@ -1094,17 +1108,23 @@ export default function AdminExpenses() {
                             <p className={`text-xs ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
                               {tx.kind === "income" ? "Uang Masuk" : "Pengeluaran"}
                             </p>
-                          </td>
-                          <td className="p-3 text-right">
-                            <p className={`font-bold whitespace-nowrap ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
-                              {tx.kind === "income" ? "+" : "−"}{formatIDR(tx.amount)}
-                            </p>
                             <p className="text-xs text-gray-500">{tx.status}</p>
+                          </td>
+                          <td className="p-3 text-right font-semibold tabular-nums text-emerald-700">
+                            {tx.kind==="income"?tx.amount.toLocaleString("id-ID"):"0"}
+                          </td>
+                          <td className="p-3 text-right font-semibold tabular-nums text-orange-700">
+                            {tx.kind==="expense"?tx.amount.toLocaleString("id-ID"):"0"}
+                          </td>
+                          <td className="p-3 text-right font-bold tabular-nums">
+                            {FINANCE_SC_TEST_ONLY
+                              ? (runningBalanceById.get(tx.key)??0).toLocaleString("id-ID")
+                              : "–"}
                           </td>
                         </tr>
                         {expandedTransactionIds.includes(tx.key) && (
                           <tr className="bg-slate-50 border-b">
-                            <td colSpan={3} className="p-4 sm:p-5">
+                            <td colSpan={5} className="p-4 sm:p-5">
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="font-bold">Rincian {tx.kind === "income" ? "Pemasukan" : "Pengeluaran"} — {tx.id}</p>
@@ -1143,6 +1163,24 @@ export default function AdminExpenses() {
                 </table>
                 {(FINANCE_SC_TEST_ONLY?!financeTestData&&!financeTestReadError:isLoading || incomeHistoryLoading) && !unifiedTransactions.length && <p className="text-sm text-gray-500 p-5">Memuat transaksi...</p>}
                 {(FINANCE_SC_TEST_ONLY?Boolean(financeTestData):!isLoading && !incomeHistoryLoading) && !visibleTransactions.length && <p className="text-sm text-gray-500 p-5 text-center">Tidak ada transaksi yang sesuai filter.</p>}
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t p-3 text-sm">
+                <span className="text-gray-500">
+                  {masterVisibleStart}–{masterVisibleEnd} / {visibleTransactions.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button type="button" size="sm" variant="outline"
+                    disabled={effectiveMasterPage<=1}
+                    onClick={()=>{setMasterPage(Math.max(1,effectiveMasterPage-1));setExpandedTransactionIds([]);}}>
+                    Sebelumnya
+                  </Button>
+                  <span className="tabular-nums">{effectiveMasterPage} / {masterPageCount}</span>
+                  <Button type="button" size="sm" variant="outline"
+                    disabled={effectiveMasterPage>=masterPageCount}
+                    onClick={()=>{setMasterPage(Math.min(masterPageCount,effectiveMasterPage+1));setExpandedTransactionIds([]);}}>
+                    Berikutnya
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
