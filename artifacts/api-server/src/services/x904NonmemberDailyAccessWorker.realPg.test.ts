@@ -687,7 +687,7 @@ test("public PIN review gate: checkout and confirmed payment alone never activat
   }
 });
 
-test("public verified PIN at closing: 22:40 activation, automatic 23:00 suspend, never reopens tomorrow", async () => {
+test("late Gym arrival: booked 20:59, activate 22:40 after session, suspend at 23:00", async () => {
   // Disposable PostgreSQL only. Never use a live PIN, booking, payment or X904.
   const pin = "607", uid = 607, name = "CI CLOSING PIN";
   const bookingId = 9607, paymentId = 9707;
@@ -700,7 +700,7 @@ test("public verified PIN at closing: 22:40 activation, automatic 23:00 suspend,
       VALUES('TDBD234200545',$1,$2,$3,'verified','ci-operator',now())`, [pin,uid,name]);
     await run(`INSERT INTO sport_center.sport_bookings
       (id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price)
-      VALUES($1,'2026-11-06','22:30','gym_public_guest',
+      VALUES($1,'2026-11-06','20:59','gym_public_guest',
         'Registered PIN booked without login; staff review required',
         'pending_payment','SC-CI-CLOSING-PIN-9607',$2,30000)`, [bookingId,name]);
     await run(`INSERT INTO sport_center.x904_nonmember_daily_access
