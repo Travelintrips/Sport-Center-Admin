@@ -1650,6 +1650,122 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
   }
 });
 
+// Explicit physical VIS handover for a paid Gym booking CREATED by operational staff.
+// Never confirms payment, creates a second booking, or commands X904 here.
+// Only a witnessed handover changes the pending grant into worker eligibility.
+router.post("/bookings/:bookingId/x904-admin-card-handover", authMiddleware, async (req, res) => {
+  const principal = getRequestRole(req);
+  if (!isOperationalBookingRole(principal)) {
+    res.status(403).json({ error: "Hanya petugas booking yang dapat mencatat penyerahan kartu VIS." });
+    return;
+  }
+  if (req.body?.identityChecked !== true || req.body?.physicalCardHandedOver !== true) {
+    res.status(400).json({ error: "Pemeriksaan identitas dan penyerahan kartu fisik wajib dikonfirmasi." });
+    return;
+  }
+  const bookingId = Number(req.params.bookingId);
+  if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
+    res.status(400).json({ error: "Booking tidak valid." }); return;
+  }
+  try {
+    const outcome = await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
+      const found = await tx.execute(sql`SELECT a.access_id,a.identity_label,a.user_pin,a.device_uid,a.verified_name,
+          a.payment_id,a.confirmed_at,a.expires_at,a.verification_state,a.access_state,a.activated_at,
+          b.booking_date,b.source,b.status::text AS booking_status,
+          p.status::text AS payment_status,p.amount,p.confirmed_at AS payment_confirmed_at,
+          COALESCE(b.grand_total,b.total_price) AS amount_due
+        FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+        JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
+        WHERE a.booking_id=${bookingId} AND a.device_serial='TDBD234200545'
+          AND a.identity_type='card' AND b.source='admin' FOR UPDATE OF a`);
+      if (found.rows.length !== 1) return { reason: "grant_missing" };
+      const row = found.rows[0] as any;
+      const wib = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Jakarta" });
+      const currentDay = wib.slice(0, 10);
+      const currentHour = Number(wib.slice(11, 13));
+      if (String(row.booking_date).slice(0,10) !== currentDay || currentHour < 6 || currentHour >= 23 ||
+          row.booking_status !== "confirmed" || row.payment_status !== "confirmed" ||
+          row.payment_confirmed_at == null || row.confirmed_at == null ||
+          Number(row.amount) < Number(row.amount_due) ||
+          row.expires_at == null ||
+          row.access_state !== "pending" || row.verification_state !== "pending" ||
+          row.activated_at != null) return { reason: "not_ready" };
+      const matchingPayments = await tx.execute(sql`SELECT count(*)::int AS n
+        FROM sport_center.sport_payments
+        WHERE booking_id=${bookingId} AND status::text='confirmed'`);
+      if (Number(matchingPayments.rows[0]?.n) !== 1) return { reason: "payment_ambiguous" };
+      const inventory = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)}
+          AND device_uid=${Number(row.device_uid)} AND device_role=0
+          AND regexp_replace(upper(display_name),'[[:space:]]+','','g') =
+            regexp_replace(upper(${String(row.identity_label)}::text),'[[:space:]]+','','g')`);
+      if (inventory.rows.length !== 1 ||
+          !/^VIS00[1-6]$/.test(String(row.identity_label)) ||
+          !Number.isSafeInteger(Number(row.device_uid))) return { reason: "identity_changed" };
+      const snapshot = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_access_snapshots s
+        WHERE s.device_serial='TDBD234200545' AND s.observed_at>=now()-interval '5 minutes'
+          AND jsonb_typeof(s.users)='array' AND jsonb_array_length(s.users)=s.user_count
+          AND (SELECT count(*) FROM jsonb_array_elements(s.users) u
+            WHERE u->>'pin'=${String(row.user_pin)} AND u->>'group'='2'
+              AND u->>'role'='0' AND u->>'enabled'='true'
+              AND regexp_replace(upper(coalesce(u->>'name','')),'[[:space:]]+','','g') =
+                  regexp_replace(upper(${String(row.identity_label)}::text),'[[:space:]]+','','g'))=1
+        ORDER BY s.snapshot_id DESC LIMIT 1`);
+      if (snapshot.rows.length !== 1) return { reason: "machine_not_ready" };
+      const overlap = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)}
+          AND access_id<>${Number(row.access_id)} AND access_state IN ('pending','active') LIMIT 1`);
+      if (overlap.rows.length) return { reason: "identity_busy" };
+      // Claim the actual physical card in the same transaction as handover.
+      // ADMINVIS-HANDOVER is an internal audit key, not a bank receipt.
+      const existingCard = await tx.execute(sql`SELECT 1
+        FROM sport_center.gym_vis_card_reservations
+        WHERE device_serial='TDBD234200545'
+          AND (card_code=${String(row.identity_label)} OR booking_id=${bookingId})
+          AND state IN ('reserved','collected') LIMIT 1`);
+      if (existingCard.rows.length) return { reason: "card_already_claimed" };
+      const claimed = await tx.execute(sql`INSERT INTO sport_center.gym_vis_card_reservations
+        (booking_id,payment_id,device_serial,card_code,user_pin,device_uid,
+         state,funds_reference,funds_verified_by,collected_at)
+        VALUES (${bookingId},${Number(row.payment_id)},'TDBD234200545',
+          ${String(row.identity_label)},${String(row.user_pin)},${Number(row.device_uid)},
+          'collected',${'ADMINVIS-HANDOVER-' + Number(row.payment_id)},
+          ${'STAFF-HANDOVER-' + Number((req as any).user?.userId ?? 0)},now())
+        RETURNING id`);
+      if (claimed.rows.length !== 1) return { reason: "card_claim_failed" };
+      const updated = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+        SET verification_state='verified'
+        WHERE access_id=${Number(row.access_id)} AND verification_state='pending'
+          AND access_state='pending' AND activated_at IS NULL
+        RETURNING access_id`);
+      if (updated.rows.length !== 1) return { reason: "handover_conflict" };
+      return { accessId: Number(row.access_id), cardCode: String(row.identity_label) };
+    });
+    if (!("accessId" in outcome)) {
+      res.status(409).json({ code: outcome.reason, error: "Penyerahan VIS ditahan: booking, pembayaran, kartu, atau mesin belum siap." });
+      return;
+    }
+    // The card claim and authorization have already committed atomically.
+    // An optional audit-write outage must not falsely report a failed handover
+    // and encourage an operator to repeat it. The collected inventory row is
+    // independently durable evidence of the physical handover.
+    await logAudit({
+      action: "GYM_ADMIN_BOOKING_CARD_PHYSICAL_HANDOVER",
+      entity: "booking",
+      entityId: bookingId,
+      after: { accessId: outcome.accessId, cardCode: outcome.cardCode, witnessed: true, identityChecked: true,
+        accessState: "pending", verificationState: "verified", actorRole: principal },
+    }).catch(error => console.error("[x904-admin-card-handover] audit failed after commit", error));
+    res.json({ success: true, accessId: outcome.accessId, cardCode: outcome.cardCode,
+      accessState: "pending", message: "Penyerahan kartu dicatat; aktivasi tetap menunggu worker dan ACK X904." });
+  } catch (error) {
+    console.error("[x904-admin-card-handover]", error);
+    res.status(503).json({ error: "Penyerahan kartu tidak dapat diverifikasi; tidak ada perintah X904 dikirim." });
+  }
+});
+
 // Assign a physical VIS card to an EXISTING paid Gym booking. Never create a
 // duplicate booking/payment and never issue an X904 device command here.
 // Handover and device read-back are separate, mandatory gates.
@@ -2295,7 +2411,7 @@ router.post("/bookings", async (req, res) => {
           (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,visitor_name,booking_id,verification_state,access_state)
           VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
             ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
-            ${x904VisitorName},${created.id},'verified','pending')`);
+            ${x904VisitorName},${created.id},${verifiedX904Identity.identityType === 'card' ? 'pending' : 'verified'},'pending')`);
       }
       return createdRows;
     });
@@ -5474,6 +5590,159 @@ router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (
   } catch (err) {
     req.log.error({ err }, "Group sessions error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Direct Admin Lapangan VIS return. Booking may still show "confirmed"
+// even after its paid door entitlement has expired; only verified Group2
+// read-back and witnessed physical return can release the inventory card.
+router.post("/bookings/:bookingId/x904-admin-card-return", authMiddleware, async (req, res) => {
+  const principal = getRequestRole(req);
+  if (!isOperationalBookingRole(principal)) {
+    res.status(403).json({ error: "Hanya petugas booking yang dapat mengembalikan kartu VIS." }); return;
+  }
+  if (req.body?.physicalCardReturned !== true) {
+    res.status(400).json({ error: "Petugas wajib memastikan kartu fisik sudah dikembalikan." }); return;
+  }
+  const bookingId = Number(req.params.bookingId);
+  if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
+    res.status(400).json({ error: "Booking tidak valid." }); return;
+  }
+  try {
+    const result = await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(90400661)`);
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
+      const found = await tx.execute(sql`SELECT r.id AS reservation_id,r.card_code,r.user_pin,r.device_uid,
+          r.collected_at,r.state AS card_state,
+          a.access_id,a.activated_at,a.expires_at,a.access_state,
+          b.booking_date,b.status::text AS booking_status
+        FROM sport_center.gym_vis_card_reservations r
+        JOIN sport_center.x904_nonmember_daily_access a
+          ON a.booking_id=r.booking_id AND a.payment_id=r.payment_id
+          AND a.device_serial=r.device_serial AND a.user_pin=r.user_pin
+          AND a.device_uid=r.device_uid AND a.identity_label=r.card_code
+          AND a.identity_type='card'
+        JOIN sport_center.sport_bookings b ON b.id=r.booking_id
+        WHERE r.booking_id=${bookingId} AND b.source='admin'
+          AND r.device_serial='TDBD234200545'
+          AND r.funds_reference=('ADMINVIS-HANDOVER-' || r.payment_id::text)
+        FOR UPDATE OF r,a`);
+      if (found.rows.length !== 1) return { reason: "card_not_found" };
+      const row = found.rows[0] as any;
+      if (row.card_state === "returned") return { cardCode: String(row.card_code), alreadyReturned: true };
+      if (row.card_state !== "collected" || !row.collected_at ||
+          !Number.isSafeInteger(Number(row.device_uid)) ||
+          row.access_state === "active") return { reason: "card_not_returnable" };
+
+      const now = new Date();
+      const dayParts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit",
+      }).formatToParts(now);
+      const parts = Object.fromEntries(dayParts.map(p => [p.type,p.value]));
+      const today = `${parts.year}-${parts.month}-${parts.day}`;
+      const hour = Number(new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Jakarta", hour: "2-digit", hourCycle: "h23",
+      }).format(now));
+      const closingPassed = String(row.booking_date) < today ||
+        (String(row.booking_date) === today && hour >= 23);
+      const bookingCancelled = ["cancelled","refunded","rejected","expired"].includes(String(row.booking_status));
+      if (!closingPassed && !bookingCancelled && row.access_state !== "expired") {
+        return { reason: "booking_access_still_open" };
+      }
+      if (row.activated_at != null && !bookingCancelled &&
+          (!row.expires_at || now.getTime() < new Date(String(row.expires_at)).getTime())) {
+        return { reason: "paid_access_has_not_expired" };
+      }
+
+      const pendingCommands = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)}
+          AND state IN ('queued','claimed') LIMIT 1`);
+      if (pendingCommands.rows.length) return { reason: "machine_command_in_flight" };
+      const competing = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)}
+          AND access_id<>${Number(row.access_id)} AND access_state IN ('pending','active')
+        LIMIT 1`);
+      if (competing.rows.length) return { reason: "another_access_is_live" };
+      const owned = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_member_mapping
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)} LIMIT 1`);
+      if (owned.rows.length) return { reason: "member_ownership_conflict" };
+      const inventory = await tx.execute(sql`SELECT 1 FROM sport_center.gym_x904_lan_users
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)}
+          AND device_uid=${Number(row.device_uid)} AND device_role=0
+          AND regexp_replace(upper(display_name),'[[:space:]]+','','g')=
+              regexp_replace(upper(${String(row.card_code)}::text),'[[:space:]]+','','g')`);
+      if (inventory.rows.length !== 1) return { reason: "machine_identity_mismatch" };
+      const snap = await tx.execute(sql`SELECT observed_at,user_count,users
+        FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial='TDBD234200545'
+        ORDER BY snapshot_id DESC LIMIT 1`);
+      if (snap.rows.length !== 1) return { reason: "snapshot_missing" };
+      const s = snap.rows[0] as any;
+      const observed = new Date(String(s.observed_at));
+      const users: any[] = Array.isArray(s.users) ? s.users : [];
+      const matches = users.filter(u => String(u.pin) === String(row.user_pin) &&
+        Number(u.group) === 2 && Number(u.role) === 0 && u.enabled === true &&
+        String(u.name ?? "").replace(/\s+/g, "").toUpperCase() ===
+          String(row.card_code).replace(/\s+/g, "").toUpperCase());
+      if (!Number.isFinite(observed.getTime()) || observed.getTime() > now.getTime() ||
+          now.getTime()-observed.getTime() > 5*60_000 ||
+          observed.getTime() < new Date(String(row.collected_at)).getTime() ||
+          users.length !== Number(s.user_count) || matches.length !== 1 ||
+          users.filter(u => String(u.pin) === String(row.user_pin)).length !== 1)
+        return { reason: "machine_group2_not_confirmed" };
+
+      const history = await tx.execute(sql`SELECT command_type,state,completed_at,result,payload,created_at
+        FROM sport_center.x904_user_commands
+        WHERE device_serial='TDBD234200545' AND user_pin=${String(row.user_pin)}
+          AND created_at>=${row.collected_at}
+        ORDER BY created_at DESC,command_id DESC LIMIT 1`);
+      const last = history.rows[0] as any | undefined;
+      if (row.activated_at != null) {
+        if (row.access_state !== "expired" || !last ||
+            last.command_type !== "SUSPEND_USER" || last.state !== "completed" ||
+            String(last.payload?.accessId) !== String(row.access_id) ||
+            last.result?.readBackConfirmed !== true ||
+            Number(last.result?.afterGroup) !== 2 ||
+            Number(last.result?.deviceUid) !== Number(row.device_uid) ||
+            !last.completed_at ||
+            new Date(String(last.completed_at)).getTime() > observed.getTime()) {
+          return { reason: "suspend_ack_missing" };
+        }
+      } else {
+        // No activation ever proved: do not assert a physical suspend command.
+        // Reject any historical commands for this grant, even failed ones.
+        const everCommanded = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
+          WHERE device_serial='TDBD234200545'
+            AND payload->>'accessId'=${String(row.access_id)} LIMIT 1`);
+        if (everCommanded.rows.length || last) return { reason: "unresolved_machine_history" };
+        if (!closingPassed && !bookingCancelled) return { reason: "booking_not_closed" };
+        const expired = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+          SET access_state='expired'
+          WHERE access_id=${Number(row.access_id)} AND activated_at IS NULL
+            AND access_state IN ('pending','review_required','expired')
+          RETURNING access_id`);
+        if (expired.rows.length !== 1) return { reason: "grant_cannot_close" };
+      }
+      const updated = await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
+        SET state='returned',returned_at=now()
+        WHERE id=${Number(row.reservation_id)} AND state='collected' RETURNING id`);
+      if (updated.rows.length !== 1) return { reason: "return_conflict" };
+      return { cardCode: String(row.card_code), alreadyReturned: false };
+    });
+    if (!("cardCode" in result)) {
+      res.status(409).json({ error: "Kartu tetap ditahan sampai suspend dan pembacaan ulang X904 terbukti.", code: result.reason });
+      return;
+    }
+    // Card return has already committed; preserve the correct outcome even
+    // if the supplementary audit sink is temporarily unavailable.
+    await logAudit({ action:"GYM_ADMIN_BOOKING_CARD_PHYSICAL_RETURN",
+      entity:"booking",entityId:bookingId,
+      after:{ cardCode:result.cardCode,physicalCardReturned:true,alreadyReturned:result.alreadyReturned } })
+      .catch(error => console.error("[x904-admin-card-return] audit failed after commit",error));
+    res.json({ success:true,cardCode:result.cardCode,state:"returned",alreadyReturned:result.alreadyReturned });
+  } catch (error) {
+    console.error("[x904-admin-card-return]",error);
+    res.status(503).json({ error:"Pengembalian VIS belum dapat diverifikasi; kartu tetap ditahan." });
   }
 });
 

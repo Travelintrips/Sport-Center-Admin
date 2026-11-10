@@ -1507,7 +1507,8 @@ function BookingDetailDrawer({
   });
   const { data: gymGuestAdminDetail } = useQuery({
     queryKey: ["admin-gym-guest-detail", booking.orderNumber],
-    enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
+    refetchInterval: booking.source === "admin" ? 15000 : false,
+    enabled: (booking.source === "gym_public_guest" || ((booking.source === "web" || booking.source === "admin") && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
     refetchOnMount: "always",
     queryFn: async () => {
@@ -1542,6 +1543,7 @@ function BookingDetailDrawer({
   const gymVisAccess = gymX904Monitoring?.access ?? null;
   const gymVisPool = gymX904Monitoring?.pool ?? [];
   const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
+  const adminGymAccess = gymGuestAdminDetail?.adminGymAccess ?? null;
   const gymIdentityRoute = gymGuestAdminDetail?.x904IdentityMatch?.route ?? null;
 
   const adminQrisEmailDetection = adminQrisDetectionPayload?.detection ?? null;
@@ -1620,6 +1622,57 @@ function BookingDetailDrawer({
       title: "Kartu VIS belum dapat dialokasikan",
       description: String(error?.message ?? error), variant: "destructive",
     }),
+  });
+
+  const handoverAdminGymVisMutation = useMutation({
+    mutationFn: async () => {
+      if (adminGymAccess?.identityType !== "card" || adminGymAccess?.verificationState !== "pending" ||
+          !visPhysicalHandedOver || !visIdentityChecked) {
+        throw new Error("Kartu dan bukti serah-terima belum memenuhi syarat.");
+      }
+      const response = await fetch(`/api/bookings/${booking.id}/x904-admin-card-handover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ physicalCardHandedOver: true, identityChecked: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async () => {
+      setVisPhysicalHandedOver(false);
+      setVisIdentityChecked(false);
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      paymentToast.toast({ title: "Serah-terima VIS Admin Lapangan dicatat",
+        description: "Menunggu aktivasi worker dan bukti ACK/read-back X904; belum berarti pintu terbuka." });
+    },
+    onError: (error: any) => paymentToast.toast({ title: "Serah-terima VIS ditolak",
+      description: String(error?.message ?? error), variant: "destructive" }),
+  });
+
+  const returnAdminGymVisMutation = useMutation({
+    mutationFn: async () => {
+      if (adminGymAccess?.identityType !== "card" || adminGymAccess?.cardState !== "collected" ||
+          adminGymAccess?.returnReady !== true || !visPhysicalReturned) {
+        throw new Error("Kartu atau bukti suspend belum siap untuk pengembalian.");
+      }
+      const response = await fetch(`/api/bookings/${booking.id}/x904-admin-card-return`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ physicalCardReturned: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload;
+    },
+    onSuccess: async (result: any) => {
+      setVisPhysicalReturned(false);
+      await paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      paymentToast.toast({ title: `${result?.cardCode ?? "VIS"} kembali ke inventaris`,
+        description: "Kartu fisik dicatat kembali setelah status aman pada mesin X904 terbukti." });
+    },
+    onError: (error: any) => paymentToast.toast({ title: "Pengembalian VIS ditahan",
+      description: String(error?.message ?? error), variant: "destructive" }),
   });
 
   const handoverGymVisMutation = useMutation({
@@ -1997,6 +2050,64 @@ function BookingDetailDrawer({
             detection={qrisEmailDetection}
             paymentStatus={qrisEmailPaymentStatus}
           />
+          {booking.source === "admin" && adminGymAccess && /gym|fitness/i.test(String(booking.facilityName ?? "")) && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950 space-y-2">
+              <div className="font-bold">Akses Gym — Booking Admin Lapangan</div>
+              <div className="text-xs">Identitas: <strong>{adminGymAccess.identityLabel}</strong> · PIN {adminGymAccess.userPin}</div>
+              <div className="text-xs">Pembayaran: <strong>{adminGymAccess.paymentStatus ?? "Belum terkonfirmasi"}</strong> · Verifikasi: <strong>{adminGymAccess.verificationState}</strong> · Akses: <strong>{adminGymAccess.accessState}</strong></div>
+              {adminGymAccess.activatedAt && adminGymAccess.expiresAt ? <div className="text-xs">Batas akses setelah aktivasi: {new Date(adminGymAccess.expiresAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB</div> : <div className="text-xs">Durasi dihitung setelah ACK aktivasi; akses maksimal sampai 23.00 WIB pada tanggal booking.</div>}
+              {adminGymAccess.identityType === "card" && adminGymAccess.verificationState === "pending" &&
+                adminGymAccess.accessState === "pending" && booking.status === "confirmed" &&
+                adminGymAccess.paymentStatus === "confirmed" && (
+                  <div className="space-y-2 border-t border-sky-200 pt-2">
+                    <div className="text-xs font-semibold">Kartu tidak akan diaktifkan sampai serah-terima fisik dicatat.</div>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={visIdentityChecked} onChange={e => setVisIdentityChecked(e.target.checked)} />
+                      Identitas pengunjung sudah diperiksa secara langsung.
+                    </label>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={visPhysicalHandedOver} onChange={e => setVisPhysicalHandedOver(e.target.checked)} />
+                      Kartu fisik telah diserahkan kepada pengunjung.
+                    </label>
+                    <button type="button" disabled={!visIdentityChecked || !visPhysicalHandedOver || handoverAdminGymVisMutation.isPending}
+                      onClick={() => handoverAdminGymVisMutation.mutate()}
+                      className="rounded-lg bg-sky-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                      {handoverAdminGymVisMutation.isPending ? "Memeriksa..." : "Konfirmasi Penyerahan VIS"}
+                    </button>
+                  </div>
+                )}
+              {adminGymAccess.identityType === "card" && (
+                <div className="space-y-2 border-t border-sky-200 pt-2 text-xs">
+                  <div>Status fisik VIS: <strong>{adminGymAccess.cardState === "collected" ? "Diserahkan ke pengunjung" :
+                    adminGymAccess.cardState === "returned" ? "Sudah kembali ke petugas" : "Belum diserahkan"}</strong></div>
+                  <div>Mesin: Grup {adminGymAccess.currentMachineGroup ?? "belum terbukti Grup 2"} ·
+                    Perintah terakhir: {adminGymAccess.latestCommand ?? "-"} ·
+                    ACK/read-back: {adminGymAccess.readBackConfirmed ? "terkonfirmasi" : "belum terkonfirmasi"}</div>
+                  {adminGymAccess.cardState === "collected" && (
+                    <div className="space-y-2 rounded-lg border border-sky-300 bg-white p-3">
+                      <div className="font-semibold">{adminGymAccess.returnReady ?
+                        "Akses sudah aman — kartu dapat dikembalikan secara fisik." :
+                        "Kartu masih di tangan pengunjung atau bukti suspend X904 belum lengkap."}</div>
+                      <label className="flex items-start gap-2">
+                        <input type="checkbox" checked={visPhysicalReturned}
+                          onChange={event => setVisPhysicalReturned(event.target.checked)}
+                          disabled={!adminGymAccess.returnReady} />
+                        Saya menyaksikan kartu fisik telah dikembalikan ke petugas.
+                      </label>
+                      <button type="button"
+                        disabled={!adminGymAccess.returnReady || !visPhysicalReturned ||
+                          returnAdminGymVisMutation.isPending}
+                        onClick={() => returnAdminGymVisMutation.mutate()}
+                        className="rounded bg-sky-800 px-3 py-2 font-semibold text-white disabled:opacity-50">
+                        {returnAdminGymVisMutation.isPending ? "Memeriksa mesin..." : "Konfirmasi Pengembalian VIS"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="text-xs font-medium">Akses aktif dan suspend hanya sah setelah ACK/read-back serta snapshot Grup 1/2 cocok.</div>
+            </div>
+          )}
           {(booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && gymX904MonitoringFailed && (
             <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
               <div className="font-semibold">Status kartu VIS/X904 belum dapat diverifikasi.</div>

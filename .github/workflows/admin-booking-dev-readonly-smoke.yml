@@ -1,0 +1,52 @@
+name: Admin Lapangan DEV authenticated read-only smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/admin-booking-dev-readonly-smoke.yml'
+      - 'artifacts/api-server/src/routes/__tests__/adminBookingDevReadonlySmoke.test.ts'
+      - 'artifacts/api-server/src/routes/bookings.ts'
+      - 'artifacts/api-server/src/routes/waBookingsAdmin.ts'
+      - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dev-auth-get:
+    name: Validate DEV admin_booking API access (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NODE_ENV: test
+      NODE_OPTIONS: --experimental-vm-modules
+      APP_ENV: development
+      DB_POOL_MAX: '1'
+      ADMIN_BOOKING_DEV_READONLY_SMOKE: enabled
+      SUPABASE_DATABASE_URL_DEV: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET_TEST }}
+      GYM_X904_NONMEMBER_ACCESS_ENABLED: 'false'
+      GYM_X904_MANUAL_ACCESS_ENABLED: 'false'
+      GYM_X904_USER_WRITE_ENABLED: 'false'
+      GYM_X904_AUTOMATIC_COMMANDS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Reject missing or incorrect DEV connection without printing secrets
+        shell: bash
+        run: |
+          test -n "$SUPABASE_DATABASE_URL_DEV"
+          [[ "$SUPABASE_DATABASE_URL_DEV" == *xssrfshdrtdfupgqwfdw* ]]
+          [[ "$SUPABASE_DATABASE_URL_DEV" != *nzdweipzckfszczzqtuw* ]]
+          test -n "$SESSION_SECRET"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck:libs
+      - name: Exercise authenticated Admin Lapangan GET using read-only PostgreSQL
+        run: pnpm --filter @workspace/api-server exec jest --runInBand src/routes/__tests__/adminBookingDevReadonlySmoke.test.ts

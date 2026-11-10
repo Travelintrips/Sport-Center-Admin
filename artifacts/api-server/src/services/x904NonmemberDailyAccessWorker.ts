@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { isX904AutoSuspendExempt, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry, x904NonmemberSameWibDate } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
+import { expireUnusedAdminVisGrants } from "./x904AdminVisPendingExpiry";
 
 type Store = Pick<typeof db, "execute" | "transaction">;
 const DEVICE = "TDBD234200545";
@@ -76,6 +77,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND registration_source='system_x904_automation'
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
+
+  // Only direct Admin Lapangan VIS grants that never opened the door may be
+  // retired. Requires a fresh authenticated Group 2 snapshot, and issues no
+  // X904 device command. PIN/member/public flows remain unchanged.
+  await expireUnusedAdminVisGrants(store, now, testPin);
 
   // Inventory reconciliation is read-only unless a PIN has an independently
   // verified nonmember grant. An absent member mapping is NOT proof of nonmembership.
@@ -230,7 +236,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.booking_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
-          p.status::text AS payment_status,
+          p.status::text AS payment_status, p.amount AS payment_amount,
+          p.confirmed_at AS payment_confirmed_at,
+          COALESCE(booking.grand_total,booking.total_price) AS amount_due,
+          (SELECT count(*)::int FROM sport_center.sport_payments cp
+            WHERE cp.booking_id=a.booking_id AND cp.status::text='confirmed') AS confirmed_payment_count,
           booking.booking_date AS booking_date, booking.start_time AS booking_start_time,
           booking.source AS booking_source, booking.notes AS booking_notes,
           booking.status::text AS booking_status,
@@ -322,10 +332,25 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         : null;
       // A web booking attached to a physical VIS must be confirmed to activate.
       // Cancellation/completion causes the ordinary verified SUSPEND path.
+      // Admin Lapangan bookings must remain confirmed. A cancelled admin booking
+      // with a confirmed payment is never an authorization to activate a PIN/VIS.
       const bookingEligible = a.booking_source === "web" && a.identity_type === "card"
         ? a.booking_status === "confirmed"
-        : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
-      const shouldBeActive = bookingEligible &&
+        : a.booking_source === "admin"
+          ? a.booking_status === "confirmed"
+          : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
+      // Direct Admin Lapangan Gym grants require exactly one fully paid,
+      // independently confirmed payment. "confirmed" alone is insufficient
+      // if the amount is partial or multiple receipts conflict.
+      // Other booking sources retain their existing behavior.
+      const adminPaymentEligible = a.booking_source !== "admin" ||
+        (Number(a.confirmed_payment_count) === 1 &&
+          a.payment_confirmed_at != null && a.amount_due != null &&
+          Number.isFinite(Number(a.payment_amount)) &&
+          Number.isFinite(Number(a.amount_due)) &&
+          Number(a.amount_due) > 0 &&
+          Number(a.payment_amount) >= Number(a.amount_due));
+      const shouldBeActive = bookingEligible && adminPaymentEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
