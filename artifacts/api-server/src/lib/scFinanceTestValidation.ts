@@ -52,8 +52,14 @@ export function testSheetRow(item:TestLedgerEntry) {
   const who=String(item.source_name).trim().toUpperCase();
   const marker=item.direction==="IN" ? "SC-TEST-IN:" : "SC-TEST-OUT:";
   const words=item.direction==="IN"?"Dana masuk dari":"Pengeluaran ke";
-  const detail=String(item.notes??"").trim();
-  const description=`${marker} ${words} ${who}${detail?" | "+detail:""} | ${testNo(Number(item.id),item.direction)}`;
+  const source=String(item.sender_bank??"").trim();
+  const account=String(item.receiving_account??"").trim();
+  const method=String(item.method??"").trim();
+  const reference=String(item.bank_reference??"").trim();
+  const note=String(item.notes??"").trim();
+  const bankAndAccount=[source,account].filter(Boolean).join(" - ");
+  const details=[bankAndAccount,method,reference?"Ref: "+reference:"",note].filter(Boolean);
+  const description=`${marker} ${words} ${who}${details.length?" | "+details.join(" | "):""} | ${testNo(Number(item.id),item.direction)}`;
   // A:M. Never invent real bank balance, mutation_key, matching score or COA.
   return [
     date.split("-").reverse().join("/"),description,
