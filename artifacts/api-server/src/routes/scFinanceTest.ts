@@ -15,7 +15,8 @@ router.get("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
       sender_bank AS "senderBank",receiving_account AS "receivingAccount",
       method,bank_reference AS "bankReference",notes,amount::text,
       sheet_sync_state AS "sheetSyncState",sheet_row AS "sheetRow",
-      sheet_sync_error AS "sheetSyncError",created_at AS "createdAt"
+      sheet_sync_error AS "sheetSyncError",sheet_verified_at AS "sheetVerifiedAt",
+      created_at AS "createdAt"
       FROM sport_center.sc_finance_test_entries ORDER BY id DESC LIMIT 250`));
     const totals=resultRows(await db.execute(sql`SELECT
       direction,amount::text,sheet_sync_state
