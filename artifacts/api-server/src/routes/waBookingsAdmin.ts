@@ -686,6 +686,16 @@ router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, a
         res.status(404).json({ error: 'Monitoring VIS hanya untuk fasilitas Gym.' }); return;
       }
     }
+    // Booking-bound PIN identity is independent of the legacy WA detail endpoint.
+    // This is read-only evidence, not ownership verification or a device grant.
+    const linkedPin = booking.source === 'gym_public_guest'
+      ? await db.execute(sql`SELECT access_id,user_pin,device_uid,verified_name,verification_state,access_state
+          FROM sport_center.x904_nonmember_daily_access
+          WHERE booking_id=${booking.id} AND identity_type='pin'
+            AND device_serial='TDBD234200545'
+          ORDER BY access_id DESC LIMIT 1`)
+      : null;
+    const pinRow = linkedPin?.rows[0] as any;
     const detail = await db.execute(sql`SELECT r.card_code,r.state AS card_state,r.user_pin,r.device_uid,
         r.reserved_at,r.collected_at,r.returned_at,a.access_id,a.verification_state,a.access_state,a.activated_at,a.expires_at
       FROM sport_center.gym_vis_card_reservations r
@@ -736,6 +746,11 @@ router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, a
     });
     res.json({
       bookingStatus: booking.status,
+      pinGrant: pinRow ? {
+        accessId:Number(pinRow.access_id),userPin:String(pinRow.user_pin),deviceUid:Number(pinRow.device_uid),
+        verifiedName:String(pinRow.verified_name),verificationState:String(pinRow.verification_state),
+        accessState:String(pinRow.access_state),
+      } : null,
       pool,
       reservation: row ? {
         cardCode:String(row.card_code),state:String(row.card_state),userPin:String(row.user_pin),deviceUid:Number(row.device_uid),
