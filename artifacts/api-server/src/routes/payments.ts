@@ -2619,7 +2619,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   } catch (err: any) {
     req.log.error({ err }, "Update payment error");
     if (res.headersSent) return;
-    const message = String(err instanceof Error ? err.message : err ?? "");
+    // Drizzle can wrap a PostgreSQL error as "Failed query" while its
+    // canonical/mirror guard identifier is carried in the original cause.
+    // Only the stable allowlisted error code is exposed to clients.
+    const message = String(err instanceof Error ? err.message : err ?? "")
+      + " " + String((err as { cause?: { message?: unknown } })?.cause?.message ?? "");
     const isAccountingConflict =
       message.includes("POSTED_ACCOUNTING_JOURNAL") ||
       message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS");
