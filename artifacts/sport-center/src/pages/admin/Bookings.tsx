@@ -1541,7 +1541,8 @@ function BookingDetailDrawer({
   const gymVisReservation = gymX904Monitoring?.reservation ?? gymGuestAdminDetail?.visCardReservation ?? null;
   const gymVisAccess = gymX904Monitoring?.access ?? null;
   const gymVisPool = gymX904Monitoring?.pool ?? [];
-  const gymPinGrant = gymGuestAdminDetail?.x904PinGrant ?? null;
+  // Monitoring refreshes independently of the legacy WA detail request.
+  const gymPinGrant = gymX904Monitoring?.pinGrant ?? gymGuestAdminDetail?.x904PinGrant ?? null;
   // A persisted booking-bound X904 PIN grant is stronger identity evidence than
   // a fresh name-registry lookup, which can be temporarily unavailable.
   // This selects the correct UI route only; it never approves ownership or access.
