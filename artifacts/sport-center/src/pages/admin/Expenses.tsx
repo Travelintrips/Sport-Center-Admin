@@ -728,36 +728,6 @@ export default function AdminExpenses() {
             </Card>
           </div>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">Riwayat Pemasukan</CardTitle>
-              <p className="text-xs text-gray-500">Status tujuan Sheets ditampilkan terpisah: register SC Uang Masuk dan kas besar sc.</p>
-            </CardHeader>
-            <CardContent>
-              {incomeHistoryLoading && !incomeData ? <p className="text-sm text-gray-500">Memuat data pemasukan...</p>
-                : incomeHistoryError ? <p className="text-sm text-red-700">Riwayat belum dapat dibaca. Jangan ulangi input sebelum memeriksa data.</p>
-                : !incomeData?.entries?.length ? <p className="text-sm text-gray-500 py-5 text-center">Belum ada pemasukan yang dicatat.</p>
-                : <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead><tr className="border-b text-left">
-                      <th className="p-2">ID</th><th className="p-2">Tanggal</th><th className="p-2">Pengirim</th>
-                      <th className="p-2">Penerima</th><th className="p-2 text-right">Nominal</th>
-                      <th className="p-2">SC Uang Masuk</th><th className="p-2">kas besar sc</th>
-                    </tr></thead>
-                    <tbody>{incomeData.entries.slice(0, 10).map(entry => <tr key={entry.id} className="border-b">
-                      <td className="p-2 font-mono">{entry.incomeNo}</td>
-                      <td className="p-2">{entry.transactionDate}</td>
-                      <td className="p-2">{entry.sourceName}<span className="block text-xs text-gray-500">{entry.senderBank}</span></td>
-                      <td className="p-2">{entry.receivingAccount}</td>
-                      <td className="p-2 text-right whitespace-nowrap">{formatIDR(Number(entry.amount))}</td>
-                      <td className="p-2">{entry.sheetSyncState === "synced" ? "Tersinkron (belum diverifikasi)" : entry.sheetSyncState}</td>
-                      <td className="p-2">{entry.cashSheetState === "not_applicable" ? "Tidak berlaku" :
-                        entry.cashSheetState === "synced" ? `Tersinkron · baris ${entry.cashSheetRow}` : entry.cashSheetState}</td>
-                    </tr>)}</tbody>
-                  </table>
-                </div>}
-            </CardContent>
-          </Card>
         </section>
       ) : financeSection === "details" ? (
         <section role="tabpanel" aria-label="Detail Transaksi Keuangan SC" className="space-y-4">

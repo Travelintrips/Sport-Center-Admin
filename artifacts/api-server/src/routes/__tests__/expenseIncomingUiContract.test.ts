@@ -39,7 +39,8 @@ describe("separated financial navigation", () => {
     expect(ui).toContain('role="tablist"');
     expect(ui).toContain('aria-label="Uang Masuk SC"');
     expect(ui).toContain('aria-label="Pengeluaran SC"');
-    expect(ui).toContain("Riwayat Pemasukan");
+    expect(ui).not.toContain('>Riwayat Pemasukan</CardTitle>');
+    expect(ui).toContain("Master Tabel Transaksi");
     expect(ui).toContain("Mutasi Masuk Kas Besar CST — BizPortal");
     expect(ui).toContain("Total Input Uang Masuk — Bulan Ini");
   });
@@ -75,5 +76,16 @@ describe("expandable master finance table", () => {
     expect(ui).toContain('tx.date <= transactionDateTo');
     expect(ui).toContain('transactionDateFrom > transactionDateTo');
     expect(ui).toContain('Tanggal awal tidak boleh lebih besar');
+  });
+});
+
+
+describe("income register UI removed safely", () => {
+  it("hides the duplicate inline income history without deleting read-only master records", () => {
+    expect(ui).not.toContain('>Riwayat Pemasukan</CardTitle>');
+    expect(ui).toContain("incomeData?.entries");
+    expect(ui).toContain('aria-label="Detail Transaksi Keuangan SC"');
+    expect(ui).toContain("Total Input Uang Masuk — Bulan Ini");
+    expect(ui).toContain("Input Uang Masuk");
   });
 });
