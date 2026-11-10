@@ -330,7 +330,7 @@ export default function AdminExpenses() {
   const {data:financeTestData,refetch:refetchFinanceTest,isError:financeTestReadError} = useQuery<{
     entries:Array<{id:number;testNo:string;direction:"IN"|"OUT";transactionDate:string;
       sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
-      sheetSyncError:string|null;senderBank:string;receivingAccount:string}>;
+      sheetSyncError:string|null;sheetVerifiedAt:string|null;senderBank:string;receivingAccount:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -1118,7 +1118,10 @@ export default function AdminExpenses() {
                       <td className="p-2 text-right whitespace-nowrap">{x.direction==="IN"?"+":"−"}{formatIDR(Number(x.amount))}</td>
                       <td className="p-2">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow}`:
                         x.sheetSyncState==="removed"?"Dihapus dari Sheets":
-                        x.sheetSyncState==="mismatch"?"Data Sheets tidak cocok":x.sheetSyncState}</td>
+                        x.sheetSyncState==="mismatch"?"Data Sheets tidak cocok":x.sheetSyncState}
+                        {x.sheetVerifiedAt && <span className="block text-xs text-gray-500">
+                          Diperiksa {new Date(x.sheetVerifiedAt).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})} WIB
+                        </span>}</td>
                       <td className="p-2">{["pending","failed"].includes(x.sheetSyncState) &&
                         <Button type="button" size="sm" variant="outline" onClick={()=>void retryFinanceTestRow(x.id)}>
                           Coba kirim

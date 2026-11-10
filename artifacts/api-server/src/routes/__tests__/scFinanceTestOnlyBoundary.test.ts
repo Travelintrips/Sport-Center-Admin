@@ -72,6 +72,9 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     expect(source).toContain('sheet_row=NULL');
     expect(source).toContain('testRowIndexes(rows.map');
     expect(source).toContain("SC_TEST_SHEET_CONTENT_MISMATCH");
+    expect(source).toContain("sheet_verified_at=now()");
+    expect(route).toContain('sheet_verified_at AS "sheetVerifiedAt"');
+    expect(ui).toContain("Diperiksa ");
     expect(source).toContain("sheet_sync_state IN ('pending','failed')");
     expect(route).toContain('router.post("/admin/finance-test/reconcile"');
     expect(ui).toContain("Periksa Ulang Sheets");

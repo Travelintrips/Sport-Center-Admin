@@ -146,7 +146,8 @@ export async function reconcileScFinanceTestSheets():Promise<{
     if(matches.length>1) {
       // Fail closed and don't silently pick one ambiguous row.
       await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
-        sheet_sync_state='mismatch',sheet_row=NULL,sheet_sync_error='DUPLICATE_TEST_ID_IN_SHEET',updated_at=now()
+        sheet_sync_state='mismatch',sheet_row=NULL,sheet_sync_error='DUPLICATE_TEST_ID_IN_SHEET',
+        sheet_verified_at=now(),updated_at=now()
         WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
       totals.mismatched++; totals.inspected++;
       continue;
@@ -155,9 +156,13 @@ export async function reconcileScFinanceTestSheets():Promise<{
       if(entry.sheet_sync_state!=='removed'){
         await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
           sheet_sync_state='removed',sheet_row=NULL,sheet_sync_error='REMOVED_FROM_SHEET',
-          updated_at=now() WHERE id=${id}
+          sheet_verified_at=now(),updated_at=now() WHERE id=${id}
           AND sheet_sync_state IN ('synced','mismatch')`);
         totals.removed++;
+      }else{
+        await db.execute(sql`UPDATE sport_center.sc_finance_test_entries
+          SET sheet_sync_error='REMOVED_FROM_SHEET',sheet_verified_at=now(),updated_at=now()
+          WHERE id=${id} AND sheet_sync_state='removed'`);
       }
       totals.inspected++;
       continue;
@@ -172,16 +177,20 @@ export async function reconcileScFinanceTestSheets():Promise<{
        String(actual[7]??"")!=="SC_TEST_ONLY"){
       await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
         sheet_sync_state='mismatch',sheet_row=NULL,sheet_sync_error='SC_TEST_SHEET_CONTENT_MISMATCH',
-        updated_at=now() WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
+        sheet_verified_at=now(),updated_at=now() WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
       totals.mismatched++;totals.inspected++;
       continue;
     }
     if(entry.sheet_sync_state!=='synced' || Number(entry.sheet_row)!==matches[0]){
       await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
         sheet_sync_state='synced',sheet_row=${matches[0]},sheet_sync_error=NULL,
-        updated_at=now() WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
+        sheet_verified_at=now(),updated_at=now() WHERE id=${id} AND sheet_sync_state IN ('synced','removed','mismatch')`);
       if(entry.sheet_sync_state!=='synced')totals.restored++;
       else totals.moved++;
+    }else{
+      await db.execute(sql`UPDATE sport_center.sc_finance_test_entries
+        SET sheet_verified_at=now(),updated_at=now()
+        WHERE id=${id} AND sheet_sync_state='synced'`);
     }
     totals.inspected++;
   }
