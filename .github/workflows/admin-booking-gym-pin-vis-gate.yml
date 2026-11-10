@@ -8,7 +8,7 @@ on:
       - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_payment_handover_gate.sql'
       - 'artifacts/api-server/migrations/20261110_admin_booking_vis_initial_pending_rls.sql'
-      - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.realPg.test.ts'
+      - 'artifacts/api-server/src/services/x904AdminBookingLapangan.realPg.test.ts'
       - 'artifacts/api-server/src/routes/__tests__/adminBookingGymPinVisPaymentActivationSuspendContract.test.ts'
       - 'artifacts/sport-center/src/pages/admin/Bookings.tsx'
       - 'scripts/test-admin-booking-vis-payment-gate-pg.mjs'
@@ -56,4 +56,4 @@ jobs:
           X904_NONMEMBER_ISOLATED_PG_URL: postgresql://postgres:isolated_dev_fixture_only@127.0.0.1:55445/x904_nonmember
           NODE_ENV: test
           NODE_OPTIONS: --experimental-vm-modules
-        run: pnpm --filter @workspace/api-server exec jest --runInBand src/services/x904NonmemberDailyAccessWorker.realPg.test.ts --testNamePattern='ADMIN LAPANGAN E2E'
+        run: pnpm --filter @workspace/api-server exec jest --runInBand src/services/x904AdminBookingLapangan.realPg.test.ts --testNamePattern='ADMIN LAPANGAN'
