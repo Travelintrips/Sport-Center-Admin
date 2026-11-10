@@ -1,0 +1,43 @@
+name: Admin Lapangan Gym PIN/VIS payment gate
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/admin-booking-gym-pin-vis-gate.yml'
+      - 'artifacts/api-server/src/routes/bookings.ts'
+      - 'artifacts/api-server/src/routes/waBookingsAdmin.ts'
+      - 'artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts'
+      - 'artifacts/api-server/migrations/20261110_admin_booking_vis_payment_handover_gate.sql'
+      - 'artifacts/api-server/src/routes/__tests__/adminBookingGymPinVisPaymentActivationSuspendContract.test.ts'
+      - 'artifacts/sport-center/src/pages/admin/Bookings.tsx'
+      - 'scripts/test-admin-booking-vis-payment-gate-pg.mjs'
+      - 'scripts/fixtures/20261110_admin_vis_dev_payment_trigger.sql'
+  workflow_dispatch:
+jobs:
+  admin-booking-pin-vis:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: isolated_dev_fixture_only
+        ports:
+          - 55443:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Admin booking contract and safety regression
+        run: pnpm --filter @workspace/api-server exec jest --runInBand src/routes/__tests__/adminBookingGymPinVisPaymentActivationSuspendContract.test.ts src/routes/__tests__/gymExistingWebBookingVisIdentityContract.test.ts src/services/x904NonmemberGrantScope.test.ts
+      - name: Confirmed payment trigger on isolated real PostgreSQL
+        run: node scripts/test-admin-booking-vis-payment-gate-pg.mjs
