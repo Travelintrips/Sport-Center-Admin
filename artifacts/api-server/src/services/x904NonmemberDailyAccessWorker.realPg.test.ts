@@ -1041,7 +1041,7 @@ test("new on-device role-0 PIN alone queues one initial suspend; role 4/14 and h
       user_pin:"650",command_type:"SUSPEND_USER",state:"queued",
       payload:{expectedUid:650,expectedName:"NEW ROLE ZERO",expectedRole:0,
         firstObservedAt:"2026-11-09T00:01:00.000Z",
-        suspendDeadlineAt:"2026-11-09T00:04:00.000Z"}
+        suspendDeadlineAt:"2026-11-09T00:31:00.000Z"}
     });
     // No automatic commands for 651 role4, 652 role14 or existing 653.
     expect(cmds.some((c:any) => ["651","652","653"].includes(c.user_pin))).toBe(false);
@@ -1102,7 +1102,7 @@ test("unrestricted role-0 rollout handles two fresh PINs and protects special, m
     expect(rows.find((r:any)=>r.user_pin==="660").payload).toMatchObject({
       expectedUid:660,expectedName:"NEW MULTI SPACE",expectedRole:0,
       firstObservedAt:"2026-11-09T00:05:00.000Z",
-      suspendDeadlineAt:"2026-11-09T00:08:00.000Z"
+      suspendDeadlineAt:"2026-11-09T00:35:00.000Z"
     });
   } finally {
     delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
@@ -1137,7 +1137,7 @@ test("collector outage does not freeze later enrollment; no duplicate on retry",
     expect(matches).toHaveLength(1);
     expect(matches[0]).toMatchObject({user_pin:"670",command_type:"SUSPEND_USER",state:"queued",
       payload:{expectedUid:670,expectedRole:0,firstObservedAt:"2026-11-09T00:21:00.000Z",
-        suspendDeadlineAt:"2026-11-09T00:24:00.000Z"}});
+        suspendDeadlineAt:"2026-11-09T00:51:00.000Z"}});
     const old=(await run(`SELECT user_pin FROM sport_center.x904_user_commands
       WHERE user_pin IN ('662','663','664','665','668') AND
         payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'`)).rows;
