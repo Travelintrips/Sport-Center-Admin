@@ -80,6 +80,6 @@ export function testSummary(entries:Array<{direction:TestDirection,amount:string
   const incoming=synced.filter(x=>x.direction==="IN").reduce((s,x)=>s+Number(x.amount),0);
   const outgoing=synced.filter(x=>x.direction==="OUT").reduce((s,x)=>s+Number(x.amount),0);
   return {income:incoming,expense:outgoing,balance:incoming-outgoing,
-    pending:entries.filter(x=>x.sheet_sync_state!=="synced").length,
+    pending:entries.filter(x=>["pending","syncing","failed"].includes(x.sheet_sync_state)).length,
     count:entries.length};
 }
