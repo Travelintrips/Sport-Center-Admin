@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -158,7 +158,13 @@ export default function AdminExpenses() {
   const [financeSection, setFinanceSection] = useState<"income" | "expenses" | "details">("income");
   const [detailKind, setDetailKind] = useState<"all" | "income" | "expense">("all");
   const [unifiedSearch, setUnifiedSearch] = useState("");
-  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
+  const [expandedTransactionIds, setExpandedTransactionIds] = useState<string[]>([]);
+  const [transactionDateMode, setTransactionDateMode] = useState<"all" | "single" | "range">("all");
+  const [transactionSingleDate, setTransactionSingleDate] = useState("");
+  const [transactionDateFrom, setTransactionDateFrom] = useState("");
+  const [transactionDateTo, setTransactionDateTo] = useState("");
+  const [transactionStatus, setTransactionStatus] = useState("all");
+  const [transactionSort, setTransactionSort] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [startDate, setStartDate] = useState("");
@@ -535,13 +541,26 @@ export default function AdminExpenses() {
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
       reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
     })),
-  ].sort((a,b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  ];
+  const transactionDateInvalid = transactionDateMode === "range"
+    && Boolean(transactionDateFrom && transactionDateTo && transactionDateFrom > transactionDateTo);
   const visibleTransactions = unifiedTransactions.filter(tx =>
     (detailKind === "all" || tx.kind === detailKind)
-    && (!unifiedSearch.trim() || [tx.id, tx.name, tx.description, tx.reference]
+    && (transactionStatus === "all" || tx.status === transactionStatus)
+    && (transactionDateMode !== "single" || !transactionSingleDate || tx.date === transactionSingleDate)
+    && (transactionDateMode !== "range" || (
+      (!transactionDateFrom || tx.date >= transactionDateFrom)
+      && (!transactionDateTo || tx.date <= transactionDateTo)))
+    && !transactionDateInvalid
+    && (!unifiedSearch.trim() || [tx.id, tx.name, tx.bank, tx.account, tx.description, tx.reference]
       .some(value => value.toLowerCase().includes(unifiedSearch.trim().toLowerCase())))
-  );
-  const selectedTransaction = visibleTransactions.find(tx => tx.key === selectedTransactionId) ?? visibleTransactions[0];
+  ).sort((a,b) => transactionSort === "largest" ? b.amount - a.amount :
+    transactionSort === "smallest" ? a.amount - b.amount :
+      transactionSort === "oldest" ? a.date.localeCompare(b.date) || a.key.localeCompare(b.key) :
+        b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  const toggleExpandedTransaction = (key: string) =>
+    setExpandedTransactionIds(current => current.includes(key)
+      ? current.filter(id => id !== key) : [...current, key]);
 
   const recipientSuggestions = [
     ...employees.map((e) => ({ key: `staff-${e.employeeId}`, name: e.fullName, kind: "Karyawan SC", vendorId: "" })),
@@ -682,9 +701,6 @@ export default function AdminExpenses() {
               }}>
                 <Plus className="w-4 h-4 mr-2" /> Input Uang Masuk
               </Button>
-              <Button variant="outline" onClick={() => { setIncomeHistoryOpen(true); void refetchIncome(); }}>
-                <Eye className="w-4 h-4 mr-2" /> Histori Lengkap
-              </Button>
             </div>
           </div>
 
@@ -749,85 +765,183 @@ export default function AdminExpenses() {
             <h2 className="text-lg font-bold text-blue-900">Detail Transaksi Keuangan SC</h2>
             <p className="text-sm text-gray-500">Riwayat gabungan baca-saja dari register Uang Masuk dan daftar Pengeluaran SC.</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex gap-2 flex-wrap" role="group" aria-label="Filter jenis transaksi">
-              {([
-                ["all", "Semua"], ["income", "Uang Masuk"], ["expense", "Pengeluaran"],
-              ] as const).map(([kind, label]) => (
-                <Button key={kind} size="sm" variant={detailKind === kind ? "default" : "outline"}
-                  onClick={() => {setDetailKind(kind); setSelectedTransactionId(null);}}>
-                  {label}
-                </Button>
-              ))}
-            </div>
-            <Input aria-label="Cari transaksi keuangan" className="sm:ml-auto sm:max-w-xs"
-              placeholder="Cari ID, pengirim, penerima atau referensi..."
-              value={unifiedSearch} onChange={e => {setUnifiedSearch(e.target.value); setSelectedTransactionId(null);}} />
-          </div>
-          {incomeHistoryError && <p className="text-sm text-red-700">Pemasukan gagal dibaca; daftar gabungan mungkin belum lengkap.</p>}
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] gap-4 items-start">
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-base">Daftar Transaksi ({visibleTransactions.length})</CardTitle></CardHeader>
-              <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
-                {(!visibleTransactions.length && (isLoading || incomeHistoryLoading)) ? <p className="text-sm text-gray-500">Memuat transaksi...</p>
-                 : !visibleTransactions.length ? <p className="text-sm text-gray-500">Tidak ada transaksi yang cocok.</p>
-                 : visibleTransactions.map(tx => (
-                  <button type="button" key={tx.key} onClick={() => setSelectedTransactionId(tx.key)}
-                    className={`w-full text-left rounded-lg border p-3 hover:bg-gray-50 ${selectedTransaction?.key === tx.key ? "border-blue-500 bg-blue-50" : "border-gray-200"}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className={`font-semibold text-sm ${tx.kind === "income" ? "text-emerald-800" : "text-orange-800"}`}>
-                          {tx.kind === "income" ? "↓ Uang Masuk" : "↑ Pengeluaran"} · {tx.name}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">{tx.id} · {tx.date}</p>
-                      </div>
-                      <span className={`font-bold whitespace-nowrap ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
-                        {tx.kind === "income" ? "+" : "−"}{formatIDR(tx.amount)}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-base">Rincian Transaksi</CardTitle></CardHeader>
-              <CardContent>
-                {!selectedTransaction ? <p className="text-sm text-gray-500">Pilih transaksi untuk melihat rinciannya.</p> : (
-                  <div className="space-y-3">
-                    <div className={`rounded-lg p-4 ${selectedTransaction.kind === "income" ? "bg-emerald-50" : "bg-orange-50"}`}>
-                      <p className="text-xs text-gray-600">{selectedTransaction.kind === "income" ? "Uang Masuk" : "Pengeluaran"}</p>
-                      <p className="text-2xl font-bold mt-1">{formatIDR(selectedTransaction.amount)}</p>
-                      <p className="text-xs font-mono mt-2">{selectedTransaction.id}</p>
-                    </div>
-                    {([
-                      ["Tanggal", selectedTransaction.date],
-                      [selectedTransaction.kind === "income" ? "Pengirim" : "Penerima",selectedTransaction.name],
-                      ["Keterangan", selectedTransaction.description],
-                      ["Bank / Sumber Dana", selectedTransaction.bank || "Tidak tersedia"],
-                      ["Akun Penerima / Tujuan", selectedTransaction.account || "Tidak tersedia"],
-                      ["Metode", selectedTransaction.method || "Tidak tersedia"],
-                      ["Nomor Referensi", selectedTransaction.reference || "Tidak diisi"],
-                      ["Status", selectedTransaction.status],
-                      ["Register Sheets", selectedTransaction.sheet],
-                      ["Kas Besar SC", selectedTransaction.cashSheet],
-                      ["Catatan", selectedTransaction.notes || "Tidak ada"],
-                    ] as Array<[string,string]>).map(([label,value]) => (
-                      <div key={label} className="grid grid-cols-[125px_minmax(0,1fr)] gap-2 text-sm border-b pb-2">
-                        <span className="text-gray-500">{label}</span>
-                        <span className="break-words font-medium">{value}</span>
-                      </div>
-                    ))}
-                    <Button variant="outline" size="sm" onClick={() => {
-                      void navigator.clipboard.writeText(
-                        `ID: ${selectedTransaction.id}\nTanggal: ${selectedTransaction.date}\nNama: ${selectedTransaction.name}\nNominal: ${formatIDR(selectedTransaction.amount)}\nStatus: ${selectedTransaction.status}`
-                      ).then(() => toast({title:"Detail disalin"})).catch(() => toast({title:"Gagal menyalin detail",variant:"destructive"}));
-                    }}>Salin Detail</Button>
-                    <p className="text-xs text-gray-500">Detail baca-saja; persetujuan dan jurnal tetap mengikuti proses masing-masing.</p>
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Filter jenis transaksi">
+                  {([
+                    ["all", "Semua"], ["income", "Uang Masuk"], ["expense", "Pengeluaran"],
+                  ] as const).map(([kind, label]) => (
+                    <Button key={kind} size="sm" variant={detailKind === kind ? "default" : "outline"}
+                      onClick={() => setDetailKind(kind)}>{label}</Button>
+                  ))}
+                </div>
+                <Input aria-label="Cari transaksi keuangan" className="lg:ml-auto lg:max-w-sm"
+                  placeholder="Cari ID, nama, bank, rekening atau referensi..."
+                  value={unifiedSearch} onChange={e => setUnifiedSearch(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="finance-date-mode">Filter Tanggal</Label>
+                  <Select value={transactionDateMode} onValueChange={v => setTransactionDateMode(v as "all" | "single" | "range")}>
+                    <SelectTrigger id="finance-date-mode"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua tanggal</SelectItem>
+                      <SelectItem value="single">Tanggal tunggal</SelectItem>
+                      <SelectItem value="range">Rentang tanggal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {transactionDateMode === "single" && (
+                  <div className="space-y-1">
+                    <Label htmlFor="finance-single-date">Tanggal transaksi</Label>
+                    <Input id="finance-single-date" type="date" value={transactionSingleDate}
+                      onChange={e => setTransactionSingleDate(e.target.value)} />
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </div>
+                {transactionDateMode === "range" && (
+                  <>
+                    <div className="space-y-1">
+                      <Label htmlFor="finance-from-date">Dari tanggal</Label>
+                      <Input id="finance-from-date" type="date" value={transactionDateFrom}
+                        max={transactionDateTo || undefined}
+                        onChange={e => setTransactionDateFrom(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="finance-to-date">Sampai tanggal</Label>
+                      <Input id="finance-to-date" type="date" value={transactionDateTo}
+                        min={transactionDateFrom || undefined}
+                        onChange={e => setTransactionDateTo(e.target.value)} />
+                    </div>
+                  </>
+                )}
+                <div className="space-y-1">
+                  <Label htmlFor="finance-status">Status</Label>
+                  <Select value={transactionStatus} onValueChange={setTransactionStatus}>
+                    <SelectTrigger id="finance-status"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua status</SelectItem>
+                      {Array.from(new Set(unifiedTransactions.map(tx => tx.status))).sort().map(value =>
+                        <SelectItem key={value} value={value}>{value}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="finance-sort">Urutkan</Label>
+                  <Select value={transactionSort} onValueChange={v => setTransactionSort(v as typeof transactionSort)}>
+                    <SelectTrigger id="finance-sort"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="newest">Tanggal terbaru</SelectItem>
+                      <SelectItem value="oldest">Tanggal terlama</SelectItem>
+                      <SelectItem value="largest">Nominal terbesar</SelectItem>
+                      <SelectItem value="smallest">Nominal terkecil</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {transactionDateInvalid && <p role="alert" className="text-sm text-red-700">
+                Tanggal awal tidak boleh lebih besar dari tanggal akhir.
+              </p>}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-500">
+                  Menampilkan {visibleTransactions.length} dari {unifiedTransactions.length} transaksi
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds(visibleTransactions.map(tx => tx.key))}>Buka Semua</Button>
+                  <Button variant="outline" size="sm" onClick={() => setExpandedTransactionIds([])}>Tutup Semua</Button>
+                  <Button variant="ghost" size="sm" onClick={() => {
+                    setDetailKind("all"); setUnifiedSearch(""); setTransactionStatus("all");
+                    setTransactionDateMode("all"); setTransactionSingleDate("");
+                    setTransactionDateFrom(""); setTransactionDateTo("");
+                    setTransactionSort("newest"); setExpandedTransactionIds([]);
+                  }}>Reset Filter</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          {incomeHistoryError && <p className="text-sm text-red-700">Pemasukan belum berhasil dimuat; daftar gabungan mungkin tidak lengkap.</p>}
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base">Master Tabel Transaksi</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left border-b">
+                      <th className="p-3">ID / Tanggal</th>
+                      <th className="p-3">Nama / Jenis</th>
+                      <th className="p-3 text-right">Nominal / Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleTransactions.map(tx => (
+                      <Fragment key={tx.key}>
+                        <tr role="button" tabIndex={0} aria-expanded={expandedTransactionIds.includes(tx.key)}
+                          className={`cursor-pointer border-b hover:bg-blue-50 focus-visible:outline focus-visible:outline-blue-500 ${expandedTransactionIds.includes(tx.key) ? "bg-blue-50" : ""}`}
+                          onClick={() => toggleExpandedTransaction(tx.key)}
+                          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleExpandedTransaction(tx.key); } }}>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <ChevronsUpDown className="w-4 h-4 text-gray-500 shrink-0" />
+                              <div><p className="font-mono font-semibold">{tx.id}</p>
+                                <p className="text-xs text-gray-500">{tx.date}</p></div>
+                            </div>
+                          </td>
+                          <td className="p-3"><p className="font-semibold">{tx.name}</p>
+                            <p className={`text-xs ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
+                              {tx.kind === "income" ? "Uang Masuk" : "Pengeluaran"}
+                            </p>
+                          </td>
+                          <td className="p-3 text-right">
+                            <p className={`font-bold whitespace-nowrap ${tx.kind === "income" ? "text-emerald-700" : "text-orange-700"}`}>
+                              {tx.kind === "income" ? "+" : "−"}{formatIDR(tx.amount)}
+                            </p>
+                            <p className="text-xs text-gray-500">{tx.status}</p>
+                          </td>
+                        </tr>
+                        {expandedTransactionIds.includes(tx.key) && (
+                          <tr className="bg-slate-50 border-b">
+                            <td colSpan={3} className="p-4 sm:p-5">
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="font-bold">Rincian {tx.kind === "income" ? "Pemasukan" : "Pengeluaran"} — {tx.id}</p>
+                                  <Badge variant="outline">Baca saja</Badge>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                  {([
+                                    ["Tanggal", tx.date],
+                                    [tx.kind === "income" ? "Pengirim" : "Penerima",tx.name],
+                                    ["Metode",tx.method || "Tidak tersedia"],
+                                    ["Bank / Sumber",tx.bank || "Tidak tersedia"],
+                                    ["Akun Tujuan",tx.account || "Tidak tersedia"],
+                                    ["Referensi Bank",tx.reference || "Tidak diisi"],
+                                    ["Status Transaksi",tx.status],
+                                    ["Register Sheets",tx.sheet],
+                                    ["Kas Besar SC",tx.cashSheet],
+                                    ["Keterangan",tx.description || "Tidak ada"],
+                                    ["Catatan",tx.notes || "Tidak ada"],
+                                  ] as Array<[string,string]>).map(([label,value]) => (
+                                    <div key={label} className="space-y-1 min-w-0">
+                                      <p className="text-xs text-gray-500">{label}</p>
+                                      <p className="font-medium text-sm break-words">{value}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex justify-end">
+                                  <Button size="sm" variant="outline" onClick={() => toggleExpandedTransaction(tx.key)}>Tutup Rincian</Button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+                {(isLoading || incomeHistoryLoading) && !unifiedTransactions.length && <p className="text-sm text-gray-500 p-5">Memuat transaksi...</p>}
+                {!isLoading && !incomeHistoryLoading && !visibleTransactions.length && <p className="text-sm text-gray-500 p-5 text-center">Tidak ada transaksi yang sesuai filter.</p>}
+              </div>
+            </CardContent>
+          </Card>
         </section>
       ) : (
         <section role="tabpanel" aria-label="Pengeluaran SC" className="space-y-4">

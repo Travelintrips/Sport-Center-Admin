@@ -52,7 +52,28 @@ describe("unified transaction detail view", () => {
     expect(ui).toContain("incomeData?.entries");
     expect(ui).toContain("allExpenses.map");
     expect(ui).toContain("Cari transaksi keuangan");
-    expect(ui).toContain("Rincian Transaksi");
-    expect(ui).toContain("Salin Detail");
+    expect(ui).toContain("Master Tabel Transaksi");
+    expect(ui).toContain("Rincian ");
+  });
+});
+
+describe("expandable master finance table", () => {
+  it("has accessible inline expansion and no separate detail button", () => {
+    expect(ui).toContain('aria-expanded={expandedTransactionIds.includes(tx.key)}');
+    expect(ui).toContain('onClick={() => toggleExpandedTransaction(tx.key)}');
+    expect(ui).toContain('<td colSpan={3}');
+    expect(ui).toContain("Buka Semua");
+    expect(ui).toContain("Tutup Semua");
+    expect(ui).not.toContain("Salin Detail");
+    expect(ui).not.toContain("Histori Lengkap");
+  });
+  it("supports one exact day or an inclusive from/to range and invalid-range warning", () => {
+    expect(ui).toContain('value="single">Tanggal tunggal');
+    expect(ui).toContain('value="range">Rentang tanggal');
+    expect(ui).toContain('tx.date === transactionSingleDate');
+    expect(ui).toContain('tx.date >= transactionDateFrom');
+    expect(ui).toContain('tx.date <= transactionDateTo');
+    expect(ui).toContain('transactionDateFrom > transactionDateTo');
+    expect(ui).toContain('Tanggal awal tidak boleh lebih besar');
   });
 });
