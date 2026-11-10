@@ -11,14 +11,15 @@ const migration=readFileSync(resolve(process.cwd(),"../../migrations/20261110_sc
 
 const sample=(direction:"IN"|"OUT",amount:number,id:number)=>({
   id,direction,transaction_date:"2026-11-10",source_name:"Felicia Justiani",amount,
-  notes:"Tes internal"
+  notes:"Tes internal",sender_bank:"Mandiri",receiving_account:"Kas Besar SC",
+  method:"Simulasi",bank_reference:"TEST-123"
 });
 describe("SC test-only ledger never creates bank movements or journals",()=>{
   it("places money in column C, money out in D, leaves balance and BizPortal columns untouched",()=>{
     const income=testSheetRow(sample("IN",10000,1));
     const expense=testSheetRow(sample("OUT",3000,2));
     expect(income).toEqual([
-      "10/11/2026","SC-TEST-IN: Dana masuk dari FELICIA JUSTIANI | Tes internal | SC-TEST-IN-000001",
+      "10/11/2026","SC-TEST-IN: Dana masuk dari FELICIA JUSTIANI | Mandiri - Kas Besar SC | Simulasi | Ref: TEST-123 | Tes internal | SC-TEST-IN-000001",
       10000,"","","Pemasukan","","SC_TEST_ONLY","","","","",""
     ]);
     expect(expense[2]).toBe("");
