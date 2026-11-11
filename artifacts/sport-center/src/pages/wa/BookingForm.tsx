@@ -755,11 +755,11 @@ export default function WaBookingForm() {
             src={buildingImg}
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 h-full w-full scale-110 object-cover object-center opacity-[0.18] blur-[10px] saturate-75"
+            className="absolute inset-0 h-full w-full scale-110 object-cover object-[68%_48%] opacity-[0.42] blur-[6px] saturate-90 contrast-90"
             decoding="async"
           />
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,250,243,0.98)_0%,rgba(255,250,243,0.91)_38%,rgba(255,250,243,0.72)_66%,rgba(255,247,237,0.80)_100%)]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_44%,rgba(15,91,70,0.10),transparent_25%),radial-gradient(circle_at_12%_18%,rgba(245,158,11,0.14),transparent_30%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,250,243,0.96)_0%,rgba(255,250,243,0.82)_38%,rgba(255,250,243,0.48)_66%,rgba(255,247,237,0.42)_100%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_44%,rgba(15,91,70,0.14),transparent_28%),radial-gradient(circle_at_12%_18%,rgba(245,158,11,0.12),transparent_32%)]" />
           <div className="absolute -bottom-16 left-0 right-0 h-32 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.95),rgba(255,255,255,0)_68%)]" />
         </div>
         <div className="relative mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 sm:pb-12 lg:px-8">
