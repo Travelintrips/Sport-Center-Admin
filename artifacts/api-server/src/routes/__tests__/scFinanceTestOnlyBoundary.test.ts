@@ -19,7 +19,7 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     const income=testSheetRow(sample("IN",10000,1));
     const expense=testSheetRow(sample("OUT",3000,2));
     expect(income).toEqual([
-      "10/11/2026","SC-TEST-IN: Dana masuk dari FELICIA JUSTIANI | Mandiri - Kas Besar SC | Simulasi | Ref: TEST-123 | Tes internal | SC-TEST-IN-000001",
+      "10/11/2026","Dana Masuk dari FELICIA JUSTIANI | Mandiri - Kas Besar SC | TEST-123 | SC-IN-000001",
       10000,"","","Pemasukan","","SC_TEST_ONLY","","","","",""
     ]);
     expect(expense[2]).toBe("");
@@ -40,9 +40,9 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     ])).toEqual({income:10000,expense:3000,balance:7000,pending:1,count:5});
   });
   it("finds exactly one row for each stable ID on retry",()=>{
-    expect(testNo(1,"IN")).toBe("SC-TEST-IN-000001");
-    expect(testRowIndexes([["Header"],["A | SC-TEST-IN-000001"],["B | SC-TEST-OUT-000002"]],
-      "SC-TEST-IN-000001")).toEqual([2]);
+    expect(testNo(1,"IN")).toBe("SC-IN-000001");
+    expect(testRowIndexes([["Header"],["A | SC-IN-000001"],["B | SC-TEST-OUT-000002"]],
+      "SC-IN-000001")).toEqual([2]);
   });
   it("rejects invalid dates and amounts",()=>{
     const ok={entryKey:"9472f5ac-089f-41f2-b557-c6a67a49939d",
