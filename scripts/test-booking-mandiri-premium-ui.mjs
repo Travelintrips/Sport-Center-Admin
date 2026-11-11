@@ -8,13 +8,13 @@ test("premium booking page reuses the real building asset",()=>{
  assert.ok(path);
  assert.ok(home.includes('from "'+path+'"'));
  assert.match(page,/src=\{buildingImg\}/);
- assert.match(page,/Pilih layanan olahraga/);
+ assert.match(page,/Pilih Layanan Olahraga/);
 });
 test("dynamic prices and safe guest Gym route remain unchanged",()=>{
  assert.match(page,/fetch\("\/api\/wa\/facilities"/);
  assert.match(page,/Number\(value\.pricePerHour\) > 0/);
  assert.match(page,/facilities\.map\(facility =>/);
  assert.match(page,/isGym\(facility\) \? path \+ "\?nonmember=1&self=1" : path/);
- assert.match(page,/Pembayaran harus diverifikasi sebelum dianggap lunas/);
+ assert.match(page,/setelah pembayaran diverifikasi/i);
  assert.doesNotMatch(page,/ACTIVATE_USER|SUSPEND_USER/);
 });
