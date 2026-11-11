@@ -1,4 +1,4 @@
-import { isNewOrdinaryX904Candidate, isSafeReenrollment } from "./x904NewOrdinaryUserDefaultSuspend";
+import { isNewOrdinaryX904Candidate, isSafeReenrollment, hasX904CommandForCurrentIdentityEpoch } from "./x904NewOrdinaryUserDefaultSuspend";
 import { decideNonmemberX904Access, x904NonmemberEffectiveExpiry } from "./x904NonmemberAccessPolicy";
 
 describe("new ordinary X904 device user stays suspended until verified paid entitlement", () => {
@@ -51,4 +51,14 @@ describe("historical PIN reused after removal",()=>{
  });
  test.each(["12","79","237"])("special PIN %s held",pin=>expect(isSafeReenrollment({...toms,pin})).toBe(false));
  test.each([4,14])("special role %s held",role=>expect(isSafeReenrollment({...toms,oldRole:role})).toBe(false));
+});
+
+test("reused PIN separates old commands from the new identity epoch", () => {
+  const firstSeen = Date.parse("2026-11-11T10:00:00Z");
+  expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, undefined)).toBe(false);
+  expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, firstSeen - 60_000)).toBe(false);
+  expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, firstSeen)).toBe(true);
+  expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, firstSeen + 60_000)).toBe(true);
+  expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, NaN)).toBe(true);
+  expect(hasX904CommandForCurrentIdentityEpoch(NaN, undefined)).toBe(true);
 });
