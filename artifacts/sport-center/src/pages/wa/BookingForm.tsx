@@ -688,146 +688,40 @@ export default function WaBookingForm() {
               </div>
             )}
             {publicGymGuest && (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                Pencocokan nama X904 belum merupakan hak akses. Booking dan pembayaran mandiri tidak otomatis membuka pintu. Tunjukkan nomor booking kepada petugas
-                untuk verifikasi identitas serta penyerahan kartu VIS / pemeriksaan PIN X904.
-              </p>
-            )}
-            <p className="text-sm text-gray-600 text-center">
-              {proofUploadState === "uploading"
-                ? "Booking berhasil dibuat. Mengirim bukti pembayaran ke server..."
-                : proofUploadState === "failed"
-                  ? "Booking sudah dibuat, tetapi bukti belum berhasil tersimpan. Jangan membayar atau membuat booking lagi."
-                  : proofUploadState === "received"
-                    ? "Bukti pembayaran sudah tercatat dan menunggu verifikasi admin. Booking belum memberi akses pintu."
-                    : proofUploadState === "confirmed"
-                      ? "Pembayaran sudah terkonfirmasi oleh sistem. Periksa status terbaru sebelum menggunakan fasilitas."
-                      : "Booking sudah dibuat, tetapi belum ada bukti pembayaran yang terkonfirmasi tersimpan."}
-            </p>
-
-            {proofUploadError && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                {proofUploadError}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {proofUploadState === "uploading" && (
-                <p role="status" className="rounded-lg bg-blue-50 p-3 text-center text-sm font-semibold text-blue-700">
-                  Mengunggah bukti pembayaran. Jangan menutup halaman atau membuat booking baru.
-                </p>
-              )}
-              {proofUploadState === "failed" && proofFile && (
-                <Button type="button" onClick={() => { void uploadProofForBooking(result); }}
-                  disabled={uploadingProof}
-                  className="w-full bg-orange-600 hover:bg-orange-700">
-                  Coba Upload Lagi — Booking {result.orderNumber}
-                </Button>
-              )}
-              {proofUploadState !== "received" && proofUploadState !== "confirmed" && proofUploadState !== "uploading" && (
-                <a href={result.uploadProofUrl}
-                  className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 px-4 rounded-lg text-center text-sm transition-colors">
-                  📎 Upload Bukti Pembayaran pada Booking Ini
-                </a>
-              )}
-              {(proofUploadState === "received" || proofUploadState === "confirmed") && (
-                <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700">
-                  Bukti pembayaran sudah diterima sistem. Tidak perlu upload atau membayar ulang.
-                </p>
-              )}
-              <a href={result.statusUrl}
-                className="block w-full border border-orange-300 text-orange-700 font-semibold py-3 px-4 rounded-lg text-center text-sm hover:bg-orange-50 transition-colors">
-                🔍 Cek Status Booking
-              </a>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  return (
-    <main className="min-h-screen bg-[#f7f8fb] pb-16 text-slate-900">
-      {/* Shared premium checkout header for every public Sport Center facility. */}
-      <section className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-white via-[#fffbf7] to-orange-50">
-        <div className="mx-auto max-w-6xl px-4 pb-8 pt-6 sm:px-6 sm:pb-10 lg:px-8">
-          <Link href="/booking/mandiri" className="mb-7 inline-flex min-h-9 items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-orange-600">
-            <ArrowLeft className="h-4 w-4" /> Semua fasilitas
-          </Link>
-          <div className="grid items-center gap-7 md:grid-cols-[1fr_260px] lg:grid-cols-[1fr_350px]">
-            <div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-orange-700">
-                <ShieldCheck className="h-4 w-4" /> Booking langsung tanpa login
-              </span>
-              <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.16em] text-orange-600">Sport Center Bandara Soekarno-Hatta</p>
-              <h1 className="mt-2 text-3xl font-black leading-tight tracking-tight text-[#142441] sm:text-4xl">{facility?.name}</h1>
-              <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
-                Lengkapi informasi pengunjung, pilih jadwal, lalu bayar dengan metode yang tersedia.
-                Semua dilakukan dalam satu halaman.
-              </p>
-              <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 shadow-sm"><Clock className="h-4 w-4 text-orange-600" /> {facility?.openTime}–{facility?.closeTime} WIB</span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 shadow-sm"><MapPin className="h-4 w-4 text-orange-600" /> {facility?.category}</span>
-                <span className="rounded-lg bg-orange-600 px-3 py-2 font-extrabold text-white">
-                  Rp {facility?.pricePerHour.toLocaleString("id-ID")}{gymWalkIn ? "/kunjungan" : "/jam"}
-                </span>
-              </div>
-            </div>
-            <div className="relative hidden overflow-hidden rounded-2xl border-4 border-white shadow-[0_15px_35px_rgba(15,23,42,0.12)] md:block">
-              <img src={buildingImg} alt="Gedung Sport Center Bandara Soekarno-Hatta" className="aspect-[5/3] h-full w-full object-cover brightness-105" decoding="async" />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="mx-auto max-w-6xl px-4 pt-7 sm:px-6 lg:px-8">
-        <div className="mb-7 grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-3 text-center shadow-sm sm:gap-3 sm:p-4">
-          {[
-            { icon: Phone, title: "Data pemesan", sub: "Identitas" },
-            { icon: CalendarDays, title: "Pilih jadwal", sub: "Tanggal & jam" },
-            { icon: CreditCard, title: "Pembayaran", sub: "QRIS / transfer" },
-          ].map(({ icon: Icon, title, sub }, index) => (
-            <div key={title} className="flex flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 sm:flex-row sm:gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-600"><Icon className="h-4 w-4" /></div>
-              <div className="text-center sm:text-left">
-                <p className="text-xs font-bold text-[#142441] sm:text-sm">{index + 1}. {title}</p>
-                <p className="hidden text-xs text-slate-500 sm:block">{sub}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-2 text-sm text-red-700">
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-            {error}
-          </div>
-        )}
-
-        {publicGymGuest && (
-          <div className="mb-5 rounded-2xl border border-orange-200 bg-gradient-to-r from-orange-50 via-white to-orange-50 p-4 shadow-[0_8px_28px_rgba(249,115,22,0.08)] sm:p-5">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600">
-                <ShieldCheck className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-extrabold text-[#142441] sm:text-base">Booking Gym lebih mudah</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">
-                  Lengkapi data Anda, pilih jadwal dan metode pembayaran, lalu unggah bukti pembayaran. Setelah pembayaran diverifikasi, akses Gym akan diaktifkan secara otomatis.
-                </p>
-                <div className="mt-3 grid gap-2 text-xs font-medium text-slate-600 sm:grid-cols-3">
-                  <div className="rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-100">1. Isi data diri</div>
-                  <div className="rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-100">2. Pilih jadwal & bayar</div>
-                  <div className="rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-100">3. Akses aktif otomatis</div>
+          <div className="mb-6 overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-r from-[#0b3f33] via-[#0f5b46] to-[#176f56] text-white shadow-[0_18px_45px_rgba(15,91,70,0.18)]">
+            <div className="relative p-5 sm:p-6">
+              <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-amber-300/10 blur-2xl" />
+              <div className="relative flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-amber-300/40 bg-amber-300/15 text-amber-200">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-base font-black sm:text-xl">Booking Gym <span className="text-amber-300">lebih mudah</span></p>
+                  <p className="mt-1.5 max-w-3xl text-sm leading-6 text-emerald-50/90">
+                    Ikuti tiga langkah sederhana berikut untuk mendapatkan akses Gym.
+                  </p>
+                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                    {[
+                      ["1. Isi Data Diri", "Lengkapi nama dan nomor WhatsApp"],
+                      ["2. Pilih Jadwal & Bayar", "Tentukan tanggal, jam, dan metode pembayaran"],
+                      ["3. Akses Aktif Otomatis", "Setelah pembayaran diverifikasi, akses akan diaktifkan"],
+                    ].map(([title, sub]) => (
+                      <div key={title} className="rounded-2xl border border-white/10 bg-white/10 px-3.5 py-3 backdrop-blur-sm">
+                        <p className="text-xs font-extrabold text-white sm:text-sm">{title}</p>
+                        <p className="mt-1 hidden text-xs leading-5 text-emerald-50/75 sm:block">{sub}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
-        <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
+        <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_410px] lg:gap-7">
           <div className="space-y-6">
-          <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
-            <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
-              <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">Data Pemesan</CardTitle>
+          <Card className="overflow-hidden rounded-3xl border-slate-200/80 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.06)]">
+            <CardHeader className="border-b border-slate-100 bg-gradient-to-r from-white to-slate-50/70 pb-4 pt-5">
+              <CardTitle className="text-sm font-black text-[#0b3f33] uppercase tracking-wide">Data Pemesan</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 p-5 sm:p-6">
               {gymWalkIn && !publicGymGuest ? (
@@ -852,9 +746,9 @@ export default function WaBookingForm() {
                   />
                   {publicGymGuest && guestIdentityRoute === "checking" && <p className="text-xs text-slate-500" role="status">Memeriksa nama...</p>}
                   {publicGymGuest && guestLookupError && <p className="text-xs text-amber-700" role="status">{guestLookupError}</p>}
-                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Terdaftar sebagai nonmember X904. Akses menunggu verifikasi petugas.</p>}
-                  {publicGymGuest && guestIdentityRoute === "expired_member" && <p className="text-xs font-semibold text-green-700" role="status">Nama ditemukan di X904. Membership sebelumnya expired; tiket harian boleh dipesan tanpa perpanjangan. Akses diverifikasi petugas.</p>}
-                  {publicGymGuest && guestIdentityRoute === "recognized_review" && <p className="text-xs font-semibold text-green-700" role="status">Nama ditemukan di X904. Tiket harian dapat dipesan; PIN/kartu dan identitas harus diverifikasi petugas sebelum akses.</p>}
+                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Data Anda dikenali. Akses akan aktif setelah pembayaran diverifikasi.</p>}
+                  {publicGymGuest && guestIdentityRoute === "expired_member" && <p className="text-xs font-semibold text-green-700" role="status">Data Anda dikenali. Anda dapat melanjutkan booking kunjungan harian.</p>}
+                  {publicGymGuest && guestIdentityRoute === "recognized_review" && <p className="text-xs font-semibold text-green-700" role="status">Data Anda dikenali. Silakan lanjutkan booking dan pembayaran.</p>}
                 </div>
               )}
               <div className="space-y-1">
@@ -924,9 +818,9 @@ export default function WaBookingForm() {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
-            <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
-              <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">Jadwal Booking</CardTitle>
+          <Card className="overflow-hidden rounded-3xl border-slate-200/80 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.06)]">
+            <CardHeader className="border-b border-slate-100 bg-gradient-to-r from-white to-slate-50/70 pb-4 pt-5">
+              <CardTitle className="text-sm font-black text-[#0b3f33] uppercase tracking-wide">Jadwal Booking</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 p-5 sm:p-6">
               {!gymWalkIn && (
@@ -1046,7 +940,7 @@ export default function WaBookingForm() {
           <aside aria-label="Ringkasan dan pembayaran booking" className="space-y-6 lg:sticky lg:top-5">
           {/* Price summary */}
           {(form.startTime || dedicatedNonmember) && (
-            <Card className="overflow-hidden rounded-2xl border-orange-200 bg-gradient-to-b from-orange-50 to-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
+            <Card className="overflow-hidden rounded-3xl border-amber-200 bg-gradient-to-b from-[#fffaf0] via-white to-white shadow-[0_16px_40px_rgba(180,83,9,0.08)]">
               <CardContent className="pt-4 pb-3 space-y-1.5">
                 {paymentOptions.length > 0 && (
                   <div className="space-y-2.5 pb-3">
@@ -1062,18 +956,18 @@ export default function WaBookingForm() {
                             onClick={() => setForm((current) => ({ ...current, paymentMethod: method.id }))}
                             className={`flex min-h-16 items-center gap-2 rounded-lg border-2 px-2.5 py-2 text-left transition-colors ${
                               selected
-                                ? "border-orange-500 bg-orange-500 text-white"
-                                : "border-orange-200 bg-white text-gray-700 hover:border-orange-400"
+                                ? "border-amber-500 bg-gradient-to-br from-amber-50 to-orange-50 text-slate-900 shadow-[0_8px_22px_rgba(245,158,11,0.16)]"
+                                : "border-slate-200 bg-white text-gray-700 hover:border-amber-300 hover:bg-amber-50/40"
                             }`}
                           >
                             {method.id === "qris" ? (
-                              <QrCode className={`h-6 w-6 shrink-0 ${selected ? "text-white" : "text-orange-600"}`} />
+                              <QrCode className={`h-6 w-6 shrink-0 ${selected ? "text-amber-700" : "text-orange-600"}`} />
                             ) : (
-                              <Building2 className={`h-6 w-6 shrink-0 ${selected ? "text-white" : "text-blue-600"}`} />
+                              <Building2 className={`h-6 w-6 shrink-0 ${selected ? "text-blue-700" : "text-blue-600"}`} />
                             )}
                             <span className="min-w-0">
                               <span className="block text-xs font-bold">{method.label}</span>
-                              <span className={`block truncate text-[10px] ${selected ? "text-white/80" : "text-gray-500"}`}>
+                              <span className={`block truncate text-[10px] ${selected ? "text-slate-600" : "text-gray-500"}`}>
                                 {method.detail}
                               </span>
                             </span>
@@ -1177,9 +1071,9 @@ export default function WaBookingForm() {
             </Card>
           )}
 
-          <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-[0_10px_32px_rgba(15,23,42,0.045)]">
-            <CardHeader className="border-b border-slate-100 bg-slate-50/60 pb-4 pt-5">
-              <CardTitle className="text-sm font-extrabold text-[#142441] uppercase tracking-wide">
+          <Card className="overflow-hidden rounded-3xl border-slate-200/80 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.06)]">
+            <CardHeader className="border-b border-slate-100 bg-gradient-to-r from-white to-slate-50/70 pb-4 pt-5">
+              <CardTitle className="text-sm font-black text-[#0b3f33] uppercase tracking-wide">
                 Upload Bukti Bayar
               </CardTitle>
             </CardHeader>
@@ -1210,7 +1104,7 @@ export default function WaBookingForm() {
                   </label>
                 </div>
               ) : (
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-orange-300 bg-orange-50 px-4 py-5 text-sm font-bold text-orange-700 hover:bg-orange-100">
+                <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-amber-300 bg-gradient-to-br from-amber-50 to-white px-4 py-7 text-sm font-extrabold text-amber-800 transition hover:border-amber-400 hover:bg-amber-50">
                   <Upload className="h-5 w-5" />
                   Pilih Foto Bukti Pembayaran
                   <input
@@ -1264,9 +1158,9 @@ export default function WaBookingForm() {
             else if (proofScanning) missing.push("Menunggu pemeriksaan bukti");
             else if (!proofOcrPreview?.amountMatch) missing.push("Nominal bukti belum cocok dengan tagihan");
             if (missing.length === 0 || submitting || uploadingProof) return null;
-            return <div role="status" aria-live="polite" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <p className="font-semibold">Booking belum dapat dikirim:</p>
-              <ul className="list-disc pl-5">{missing.map(reason => <li key={reason}>{reason}</li>)}</ul>
+            return <div role="status" aria-live="polite" className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-4 py-3.5 text-sm text-slate-700 shadow-[0_8px_22px_rgba(245,158,11,0.08)]">
+              <p className="font-extrabold text-amber-900">Sebelum booking, pastikan:</p>
+              <ul className="mt-2 space-y-1.5">{missing.map(reason => <li key={reason} className="flex items-start gap-2"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /> <span>{reason}</span></li>)}</ul>
               
             </div>;
           })()}
@@ -1289,7 +1183,7 @@ export default function WaBookingForm() {
               !form.startTime ||
               !proofFile
             }
-            className="min-h-14 w-full rounded-xl bg-orange-600 py-4 text-base font-extrabold text-white shadow-lg shadow-orange-600/15 transition hover:bg-orange-700">
+            className="min-h-14 w-full rounded-2xl bg-gradient-to-r from-[#0b3f33] to-[#0f5b46] py-4 text-base font-black text-white shadow-[0_14px_30px_rgba(15,91,70,0.24)] transition hover:from-[#0a382d] hover:to-[#0d503f] disabled:opacity-45">
             {submitting || uploadingProof || proofScanning ? (
               <span className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
