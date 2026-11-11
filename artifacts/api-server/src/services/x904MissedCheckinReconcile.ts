@@ -56,6 +56,10 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time
     FROM sport_center.x904_nonmember_daily_access a
     JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+    JOIN sport_center.sport_payments p
+      ON p.id=a.payment_id AND p.booking_id=a.booking_id
+      AND p.status='confirmed' AND p.confirmed_at IS NOT NULL
+      AND p.amount > 0
     JOIN sport_center.x904_verified_nonmember_identities v
       ON v.device_serial=a.device_serial AND v.user_pin=a.user_pin
       AND v.device_uid=a.device_uid
@@ -69,6 +73,8 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND l.user_pin=a.user_pin AND l.device_uid=a.device_uid
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND a.identity_type='pin' -- VIS cards retain their established handover/check-in workflow
+      AND a.confirmed_at IS NOT NULL
+      AND a.access_state IN ('active','expired')
       AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
       AND b.status='confirmed' AND b.checked_in_at IS NULL
       AND b.booking_date IN ((now() AT TIME ZONE 'Asia/Jakarta')::date::text,
