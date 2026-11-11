@@ -68,6 +68,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     JOIN sport_center.gym_x904_lan_logs l ON l.device_serial=a.device_serial
       AND l.user_pin=a.user_pin AND l.device_uid=a.device_uid
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
+      AND a.identity_type='pin' -- VIS cards retain their established handover/check-in workflow
       AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
       AND b.status='confirmed' AND b.checked_in_at IS NULL
       AND b.booking_date IN ((now() AT TIME ZONE 'Asia/Jakarta')::date::text,
