@@ -11,7 +11,7 @@ const wa = read("artifacts/api-server/src/routes/whatsapp.ts");
 test("existing gym URL and generic self-service URL both show the chooser", () => {
   assert.match(app, /<Route path="\/gym\/nonmember" component=\{GymNonmemberEntry\}/);
   assert.match(app, /<Route path="\/booking\/mandiri" component=\{GymNonmemberEntry\}/);
-  assert.match(entry, /Pilih layanan/);
+  assert.match(entry, /Pilih Fasilitas & Booking/);
   assert.match(entry, /fetch\("\/api\/wa\/facilities"/);
   assert.match(entry, /facilities\.map\(/);
   assert.doesNotMatch(entry, /window\.location\.replace\(/);
@@ -30,5 +30,5 @@ test("the selector excludes unavailable/non-priced facilities while booking rout
   assert.match(entry, /Number\(value\.pricePerHour\) > 0/);
   assert.match(entry, /typeof value\.id === "number"/);
   assert.match(app, /<Route path="\/wa\/booking\/:facilityId" component=\{WaBookingForm\}/);
-  assert.match(entry, /Tidak perlu membuat akun atau login/);
+  assert.match(entry, /Booking online tanpa login/);
 });
