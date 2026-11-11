@@ -218,6 +218,8 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
+  const [expenseKind,setExpenseKind] = useState("Transfer Bank");
+  const [destinationBank,setDestinationBank] = useState("");
   const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
     amount: number | null; date: string | null; bankReference: string | null; recipient: string | null;
@@ -339,7 +341,8 @@ export default function AdminExpenses() {
       sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
       sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
       senderBank:string;receivingAccount:string;
-      method:string;bankReference:string|null;notes:string|null}>;
+      method:string;bankReference:string|null;notes:string|null;
+      receiptUrls?:string[];expenseKind?:string;destinationBank?:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -408,7 +411,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number
+    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -767,6 +770,10 @@ export default function AdminExpenses() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if(FINANCE_SC_TEST_ONLY && (uploadingReceipt || scanningProof)){
+      toast({title:"Bukti masih diproses",description:"Simpan setelah unggahan/OCR selesai agar bukti tidak tertinggal.",variant:"destructive"});
+      return;
+    }
     if (!form.notes.trim()) {
       toast({ title: "Catatan transaksi wajib diisi", description: "Tuliskan tujuan penggunaan dana sebelum menyimpan.", variant: "destructive" });
       return;
@@ -808,6 +815,8 @@ export default function AdminExpenses() {
             receivingAccount:form.vendorName.trim() || "PENERIMA BELUM DIISI",
             method:form.paymentMethod || "Belum ditentukan",
             bankReference:form.bankReference.trim(),
+            expenseKind,destinationBank:destinationBank.trim(),
+            receiptUrls:form.receiptUrls,
             notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
               ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
             amount:gross
@@ -818,7 +827,7 @@ export default function AdminExpenses() {
               :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
           await refetchFinanceTest();
           setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
-          setExpenseTestEntryKey(crypto.randomUUID());
+          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setExpenseKind("Transfer Bank");
         }catch(error:any){
           toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
         }finally{setExpenseTestSaving(false);}
@@ -1378,7 +1387,13 @@ export default function AdminExpenses() {
                 </tr></thead>
                 <tbody>{visibleTestExpenses.map(x=><tr key={x.id} className="border-b">
                   <td className="p-3 font-mono">{x.testNo}<span className="block text-xs text-gray-500">{x.transactionDate}</span></td>
-                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span>
+                    {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
+                      <span className="block text-xs mt-1">
+                        {x.receiptUrls.map((url,i)=><a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                          className="text-blue-700 underline mr-2">Bukti {i+1}</a>)}
+                      </span>}
+                  </td>
                   <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
                   <td className="p-3">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
                     x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
@@ -1889,6 +1904,28 @@ export default function AdminExpenses() {
                 <p className="text-xs text-gray-500">Tidak memetakan COA, tidak membuat jurnal, dan bukan bank tujuan penerima.</p>
               </div>
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Jenis Transaksi Keluar</Label>
+                  <Select value={expenseKind} onValueChange={setExpenseKind}>
+                    <SelectTrigger><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      {["Transfer Bank","BI-FAST","QRIS","PLN Prabayar","Top Up E-Wallet",
+                        "Biaya Admin","E-Commerce","Tunai","Kartu Kredit","Virtual Account",
+                        "Kasbon Karyawan","Lainnya"].map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Bank Tujuan / Penyedia (opsional)</Label>
+                  <Input value={destinationBank} maxLength={100}
+                    onChange={e=>setDestinationBank(e.target.value)}
+                    placeholder="Contoh: BCA, Mandiri, DANA, PLN"/>
+                  <p className="text-xs text-gray-500">Berbeda dari Sumber Dana. Jangan menebak bank tujuan dari akun pengirim.</p>
+                </div>
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Nomor Referensi Bank (opsional)</Label>
               <Input value={form.bankReference} maxLength={120}
@@ -1922,13 +1959,35 @@ export default function AdminExpenses() {
                 </div>
               )}
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="rounded-md border bg-gray-50 p-3 space-y-1 text-sm">
+                <p className="font-semibold">Pratinjau Keterangan Kolom B (TEST)</p>
+                <p className="break-words">{[
+                  expenseKind==="Transfer Bank"||expenseKind==="BI-FAST"
+                    ? "Transfer ke "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="QRIS"?"Pembayaran QRIS | "+(form.vendorName.trim()||"MERCHANT")
+                    : expenseKind==="PLN Prabayar"?"Pembelian PLN Prabayar | "+(form.vendorName.trim()||"PELANGGAN")
+                    : expenseKind==="Top Up E-Wallet"?"Top Up E-Wallet | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="Biaya Admin"?"Biaya Admin | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="Kasbon Karyawan"?"Kasbon Karyawan | "+(form.vendorName.trim()||"KARYAWAN")
+                    : expenseKind==="Tunai"?"Pengeluaran Tunai | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind+" | "+(form.vendorName.trim()||"PENERIMA"),
+                  [destinationBank.trim(),form.notes.trim()].filter(Boolean).join(" - "),
+                  form.bankReference.trim(),
+                  "SC-TEST-OUT-(ID otomatis)"
+                ].filter(Boolean).join(" | ")}</p>
+                <p className="text-xs text-gray-500">
+                  Penanda SC_TEST_ONLY disimpan terpisah pada kolom H; bukti tetap dapat dilihat dari histori transaksi.
+                </p>
+              </div>
+            )}
             <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
 
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
                 Batal
               </Button>
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving}>
+              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving || uploadingReceipt || scanningProof}>
                 {editingId ? "Simpan Perubahan" : FINANCE_SC_TEST_ONLY ? "Simpan Pengeluaran (TEST)" : "Buat Pengeluaran"}
               </Button>
             </div>
