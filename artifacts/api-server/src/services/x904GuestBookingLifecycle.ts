@@ -4,6 +4,8 @@ import { sql } from "drizzle-orm";
 /** Only completed paid visits with an independently recorded X904 scan qualify.
  * A machine activation alone is never check-in evidence. The source is the
  * device's append-only LAN log, not a manually edited booking status.
+ * LAN log device_uid is a log record identifier (not the user's machine UID);
+ * validate UID against the current machine inventory instead.
  */
 export async function processX904GuestBookingLifecycle(store: Pick<typeof db,"execute"> = db, now = new Date()) {
   if (process.env.GYM_X904_GUEST_BOOKING_LIFECYCLE_ENABLED !== "true") return;
@@ -13,8 +15,12 @@ export async function processX904GuestBookingLifecycle(store: Pick<typeof db,"ex
       FROM sport_center.sport_bookings b
       JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=b.id
       JOIN sport_center.sport_payments p ON p.id=a.payment_id
+      JOIN sport_center.gym_x904_lan_users u ON u.device_serial=a.device_serial
+        AND u.user_pin=a.user_pin AND u.device_uid=a.device_uid
+        AND u.device_role=0
+        AND upper(trim(u.display_name))=upper(trim(a.verified_name))
       JOIN sport_center.gym_x904_lan_logs l ON l.device_serial=a.device_serial
-        AND l.user_pin=a.user_pin AND l.device_uid=a.device_uid
+        AND l.user_pin=a.user_pin
       WHERE b.source='gym_public_guest' AND b.status='confirmed'
         AND b.checked_in_at IS NULL AND b.completed_at IS NULL
         AND a.verification_state='verified' AND a.access_state='expired'

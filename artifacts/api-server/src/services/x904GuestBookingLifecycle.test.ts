@@ -13,7 +13,7 @@ test('enabled path requires paid verified guest, real UID-matched scan, expired 
   process.env.GYM_X904_GUEST_BOOKING_LIFECYCLE_ENABLED='true';
   const store={execute:jest.fn(async(query:any)=>{
     const statement=query.queryChunks.map((x:any)=>typeof x==='string'?x:(x.value?.join?.('')??'')).join('');
-    for(const condition of ["b.source='gym_public_guest'","l.device_uid=a.device_uid","p.status='confirmed'","a.access_state='expired'","readBackConfirmed'='true'","afterGroup'='2'","b.checked_in_at IS NULL"])
+    for(const condition of ["b.source='gym_public_guest'","u.device_uid=a.device_uid","p.status='confirmed'","a.access_state='expired'","readBackConfirmed'='true'","afterGroup'='2'","b.checked_in_at IS NULL"])
       expect(statement).toContain(condition);
     return {rows:[{id:1809,order_number:'SC-1773'}]};
   })};
