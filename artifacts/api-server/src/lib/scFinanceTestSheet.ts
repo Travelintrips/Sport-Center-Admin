@@ -60,7 +60,7 @@ export async function syncScFinanceTestRow(id:number):Promise<"synced"|"pending"
     sheet_sync_started_at=now(),updated_at=now()
     WHERE id=${id} AND (sheet_sync_state IN ('pending','failed') OR
       (sheet_sync_state='syncing' AND sheet_sync_started_at<now()-interval '15 minutes'))
-    RETURNING id,direction,transaction_date::text,source_name,sender_bank,receiving_account,
+    RETURNING id,direction,transaction_date::text,source_name,sender_bank,cash_type,receiving_account,
       method,bank_reference,notes,amount::text`))[0];
   if(!claim){
     const existing=resultRows(await db.execute(sql`SELECT sheet_sync_state
@@ -135,7 +135,7 @@ export async function reconcileScFinanceTestSheets():Promise<{
   const rows=(read.data.values??[]) as unknown[][];
   assertHeaders((rows[0]??[]) as string[]);
   const entries=resultRows(await db.execute(sql`SELECT id,direction,transaction_date::text,source_name,
-    sender_bank,receiving_account,method,bank_reference,notes,amount::text,
+    sender_bank,cash_type,receiving_account,method,bank_reference,notes,amount::text,
     sheet_row,sheet_sync_state FROM sport_center.sc_finance_test_entries
     WHERE sheet_sync_state IN ('synced','removed','mismatch')
     ORDER BY id LIMIT 1000`));

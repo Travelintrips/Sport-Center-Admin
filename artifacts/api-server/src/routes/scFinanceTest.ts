@@ -12,7 +12,7 @@ router.get("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
   try{
     const rows=resultRows(await db.execute(sql`SELECT id,entry_key,direction,
       transaction_date::text AS "transactionDate",source_name AS "sourceName",
-      sender_bank AS "senderBank",receiving_account AS "receivingAccount",
+      sender_bank AS "senderBank",cash_type AS "cashType",receiving_account AS "receivingAccount",
       method,bank_reference AS "bankReference",notes,amount::text,
       sheet_sync_state AS "sheetSyncState",sheet_row AS "sheetRow",
       sheet_sync_error AS "sheetSyncError",sheet_verified_at AS "sheetVerifiedAt",
@@ -37,21 +37,21 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
   }
   try{
     const existing=resultRows(await db.execute(sql`SELECT id,direction,transaction_date::text,
-      amount::text,source_name,sheet_sync_state
+      amount::text,source_name,sheet_sync_state,cash_type
       FROM sport_center.sc_finance_test_entries WHERE entry_key=${input.entryKey}::uuid`))[0];
     if(existing){
       if(existing.direction!==input.direction || existing.transaction_date!==input.transactionDate
-        || Number(existing.amount)!==input.amount || existing.source_name!==input.sourceName){
+        || Number(existing.amount)!==input.amount || existing.source_name!==input.sourceName || existing.cash_type!==input.cashType){
         res.status(409).json({error:"TEST_KEY_REUSED_WITH_DIFFERENT_DATA"});return;
       }
       res.json({testNo:testNo(Number(existing.id),existing.direction),
         sheetState:existing.sheet_sync_state,replayed:true});return;
     }
     const row=resultRows(await db.execute(sql`INSERT INTO sport_center.sc_finance_test_entries
-      (entry_key,direction,transaction_date,source_name,sender_bank,receiving_account,
+      (entry_key,direction,transaction_date,source_name,sender_bank,cash_type,receiving_account,
         method,bank_reference,notes,amount,created_by)
       VALUES(${input.entryKey}::uuid,${input.direction},${input.transactionDate}::date,
-        ${input.sourceName},${input.senderBank},${input.receivingAccount},
+        ${input.sourceName},${input.senderBank},${input.cashType},${input.receivingAccount},
         ${input.method},${input.bankReference||null},${input.notes||null},${input.amount},
         ${getUserFromReq(req).userId??null})
       ON CONFLICT(entry_key) DO NOTHING RETURNING id,direction`))[0];

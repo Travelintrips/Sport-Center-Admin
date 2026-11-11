@@ -197,6 +197,7 @@ export default function AdminExpenses() {
     sourceName: "",
     method: "Transfer Bank",
     bank: "",
+    cashType: "",
     receivingAccount: "",
     bankReference: "",
     amount: "",
@@ -405,7 +406,7 @@ export default function AdminExpenses() {
   // No operational income/expense, BizPortal bank mutation or journal is created.
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
-    senderBank:string;receivingAccount:string;method:string;bankReference:string;
+    senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
     notes:string;amount:number
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
@@ -424,7 +425,7 @@ export default function AdminExpenses() {
         const result=await postTestEntry({
           entryKey:incomeEntryKey,direction:"IN",
           transactionDate:incomeForm.transactionDate,sourceName:incomeForm.sourceName.trim(),
-          senderBank:incomeForm.bank.trim(),receivingAccount:incomeForm.receivingAccount.trim(),
+          senderBank:incomeForm.bank.trim(),cashType:incomeForm.cashType,receivingAccount:incomeForm.receivingAccount.trim(),
           method:incomeForm.method,bankReference:incomeForm.bankReference.trim(),
           notes:"INPUT UANG MASUK SC - SIMULASI",amount:Number(incomeForm.amount)
         });
@@ -897,7 +898,7 @@ export default function AdminExpenses() {
               <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => {
                 setIncomeForm({
                   transactionDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
-                  sourceName: "", method: "Transfer Bank", bank: "", receivingAccount: "", bankReference: "", amount: "",
+                  sourceName: "", method: "Transfer Bank", bank: "", cashType:"", receivingAccount: "", bankReference: "", amount: "",
                 });
                 setIncomePreview(false);
                 setCashReceiptConfirmed(false);
@@ -1614,6 +1615,21 @@ export default function AdminExpenses() {
               <p className="text-xs text-gray-500">Bank asal dana. Berbeda dengan bank atau akun penerima.</p>
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="income-cash-type">Kas (opsional)</Label>
+              <Select value={incomeForm.cashType||"none"} onValueChange={value=>{
+                setIncomeForm({...incomeForm,cashType:value==="none"?"":value});
+                setIncomePreview(false);
+              }}>
+                <SelectTrigger id="income-cash-type"><SelectValue placeholder="Kosong / tidak dipilih"/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Kosong / tidak dipilih</SelectItem>
+                  <SelectItem value="kas kecil">kas kecil</SelectItem>
+                  <SelectItem value="kas besar">kas besar</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">Jika dipilih, dicatat di keterangan antara bank pengirim dan akun penerima.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label>Metode <span className="text-red-500">*</span></Label>
               <Select value={incomeForm.method} onValueChange={(value) => {
                 setIncomeForm({ ...incomeForm, method: value }); setIncomePreview(false);
@@ -1678,6 +1694,7 @@ export default function AdminExpenses() {
                 <p className="text-xs text-emerald-800">ID unik pemasukan diterbitkan setelah penyimpanan berhasil.</p>
                 <p>{incomeForm.transactionDate} · {incomeForm.sourceName.trim()}</p>
                 <p>{incomeForm.method}{incomeForm.bank.trim() ? ` · ${incomeForm.bank.trim()}` : ""}</p>
+                <p>Kas: {incomeForm.cashType||"Tidak dipilih"}</p>
                 <p>Bank / Akun Penerima: {incomeForm.receivingAccount.trim() || "Tidak ditentukan"}</p>
                 {incomeForm.bankReference.trim() && <p>Referensi bank: {incomeForm.bankReference.trim()}</p>}
                 <p className="font-bold">{formatIDR(Number(incomeForm.amount || 0))}</p>
