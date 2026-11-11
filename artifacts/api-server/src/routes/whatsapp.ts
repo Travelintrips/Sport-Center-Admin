@@ -57,6 +57,7 @@ import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../l
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
+import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { uploadProofWithFallback } from "./storage";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
@@ -1794,6 +1795,17 @@ router.post("/wa/action/:token", async (req, res) => {
           logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
 
+        if (payment.paymentType !== "dp" && lifecycle.targetStatus === "confirmed") {
+          const invoiceAudit = { userName: "admin (WhatsApp)" };
+          const invoiceTask = booking.groupRef
+            ? sendGroupInvoiceToCustomer(booking.groupRef, invoiceAudit)
+            : sendInvoiceToCustomer(booking.orderNumber, invoiceAudit);
+          invoiceTask.catch((err) => logger.error(
+            { err, orderNumber: booking.orderNumber, groupRef: booking.groupRef ?? null },
+            "[InvoiceDelivery] Gagal kirim invoice setelah WA approve_payment",
+          ));
+        }
+
         res.json({ success: true, message: "Pembayaran dikonfirmasi. Customer diberitahu." });
         break;
       }
@@ -2765,9 +2777,23 @@ router.post("/wa/review/:token", async (req, res) => {
         facilityId: booking.facilityId,
         journalDate: _today,
         paymentMethod: _paymentMethod,
-        paymentId: payment.id,      }).catch((err) =>
+        paymentId: payment.id,
+      }).catch((err) =>
         logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
+
+      // Keep WA Review behavior aligned with the canonical admin payment-confirmation
+      // path: a full/final payment must also generate and deliver the invoice.
+      if (payment.paymentType !== "dp" && lifecycle.targetStatus === "confirmed") {
+        const invoiceAudit = { userName: "admin (WhatsApp Review)" };
+        const invoiceTask = booking.groupRef
+          ? sendGroupInvoiceToCustomer(booking.groupRef, invoiceAudit)
+          : sendInvoiceToCustomer(booking.orderNumber, invoiceAudit);
+        invoiceTask.catch((err) => logger.error(
+          { err, orderNumber: booking.orderNumber, groupRef: booking.groupRef ?? null },
+          "[InvoiceDelivery] Gagal kirim invoice setelah WA Review approve",
+        ));
+      }
 
       res.json({ success: true, message: "Pembayaran dikonfirmasi. Customer diberitahu." });
       return;
