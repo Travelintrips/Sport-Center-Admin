@@ -96,16 +96,20 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     await store.execute(sql`SELECT sport_center.x904_stage_new_nonmember_candidate(${String(row.command_id)}::uuid)`);
   }
 
-  // Read-only SLA monitor. A queued command or completed command without
-  // device read-back is never counted as successful suspension.
+  // Read-only SLA monitor. Do not count completed-but-late suspensions as PASS.
+  // Historical payload deadlines were occasionally 3 minutes, so use the
+  // observed-first timestamp as the authoritative 30-minute SLA origin.
   const overdue = await store.execute(sql`SELECT count(*)::int AS overdue_count
     FROM sport_center.x904_user_commands c
     WHERE c.device_serial=${DEVICE}
       AND c.payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
-      AND (c.payload->>'suspendDeadlineAt')::timestamptz <= ${now}
-      AND NOT (c.command_type='SUSPEND_USER' AND c.state='completed'
-        AND c.result->>'readBackConfirmed'='true'
-        AND c.result->>'afterGroup'='2')`);
+      AND c.created_at >= ${new Date(now.getTime() - 48 * 60 * 60_000)}
+      AND (c.payload->>'firstObservedAt') IS NOT NULL
+      AND (c.payload->>'firstObservedAt')::timestamptz + interval '30 minutes' <= ${now}
+      AND (c.state <> 'completed'
+        OR c.result->>'readBackConfirmed' IS DISTINCT FROM 'true'
+        OR c.result->>'afterGroup' IS DISTINCT FROM '2'
+        OR c.completed_at > (c.payload->>'firstObservedAt')::timestamptz + interval '30 minutes')`);
   const count = Number(overdue.rows[0]?.overdue_count ?? 0);
   if (count > 0) {
     console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
