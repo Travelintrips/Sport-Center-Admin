@@ -628,16 +628,19 @@ async function recoverMissingNonGymInvoices(): Promise<void> {
     const facilityById = new Map(facilities.map(row => [row.id, row]));
 
     const candidateIds = candidates.map(row => row.id);
+    const recoveryCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const confirmedPayments = await db
       .select({
         bookingId: paymentsTable.bookingId,
         paymentType: paymentsTable.paymentType,
         status: paymentsTable.status,
+        confirmedAt: paymentsTable.confirmedAt,
       })
       .from(paymentsTable)
       .where(and(
         inArray(paymentsTable.bookingId, candidateIds),
         eq(paymentsTable.status, "confirmed"),
+        gte(paymentsTable.confirmedAt, recoveryCutoff),
       ));
     const hasFinalPayment = new Set(
       confirmedPayments
