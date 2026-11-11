@@ -221,7 +221,7 @@ export async function reconcileScFinanceTestSheets():Promise<{
   assertHeaders((rows[0]??[]) as string[]);
   const entries=resultRows(await db.execute(sql`SELECT id,direction,transaction_date::text,source_name,
     sender_bank,cash_type,receiving_account,method,bank_reference,notes,amount::text,
-    sheet_row,sheet_sync_state FROM sport_center.sc_finance_test_entries
+    expense_kind,destination_bank,description_version,sheet_row,sheet_sync_state FROM sport_center.sc_finance_test_entries
     WHERE sheet_sync_state IN ('synced','removed','mismatch')
     ORDER BY id LIMIT 1000`));
   const totals={inspected:0,removed:0,restored:0,mismatched:0,moved:0};
