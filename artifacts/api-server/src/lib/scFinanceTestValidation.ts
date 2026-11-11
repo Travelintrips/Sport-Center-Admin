@@ -12,11 +12,14 @@ export type TestLedgerEntry = {
   amount: string | number;
 };
 export const TEST_RECON_STATUS = "SC_TEST_ONLY";
-export const TEST_GUARD_VERSION = "sc-test-only-v1";
+export const TEST_GUARD_VERSION = "sc-test-only-v2";
 
 export function testNo(id: number, direction: TestDirection): string {
   if (!Number.isSafeInteger(id) || id < 1) throw Error("INVALID_TEST_ID");
-  return `SC-TEST-${direction}-${String(id).padStart(6, "0")}`;
+  // Income uses the historical SC-IN ID prefix; the TEST status remains in H.
+  // Expenses retain the old marker until their separate format is reviewed.
+  return direction==="IN" ? `SC-IN-${String(id).padStart(6,"0")}`
+    : `SC-TEST-OUT-${String(id).padStart(6,"0")}`;
 }
 export function parseTestInput(body: any) {
   if (!body || !["IN","OUT"].includes(body.direction)) throw Error("INVALID_DIRECTION");
@@ -59,7 +62,13 @@ export function testSheetRow(item:TestLedgerEntry) {
   const note=String(item.notes??"").trim();
   const bankAndAccount=[source,account].filter(Boolean).join(" - ");
   const details=[bankAndAccount,method,reference?"Ref: "+reference:"",note].filter(Boolean);
-  const description=`${marker} ${words} ${who}${details.length?" | "+details.join(" | "):""} | ${testNo(Number(item.id),item.direction)}`;
+  // Cash income column B mirrors the October reference workbook:
+  // "Dana Masuk dari NAMA | BANK - TUJUAN | ID".
+  // No SC-TEST prefix, method label, or automatically inserted SIMULASI note.
+  // H still holds SC_TEST_ONLY, G stays empty, and BizPortal v2 skips the row.
+  const description=item.direction==="IN"
+    ? `Dana Masuk dari ${who} | ${source||"-"} - ${account||"-"}${reference?" | "+reference:""} | ${testNo(Number(item.id),"IN")}`
+    : `${marker} ${words} ${who}${details.length?" | "+details.join(" | "):""} | ${testNo(Number(item.id),item.direction)}`;
   // A:M. Never invent real bank balance, mutation_key, matching score or COA.
   return [
     date.split("-").reverse().join("/"),description,
