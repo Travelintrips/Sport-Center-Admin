@@ -102,7 +102,13 @@ export default function GymNonmemberEntry() {
         <div className="pointer-events-none absolute -left-20 -top-24 h-64 w-64 rounded-full bg-emerald-100/60 blur-3xl" />
         <div className="pointer-events-none absolute -right-24 top-10 h-80 w-80 rounded-full bg-orange-100/70 blur-3xl" />
         <div className="mx-auto max-w-[1280px] px-5 pb-12 pt-5 sm:px-8 lg:px-10 lg:pb-16">
-          <nav aria-label="Navigasi halaman" className="mb-8 flex flex-wrap items-center justify-between gap-5 rounded-2xl bg-white/75 px-5 py-3 shadow-sm backdrop-blur-sm">
+          <nav aria-label="Navigasi halaman" className="mb-8 rounded-2xl bg-white/75 px-5 py-3 shadow-sm backdrop-blur-sm">
+            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3 md:hidden">
+              <Link href="/" className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 transition hover:text-[#0f5b46]">
+                <ChevronRight className="h-4 w-4 rotate-180" /> Kembali ke Beranda
+              </Link>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-5">
             <Link href="/" className="flex items-center gap-3">
               <img
                 src={logoUrl}
@@ -120,9 +126,15 @@ export default function GymNonmemberEntry() {
               <a href="#cara-booking" className="hover:text-[#0f5b46]">Cara Booking</a>
               <Link href="/facilities" className="hover:text-[#0f5b46]">Informasi</Link>
             </div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm">
-              <Clock3 className="h-4 w-4 text-orange-600" /> 06:00 – 23:00 WIB
-            </span>
+            <div className="flex items-center gap-3">
+              <Link href="/" className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition hover:border-emerald-200 hover:text-[#0f5b46] md:inline-flex">
+                <ChevronRight className="h-4 w-4 rotate-180" /> Kembali ke Beranda
+              </Link>
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm">
+                <Clock3 className="h-4 w-4 text-orange-600" /> 06:00 – 23:00 WIB
+              </span>
+            </div>
+            </div>
           </nav>
 
           <div className="grid items-center gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:gap-12">
