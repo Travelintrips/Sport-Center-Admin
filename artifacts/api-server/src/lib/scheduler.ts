@@ -414,10 +414,21 @@ async function sendDayOfReminder(): Promise<void> {
         )
       );
 
-    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilities = await db.select({
+      id: facilitiesTable.id,
+      name: facilitiesTable.name,
+      category: facilitiesTable.category,
+      bookingMode: facilitiesTable.bookingMode,
+    }).from(facilitiesTable);
     const appUrl = await getBaseUrl();
-    const facilityMap: Record<number, string> = {};
-    for (const f of facilities) facilityMap[f.id] = f.name;
+    const facilityMap: Record<number, { name: string; category: string; bookingMode: string }> = {};
+    for (const f of facilities) {
+      facilityMap[f.id] = {
+        name: f.name,
+        category: f.category ?? "",
+        bookingMode: f.bookingMode ?? "",
+      };
+    }
 
     for (const booking of confirmed) {
       // Mark as sent FIRST to prevent race conditions / server restarts
@@ -427,7 +438,11 @@ async function sendDayOfReminder(): Promise<void> {
         .where(eq(bookingsTable.id, booking.id));
 
       const statusUrl = `${appUrl}/status/${booking.orderNumber}`;
-      const facilityName = facilityMap[booking.facilityId] ?? "";
+      const facilityInfo = facilityMap[booking.facilityId] ?? { name: "", category: "", bookingMode: "" };
+      const facilityName = facilityInfo.name;
+      const isGymBooking =
+        facilityInfo.bookingMode === "walk_in" ||
+        /gym|fitness/i.test(`${facilityInfo.name} ${facilityInfo.category}`);
 
       // Customer reminder
       await notifyWaDayReminder({
@@ -442,8 +457,9 @@ async function sendDayOfReminder(): Promise<void> {
         statusUrl,
       });
 
-      // Staff checkin/finish links
-      if (booking.source === "whatsapp") {
+      // Staff checkin/finish links for every confirmed non-Gym booking,
+      // including public self-service bookings stored with source="web".
+      if (!isGymBooking) {
         const checkinToken = await createWaToken(booking.id, "checkin", 2);
         const finishToken = await createWaToken(booking.id, "finish", 2);
         await notifyWaStaffCheckin({
