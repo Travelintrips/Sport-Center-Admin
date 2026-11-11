@@ -121,7 +121,7 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(api).toContain('guestNameRoute?.route === "expired_member"');
     expect(api).toContain("PIN membership lama tidak diberikan hak akses");
     expect(form).toContain('guestIdentityRoute === "expired_member"');
-    expect(form).toContain("tiket harian boleh dipesan");
+    expect(form).toContain("Data Anda dikenali. Anda dapat melanjutkan booking kunjungan harian.");
   });
 
 });
