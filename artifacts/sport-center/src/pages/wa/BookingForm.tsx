@@ -749,8 +749,19 @@ export default function WaBookingForm() {
   return (
     <main className="min-h-screen bg-[#f7f5f1] pb-16 text-slate-900">
       {/* Premium public checkout header. */}
-      <section className="relative overflow-hidden border-b border-amber-100 bg-[radial-gradient(circle_at_15%_15%,rgba(251,191,36,0.12),transparent_34%),linear-gradient(135deg,#fffaf3_0%,#ffffff_52%,#f7efe5_100%)]">
-        <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(15,23,42,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.025)_1px,transparent_1px)] [background-size:28px_28px]" />
+      <section className="relative overflow-hidden border-b border-amber-100 bg-[#fbf5ec]">
+        <div className="pointer-events-none absolute inset-0">
+          <img
+            src={buildingImg}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full scale-110 object-cover object-center opacity-[0.18] blur-[10px] saturate-75"
+            decoding="async"
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,250,243,0.98)_0%,rgba(255,250,243,0.91)_38%,rgba(255,250,243,0.72)_66%,rgba(255,247,237,0.80)_100%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_44%,rgba(15,91,70,0.10),transparent_25%),radial-gradient(circle_at_12%_18%,rgba(245,158,11,0.14),transparent_30%)]" />
+          <div className="absolute -bottom-16 left-0 right-0 h-32 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.95),rgba(255,255,255,0)_68%)]" />
+        </div>
         <div className="relative mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 sm:pb-12 lg:px-8">
           <Link href="/booking/mandiri" className="mb-7 inline-flex min-h-9 items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-[#0f5b46]">
             <ArrowLeft className="h-4 w-4" /> Semua fasilitas
