@@ -1,4 +1,4 @@
-import {calculateTestBalanceUpdates} from "../../lib/scFinanceTestBalance";
+import {calculateTestBalanceUpdates,parseSheetMoney} from "../../lib/scFinanceTestBalance";
 
 const historical = [
   ["Tanggal","Keterangan COA","Debit","Kredit","Saldo","PP","mutation_key","status_recon"],
@@ -45,12 +45,31 @@ describe("SC TEST-only Sheet column E balance",()=>{
       .toThrow("SC_TEST_BALANCE_MUTATION_KEY_PRESENT");
     const nonNumeric=income("SC-IN-000013",1000,"untrusted");
     expect(()=>calculateTestBalanceUpdates([...historical,nonNumeric],new Set(["SC-IN-000013"])))
-      .toThrow("SC_TEST_BALANCE_EXISTING_NON_NUMERIC");
+      .toThrow("SC_TEST_BALANCE_INVALID_TEST_E");
   });
   it("rejects duplicate test identifiers rather than writing an ambiguous balance",()=>{
     expect(()=>calculateTestBalanceUpdates([
       ...historical,income("SC-IN-000013",1000),income("SC-IN-000013",2000)
     ],new Set(["SC-IN-000013"]))).toThrow("SC_TEST_BALANCE_DUPLICATE_ID");
+  });
+  it("reproduces November screenshot and includes the imported bunga bluAccount on row 376",()=>{
+    const rows=[
+      historical[0],
+      ["29/10/2026","Saldo lama","","","Rp4.092,50","Pengeluaran","",""],
+      ["31/10/2026","Bunga | bluAccount","112.78","","4205.28","Pemasukan","",""],
+      income("SC-IN-000012",1000,"5092,5"),
+      income("SC-IN-000013",1000,"6092,5"),
+    ];
+    expect(calculateTestBalanceUpdates(rows,new Set(["SC-IN-000012","SC-IN-000013"])))
+      .toEqual([{row:4,value:5205.28},{row:5,value:6205.28}]);
+  });
+  it("parses Google Sheets historical currency text without silently ignoring it",()=>{
+    expect(parseSheetMoney("Rp4.205,28","E")).toBe(4205.28);
+    expect(parseSheetMoney("4205.28","E")).toBe(4205.28);
+    expect(parseSheetMoney("4,205.28","E")).toBe(4205.28);
+    expect(parseSheetMoney("112.78","C")).toBe(112.78);
+    expect(parseSheetMoney("","E")).toBeNull();
+    expect(()=>parseSheetMoney("invalid","E")).toThrow("SC_TEST_BALANCE_INVALID_E");
   });
   it("cannot affect non-TEST row E and ignores blank rows",()=>{
     const rows=[...historical,[],income("SC-IN-000013",1000)];
