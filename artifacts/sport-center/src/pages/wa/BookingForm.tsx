@@ -804,10 +804,23 @@ export default function WaBookingForm() {
         )}
 
         {publicGymGuest && (
-          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-            <strong>Booking mandiri tanpa login.</strong> Isi nama asli dan nomor WhatsApp, pilih QRIS atau transfer, lalu unggah bukti.
-            Pembayaran harus dikonfirmasi petugas sebelum akses diberikan. Nama nonmember yang telah terverifikasi di X904 ditandai hijau tanpa menampilkan PIN mesin.
-            Petugas memeriksa identitas dan pembayaran resmi sebelum akses pintu diaktifkan.
+          <div className="mb-5 rounded-2xl border border-orange-200 bg-gradient-to-r from-orange-50 via-white to-orange-50 p-4 shadow-[0_8px_28px_rgba(249,115,22,0.08)] sm:p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-extrabold text-[#142441] sm:text-base">Booking Gym lebih mudah</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Lengkapi data Anda, pilih jadwal dan metode pembayaran, lalu unggah bukti pembayaran. Setelah pembayaran diverifikasi, akses Gym akan diaktifkan secara otomatis.
+                </p>
+                <div className="mt-3 grid gap-2 text-xs font-medium text-slate-600 sm:grid-cols-3">
+                  <div className="rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-100">1. Isi data diri</div>
+                  <div className="rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-100">2. Pilih jadwal & bayar</div>
+                  <div className="rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-100">3. Akses aktif otomatis</div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
         <form onSubmit={handleSubmit} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:gap-7">
