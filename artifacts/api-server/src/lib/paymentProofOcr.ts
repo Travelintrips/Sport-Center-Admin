@@ -615,7 +615,7 @@ function resolveLocalTesseractLangPath(): string | null {
 
 async function preprocessImage(
   buffer: Buffer,
-  variant: "color" | "normalized",
+  variant: "color" | "normalized" | "inverted",
 ): Promise<Buffer> {
   const sharp = (await import("sharp")).default;
   const image = sharp(buffer)
@@ -624,6 +624,9 @@ async function preprocessImage(
     .sharpen({ sigma: 1.1 });
 
   if (variant === "normalized") image.grayscale().normalize();
+  // Bright letters over a saturated mobile-banking card can disappear under
+  // ordinary grayscale normalization. Invert as an expense-only extra pass.
+  if (variant === "inverted") image.grayscale().normalize().negate();
 
   return image.jpeg({ quality: 90 }).toBuffer();
 }
@@ -707,7 +710,10 @@ export async function scanPaymentProof(
       // WhatsApp/browser can have a .jpg filename while the actual bytes are
       // WebP. Tesseract is much more reliable after Sharp has decoded the
       // source format and emitted a canonical JPEG.
-      for (const variant of ["color", "normalized"] as const) {
+      const variants = options.fullMetadata
+        ? (["color", "normalized", "inverted"] as const)
+        : (["color", "normalized"] as const);
+      for (const variant of variants) {
         try {
           const image = await preprocessImage(buffer, variant);
           const scan = await recognize(image);
