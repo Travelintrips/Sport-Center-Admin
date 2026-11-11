@@ -71,9 +71,18 @@ export function testSheetRow(item:TestLedgerEntry) {
   // "Dana Masuk dari NAMA | BANK - TUJUAN | ID".
   // No SC-TEST prefix, method label, or automatically inserted SIMULASI note.
   // H still holds SC_TEST_ONLY, G stays empty, and BizPortal v2 skips the row.
+  // Clear human-readable expense description. Technical TEST exclusion lives in H,
+  // while the stable transaction ID remains at the end of B for read-back and retry.
+  const expenseDescription=[
+    `Pengeluaran ke ${who}`,
+    source,
+    note,
+    reference?`Ref: ${reference}`:"",
+    testNo(Number(item.id),"OUT")
+  ].filter(Boolean).join(" | ");
   const description=item.direction==="IN"
     ? `Dana Masuk dari ${who} | ${source||"-"} - ${cashType||account||"-"}${cashType?" | "+(account||"-"):""}${reference?" | "+reference:""} | ${testNo(Number(item.id),"IN")}`
-    : `${marker} ${words} ${who}${details.length?" | "+details.join(" | "):""} | ${testNo(Number(item.id),item.direction)}`;
+    : expenseDescription;
   // A:M. Never invent real bank balance, mutation_key, matching score or COA.
   return [
     date.split("-").reverse().join("/"),description,
