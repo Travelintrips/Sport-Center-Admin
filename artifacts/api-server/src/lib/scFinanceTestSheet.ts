@@ -2,7 +2,7 @@ import {google} from "googleapis";
 import {db} from "@workspace/db";
 import {sql} from "drizzle-orm";
 import {resultRows} from "./scIncomeOperational";
-import {calculateTestBalanceUpdates} from "./scFinanceTestBalance";
+import {calculateTestBalanceUpdates,parseSheetMoney} from "./scFinanceTestBalance";
 import {TEST_GUARD_VERSION,testNo,testRowIndexes,testSheetRow} from "./scFinanceTestValidation";
 
 const CASH_SHEET_ID="1VcbUujz6WHRgj5Fa1QkWjaEnkb2YIxQjkkSpEfMJNE8";
@@ -66,19 +66,39 @@ async function refreshScTestBalances(sheets:ReturnType<typeof googleSheetsClient
     WHERE sheet_sync_state IN ('synced','syncing') ORDER BY id LIMIT 1000`));
   const eligible=new Set<string>(ledger.map(entry=>testNo(Number(entry.id),entry.direction)));
   const updates=calculateTestBalanceUpdates(rows,eligible);
-  if(updates.length===0)return 0;
-  // Column E only, and only for matched TEST rows. No writes to real balances.
-  await assertBizPortalTestGuard();
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId:CASH_SHEET_ID,
-    requestBody:{
-      valueInputOption:"RAW",
-      data:updates.map(item=>({
-        range:`'kas besar sc'!E${item.row}`,
-        values:[[item.value]],
-      })),
-    },
-  });
+  if(updates.length>0){
+    // Re-read immediately before the write. A manual Sheet edit/deletion can
+    // shift row numbers between calculation and the batchUpdate request.
+    const prewrite=await sheets.spreadsheets.values.get({
+      spreadsheetId:CASH_SHEET_ID,range:"'kas besar sc'!A1:M",
+      valueRenderOption:"UNFORMATTED_VALUE",
+    });
+    const currentRows=(prewrite.data.values??[]) as unknown[][];
+    for(const item of updates){
+      const expected=rows[item.row-1]??[];
+      const current=currentRows[item.row-1]??[];
+      if(String(expected[1]??"")!==String(current[1]??"") ||
+         String(current[7]??"")!=="SC_TEST_ONLY" ||
+         String(current[6]??"").trim()!=="" ||
+         parseSheetMoney(expected[2],"DEBIT")!==parseSheetMoney(current[2],"DEBIT") ||
+         parseSheetMoney(expected[3],"KREDIT")!==parseSheetMoney(current[3],"KREDIT"))
+        throw Error("SC_TEST_BALANCE_ROW_CHANGED_BEFORE_WRITE");
+    }
+    // Column E only, and only for matched TEST rows. No writes to real balances.
+    await assertBizPortalTestGuard();
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId:CASH_SHEET_ID,
+      requestBody:{
+        valueInputOption:"RAW",
+        data:updates.map(item=>({
+          range:`'kas besar sc'!E${item.row}`,
+          values:[[item.value]],
+        })),
+      },
+    });
+  }
+  // Always read back even when no cells needed changing: the master view
+  // must reflect the actual Sheet E, not a separate zero-based TEST subtotal.
   const proof=await sheets.spreadsheets.values.get({
     spreadsheetId:CASH_SHEET_ID,range:"'kas besar sc'!A1:M",
     valueRenderOption:"UNFORMATTED_VALUE",
@@ -86,9 +106,22 @@ async function refreshScTestBalances(sheets:ReturnType<typeof googleSheetsClient
   const actualRows=(proof.data.values??[]) as unknown[][];
   for(const item of updates){
     const actual=actualRows[item.row-1]??[];
+    const parsedBalance=parseSheetMoney(actual[4],"TEST_E");
     if(String(actual[7]??"")!=="SC_TEST_ONLY" ||
-       typeof actual[4]!=="number" || Math.abs(actual[4]-item.value)>0.001)
+       parsedBalance===null || Math.abs(parsedBalance-item.value)>0.001)
       throw Error("SC_TEST_BALANCE_READBACK_MISMATCH");
+  }
+  for(const entry of ledger){
+    const matched=testRowIndexes(actualRows.map(row=>[row?.[1]??""]),testNo(Number(entry.id),entry.direction));
+    if(matched.length!==1)throw Error("SC_TEST_BALANCE_LEDGER_ID_NOT_UNIQUE");
+    const row=actualRows[matched[0]-1]??[];
+    if(String(row[7]??"")!=="SC_TEST_ONLY" || String(row[6]??"").trim()!=="")
+      throw Error("SC_TEST_BALANCE_LEDGER_MARKER_MISMATCH");
+    const balance=parseSheetMoney(row[4],"TEST_E");
+    if(balance===null)throw Error("SC_TEST_BALANCE_LEDGER_NOT_NUMERIC");
+    await db.execute(sql`UPDATE sport_center.sc_finance_test_entries
+      SET sheet_balance=${balance},updated_at=now()
+      WHERE id=${Number(entry.id)} AND sheet_sync_state IN ('synced','syncing')`);
   }
   return updates.length;
 }

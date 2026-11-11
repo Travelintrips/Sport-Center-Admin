@@ -337,7 +337,8 @@ export default function AdminExpenses() {
   const {data:financeTestData,refetch:refetchFinanceTest,isError:financeTestReadError} = useQuery<{
     entries:Array<{id:number;testNo:string;direction:"IN"|"OUT";transactionDate:string;
       sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
-      sheetSyncError:string|null;sheetVerifiedAt:string|null;senderBank:string;receivingAccount:string;
+      sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
+      senderBank:string;receivingAccount:string;
       method:string;bankReference:string|null;notes:string|null}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
@@ -645,6 +646,7 @@ export default function AdminExpenses() {
         entry.sheetSyncState==="mismatch"?"TEST — Tidak Cocok":
         `TEST — ${entry.sheetSyncState}`,
       sheet:`kas besar sc — ${entry.sheetSyncState==="synced"?"baris "+entry.sheetRow:entry.sheetSyncState}`,
+      sheetBalance:entry.sheetBalance==null?null:Number(entry.sheetBalance),
       cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
         `Status ${entry.sheetSyncState}`,
       reference:entry.bankReference||"",notes:entry.notes||"",
@@ -657,6 +659,7 @@ export default function AdminExpenses() {
       description: `Dana masuk dari ${entry.sourceName}`, method: entry.method || "Tidak tersedia",
       status: entry.reconciliationState || "UNVERIFIED",
       sheet: entry.sheetSyncState === "synced" ? "SC Uang Masuk — tersinkron (belum diverifikasi)" : entry.sheetSyncState,
+      sheetBalance:null as number|null,
       cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
         entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
       reference: entry.bankReference || "", notes: "",
@@ -670,6 +673,7 @@ export default function AdminExpenses() {
       description: String(expense.description ?? ""), method: String(expense.paymentMethod ?? ""),
       status: STATUS_LABELS[String(expense.paymentStatus)] ?? String(expense.paymentStatus ?? "Draft"),
       sheet: "Belum dikonfirmasi sebagai mutasi bank",
+      sheetBalance:null as number|null,
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
       reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
     })),
@@ -685,20 +689,8 @@ export default function AdminExpenses() {
   });
   const transactionDateInvalid = transactionDateMode === "range"
     && Boolean(transactionDateFrom && transactionDateTo && transactionDateFrom > transactionDateTo);
-  // A running balance is computed over the full chronological TEST ledger BEFORE
-  // filtering or pagination. Removed/mismatched/unsynced entries never affect it.
-  // The account balance on Google Sheets is intentionally not overwritten.
-  const chronologicalTransactions=[...unifiedTransactions].sort((a,b)=>
-    a.date.localeCompare(b.date) || Number(a.id.match(/\d+$/)?.[0]??0)-
-      Number(b.id.match(/\d+$/)?.[0]??0));
-  let runningTestBalance=0;
-  const runningBalanceById=new Map<string,number>();
-  for(const tx of chronologicalTransactions){
-    if(FINANCE_SC_TEST_ONLY && tx.status==="TEST — Tersinkron"){
-      runningTestBalance+=tx.kind==="income"?tx.amount:-tx.amount;
-    }
-    runningBalanceById.set(tx.key,runningTestBalance);
-  }
+  // Sheet E is the historical-inclusive running balance; it is exposed
+  // only after Google Sheets read-back verifies the corresponding TEST row.
   const visibleTransactions = unifiedTransactions.filter(tx =>
     (detailKind === "all" || tx.kind === detailKind)
     && (transactionDateMode !== "single" || !transactionSingleDate || tx.date === transactionSingleDate)
@@ -931,11 +923,11 @@ export default function AdminExpenses() {
             <Card className="border-l-4 border-l-slate-400">
               <CardContent className="p-4">
                 {FINANCE_SC_TEST_ONLY ? <>
-                  <p className="text-sm font-medium text-gray-600">Sisa Saldo TEST Kas Besar SC</p>
+                  <p className="text-sm font-medium text-gray-600">Selisih Bersih Transaksi TEST</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">
                     {financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.balance):"Memuat..."}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">Pemasukan TEST dikurangi Pengeluaran TEST; bukan saldo bank.</p>
+                  <p className="text-xs text-gray-500 mt-1">Pemasukan TEST − pengeluaran TEST, tanpa saldo awal historis. Saldo berjalan ada di Master Tabel.</p>
                 </> : <>
                   <p className="text-sm font-medium text-gray-600">Mutasi Masuk Kas Besar CST — BizPortal</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">
@@ -1119,7 +1111,9 @@ export default function AdminExpenses() {
                           </td>
                           <td className="p-3 text-right font-bold tabular-nums">
                             {FINANCE_SC_TEST_ONLY
-                              ? (runningBalanceById.get(tx.key)??0).toLocaleString("id-ID")
+                              ? tx.status==="TEST — Tersinkron" && tx.sheetBalance!=null
+                                ? tx.sheetBalance.toLocaleString("id-ID",{minimumFractionDigits:0,maximumFractionDigits:2})
+                                : "–"
                               : "–"}
                           </td>
                         </tr>
@@ -1207,7 +1201,7 @@ export default function AdminExpenses() {
               <p className="text-xl font-bold text-orange-700">{formatIDR(financeTestData?.summary.expense??0)}</p>
             </CardContent></Card>
             <Card className="border-l-4 border-violet-500"><CardContent className="p-4">
-              <p className="text-xs text-gray-600">Sisa Saldo Uji (bukan saldo bank)</p>
+              <p className="text-xs text-gray-600">Selisih Bersih Uji (tanpa saldo awal historis)</p>
               <p className="text-xl font-bold">{formatIDR(financeTestData?.summary.balance??0)}</p>
             </CardContent></Card>
           </div>
