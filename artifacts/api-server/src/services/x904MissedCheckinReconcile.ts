@@ -56,6 +56,15 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time
     FROM sport_center.x904_nonmember_daily_access a
     JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+    JOIN sport_center.x904_verified_nonmember_identities v
+      ON v.device_serial=a.device_serial AND v.user_pin=a.user_pin
+      AND v.device_uid=a.device_uid
+      AND v.verification_state='verified' AND v.revoked_at IS NULL
+      AND upper(trim(v.display_name))=upper(trim(a.verified_name))
+    JOIN sport_center.gym_x904_lan_users u
+      ON u.device_serial=a.device_serial AND u.user_pin=a.user_pin
+      AND u.device_uid=a.device_uid AND u.device_role=0
+      AND upper(trim(u.display_name))=upper(trim(a.verified_name))
     JOIN sport_center.gym_x904_lan_logs l ON l.device_serial=a.device_serial
       AND l.user_pin=a.user_pin AND l.device_uid=a.device_uid
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
@@ -70,6 +79,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
         || ' ' || left(b.end_time,5) || ':00')
       AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
       AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time <= to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
     ORDER BY a.booking_id,l.device_time,l.event_id LIMIT 30`);
   let checkedIn = 0;
   for (const row of rows.rows as any[]) {
