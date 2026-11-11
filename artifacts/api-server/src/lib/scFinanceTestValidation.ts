@@ -6,6 +6,7 @@ export type TestLedgerEntry = {
   bank_reference?: string | null;
   method?: string | null;
   sender_bank?: string | null;
+  cash_type?: string | null;
   receiving_account?: string | null;
   notes?: string | null;
   direction: TestDirection;
@@ -38,12 +39,14 @@ export function parseTestInput(body: any) {
   if (!sourceName || sourceName.length > 160) throw Error("INVALID_NAME");
   const senderBank = String(body.senderBank ?? "").trim().slice(0,100);
   const receivingAccount = String(body.receivingAccount ?? "").trim().slice(0,120);
+  const cashType = String(body.cashType ?? "").trim().toLowerCase();
+  if(!["","kas kecil","kas besar"].includes(cashType))throw Error("INVALID_CASH_TYPE");
   const method = String(body.method ?? "").trim().slice(0,80);
   const bankReference = String(body.bankReference ?? "").trim().slice(0,120);
   const notes = String(body.notes ?? "").trim().slice(0,200);
   return {
     direction:body.direction as TestDirection, transactionDate:date, amount,
-    entryKey:body.entryKey, sourceName,senderBank,receivingAccount,method,
+    entryKey:body.entryKey, sourceName,senderBank,receivingAccount,cashType,method,
     bankReference,notes
   };
 }
@@ -57,6 +60,8 @@ export function testSheetRow(item:TestLedgerEntry) {
   const words=item.direction==="IN"?"Dana masuk dari":"Pengeluaran ke";
   const source=String(item.sender_bank??"").trim();
   const account=String(item.receiving_account??"").trim();
+  const cashType=String(item.cash_type??"").trim().toLowerCase();
+  if(!["","kas kecil","kas besar"].includes(cashType))throw Error("INVALID_CASH_TYPE");
   const method=String(item.method??"").trim();
   const reference=String(item.bank_reference??"").trim();
   const note=String(item.notes??"").trim();
@@ -67,7 +72,7 @@ export function testSheetRow(item:TestLedgerEntry) {
   // No SC-TEST prefix, method label, or automatically inserted SIMULASI note.
   // H still holds SC_TEST_ONLY, G stays empty, and BizPortal v2 skips the row.
   const description=item.direction==="IN"
-    ? `Dana Masuk dari ${who} | ${source||"-"} - ${account||"-"}${reference?" | "+reference:""} | ${testNo(Number(item.id),"IN")}`
+    ? `Dana Masuk dari ${who} | ${source||"-"} - ${cashType||account||"-"}${cashType?" | "+(account||"-"):""}${reference?" | "+reference:""} | ${testNo(Number(item.id),"IN")}`
     : `${marker} ${words} ${who}${details.length?" | "+details.join(" | "):""} | ${testNo(Number(item.id),item.direction)}`;
   // A:M. Never invent real bank balance, mutation_key, matching score or COA.
   return [

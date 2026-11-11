@@ -167,3 +167,33 @@ describe("master financial table pagination and numeric running balance",()=>{
     expect(ui).toContain('setExpandedTransactionIds(paginatedTransactions.map(tx => tx.key))');
   });
 });
+
+describe("optional Kas selector for normal incoming form",()=>{
+  it("matches the requested bank - kas | receiving account format",()=>{
+    const income={...sample("IN",10000,11),transaction_date:"2026-11-11",
+      sender_bank:"Mandiri",cash_type:"kas kecil",receiving_account:"blu by BCA Digital",
+      bank_reference:null};
+    const row=testSheetRow(income);
+    expect(row[1]).toBe("Dana Masuk dari FELICIA JUSTIANI | Mandiri - kas kecil | blu by BCA Digital | SC-IN-000011");
+    expect(row[2]).toBe(10000);
+    expect(row[7]).toBe("SC_TEST_ONLY");
+    expect(testSheetRow({...income,cash_type:"kas besar"})[1])
+      .toContain("Mandiri - kas besar | blu by BCA Digital | SC-IN-000011");
+    expect(testSheetRow({...income,cash_type:""})[1])
+      .toContain("Mandiri - blu by BCA Digital | SC-IN-000011");
+  });
+  it("rejects unknown categories and does not alter expense formatting",()=>{
+    const valid={entryKey:"9472f5ac-089f-41f2-b557-c6a67a49939d",
+      transactionDate:"2026-11-11",sourceName:"Felicia Justiani",direction:"IN",
+      amount:10000,cashType:"kas kecil"};
+    expect(parseTestInput(valid).cashType).toBe("kas kecil");
+    expect(parseTestInput({...valid,cashType:""}).cashType).toBe("");
+    expect(()=>parseTestInput({...valid,cashType:"rekening pribadi"})).toThrow("INVALID_CASH_TYPE");
+    expect(testSheetRow({...sample("OUT",5000,12),cash_type:""})[1])
+      .toContain("SC-TEST-OUT: Pengeluaran ke FELICIA JUSTIANI");
+    expect(ui).toContain('id="income-cash-type"');
+    expect(ui).toContain('value="kas kecil"');
+    expect(ui).toContain('value="kas besar"');
+    expect(ui).toContain('cashType:incomeForm.cashType');
+  });
+});
