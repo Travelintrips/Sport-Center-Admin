@@ -226,8 +226,35 @@ export default function AdminExpenses() {
     paymentMethod: string; engine: string; verified: boolean;
   } | null>(null);
   const [scanningProof, setScanningProof] = useState(false);
+  const [proofReadMessage,setProofReadMessage] = useState("");
+  const lastProofFileRef=useRef<File|null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
+
+  async function previewExpenseProof(file:File) {
+    setScanningProof(true);
+    setProofReadMessage("");
+    try {
+      const proofFd = new FormData();
+      proofFd.append("proof",file);
+      proofFd.append("consent","true");
+      const response=await fetch(`${API}/admin/expenses/preview-proof`,{
+        method:"POST",headers:{Authorization:`Bearer ${getToken()}`},body:proofFd
+      });
+      const preview=await response.json();
+      if(!response.ok)throw Error(preview.error??"Pembacaan bukti tidak tersedia");
+      if(preview.amount!=null || preview.date || preview.recipient || preview.bankReference){
+        setProofPreview(preview);
+        if(preview.readStatus==="partial")setProofReadMessage(preview.readMessage??"Sebagian data belum terbaca.");
+      }else{
+        setProofPreview(null);
+        setProofReadMessage(preview.readMessage??"OCR belum berhasil membaca data bukti. File tetap tersimpan.");
+      }
+    }catch(e){
+      setProofPreview(null);
+      setProofReadMessage(e instanceof Error?e.message:"OCR belum tersedia. File tetap tersimpan.");
+    }finally{setScanningProof(false);}
+  }
 
   async function handleReceiptUpload(files: FileList | File[]) {
     const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
@@ -259,27 +286,10 @@ export default function AdminExpenses() {
       }
       setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
       toast({ title: `${uploaded.length} foto nota berhasil diupload` });
-      // Optional read-only OCR preview; a failure must not lose uploaded evidence.
-      const firstProof = fileArr.find((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type));
-      if (firstProof && autoReadProof) {
-        setScanningProof(true);
-        try {
-          const proofFd = new FormData();
-          proofFd.append("proof", firstProof);
-          proofFd.append("consent", "true");
-          const response = await fetch(`${API}/admin/expenses/preview-proof`, {
-            method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: proofFd,
-          });
-          if (!response.ok) throw new Error("OCR unavailable");
-          const preview = await response.json();
-          if (preview.amount != null || preview.date || preview.recipient || preview.bankReference) setProofPreview(preview);
-          else toast({ title: "Bukti tersimpan", description: "Data bukti belum terbaca, silakan isi form manual." });
-        } catch {
-          toast({ title: "Bukti tersimpan", description: "Pratinjau otomatis tidak tersedia; isikan detail secara manual." });
-        } finally {
-          setScanningProof(false);
-        }
-      }
+      // Keep the original image for OCR retry; never upload it a second time.
+      const firstProof = fileArr.find((file) => ["image/jpeg","image/png","image/webp"].includes(file.type));
+      if(firstProof)lastProofFileRef.current=firstProof;
+      if(firstProof && autoReadProof)await previewExpenseProof(firstProof);
     } catch (err: any) {
       toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
     } finally {
@@ -1766,6 +1776,16 @@ export default function AdminExpenses() {
                 <span>Isi otomatis dari bukti (opsional, memerlukan persetujuan pemrosesan AI). Admin tetap memeriksa hasilnya.</span>
               </label>
               {scanningProof && <p className="text-xs text-teal-700">Membaca bukti pembayaran untuk saran isian...</p>}
+              {proofReadMessage && (
+                <div role="status" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 space-y-2">
+                  <p>{proofReadMessage}</p>
+                  {lastProofFileRef.current && autoReadProof && !scanningProof &&
+                    <Button type="button" variant="outline" size="sm"
+                      onClick={()=>{const file=lastProofFileRef.current;if(file)void previewExpenseProof(file);}}>
+                      Coba Baca Lagi (tanpa unggah ulang)
+                    </Button>}
+                </div>
+              )}
               {proofPreview && (
                 <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
                   <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>

@@ -156,15 +156,27 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
     const fallback = (!bankReference || !date || !textAmount || !(recipient ?? genericRecipient))
       ? await readExpenseBluMissingFieldsWithVision(req.file.buffer, req.file.mimetype)
       : null;
-    res.json({
+    const fields = {
       amount: textAmount ?? fallback?.amount ?? result.amount,
       date: date ?? fallback?.date ?? null,
       bankReference: bankReference ?? fallback?.bankReference ?? null,
       recipient: recipient ?? fallback?.recipient ?? genericRecipient ?? null,
+    };
+    const readableFields = Object.values(fields).filter(value => value !== null && value !== undefined).length;
+    if (readableFields === 0) {
+      req.log.warn({ engine: result.engine, rawTextLength: result.rawText.length,
+        visionConfigured: Boolean(process.env.OPENAI_API_KEY), fieldCount: 0 },
+        "Expense proof uploaded but metadata extraction returned no fields");
+    }
+    res.json({
+      ...fields,
       paymentMethod: /PLN\s+PRABAYAR/i.test(result.rawText) ? "PLN Prabayar" :
         /BI[\s-]*FAST/i.test(result.rawText) ? "BI-FAST" : result.paymentMethod,
       engine: result.engine,
-      // Suggestions only, never verified payment evidence.
+      readStatus: readableFields === 0 ? "no_fields" : readableFields === 4 ? "complete" : "partial",
+      readMessage: readableFields === 0
+        ? "Bukti diunggah, tetapi OCR belum membaca data. Coba Baca Lagi atau isi manual."
+        : readableFields === 4 ? null : "Sebagian data terbaca. Periksa field yang kosong.",
       verified: false,
     });
   } catch (err) {
