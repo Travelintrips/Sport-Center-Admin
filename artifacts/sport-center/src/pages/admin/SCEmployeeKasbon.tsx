@@ -22,12 +22,23 @@ async function api(path: string,method="GET",body?: unknown,actionGrant?:string)
  const res = await fetch(API + path,{method,headers:{Authorization:"Bearer "+getToken(),"Content-Type":"application/json",...(actionGrant?{"x-sc-kasbon-authorization":actionGrant}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const json = await res.json(); if(!res.ok) throw Error(json.error || "Permintaan gagal"); return json;
 }
+const proofPreviewKind = (url: string): "image" | "pdf" | null => {
+ try {
+  const parsed = new URL(url);
+  if(parsed.protocol !== "https:") return null;
+  if(!/^https:\/\/[^/]+\.supabase\.co\/storage\/v1\/object\/(?:public|sign)\/payment-proofs\//.test(parsed.href)) return null;
+  if(/\.pdf$/i.test(parsed.pathname)) return "pdf";
+  if(/\.(?:jpe?g|png|webp)$/i.test(parsed.pathname)) return "image";
+  return null;
+ } catch { return null; }
+};
 const currency = (value: string | number) => new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(Number(value));
 export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;onBack:()=>void}) {
  const {toast}=useToast(), qc=useQueryClient();
  const [open,setOpen]=useState(false), [editing,setEditing]=useState<number|null>(null), [form,setForm]=useState<Form>(blank);
  const [uploading,setUploading]=useState(false);
  const [toDelete,setToDelete]=useState<Kasbon|null>(null);
+ const [proofPreview,setProofPreview]=useState<{id:number;url:string}|null>(null);
  const [unlockRecord,setUnlockRecord]=useState<Kasbon|null>(null);
  const [actionPassword,setActionPassword]=useState("");
  const [actionGrant,setActionGrant]=useState<{recordId:number;authorization:string;expiresAt:number}|null>(null);
@@ -212,7 +223,7 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
   </CardHeader><CardContent>
    {isLoading?<p>Memuat histori...</p>:isError?<p role="alert" className="text-destructive">Gagal memuat: {(error as Error).message}</p>:
    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">ID Kasbon</th><th className="p-3">Tanggal Kasbon</th>{showAllMonths&&<th className="p-3">Bulan</th>}<th className="p-3">Nominal</th><th className="p-3">Bukti Transfer</th><th className="p-3">Sisa Gaji</th><th className="p-3">Keterangan</th><th className="p-3">Status Sync Total</th><th className="p-3">Tindakan</th></tr></thead><tbody>
-    {visibleRecords.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td>{showAllMonths&&<td className="p-3 whitespace-nowrap">{new Date(r.kasbonDate+"T12:00:00").toLocaleDateString("id-ID",{month:"short",year:"numeric"})}</td>}<td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<a className="inline-flex items-center gap-1 text-primary underline" href={r.proofUrl} target="_blank" rel="noopener noreferrer">Lihat bukti <ExternalLink className="h-3 w-3"/></a>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
+    {visibleRecords.map(r=><tr key={r.id} className="border-b"><td className="p-3 font-medium">KB-{String(r.id).padStart(5,"0")}</td><td className="p-3">{r.kasbonDate}</td>{showAllMonths&&<td className="p-3 whitespace-nowrap">{new Date(r.kasbonDate+"T12:00:00").toLocaleDateString("id-ID",{month:"short",year:"numeric"})}</td>}<td className="p-3 font-medium">{currency(r.amount)}</td><td className="p-3">{r.proofUrl?<button type="button" className="inline-flex items-center gap-1 text-primary underline underline-offset-2 hover:no-underline" onClick={()=>setProofPreview({id:r.id,url:r.proofUrl!})}>Lihat bukti <ExternalLink className="h-3 w-3"/></button>:"-"}</td><td className="p-3 whitespace-nowrap font-medium" title="Gaji bulanan dikurangi seluruh kasbon pada bulan yang sama sampai transaksi ini">{sisaGaji.get(r.id) == null ? "—" : currency(sisaGaji.get(r.id)!)}</td><td className="p-3 whitespace-pre-wrap">{r.notes||"-"}</td>
     <td className="p-3">{showAllMonths?<span className="text-xs text-muted-foreground">Pilih bulan untuk cek status</span>:isSalaryChecking?<span className="text-xs text-muted-foreground">Memeriksa Sheets...</span>:payrollMatches&&syncedRecordIds.has(r.id)?<span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"><CheckCircle2 className="h-3 w-3"/>Synced</span>:syncedRecordIds.has(r.id)?<span className="text-xs font-medium text-amber-700">Perlu Sync Total</span>:<span className="text-xs text-muted-foreground">Belum diverifikasi</span>}</td>
     <td className="p-3"><div className="flex flex-wrap gap-2">
     {hasActionGrant(r.id)?<>
@@ -231,6 +242,18 @@ export default function SCEmployeeKasbon({employee,onBack}:{employee:Employee;on
     </tr>}
    </tbody></table>{!visibleRecords.length&&!showHistoricalOctober&&<p className="py-6 text-center text-muted-foreground">Belum ada catatan kasbon untuk periode yang dipilih.</p>}{showHistoricalOctober&&<p className="mt-3 text-xs text-muted-foreground">Ringkasan historis diambil dari Google Sheets, bukan dari transaksi individual database. ID, tanggal, dan bukti per transaksi tidak tersedia. Data tidak dapat diedit atau dihapus dari sini, dan tidak dijumlahkan ke total Kasbon SC.</p>}</div>}
   </CardContent></Card>
+  <Dialog open={proofPreview!==null} onOpenChange={value=>{if(!value)setProofPreview(null);}}>
+   <DialogContent className="max-w-3xl">
+    <DialogHeader><DialogTitle>Pratinjau Bukti Transfer — KB-{String(proofPreview?.id??0).padStart(5,"0")}</DialogTitle></DialogHeader>
+    {proofPreview && proofPreviewKind(proofPreview.url)==="image" && <div className="flex max-h-[70vh] items-center justify-center overflow-auto rounded-lg bg-muted/30 p-2"><img src={proofPreview.url} alt={"Bukti transfer KB-"+String(proofPreview.id).padStart(5,"0")} className="max-h-[68vh] max-w-full object-contain" /></div>}
+    {proofPreview && proofPreviewKind(proofPreview.url)==="pdf" && <iframe title={"Bukti transfer KB-"+String(proofPreview.id).padStart(5,"0")} src={proofPreview.url} className="h-[65vh] w-full rounded-lg border" />}
+    {proofPreview && !proofPreviewKind(proofPreview.url) && <p role="alert" className="text-sm text-muted-foreground">Format atau alamat bukti tidak mendukung pratinjau. Periksa lampiran melalui sumber yang tepercaya.</p>}
+    <div className="flex justify-end gap-2">
+     {proofPreview && proofPreviewKind(proofPreview.url) && <a href={proofPreview.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">Buka gambar asli <ExternalLink className="h-4 w-4"/></a>}
+     <Button type="button" variant="outline" onClick={()=>setProofPreview(null)}>Tutup</Button>
+    </div>
+   </DialogContent>
+  </Dialog>
   <Dialog open={salaryPreview!==null} onOpenChange={value=>{if(!value&&!syncSalary.isPending)setSalaryPreview(null);}}>
    <DialogContent className="max-w-md">
     <DialogHeader><DialogTitle>Konfirmasi Sync Total Kasbon</DialogTitle></DialogHeader>
