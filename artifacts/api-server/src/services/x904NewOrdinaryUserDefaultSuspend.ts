@@ -297,7 +297,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       // device deletion alone is not evidence that old authorization ended.
       const registry = await tx.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities
         WHERE device_serial=${DEVICE} AND user_pin=${pin}
-          AND (revoked_at IS NULL OR verification_state='verified') LIMIT 1`);
+          AND (revoked_at IS NULL OR verification_state IS DISTINCT FROM 'revoked') LIMIT 1`);
       if (registry.rows.length) return;
 
       const key = x904AutomaticCommandKey(
