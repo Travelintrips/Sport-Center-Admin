@@ -38,6 +38,15 @@ export function isNewOrdinaryX904Candidate(
     String(user.name ?? "").trim().length >= 2;
 }
 
+/** Compare device command history against a verified new enrollment epoch. */
+export function hasX904CommandForCurrentIdentityEpoch(
+  firstObservedAtMs: number, lastCommandAtMs: number | undefined,
+): boolean {
+  if (!Number.isFinite(firstObservedAtMs)) return true;
+  if (lastCommandAtMs === undefined) return false;
+  return !Number.isFinite(lastCommandAtMs) || lastCommandAtMs >= firstObservedAtMs;
+}
+
 export function isSafeReenrollment(input: {pin:string;name:string;oldName:string;oldRole:number;absentSnapshots:number;gapMinutes:number}): boolean {
   const norm=(x:string)=>x.trim().replace(/\s+/g," ").toUpperCase();
   const current=norm(input.name);
@@ -211,8 +220,7 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     if (currentEpochIndex <= 0) continue;
     const currentEpochAt = new Date(String(history[currentEpochIndex].observed_at)).getTime();
     const lastCommandAt = lastCommandByPin.get(pin);
-    if (lastCommandAt !== undefined && (!Number.isFinite(lastCommandAt) ||
-        lastCommandAt >= currentEpochAt)) continue;
+    if (hasX904CommandForCurrentIdentityEpoch(currentEpochAt, lastCommandAt)) continue;
     // Small bounded batches prevent device command floods and keep
     // PostgreSQL/VMSC capacity available for bookings and paid access.
     if (queuedThisCycle >= 5) break;
