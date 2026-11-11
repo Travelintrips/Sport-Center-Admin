@@ -103,7 +103,7 @@ export default function GymNonmemberEntry() {
         <div className="pointer-events-none absolute -right-24 top-10 h-80 w-80 rounded-full bg-orange-100/70 blur-3xl" />
         <div className="mx-auto max-w-[1280px] px-5 pb-12 pt-5 sm:px-8 lg:px-10 lg:pb-16">
           <nav aria-label="Navigasi halaman" className="mb-8 rounded-2xl bg-white/75 px-5 py-3 shadow-sm backdrop-blur-sm">
-            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3 md:hidden">
+            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3 lg:hidden">
               <Link href="/" className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 transition hover:text-[#0f5b46]">
                 <ChevronRight className="h-4 w-4 rotate-180" /> Kembali ke Beranda
               </Link>
@@ -121,16 +121,16 @@ export default function GymNonmemberEntry() {
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Bandara Soekarno-Hatta</p>
               </div>
             </Link>
-            <div className="hidden items-center gap-7 text-sm font-semibold text-slate-600 md:flex">
+            <div className="hidden items-center gap-7 text-sm font-semibold text-slate-600 lg:flex">
               <a href="#pilih-fasilitas" className="hover:text-[#0f5b46]">Fasilitas</a>
               <a href="#cara-booking" className="hover:text-[#0f5b46]">Cara Booking</a>
               <Link href="/facilities" className="hover:text-[#0f5b46]">Informasi</Link>
             </div>
             <div className="flex items-center gap-3">
-              <Link href="/" className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition hover:border-emerald-200 hover:text-[#0f5b46] md:inline-flex">
+              <Link href="/" className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition hover:border-emerald-200 hover:text-[#0f5b46] lg:inline-flex">
                 <ChevronRight className="h-4 w-4 rotate-180" /> Kembali ke Beranda
               </Link>
-              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm">
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm sm:px-4 sm:text-sm">
                 <Clock3 className="h-4 w-4 text-orange-600" /> 06:00 – 23:00 WIB
               </span>
             </div>
@@ -142,7 +142,7 @@ export default function GymNonmemberEntry() {
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-orange-200 bg-white px-4 py-2 text-xs font-extrabold uppercase tracking-[0.12em] text-orange-700 shadow-sm">
                 <CalendarDays className="h-4 w-4" /> Booking online tanpa login
               </div>
-              <h1 className="text-4xl font-black leading-[1.05] tracking-tight text-[#0b3f33] sm:text-5xl lg:text-[4rem]">
+              <h1 className="text-[2.45rem] font-black leading-[1.04] tracking-tight text-[#0b3f33] sm:text-5xl lg:text-[4rem]">
                 Pilih Olahragamu.<br />
                 <span className="text-orange-600">Booking Lebih Mudah.</span>
               </h1>
@@ -150,11 +150,11 @@ export default function GymNonmemberEntry() {
                 Booking fasilitas Sport Center Bandara Soekarno-Hatta dengan praktis.
                 Pilih jadwal, lakukan pembayaran, dan dapatkan akses setelah pembayaran diverifikasi.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <a href="#pilih-fasilitas" className="inline-flex min-h-12 items-center gap-3 rounded-full bg-gradient-to-r from-[#0b3f33] to-[#0f6b50] px-6 py-3 text-sm font-extrabold text-white shadow-[0_12px_28px_rgba(15,91,70,0.22)] transition hover:-translate-y-0.5">
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <a href="#pilih-fasilitas" className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-full bg-gradient-to-r from-[#0b3f33] to-[#0f6b50] px-6 py-3 text-sm font-extrabold text-white shadow-[0_12px_28px_rgba(15,91,70,0.22)] transition hover:-translate-y-0.5 sm:w-auto">
                   Pilih Fasilitas & Booking <ArrowRight className="h-5 w-5" />
                 </a>
-                <Link href="/facilities" className="inline-flex min-h-12 items-center rounded-full border border-[#0f5b46]/30 bg-white px-6 py-3 text-sm font-extrabold text-[#0b3f33] shadow-sm transition hover:bg-emerald-50">
+                <Link href="/facilities" className="inline-flex min-h-12 w-full items-center justify-center rounded-full border border-[#0f5b46]/30 bg-white px-6 py-3 text-sm font-extrabold text-[#0b3f33] shadow-sm transition hover:bg-emerald-50 sm:w-auto">
                   Lihat Semua Fasilitas
                 </Link>
               </div>
@@ -166,7 +166,7 @@ export default function GymNonmemberEntry() {
               </div>
             </div>
 
-            <div className="relative min-w-0">
+            <div className="relative mt-1 min-w-0 lg:mt-0">
               <div className="pointer-events-none absolute -bottom-7 -right-7 h-[90%] w-[92%] rounded-[2.5rem] bg-gradient-to-br from-emerald-100 to-orange-100 blur-[1px]" />
               <div className="relative overflow-hidden rounded-[2.5rem] border-[6px] border-white bg-slate-100 shadow-[0_28px_70px_rgba(15,23,42,0.18)]">
                 <img
@@ -193,7 +193,7 @@ export default function GymNonmemberEntry() {
               <span className="h-1 w-8 rounded-full bg-[#0f5b46]" />
               <span className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#0f5b46]">Pilih fasilitas</span>
             </div>
-            <h2 className="text-3xl font-black tracking-tight text-[#13213b] sm:text-4xl">Pilih Layanan Olahraga</h2>
+            <h2 className="text-[2rem] font-black tracking-tight text-[#13213b] sm:text-4xl">Pilih Layanan Olahraga</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
               Pilih fasilitas yang sesuai kebutuhanmu. Harga dan jam layanan mengikuti data fasilitas yang aktif.
             </p>
@@ -240,7 +240,7 @@ export default function GymNonmemberEntry() {
 
                 <div className="p-5 sm:p-6">
                   <h3 className="text-xl font-black leading-tight tracking-tight text-[#13213b]">{facility.name}</h3>
-                  <div className="mt-4 flex items-end justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div className="mt-4 flex flex-col items-start gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Mulai dari</p>
                       <p className="mt-1 text-2xl font-black tracking-tight text-orange-600">
@@ -248,7 +248,7 @@ export default function GymNonmemberEntry() {
                         <span className="ml-1 text-xs font-medium text-slate-500">{gym ? "/kunjungan" : "/jam"}</span>
                       </p>
                     </div>
-                    <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-xs font-bold text-[#0f5b46]">
+                    <p className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-xs font-bold text-[#0f5b46] sm:shrink-0">
                       <Clock3 className="h-4 w-4" /> {facility.openTime}–{facility.closeTime}
                     </p>
                   </div>
@@ -268,8 +268,8 @@ export default function GymNonmemberEntry() {
 
       <section id="cara-booking" className="mx-auto max-w-[1280px] px-5 pb-12 sm:px-8 lg:px-10">
         <div className="overflow-hidden rounded-[2rem] border border-emerald-100 bg-white shadow-[0_16px_45px_rgba(15,23,42,0.06)]">
-          <div className="grid md:grid-cols-[280px_1fr]">
-            <div className="flex items-center gap-4 bg-gradient-to-br from-[#eef8f2] to-[#fdf6eb] p-6 md:p-8">
+          <div className="grid lg:grid-cols-[280px_1fr]">
+            <div className="flex items-center gap-4 bg-gradient-to-br from-[#eef8f2] to-[#fdf6eb] p-6 lg:p-8">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#0f5b46] shadow-sm ring-1 ring-emerald-100">
                 <CalendarDays className="h-7 w-7" />
               </div>
@@ -280,14 +280,14 @@ export default function GymNonmemberEntry() {
               </div>
             </div>
 
-            <div className="grid gap-0 md:grid-cols-3">
+            <div className="grid gap-0 sm:grid-cols-3">
               {[
                 ["1", "Pilih Fasilitas", "Pilih fasilitas olahraga yang ingin digunakan."],
                 ["2", "Isi Data & Bayar", "Lengkapi data, pilih jadwal, lalu lakukan pembayaran."],
                 ["3", "Datang & Akses", "Setelah pembayaran diverifikasi, fasilitas siap digunakan."],
               ].map(([number, title, text], index) => (
                 <div key={title} className="relative p-6 md:p-7">
-                  {index > 0 && <div className="absolute left-0 top-6 hidden h-[calc(100%-3rem)] w-px bg-slate-100 md:block" />}
+                  {index > 0 && <div className="absolute left-0 top-6 hidden h-[calc(100%-3rem)] w-px bg-slate-100 lg:block" />}
                   <div className="mb-4 flex items-center gap-3">
                     <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 text-sm font-black text-white shadow-[0_7px_16px_rgba(234,88,12,0.22)]">{number}</span>
                     <div className="h-px flex-1 bg-gradient-to-r from-orange-200 to-transparent" />
@@ -309,7 +309,7 @@ export default function GymNonmemberEntry() {
               <h2 className="text-3xl font-black">Siap Berolahraga?</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-emerald-50 sm:text-base">Booking sekarang dan nikmati fasilitas Sport Center Bandara Soekarno-Hatta.</p>
             </div>
-            <a href="#pilih-fasilitas" className="inline-flex min-h-12 items-center gap-3 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:-translate-y-0.5">
+            <a href="#pilih-fasilitas" className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:-translate-y-0.5 md:w-auto">
               Pilih Fasilitas & Booking <ArrowRight className="h-5 w-5" />
             </a>
           </div>
