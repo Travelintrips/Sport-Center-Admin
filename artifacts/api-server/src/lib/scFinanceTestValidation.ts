@@ -56,17 +56,12 @@ export function testSheetRow(item:TestLedgerEntry) {
   const date=String(item.transaction_date).slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error("INVALID_TEST_DATE");
   const who=String(item.source_name).trim().toUpperCase();
-  const marker=item.direction==="IN" ? "SC-TEST-IN:" : "SC-TEST-OUT:";
-  const words=item.direction==="IN"?"Dana masuk dari":"Pengeluaran ke";
   const source=String(item.sender_bank??"").trim();
   const account=String(item.receiving_account??"").trim();
   const cashType=String(item.cash_type??"").trim().toLowerCase();
   if(!["","kas kecil","kas besar"].includes(cashType))throw Error("INVALID_CASH_TYPE");
-  const method=String(item.method??"").trim();
   const reference=String(item.bank_reference??"").trim();
   const note=String(item.notes??"").trim();
-  const bankAndAccount=[source,account].filter(Boolean).join(" - ");
-  const details=[bankAndAccount,method,reference?"Ref: "+reference:"",note].filter(Boolean);
   // Cash income column B mirrors the October reference workbook:
   // "Dana Masuk dari NAMA | BANK - TUJUAN | ID".
   // No SC-TEST prefix, method label, or automatically inserted SIMULASI note.
