@@ -196,14 +196,23 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   // transaction. This prevents repeated advisory locks and history scans
   // every minute for the same registration during the 75-minute lookback.
   const pins = allowedCandidates.map(u => String(u.pin));
-  const existing = await store.execute(sql`SELECT DISTINCT user_pin
+  const existing = await store.execute(sql`SELECT user_pin, max(created_at) AS latest_command_at
     FROM sport_center.x904_user_commands
-    WHERE device_serial=${DEVICE} AND user_pin IN (${sql.join(pins.map(pin => sql`${pin}`), sql`,`)})`);
-  const previouslyHandled = new Set(existing.rows.map(row => String(row.user_pin)));
+    WHERE device_serial=${DEVICE} AND user_pin IN (${sql.join(pins.map(pin => sql`${pin}`), sql`,`)})
+    GROUP BY user_pin`);
+  const lastCommandByPin = new Map(existing.rows.map(row =>
+    [String(row.user_pin), new Date(String(row.latest_command_at)).getTime()] as const));
   let queuedThisCycle = 0;
   for (const candidate of allowedCandidates) {
     const pin = String(candidate.pin);
-    if (previouslyHandled.has(pin)) continue;
+    // Historical commands belong to an earlier identity epoch. Only a command
+    // observed after this enrollment's first snapshot can suppress requeue.
+    const currentEpochIndex = firstIndexOf(pin);
+    if (currentEpochIndex <= 0) continue;
+    const currentEpochAt = new Date(String(history[currentEpochIndex].observed_at)).getTime();
+    const lastCommandAt = lastCommandByPin.get(pin);
+    if (lastCommandAt !== undefined && (!Number.isFinite(lastCommandAt) ||
+        lastCommandAt >= currentEpochAt)) continue;
     // Small bounded batches prevent device command floods and keep
     // PostgreSQL/VMSC capacity available for bookings and paid access.
     if (queuedThisCycle >= 5) break;
@@ -268,14 +277,19 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       if (ownership.rows.length) return;
       const grants = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
         WHERE device_serial=${DEVICE} AND user_pin=${pin}
-          AND (access_state IN ('pending','active') OR activated_at IS NOT NULL)
+          AND (access_state IN ('pending','active')
+            OR (activated_at IS NOT NULL AND (expires_at IS NULL OR expires_at > ${now})))
         LIMIT 1`);
       if (grants.rows.length) return;
       const commands = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
-        WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
+        WHERE device_serial=${DEVICE} AND user_pin=${pin}
+          AND created_at >= ${firstSeen} LIMIT 1`);
       if (commands.rows.length) return;
+      // An old verified identity must be explicitly revoked. A rename or
+      // device deletion alone is not evidence that old authorization ended.
       const registry = await tx.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities
-        WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
+        WHERE device_serial=${DEVICE} AND user_pin=${pin}
+          AND (revoked_at IS NULL OR verification_state='verified') LIMIT 1`);
       if (registry.rows.length) return;
 
       const key = x904AutomaticCommandKey(
