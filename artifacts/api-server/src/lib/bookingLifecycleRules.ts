@@ -42,3 +42,27 @@ export function normalizeBookingCompletionExceptionReason(value: unknown): strin
   if (normalized.length < 12 || normalized.length > 1000) return null;
   return normalized;
 }
+
+/**
+ * X904 device timestamps are local WIB without a timezone suffix.
+ * A door event is usage evidence only inside the booked session, never merely
+ * because the access grant was activated or later suspended.
+ */
+export function isX904UsageWithinBookingSession(
+  bookingDate: string,
+  startTime: string,
+  endTime: string,
+  deviceTime: string,
+): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) ||
+      !/^\d{2}:\d{2}(?::\d{2})?$/.test(startTime) ||
+      !/^\d{2}:\d{2}(?::\d{2})?$/.test(endTime) ||
+      !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(deviceTime)) return false;
+  const start = new Date(`${bookingDate}T${startTime.slice(0,5)}:00+07:00`);
+  const end = new Date(`${bookingDate}T${endTime.slice(0,5)}:00+07:00`);
+  const event = new Date(`${deviceTime.replace(" ", "T")}+07:00`);
+  if (endTime.slice(0,5) === "00:00" || end.getTime() <= start.getTime())
+    end.setTime(end.getTime() + 86_400_000);
+  return [start,end,event].every(t=>Number.isFinite(t.getTime())) &&
+    event.getTime() >= start.getTime() && event.getTime() < end.getTime();
+}
