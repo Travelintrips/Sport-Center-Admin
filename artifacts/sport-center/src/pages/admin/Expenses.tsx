@@ -341,7 +341,8 @@ export default function AdminExpenses() {
       sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
       sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
       senderBank:string;receivingAccount:string;
-      method:string;bankReference:string|null;notes:string|null}>;
+      method:string;bankReference:string|null;notes:string|null;
+      receiptUrls?:string[];expenseKind?:string;destinationBank?:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -1382,7 +1383,13 @@ export default function AdminExpenses() {
                 </tr></thead>
                 <tbody>{visibleTestExpenses.map(x=><tr key={x.id} className="border-b">
                   <td className="p-3 font-mono">{x.testNo}<span className="block text-xs text-gray-500">{x.transactionDate}</span></td>
-                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span>
+                    {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
+                      <span className="block text-xs mt-1">
+                        {x.receiptUrls.map((url,i)=><a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                          className="text-blue-700 underline mr-2">Bukti {i+1}</a>)}
+                      </span>}
+                  </td>
                   <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
                   <td className="p-3">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
                     x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
