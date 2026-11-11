@@ -44,6 +44,8 @@ export async function reconcileX904MissedPaidCheckins(): Promise<void> {
     const outcome=String(result.rows[0]?.result??'');
     if (outcome === 'error_nonblocking') logger.error({eventId}, '[x904] auto checkin reconciliation error');
   }
+  // Same existing 60-second reconciler; nonmember branch has its own off-by-default gate.
+  await reconcileX904MissedNonmemberBookingCheckins();
 }
 
 /**
