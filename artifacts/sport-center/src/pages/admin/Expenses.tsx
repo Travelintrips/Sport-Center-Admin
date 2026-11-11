@@ -770,6 +770,10 @@ export default function AdminExpenses() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if(FINANCE_SC_TEST_ONLY && (uploadingReceipt || scanningProof)){
+      toast({title:"Bukti masih diproses",description:"Simpan setelah unggahan/OCR selesai agar bukti tidak tertinggal.",variant:"destructive"});
+      return;
+    }
     if (!form.notes.trim()) {
       toast({ title: "Catatan transaksi wajib diisi", description: "Tuliskan tujuan penggunaan dana sebelum menyimpan.", variant: "destructive" });
       return;
@@ -1983,7 +1987,7 @@ export default function AdminExpenses() {
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
                 Batal
               </Button>
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving}>
+              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving || uploadingReceipt || scanningProof}>
                 {editingId ? "Simpan Perubahan" : FINANCE_SC_TEST_ONLY ? "Simpan Pengeluaran (TEST)" : "Buat Pengeluaran"}
               </Button>
             </div>
