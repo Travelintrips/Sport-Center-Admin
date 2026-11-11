@@ -98,10 +98,15 @@ export default function GymNonmemberEntry() {
 
   return (
     <main className="min-h-screen bg-[#f7f8fa] text-slate-900">
-      <section className="relative overflow-hidden border-b border-emerald-900/5 bg-[linear-gradient(135deg,#fffaf3_0%,#ffffff_48%,#eef8f3_100%)]">
-        <div className="pointer-events-none absolute -left-20 -top-24 h-64 w-64 rounded-full bg-emerald-100/60 blur-3xl" />
-        <div className="pointer-events-none absolute -right-24 top-10 h-80 w-80 rounded-full bg-orange-100/70 blur-3xl" />
-        <div className="mx-auto max-w-[1280px] px-5 pb-12 pt-5 sm:px-8 lg:px-10 lg:pb-16">
+      <section className="relative overflow-hidden border-b border-emerald-100 bg-[linear-gradient(135deg,#f4fbf7_0%,#fffaf4_42%,#f8fbf9_68%,#eef7f2_100%)]">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-28 -top-24 h-80 w-80 rounded-full bg-emerald-100/65 blur-3xl" />
+          <div className="absolute right-[-5rem] top-10 h-[24rem] w-[24rem] rounded-full bg-orange-100/55 blur-3xl" />
+          <div className="absolute left-[38%] top-[22%] h-72 w-72 rounded-full bg-white/70 blur-3xl" />
+          <div className="absolute inset-0 opacity-[0.035] [background-image:linear-gradient(rgba(15,23,42,0.55)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.55)_1px,transparent_1px)] [background-size:32px_32px]" />
+          <div className="absolute inset-x-0 bottom-0 h-28 bg-[linear-gradient(to_top,rgba(255,255,255,0.72),transparent)]" />
+        </div>
+        <div className="relative mx-auto max-w-[1280px] px-5 pb-12 pt-5 sm:px-8 lg:px-10 lg:pb-16">
           <nav aria-label="Navigasi halaman" className="mb-8 rounded-2xl bg-white/75 px-4 py-3 shadow-sm backdrop-blur-sm sm:px-5 [@media_(orientation:portrait)_and_(min-width:768px)_and_(max-width:1200px)]:px-4">
             <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3 lg:hidden">
               <Link href="/" className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-slate-600 transition hover:text-[#0f5b46] [@media_(pointer:coarse)]:min-h-12 [@media_(pointer:coarse)]:px-1">
@@ -167,8 +172,10 @@ export default function GymNonmemberEntry() {
             </div>
 
             <div className="relative mt-1 min-w-0 lg:mt-0">
-              <div className="pointer-events-none absolute -bottom-7 -right-7 h-[90%] w-[92%] rounded-[2.5rem] bg-gradient-to-br from-emerald-100 to-orange-100 blur-[1px]" />
-              <div className="relative overflow-hidden rounded-[2.5rem] border-[6px] border-white bg-slate-100 shadow-[0_28px_70px_rgba(15,23,42,0.18)]">
+              <div className="pointer-events-none absolute -right-10 top-[8%] h-[82%] w-[86%] rounded-[3rem] bg-gradient-to-br from-emerald-100/85 via-white/40 to-orange-100/80 blur-[2px]" />
+              <div className="pointer-events-none absolute left-[10%] top-[8%] h-40 w-40 rounded-full bg-white/75 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-8 right-[6%] h-24 w-[72%] rounded-full bg-[#0f5b46]/10 blur-2xl" />
+              <div className="relative overflow-hidden rounded-[2.5rem] border-[6px] border-white/95 bg-slate-100 shadow-[0_30px_75px_rgba(15,63,51,0.16)]">
                 <img
                   src={buildingImg}
                   alt="Gedung Sport Center Bandara Soekarno-Hatta"
