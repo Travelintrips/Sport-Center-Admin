@@ -8,7 +8,7 @@ test("all facility chooser options lead to shared responsive checkout",()=>{
  assert.match(chooser,/const path = "\/wa\/booking\/"/);
  assert.match(chooser,/isGym\(facility\) \? path \+ "\?nonmember=1&self=1" : path/);
  assert.match(form,/max-w-6xl/);
- assert.match(form,/lg:grid-cols-\[minmax\(0,1fr\)_390px\]/);
+ assert.match(form,/lg:grid-cols-\[minmax\(0,1\.2fr\)_410px\]/);
  assert.match(form,/src=\{buildingImg\}/);
  assert.match(form,/Ringkasan dan pembayaran booking/);
  assert.match(form,/Konfirmasi & Buat Booking/);
