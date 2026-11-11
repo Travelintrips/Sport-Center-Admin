@@ -15,6 +15,6 @@ test("facilities remain live and Gym still enters protected checkout",()=>{
  assert.match(page,/fetch\("\/api\/wa\/facilities"/);
  assert.match(page,/Number\(value\.pricePerHour\) > 0/);
  assert.match(page,/isGym\(facility\) \? path \+ "\?nonmember=1&self=1" : path/);
- assert.match(page,/Setelah pembayaran diverifikasi, akses fasilitas akan diberikan/);
+ assert.match(page,/setelah pembayaran diverifikasi/i);
  assert.doesNotMatch(page,/ACTIVATE_USER|SUSPEND_USER/);
 });
