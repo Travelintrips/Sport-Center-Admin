@@ -2,6 +2,7 @@ import {google} from "googleapis";
 import {db} from "@workspace/db";
 import {sql} from "drizzle-orm";
 import {resultRows} from "./scIncomeOperational";
+import {calculateTestBalanceUpdates} from "./scFinanceTestBalance";
 import {TEST_GUARD_VERSION,testNo,testRowIndexes,testSheetRow} from "./scFinanceTestValidation";
 
 const CASH_SHEET_ID="1VcbUujz6WHRgj5Fa1QkWjaEnkb2YIxQjkkSpEfMJNE8";
@@ -49,6 +50,49 @@ function assertHeaders(headers:string[]){
      expected.slice(2).some((x,i)=>normalized[i+2]!==x))
     throw Error("SC_TEST_CASH_SHEET_HEADERS_MISMATCH");
 }
+/**
+ * Refresh column E for verified SC_TEST_ONLY entries, including older test rows
+ * that were written before balances were shown. Keep non-test balances untouched.
+ * This can be rerun after Sheet deletion/row reordering without re-appending data.
+ */
+async function refreshScTestBalances(sheets:ReturnType<typeof googleSheetsClient>):Promise<number>{
+  const sheet=await sheets.spreadsheets.values.get({
+    spreadsheetId:CASH_SHEET_ID,range:"'kas besar sc'!A1:M",
+    valueRenderOption:"UNFORMATTED_VALUE",
+  });
+  const rows=(sheet.data.values??[]) as unknown[][];
+  assertHeaders((rows[0]??[]) as string[]);
+  const ledger=resultRows(await db.execute(sql`SELECT id,direction FROM sport_center.sc_finance_test_entries
+    WHERE sheet_sync_state IN ('synced','syncing') ORDER BY id LIMIT 1000`));
+  const eligible=new Set<string>(ledger.map(entry=>testNo(Number(entry.id),entry.direction)));
+  const updates=calculateTestBalanceUpdates(rows,eligible);
+  if(updates.length===0)return 0;
+  // Column E only, and only for matched TEST rows. No writes to real balances.
+  await assertBizPortalTestGuard();
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId:CASH_SHEET_ID,
+    requestBody:{
+      valueInputOption:"RAW",
+      data:updates.map(item=>({
+        range:`'kas besar sc'!E${item.row}`,
+        values:[[item.value]],
+      })),
+    },
+  });
+  const proof=await sheets.spreadsheets.values.get({
+    spreadsheetId:CASH_SHEET_ID,range:"'kas besar sc'!A1:M",
+    valueRenderOption:"UNFORMATTED_VALUE",
+  });
+  const actualRows=(proof.data.values??[]) as unknown[][];
+  for(const item of updates){
+    const actual=actualRows[item.row-1]??[];
+    if(String(actual[7]??"")!=="SC_TEST_ONLY" ||
+       typeof actual[4]!=="number" || Math.abs(actual[4]-item.value)>0.001)
+      throw Error("SC_TEST_BALANCE_READBACK_MISMATCH");
+  }
+  return updates.length;
+}
+
 export async function syncScFinanceTestRow(id:number):Promise<"synced"|"pending"|"disabled"> {
   if(!testSheetWritingEnabled())return "disabled";
   if(!process.env.GOOGLE_SERVICE_ACCOUNT_JSON)throw Error("SC_TEST_SHEET_CREDENTIALS_MISSING");
@@ -105,6 +149,14 @@ export async function syncScFinanceTestRow(id:number):Promise<"synced"|"pending"
        row[5]!==expected[5] ||
        String(row[6]??"")!=="" || row[7]!=="SC_TEST_ONLY")
       throw Error("SC_TEST_SHEET_READBACK_MISMATCH");
+    // The row remains retryable until its visible column-E balance is verified.
+    await refreshScTestBalances(sheets);
+    const visibleBalance=await sheets.spreadsheets.values.get({
+      spreadsheetId:CASH_SHEET_ID,range:`'kas besar sc'!E${matched[0]}`,
+      valueRenderOption:"UNFORMATTED_VALUE"
+    });
+    if(typeof visibleBalance.data.values?.[0]?.[0]!=="number")
+      throw Error("SC_TEST_BALANCE_NOT_VISIBLE");
     await db.execute(sql`UPDATE sport_center.sc_finance_test_entries SET
       sheet_sync_state='synced',sheet_row=${matched[0]},sheet_sync_error=NULL,
       sheet_synced_at=now(),updated_at=now()
@@ -194,6 +246,9 @@ export async function reconcileScFinanceTestSheets():Promise<{
     }
     totals.inspected++;
   }
+  // Also backfill/recalculate E for TEST rows after manual deletions.
+  // A read or write failure does not mark any record newly synced.
+  await refreshScTestBalances(sheets);
   return totals;
 }
 export function startScFinanceTestSheetReconciliationWorker(){

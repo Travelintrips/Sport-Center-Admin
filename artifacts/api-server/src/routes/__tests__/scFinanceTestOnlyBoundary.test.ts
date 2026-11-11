@@ -197,3 +197,16 @@ describe("optional Kas selector for normal incoming form",()=>{
     expect(ui).toContain('cashType:incomeForm.cashType');
   });
 });
+
+
+describe("column E TEST balance on existing test ledger writer",()=>{
+  it("writes only verified TEST column E values and proves them before sync",()=>{
+    expect(source).toContain("refreshScTestBalances");
+    expect(source).toContain('!E${item.row}');
+    expect(source).toContain('valueInputOption:"RAW"');
+    expect(source).toContain('SC_TEST_BALANCE_NOT_VISIBLE');
+    expect(source).toContain("SC_TEST_BALANCE_READBACK_MISMATCH");
+    expect(source).toContain("await refreshScTestBalances(sheets);");
+    expect(source).toContain("sheet_sync_state IN ('synced','syncing')");
+  });
+});
