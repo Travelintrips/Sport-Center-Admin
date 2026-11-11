@@ -1254,7 +1254,7 @@ export default function WaBookingForm() {
             return <div role="status" aria-live="polite" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               <p className="font-semibold">Booking belum dapat dikirim:</p>
               <ul className="list-disc pl-5">{missing.map(reason => <li key={reason}>{reason}</li>)}</ul>
-              {dedicatedNonmember && <p className="mt-2">Untuk simulasi tanpa pembayaran, gunakan lingkungan uji. Bukti pembayaran tetap wajib untuk transaksi nyata.</p>}
+              
             </div>;
           })()}
 
