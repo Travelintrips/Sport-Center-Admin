@@ -4,7 +4,7 @@ import { dispatchX904GymUsageReport } from "../services/x904GymUsageWaQueue";
 import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWorker";
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport, reconcileX904LegacyLanDelivery } from "../services/x904LanWaNotifications";
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
@@ -18,6 +18,7 @@ import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
 import { completeBooking } from "./bookingLifecycle";
 import { getBaseUrl } from "./appUrl";
+import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "./invoiceDelivery";
 
 function getWIBNow(): Date {
   return new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -595,6 +596,96 @@ async function autoCompleteBookings(): Promise<void> {
   }
 }
 
+async function recoverMissingNonGymInvoices(): Promise<void> {
+  try {
+    const candidates = await db
+      .select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        groupRef: bookingsTable.groupRef,
+        facilityId: bookingsTable.facilityId,
+        invoicePdfUrl: bookingsTable.invoicePdfUrl,
+      })
+      .from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.status, "confirmed"),
+        isNull(bookingsTable.invoicePdfUrl),
+      ))
+      .limit(40);
+
+    if (!candidates.length) return;
+
+    const facilityIds = [...new Set(candidates.map(row => row.facilityId))];
+    const facilities = await db
+      .select({
+        id: facilitiesTable.id,
+        name: facilitiesTable.name,
+        category: facilitiesTable.category,
+        bookingMode: facilitiesTable.bookingMode,
+      })
+      .from(facilitiesTable)
+      .where(inArray(facilitiesTable.id, facilityIds));
+    const facilityById = new Map(facilities.map(row => [row.id, row]));
+
+    const candidateIds = candidates.map(row => row.id);
+    const confirmedPayments = await db
+      .select({
+        bookingId: paymentsTable.bookingId,
+        paymentType: paymentsTable.paymentType,
+        status: paymentsTable.status,
+      })
+      .from(paymentsTable)
+      .where(and(
+        inArray(paymentsTable.bookingId, candidateIds),
+        eq(paymentsTable.status, "confirmed"),
+      ));
+    const hasFinalPayment = new Set(
+      confirmedPayments
+        .filter(payment => payment.paymentType !== "dp")
+        .map(payment => payment.bookingId),
+    );
+
+    const processedGroups = new Set<string>();
+    let attempted = 0;
+
+    for (const booking of candidates) {
+      if (!hasFinalPayment.has(booking.id)) continue;
+      const facility = facilityById.get(booking.facilityId);
+      if (!facility) continue;
+      const isGym =
+        facility.bookingMode === "walk_in" ||
+        /gym|fitness/i.test(`${facility.name} ${facility.category ?? ""}`);
+      if (isGym) continue;
+
+      if (booking.groupRef) {
+        if (processedGroups.has(booking.groupRef)) continue;
+        processedGroups.add(booking.groupRef);
+      }
+
+      attempted++;
+      const task = booking.groupRef
+        ? sendGroupInvoiceToCustomer(booking.groupRef, { userName: "scheduler:invoice-recovery" })
+        : sendInvoiceToCustomer(booking.orderNumber, { userName: "scheduler:invoice-recovery" });
+      try {
+        await task;
+        logger.info(
+          { orderNumber: booking.orderNumber, groupRef: booking.groupRef ?? null },
+          "[scheduler] Recovered missing non-Gym invoice",
+        );
+      } catch (err) {
+        logger.error(
+          { err, orderNumber: booking.orderNumber, groupRef: booking.groupRef ?? null },
+          "[scheduler] Missing non-Gym invoice recovery failed",
+        );
+      }
+
+      if (attempted >= 10) break;
+    }
+  } catch (err) {
+    logger.error({ err }, "[scheduler] Missing non-Gym invoice recovery scan failed");
+  }
+}
+
 // Nightly bank audit — 23:00 WIB (16:00 UTC), kirim WA jika ada temuan critical/warning
 async function runNightlyBankAudit(): Promise<void> {
   const now = getWIBNow();
@@ -687,6 +778,7 @@ export function startScheduler(): void {
   expireOverdueMemberships();
   expireOverdueBookings();
   autoCompleteBookings();
+  recoverMissingNonGymInvoices();
   checkConnections();
   processPaymentAccountingOutbox().catch((err) =>
     logger.error({ err }, "[scheduler] Initial payment accounting outbox processing failed"),
@@ -755,6 +847,7 @@ export function startScheduler(): void {
     await expireOverdueMemberships();
     await expireOverdueBookings();
     await autoCompleteBookings();
+    await recoverMissingNonGymInvoices();
     await sendPaymentReminder();
     await sendReminderH1();
     await sendDayOfReminder();
