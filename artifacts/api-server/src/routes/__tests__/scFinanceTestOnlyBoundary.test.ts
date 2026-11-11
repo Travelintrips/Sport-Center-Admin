@@ -188,7 +188,13 @@ describe("optional Kas selector for normal incoming form",()=>{
     expect(parseTestInput({...valid,cashType:""}).cashType).toBe("");
     expect(()=>parseTestInput({...valid,cashType:"rekening pribadi"})).toThrow("INVALID_CASH_TYPE");
     expect(testSheetRow({...sample("OUT",5000,12),cash_type:""})[1])
-      .toContain("SC-TEST-OUT: Pengeluaran ke FELICIA JUSTIANI");
+      .toBe("Pengeluaran ke FELICIA JUSTIANI | Mandiri | Tes internal | Ref: TEST-123 | SC-TEST-OUT-000012");
+    const expenseActual={...sample("OUT",1000,17),source_name:"DEDE SAEFULLAH",
+      receiving_account:"DEDE SAEFULLAH",sender_bank:"blu by BCA Digital",
+      notes:"Reimbush charger ev",bank_reference:"1793262302800488"};
+    expect(testSheetRow(expenseActual)[1]).toBe(
+      "Pengeluaran ke DEDE SAEFULLAH | blu by BCA Digital | Reimbush charger ev | Ref: 1793262302800488 | SC-TEST-OUT-000017"
+    );
     expect(ui).toContain('id="income-cash-type"');
     expect(ui).toContain('value="kas kecil"');
     expect(ui).toContain('value="kas besar"');
