@@ -1,5 +1,5 @@
 import { db, bookingsTable, bookingHistoryTable, rescheduleRequestsTable, usageProofsTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { logAudit } from "./auditLog";
 export {
   CONFIRMABLE_BOOKING_STATUSES,
@@ -157,6 +157,7 @@ export async function checkInBooking(
       .where(and(
         eq(bookingsTable.id, bookingId),
         eq(bookingsTable.status, "confirmed"),
+        isNull(bookingsTable.checkedInAt),
       ))
       .returning({ id: bookingsTable.id });
     if (!updated) return { ok: false, reason: "Booking berubah diproses oleh operator lain" };
