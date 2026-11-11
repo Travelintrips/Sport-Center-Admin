@@ -55,3 +55,19 @@ TOTAL BAYAR RP 100.000`;
     expect(parseBluProofReference("PLN Prabayar\\nKode Token\\n2323 0937 7275 0481 1885\\nNo Meter 32193581751")).toBeNull();
   });
 });
+
+describe("expense proof empty OCR response is recoverable without duplicate upload", () => {
+  it("keeps the uploaded file and exposes a retry instead of silently reporting success", () => {
+    const fs=require("node:fs") as typeof import("node:fs");
+    const path=require("node:path") as typeof import("node:path");
+    const route=fs.readFileSync(path.resolve(process.cwd(),"src/routes/expenses.ts"),"utf8");
+    const ocr=fs.readFileSync(path.resolve(process.cwd(),"src/lib/paymentProofOcr.ts"),"utf8");
+    const ui=fs.readFileSync(path.resolve(process.cwd(),"../sport-center/src/pages/admin/Expenses.tsx"),"utf8");
+    expect(route).toContain('readStatus: readableFields === 0 ? "no_fields"');
+    expect(route).toContain("fieldCount: 0");
+    expect(ocr).toContain('(["color", "normalized", "inverted"] as const)');
+    expect(ui).toContain("Coba Baca Lagi (tanpa unggah ulang)");
+    expect(ui).toContain("lastProofFileRef.current=firstProof");
+    expect(ui).toContain('setProofReadMessage(preview.readMessage');
+  });
+});
