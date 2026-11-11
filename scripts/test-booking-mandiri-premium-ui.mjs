@@ -15,6 +15,6 @@ test("dynamic prices and safe guest Gym route remain unchanged",()=>{
  assert.match(page,/Number\(value\.pricePerHour\) > 0/);
  assert.match(page,/facilities\.map\(facility =>/);
  assert.match(page,/isGym\(facility\) \? path \+ "\?nonmember=1&self=1" : path/);
- assert.match(page,/Setelah pembayaran diverifikasi, fasilitas siap digunakan/);
+ assert.match(page,/Setelah pembayaran diverifikasi, akses fasilitas akan diberikan/);
  assert.doesNotMatch(page,/ACTIVATE_USER|SUSPEND_USER/);
 });
