@@ -2,7 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { isX904AutoSuspendExempt } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
-import { classifyX904OrdinaryIdentityChange } from "./x904OrdinaryIdentityChange";
+import { findX904OrdinaryIdentityReplacements } from "./x904OrdinaryIdentityChange";
 
 const DEVICE = "TDBD234200545";
 const SNAPSHOT_MAX_AGE_MS = 5 * 60_000;
@@ -56,20 +56,23 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   store: Store = db,
   now = new Date(),
 ): Promise<void> {
-  // New feature explicitly off by default. Never mutate live machine from a
-  // code deployment alone; require all existing access and write gates.
-  if (process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED !== "true" ||
-      process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true" ||
-      process.env.GYM_X904_MANUAL_ACCESS_ENABLED !== "true" ||
-      process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return;
+  // Replacement audit is read-only and independent from device write gates.
+  // Enabling monitoring alone must never enqueue machine commands.
+  const suspendEnabled = process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED === "true" &&
+    process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true" &&
+    process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true" &&
+    process.env.GYM_X904_USER_WRITE_ENABLED === "true";
+  const auditEnabled = process.env.GYM_X904_NEW_USER_IDENTITY_AUDIT_ENABLED === "true";
+  if (!suspendEnabled && !auditEnabled) return;
 
   const baselineRaw = process.env.GYM_X904_NEW_USER_BASELINE_AT ?? "";
   const baseline = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(baselineRaw)
     ? new Date(baselineRaw).getTime()
     : NaN;
   const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
-  if (!Number.isFinite(baseline) || baseline > now.getTime() ||
-      !Number.isSafeInteger(actor) || actor <= 0) return;
+  if (!Number.isFinite(baseline) || baseline > now.getTime()) return;
+  if (auditEnabled) await auditX904OrdinaryIdentityReplacements(store, now, baseline);
+  if (!suspendEnabled || !Number.isSafeInteger(actor) || actor <= 0) return;
 
   const identity = await store.execute(sql`SELECT 1 FROM sport_center.users
     WHERE id=${actor} AND name='X904 AUTOMATION SERVICE'
@@ -159,17 +162,6 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   if (currentUsers.length < firstUsers.length) return;
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
-  // Detect a same-PIN name change, including a replacement with no absence.
-  // It is never auto-authorized: a display-name edit alone is insufficient
-  // evidence to suspend an existing account or inherit its registry record.
-  const previousByPin = new Map(firstUsers.map(u => [String(u.pin ?? ""), u]));
-  const replacements = currentUsers.filter(u =>
-    classifyX904OrdinaryIdentityChange(previousByPin.get(String(u.pin ?? "")) ?? null, u)
-      === "replacement_review");
-  if (replacements.length) console.warn("[x904-new-user-default-suspend] identity-replacement-review", JSON.stringify({
-    count: replacements.length, pins: replacements.slice(0, 10).map(u => String(u.pin)),
-    action: "verify_reenrollment_and_revoke_old_identity_before_booking",
-  }));
   if (!newCandidates.length) return;
   const firstIndexOf = (pin: string): number => history.findIndex(row =>
     (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
@@ -304,8 +296,37 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
 
 }
 
+/** A separate read-only audit gate, intentionally no actor, stage, or command writes. */
+export async function auditX904OrdinaryIdentityReplacements(store: Store = db, now = new Date(), baseline?: number): Promise<string[]> {
+  const start = baseline ?? Date.parse(process.env.GYM_X904_NEW_USER_BASELINE_AT ?? "");
+  if (!Number.isFinite(start) || start > now.getTime()) return [];
+  const snapshots = await store.execute(sql`SELECT snapshot_id,observed_at,user_count,users
+    FROM sport_center.gym_x904_access_snapshots
+    WHERE device_serial=${DEVICE}
+      AND observed_at >= ${new Date(start)}
+      AND observed_at >= ${new Date(now.getTime() - 75 * 60_000)}
+      AND observed_at <= ${now}
+    ORDER BY snapshot_id DESC LIMIT 80`);
+  const history = (snapshots.rows as any[]).reverse();
+  if (history.length < 2) return [];
+  for (let i=0;i<history.length;i++) {
+    const row=history[i], at=new Date(String(row.observed_at)).getTime();
+    if (!Number.isFinite(at) || !Array.isArray(row.users) || row.users.length!==Number(row.user_count)) return [];
+    if (i && (at<=new Date(String(history[i-1].observed_at)).getTime() ||
+      at-new Date(String(history[i-1].observed_at)).getTime()>10*60_000)) return [];
+  }
+  const latestAt=new Date(String(history[history.length-1].observed_at)).getTime();
+  if (latestAt>now.getTime() || now.getTime()-latestAt>SNAPSHOT_MAX_AGE_MS) return [];
+  const pins=findX904OrdinaryIdentityReplacements(history.map(row=>row.users));
+  if (pins.length) console.warn("[x904-new-user-default-suspend] identity-replacement-review", JSON.stringify({
+    count:pins.length,pins:pins.slice(0,10),action:"verify_reenrollment_and_revoke_old_identity_before_booking",
+  }));
+  return pins;
+}
+
 export function startX904NewOrdinaryUserDefaultSuspend(): void {
-  if (process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED !== "true") return;
+  if (process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED !== "true" &&
+      process.env.GYM_X904_NEW_USER_IDENTITY_AUDIT_ENABLED !== "true") return;
   let running = false;
   const tick = async () => {
     if (running) return;

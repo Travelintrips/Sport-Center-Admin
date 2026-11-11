@@ -17,3 +17,23 @@ export function classifyX904OrdinaryIdentityChange(
   const oldName = String(previous.name ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
   return oldName === name ? "unchanged" : "replacement_review";
 }
+
+/** Audit every adjacent observation; do not miss a PIN first enrolled mid-window
+ * and renamed again before the last snapshot. Only role-0 valid identities.
+ * A different identity produces a review event, never device commands.
+ */
+export function findX904OrdinaryIdentityReplacements(
+  snapshots: ReadonlyArray<ReadonlyArray<X904SnapshotUser>>,
+): string[] {
+  const changed = new Set<string>();
+  for (let i = 1; i < snapshots.length; i++) {
+    const prior = new Map(snapshots[i - 1].map(u => [String(u.pin ?? ""), u]));
+    for (const current of snapshots[i]) {
+      const pin = String(current.pin ?? "");
+      const previous = prior.get(pin);
+      if (previous && classifyX904OrdinaryIdentityChange(previous, current) === "replacement_review")
+        changed.add(pin);
+    }
+  }
+  return [...changed].sort((a,b) => a.localeCompare(b, "en", { numeric: true }));
+}
