@@ -9,7 +9,7 @@ test("bright split hero shows true building image without dark full-screen overl
  assert.match(page,/bg-gradient-to-br from-emerald-100 to-orange-100/);
  assert.doesNotMatch(page,/bg-gradient-to-r from-\[#09162b\]\/95/);
  assert.match(page,/Pilih Fasilitas & Booking/);
- assert.match(page,/Kembali ke Beranda/);
+ assert.match(page,/<Link href="\/facilities"/);
 });
 test("facilities remain live and Gym still enters protected checkout",()=>{
  assert.match(page,/fetch\("\/api\/wa\/facilities"/);
