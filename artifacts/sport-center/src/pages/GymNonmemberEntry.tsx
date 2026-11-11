@@ -6,6 +6,7 @@ import {
   Sparkles, Trophy, Target, CircleDot,
 } from "lucide-react";
 import buildingImg from "@assets/1780087062_1780089778393.png";
+import logoUrl from "@assets/logosc_1780088803724.png";
 
 type Facility = {
   id: number;
@@ -102,15 +103,18 @@ export default function GymNonmemberEntry() {
         <div className="pointer-events-none absolute -right-24 top-10 h-80 w-80 rounded-full bg-orange-100/70 blur-3xl" />
         <div className="mx-auto max-w-[1280px] px-5 pb-12 pt-5 sm:px-8 lg:px-10 lg:pb-16">
           <nav aria-label="Navigasi halaman" className="mb-8 flex flex-wrap items-center justify-between gap-5 rounded-2xl bg-white/75 px-5 py-3 shadow-sm backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0b3f33] text-white">
-                <Dumbbell className="h-5 w-5" />
-              </div>
+            <Link href="/" className="flex items-center gap-3">
+              <img
+                src={logoUrl}
+                alt="Sport Center Bandara Soekarno-Hatta"
+                className="h-11 w-11 rounded-xl object-cover shadow-sm ring-1 ring-slate-200"
+                decoding="async"
+              />
               <div>
                 <p className="text-base font-black tracking-tight text-[#0b3f33]">SPORT CENTER</p>
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Bandara Soekarno-Hatta</p>
               </div>
-            </div>
+            </Link>
             <div className="hidden items-center gap-7 text-sm font-semibold text-slate-600 md:flex">
               <a href="#pilih-fasilitas" className="hover:text-[#0f5b46]">Fasilitas</a>
               <a href="#cara-booking" className="hover:text-[#0f5b46]">Cara Booking</a>
@@ -193,38 +197,56 @@ export default function GymNonmemberEntry() {
           <p role="status" className="rounded-3xl bg-white p-10 text-center text-slate-600 shadow-sm">Belum ada fasilitas berbayar yang tersedia untuk booking mandiri.</p>
         )}
 
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {facilities.map(facility => {
             const gym = isGym(facility);
             const url = getPublicBookingLink(facility);
             return (
-              <article key={facility.id} className="group overflow-hidden rounded-[1.5rem] border border-slate-200/90 bg-white shadow-[0_10px_35px_rgba(15,23,42,0.05)] transition duration-300 hover:-translate-y-1.5 hover:border-emerald-200 hover:shadow-[0_24px_55px_rgba(15,91,70,0.12)]">
-                <div className="grid h-full grid-cols-[132px_minmax(0,1fr)]">
-                  <div className="relative min-h-[220px] overflow-hidden bg-slate-100">
-                    {facility.imageUrl ? (
-                      <img src={facility.imageUrl} alt={facility.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-orange-600"><FacilityIcon facility={facility} /></div>
-                    )}
-                  </div>
-                  <div className="flex min-w-0 flex-col p-5">
-                    <span className="mb-2 w-fit rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-orange-700">
-                      {facility.category}
+              <article key={facility.id} className="group overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_12px_38px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1.5 hover:border-emerald-200 hover:shadow-[0_26px_60px_rgba(15,91,70,0.14)]">
+                <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
+                  {facility.imageUrl ? (
+                    <img
+                      src={facility.imageUrl}
+                      alt={facility.name}
+                      className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.04]"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-orange-600"><FacilityIcon facility={facility} /></div>
+                  )}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/35 via-transparent to-transparent" />
+                  <span className="absolute left-4 top-4 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-orange-700 shadow-sm backdrop-blur">
+                    {facility.category}
+                  </span>
+                  {gym && (
+                    <span className="absolute bottom-4 left-4 rounded-full border border-white/30 bg-[#0b3f33]/80 px-3 py-1.5 text-xs font-bold text-white backdrop-blur">
+                      Tiket harian
                     </span>
-                    <h3 className="text-lg font-black leading-tight tracking-tight text-[#13213b]">{facility.name}</h3>
-                    <div className="mt-auto pt-5">
-                      <p className="text-2xl font-black tracking-tight text-orange-600">
+                  )}
+                </div>
+
+                <div className="p-5 sm:p-6">
+                  <h3 className="text-xl font-black leading-tight tracking-tight text-[#13213b]">{facility.name}</h3>
+                  <div className="mt-4 flex items-end justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Mulai dari</p>
+                      <p className="mt-1 text-2xl font-black tracking-tight text-orange-600">
                         Rp {Number(facility.pricePerHour).toLocaleString("id-ID")}
                         <span className="ml-1 text-xs font-medium text-slate-500">{gym ? "/kunjungan" : "/jam"}</span>
                       </p>
-                      <p className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-600">
-                        <Clock3 className="h-4 w-4 text-[#0f5b46]" /> {facility.openTime}–{facility.closeTime} WIB
-                      </p>
-                      <Link href={url} className="mt-4 flex min-h-11 items-center justify-between rounded-xl bg-gradient-to-r from-[#0b3f33] to-[#0f5b46] px-4 py-2.5 text-sm font-extrabold text-white shadow-[0_8px_18px_rgba(15,91,70,0.16)] transition hover:from-[#0a382d] hover:to-[#0d503f]">
-                        Pilih & Booking <ArrowRight className="h-4 w-4" />
-                      </Link>
                     </div>
+                    <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-xs font-bold text-[#0f5b46]">
+                      <Clock3 className="h-4 w-4" /> {facility.openTime}–{facility.closeTime}
+                    </p>
                   </div>
+
+                  <Link href={url} className="mt-5 flex min-h-12 items-center justify-between rounded-2xl bg-gradient-to-r from-[#0b3f33] to-[#0f5b46] px-5 py-3 text-sm font-extrabold text-white shadow-[0_10px_22px_rgba(15,91,70,0.16)] transition hover:from-[#0a382d] hover:to-[#0d503f]">
+                    Pilih & Booking
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/12">
+                      <ArrowRight className="h-4 w-4" />
+                    </span>
+                  </Link>
                 </div>
               </article>
             );
@@ -232,29 +254,37 @@ export default function GymNonmemberEntry() {
         </div>
       </section>
 
-      <section id="cara-booking" className="mx-auto max-w-[1280px] px-5 pb-10 sm:px-8 lg:px-10">
-        <div className="grid gap-4 rounded-[2rem] border border-emerald-100 bg-gradient-to-r from-[#f3f8f2] via-white to-[#f8f2e9] p-5 shadow-[0_12px_35px_rgba(15,23,42,0.05)] md:grid-cols-[260px_1fr] md:p-7">
-          <div className="flex items-center gap-4 border-b border-emerald-100 pb-5 md:border-b-0 md:border-r md:pb-0 md:pr-6">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-[#0f5b46] shadow-sm">
-              <CalendarDays className="h-7 w-7" />
-            </div>
-            <div>
-              <p className="text-2xl font-black leading-tight text-[#13213b]">Cara Booking</p>
-              <p className="text-2xl font-black leading-tight text-orange-600">Sangat Mudah</p>
-            </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {[
-              ["1. Pilih Fasilitas", "Tentukan fasilitas olahraga yang ingin digunakan."],
-              ["2. Isi Data & Bayar", "Lengkapi data, pilih jadwal, dan lakukan pembayaran."],
-              ["3. Datang & Akses", "Setelah pembayaran diverifikasi, akses fasilitas akan diberikan."],
-            ].map(([title, text], index) => (
-              <div key={title} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-orange-500 font-black text-white">{index + 1}</div>
-                <p className="font-black text-[#13213b]">{title}</p>
-                <p className="mt-1 text-sm leading-5 text-slate-600">{text}</p>
+      <section id="cara-booking" className="mx-auto max-w-[1280px] px-5 pb-12 sm:px-8 lg:px-10">
+        <div className="overflow-hidden rounded-[2rem] border border-emerald-100 bg-white shadow-[0_16px_45px_rgba(15,23,42,0.06)]">
+          <div className="grid md:grid-cols-[280px_1fr]">
+            <div className="flex items-center gap-4 bg-gradient-to-br from-[#eef8f2] to-[#fdf6eb] p-6 md:p-8">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#0f5b46] shadow-sm ring-1 ring-emerald-100">
+                <CalendarDays className="h-7 w-7" />
               </div>
-            ))}
+              <div>
+                <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-[#0f5b46]">3 langkah</p>
+                <p className="mt-1 text-2xl font-black leading-tight text-[#13213b]">Cara Booking</p>
+                <p className="text-2xl font-black leading-tight text-orange-600">Sangat Mudah</p>
+              </div>
+            </div>
+
+            <div className="grid gap-0 md:grid-cols-3">
+              {[
+                ["1", "Pilih Fasilitas", "Pilih fasilitas olahraga yang ingin digunakan."],
+                ["2", "Isi Data & Bayar", "Lengkapi data, pilih jadwal, lalu lakukan pembayaran."],
+                ["3", "Datang & Akses", "Setelah pembayaran diverifikasi, fasilitas siap digunakan."],
+              ].map(([number, title, text], index) => (
+                <div key={title} className="relative p-6 md:p-7">
+                  {index > 0 && <div className="absolute left-0 top-6 hidden h-[calc(100%-3rem)] w-px bg-slate-100 md:block" />}
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 text-sm font-black text-white shadow-[0_7px_16px_rgba(234,88,12,0.22)]">{number}</span>
+                    <div className="h-px flex-1 bg-gradient-to-r from-orange-200 to-transparent" />
+                  </div>
+                  <p className="text-base font-black text-[#13213b]">{title}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
