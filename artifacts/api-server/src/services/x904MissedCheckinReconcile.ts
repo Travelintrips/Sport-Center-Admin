@@ -74,7 +74,36 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND b.booking_date IN (
         (now() AT TIME ZONE 'Asia/Jakarta')::date::text,
         ((now() AT TIME ZONE 'Asia/Jakarta')::date-1)::text)
-      AND l.device_time ~ '^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$'
+      AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}
+      AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+    ORDER BY a.booking_id,l.device_time,l.event_id
+    LIMIT 30`);
+  let checkedIn = 0;
+  for (const row of rows.rows as any[]) {
+    const eventTime = String(row.device_time);
+    if (!isX904UsageWithinBookingSession(
+      String(row.booking_date), String(row.start_time),
+      String(row.end_time), eventTime)) continue;
+    const observed = new Date(eventTime.replace(" ", "T") + "+07:00");
+    if (!Number.isFinite(observed.getTime())) continue;
+    // checkInBooking validates current status, session, pending reschedule and
+    // records an audit entry; the normal scheduler later calls completeBooking.
+    const result = await checkInBooking(Number(row.booking_id), {
+      userName: `X904 verified scan ${String(row.event_id)}`, userRole: "system",
+    }, observed);
+    if (result.ok) checkedIn++;
+    else logger.info({ bookingId: row.booking_id, reason: result.reason },
+      "[x904] nonmember booking check-in held");
+  }
+  return checkedIn;
+}
+
+      AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
+      AND l.device_time < (
+        CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
+          THEN to_char(b.booking_date::date + 1, 'YYYY-MM-DD')
+          ELSE b.booking_date END
+        || ' ' || left(b.end_time,5) || ':00')
       AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
       AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
     ORDER BY a.booking_id,l.device_time,l.event_id
