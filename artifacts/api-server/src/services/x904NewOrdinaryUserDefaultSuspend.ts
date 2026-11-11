@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { isX904AutoSuspendExempt } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
+import { classifyX904OrdinaryIdentityChange } from "./x904OrdinaryIdentityChange";
 
 const DEVICE = "TDBD234200545";
 const SNAPSHOT_MAX_AGE_MS = 5 * 60_000;
@@ -158,6 +159,17 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   if (currentUsers.length < firstUsers.length) return;
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
+  // Detect a same-PIN name change, including a replacement with no absence.
+  // It is never auto-authorized: a display-name edit alone is insufficient
+  // evidence to suspend an existing account or inherit its registry record.
+  const previousByPin = new Map(firstUsers.map(u => [String(u.pin ?? ""), u]));
+  const replacements = currentUsers.filter(u =>
+    classifyX904OrdinaryIdentityChange(previousByPin.get(String(u.pin ?? "")) ?? null, u)
+      === "replacement_review");
+  if (replacements.length) console.warn("[x904-new-user-default-suspend] identity-replacement-review", JSON.stringify({
+    count: replacements.length, pins: replacements.slice(0, 10).map(u => String(u.pin)),
+    action: "verify_reenrollment_and_revoke_old_identity_before_booking",
+  }));
   if (!newCandidates.length) return;
   const firstIndexOf = (pin: string): number => history.findIndex(row =>
     (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
