@@ -5,7 +5,7 @@ import {processX904AutomaticCommands} from "../services/x904AutomaticCommandWork
 import { dispatchX904AttendanceWhatsApp } from "../services/x904AttendanceWaOutbox";
 import { dispatchX904LanScanNotifications, dispatchX904OneTimeReport, reconcileX904LegacyLanDelivery } from "../services/x904LanWaNotifications";
 import { db, bookingsTable, facilitiesTable, paymentsTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable, membershipPaymentsTable } from "@workspace/db";
-import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
+import { eq, and, lt, lte, gte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
