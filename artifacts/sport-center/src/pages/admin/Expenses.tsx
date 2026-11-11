@@ -218,6 +218,8 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
+  const [expenseKind,setExpenseKind] = useState("Transfer Bank");
+  const [destinationBank,setDestinationBank] = useState("");
   const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
     amount: number | null; date: string | null; bankReference: string | null; recipient: string | null;
@@ -408,7 +410,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number
+    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -808,6 +810,8 @@ export default function AdminExpenses() {
             receivingAccount:form.vendorName.trim() || "PENERIMA BELUM DIISI",
             method:form.paymentMethod || "Belum ditentukan",
             bankReference:form.bankReference.trim(),
+            expenseKind,destinationBank:destinationBank.trim(),
+            receiptUrls:form.receiptUrls,
             notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
               ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
             amount:gross
@@ -818,7 +822,7 @@ export default function AdminExpenses() {
               :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
           await refetchFinanceTest();
           setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
-          setExpenseTestEntryKey(crypto.randomUUID());
+          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setExpenseKind("Transfer Bank");
         }catch(error:any){
           toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
         }finally{setExpenseTestSaving(false);}
@@ -1889,6 +1893,28 @@ export default function AdminExpenses() {
                 <p className="text-xs text-gray-500">Tidak memetakan COA, tidak membuat jurnal, dan bukan bank tujuan penerima.</p>
               </div>
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Jenis Transaksi Keluar</Label>
+                  <Select value={expenseKind} onValueChange={setExpenseKind}>
+                    <SelectTrigger><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      {["Transfer Bank","BI-FAST","QRIS","PLN Prabayar","Top Up E-Wallet",
+                        "Biaya Admin","E-Commerce","Tunai","Kartu Kredit","Virtual Account",
+                        "Kasbon Karyawan","Lainnya"].map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Bank Tujuan / Penyedia (opsional)</Label>
+                  <Input value={destinationBank} maxLength={100}
+                    onChange={e=>setDestinationBank(e.target.value)}
+                    placeholder="Contoh: BCA, Mandiri, DANA, PLN"/>
+                  <p className="text-xs text-gray-500">Berbeda dari Sumber Dana. Jangan menebak bank tujuan dari akun pengirim.</p>
+                </div>
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Nomor Referensi Bank (opsional)</Label>
               <Input value={form.bankReference} maxLength={120}
@@ -1922,6 +1948,28 @@ export default function AdminExpenses() {
                 </div>
               )}
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="rounded-md border bg-gray-50 p-3 space-y-1 text-sm">
+                <p className="font-semibold">Pratinjau Keterangan Kolom B (TEST)</p>
+                <p className="break-words">{[
+                  expenseKind==="Transfer Bank"||expenseKind==="BI-FAST"
+                    ? "Transfer ke "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="QRIS"?"Pembayaran QRIS | "+(form.vendorName.trim()||"MERCHANT")
+                    : expenseKind==="PLN Prabayar"?"Pembelian PLN Prabayar | "+(form.vendorName.trim()||"PELANGGAN")
+                    : expenseKind==="Top Up E-Wallet"?"Top Up E-Wallet | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="Biaya Admin"?"Biaya Admin | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="Kasbon Karyawan"?"Kasbon Karyawan | "+(form.vendorName.trim()||"KARYAWAN")
+                    : expenseKind==="Tunai"?"Pengeluaran Tunai | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind+" | "+(form.vendorName.trim()||"PENERIMA"),
+                  [destinationBank.trim(),form.notes.trim()].filter(Boolean).join(" - "),
+                  form.bankReference.trim(),
+                  "SC-TEST-OUT-(ID otomatis)"
+                ].filter(Boolean).join(" | ")}</p>
+                <p className="text-xs text-gray-500">
+                  Penanda SC_TEST_ONLY disimpan terpisah pada kolom H; bukti tetap dapat dilihat dari histori transaksi.
+                </p>
+              </div>
+            )}
             <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
 
             <div className="flex gap-3 justify-end pt-2">
