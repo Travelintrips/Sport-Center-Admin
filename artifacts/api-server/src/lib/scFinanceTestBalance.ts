@@ -6,11 +6,43 @@
  */
 export type TestBalanceCell = { row: number; value: number };
 
-function numericCell(value: unknown, name: string): number {
-  if (value == null || value === "") return 0;
-  if (typeof value !== "number" || !Number.isFinite(value))
-    throw Error(`SC_TEST_BALANCE_INVALID_${name}`);
-  return value;
+/**
+ * Google Sheets can return historical cash amounts as text even with
+ * UNFORMATTED_VALUE, especially after a manual import or pasted rows.
+ * Accept only unambiguous Indonesian/US currency patterns.
+ */
+export function parseSheetMoney(value:unknown,name:string):number|null{
+  if(value===null||value===undefined||value==="")return null;
+  if(typeof value==="number"){
+    if(!Number.isFinite(value))throw Error(`SC_TEST_BALANCE_INVALID_${name}`);
+    return value;
+  }
+  if(typeof value!=="string")throw Error(`SC_TEST_BALANCE_INVALID_${name}`);
+  let text=value.trim().replace(/^Rp\s*/i,"").replace(/\s+/g,"");
+  if(!text)return null;
+  let negative=false;
+  if(text.startsWith("(")&&text.endsWith(")")){
+    negative=true;text=text.slice(1,-1);
+  }
+  if(text.startsWith("-")){negative=true;text=text.slice(1);}
+  if(!/^[0-9.,]+$/.test(text))throw Error(`SC_TEST_BALANCE_INVALID_${name}`);
+  const comma=text.lastIndexOf(",");
+  const dot=text.lastIndexOf(".");
+  if(comma>=0&&dot>=0){
+    // Last separator determines the decimal mark.
+    text=comma>dot?text.replace(/\./g,"").replace(",","."):text.replace(/,/g,"");
+  }else if(comma>=0){
+    text=/^\d{1,3}(,\d{3})+$/.test(text)?text.replace(/,/g,""):text.replace(",",".");
+  }else if(dot>=0 && /^\d{1,3}(\.\d{3})+$/.test(text)){
+    text=text.replace(/\./g,"");
+  }
+  if(!/^\d+(?:\.\d+)?$/.test(text))throw Error(`SC_TEST_BALANCE_INVALID_${name}`);
+  const result=Number(text)*(negative?-1:1);
+  if(!Number.isFinite(result))throw Error(`SC_TEST_BALANCE_INVALID_${name}`);
+  return result;
+}
+function numericCell(value:unknown,name:string):number{
+  return parseSheetMoney(value,name)??0;
 }
 function rounded(value: number): number {
   if (!Number.isFinite(value) || Math.abs(value) > 1e15)
@@ -37,8 +69,9 @@ export function calculateTestBalanceUpdates(
     const isTest = String(row[7] ?? "").trim() === "SC_TEST_ONLY";
     if (!isTest) {
       // An existing numeric historical balance is authoritative. We never write it.
-      if (typeof existingBalance === "number" && Number.isFinite(existingBalance)) {
-        balance = rounded(existingBalance);
+      const historicalBalance=parseSheetMoney(existingBalance,"HISTORICAL_E");
+      if (historicalBalance !== null) {
+        balance = rounded(historicalBalance);
       } else if ((incoming !== 0 || outgoing !== 0) && balance !== null) {
         // An intervening non-test row may not have its own balance yet.
         balance = rounded(balance + incoming - outgoing);
@@ -55,11 +88,8 @@ export function calculateTestBalanceUpdates(
     if (balance === null) throw Error("SC_TEST_BALANCE_NO_HISTORICAL_ANCHOR");
     balance = rounded(balance + incoming - outgoing);
     if (!verifiedTestIds.has(id)) continue;
-    if (existingBalance !== "" && existingBalance != null &&
-      (typeof existingBalance !== "number" || !Number.isFinite(existingBalance)))
-      throw Error("SC_TEST_BALANCE_EXISTING_NON_NUMERIC");
-    if (existingBalance === "" || existingBalance == null ||
-      Math.abs(existingBalance - balance) > 0.001)
+    const testBalance=parseSheetMoney(existingBalance,"TEST_E");
+    if (testBalance === null || Math.abs(testBalance-balance)>0.001)
       result.push({row:index + 1,value:balance});
   }
   return result;

@@ -218,6 +218,8 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
+  const [expenseKind,setExpenseKind] = useState("Transfer Bank");
+  const [destinationBank,setDestinationBank] = useState("");
   const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
     amount: number | null; date: string | null; bankReference: string | null; recipient: string | null;
@@ -337,8 +339,10 @@ export default function AdminExpenses() {
   const {data:financeTestData,refetch:refetchFinanceTest,isError:financeTestReadError} = useQuery<{
     entries:Array<{id:number;testNo:string;direction:"IN"|"OUT";transactionDate:string;
       sourceName:string;amount:string;sheetSyncState:string;sheetRow:number|null;
-      sheetSyncError:string|null;sheetVerifiedAt:string|null;senderBank:string;receivingAccount:string;
-      method:string;bankReference:string|null;notes:string|null}>;
+      sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
+      senderBank:string;receivingAccount:string;
+      method:string;bankReference:string|null;notes:string|null;
+      receiptUrls?:string[];expenseKind?:string;destinationBank?:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -407,7 +411,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number
+    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -645,6 +649,7 @@ export default function AdminExpenses() {
         entry.sheetSyncState==="mismatch"?"TEST — Tidak Cocok":
         `TEST — ${entry.sheetSyncState}`,
       sheet:`kas besar sc — ${entry.sheetSyncState==="synced"?"baris "+entry.sheetRow:entry.sheetSyncState}`,
+      sheetBalance:entry.sheetBalance==null?null:Number(entry.sheetBalance),
       cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
         `Status ${entry.sheetSyncState}`,
       reference:entry.bankReference||"",notes:entry.notes||"",
@@ -657,6 +662,7 @@ export default function AdminExpenses() {
       description: `Dana masuk dari ${entry.sourceName}`, method: entry.method || "Tidak tersedia",
       status: entry.reconciliationState || "UNVERIFIED",
       sheet: entry.sheetSyncState === "synced" ? "SC Uang Masuk — tersinkron (belum diverifikasi)" : entry.sheetSyncState,
+      sheetBalance:null as number|null,
       cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
         entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
       reference: entry.bankReference || "", notes: "",
@@ -670,6 +676,7 @@ export default function AdminExpenses() {
       description: String(expense.description ?? ""), method: String(expense.paymentMethod ?? ""),
       status: STATUS_LABELS[String(expense.paymentStatus)] ?? String(expense.paymentStatus ?? "Draft"),
       sheet: "Belum dikonfirmasi sebagai mutasi bank",
+      sheetBalance:null as number|null,
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
       reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
     })),
@@ -685,20 +692,8 @@ export default function AdminExpenses() {
   });
   const transactionDateInvalid = transactionDateMode === "range"
     && Boolean(transactionDateFrom && transactionDateTo && transactionDateFrom > transactionDateTo);
-  // A running balance is computed over the full chronological TEST ledger BEFORE
-  // filtering or pagination. Removed/mismatched/unsynced entries never affect it.
-  // The account balance on Google Sheets is intentionally not overwritten.
-  const chronologicalTransactions=[...unifiedTransactions].sort((a,b)=>
-    a.date.localeCompare(b.date) || Number(a.id.match(/\d+$/)?.[0]??0)-
-      Number(b.id.match(/\d+$/)?.[0]??0));
-  let runningTestBalance=0;
-  const runningBalanceById=new Map<string,number>();
-  for(const tx of chronologicalTransactions){
-    if(FINANCE_SC_TEST_ONLY && tx.status==="TEST — Tersinkron"){
-      runningTestBalance+=tx.kind==="income"?tx.amount:-tx.amount;
-    }
-    runningBalanceById.set(tx.key,runningTestBalance);
-  }
+  // Sheet E is the historical-inclusive running balance; it is exposed
+  // only after Google Sheets read-back verifies the corresponding TEST row.
   const visibleTransactions = unifiedTransactions.filter(tx =>
     (detailKind === "all" || tx.kind === detailKind)
     && (transactionDateMode !== "single" || !transactionSingleDate || tx.date === transactionSingleDate)
@@ -775,6 +770,10 @@ export default function AdminExpenses() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if(FINANCE_SC_TEST_ONLY && (uploadingReceipt || scanningProof)){
+      toast({title:"Bukti masih diproses",description:"Simpan setelah unggahan/OCR selesai agar bukti tidak tertinggal.",variant:"destructive"});
+      return;
+    }
     if (!form.notes.trim()) {
       toast({ title: "Catatan transaksi wajib diisi", description: "Tuliskan tujuan penggunaan dana sebelum menyimpan.", variant: "destructive" });
       return;
@@ -816,6 +815,8 @@ export default function AdminExpenses() {
             receivingAccount:form.vendorName.trim() || "PENERIMA BELUM DIISI",
             method:form.paymentMethod || "Belum ditentukan",
             bankReference:form.bankReference.trim(),
+            expenseKind,destinationBank:destinationBank.trim(),
+            receiptUrls:form.receiptUrls,
             notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
               ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
             amount:gross
@@ -826,7 +827,7 @@ export default function AdminExpenses() {
               :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
           await refetchFinanceTest();
           setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
-          setExpenseTestEntryKey(crypto.randomUUID());
+          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setExpenseKind("Transfer Bank");
         }catch(error:any){
           toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
         }finally{setExpenseTestSaving(false);}
@@ -931,11 +932,11 @@ export default function AdminExpenses() {
             <Card className="border-l-4 border-l-slate-400">
               <CardContent className="p-4">
                 {FINANCE_SC_TEST_ONLY ? <>
-                  <p className="text-sm font-medium text-gray-600">Sisa Saldo TEST Kas Besar SC</p>
+                  <p className="text-sm font-medium text-gray-600">Selisih Bersih Transaksi TEST</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">
                     {financeTestReadError?"Tidak tersedia":financeTestData?formatIDR(financeTestData.summary.balance):"Memuat..."}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">Pemasukan TEST dikurangi Pengeluaran TEST; bukan saldo bank.</p>
+                  <p className="text-xs text-gray-500 mt-1">Pemasukan TEST − pengeluaran TEST, tanpa saldo awal historis. Saldo berjalan ada di Master Tabel.</p>
                 </> : <>
                   <p className="text-sm font-medium text-gray-600">Mutasi Masuk Kas Besar CST — BizPortal</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">
@@ -1119,7 +1120,9 @@ export default function AdminExpenses() {
                           </td>
                           <td className="p-3 text-right font-bold tabular-nums">
                             {FINANCE_SC_TEST_ONLY
-                              ? (runningBalanceById.get(tx.key)??0).toLocaleString("id-ID")
+                              ? tx.status==="TEST — Tersinkron" && tx.sheetBalance!=null
+                                ? tx.sheetBalance.toLocaleString("id-ID",{minimumFractionDigits:0,maximumFractionDigits:2})
+                                : "–"
                               : "–"}
                           </td>
                         </tr>
@@ -1207,7 +1210,7 @@ export default function AdminExpenses() {
               <p className="text-xl font-bold text-orange-700">{formatIDR(financeTestData?.summary.expense??0)}</p>
             </CardContent></Card>
             <Card className="border-l-4 border-violet-500"><CardContent className="p-4">
-              <p className="text-xs text-gray-600">Sisa Saldo Uji (bukan saldo bank)</p>
+              <p className="text-xs text-gray-600">Selisih Bersih Uji (tanpa saldo awal historis)</p>
               <p className="text-xl font-bold">{formatIDR(financeTestData?.summary.balance??0)}</p>
             </CardContent></Card>
           </div>
@@ -1384,7 +1387,13 @@ export default function AdminExpenses() {
                 </tr></thead>
                 <tbody>{visibleTestExpenses.map(x=><tr key={x.id} className="border-b">
                   <td className="p-3 font-mono">{x.testNo}<span className="block text-xs text-gray-500">{x.transactionDate}</span></td>
-                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span></td>
+                  <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span>
+                    {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
+                      <span className="block text-xs mt-1">
+                        {x.receiptUrls.map((url,i)=><a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                          className="text-blue-700 underline mr-2">Bukti {i+1}</a>)}
+                      </span>}
+                  </td>
                   <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
                   <td className="p-3">{x.sheetSyncState==="synced"?`Baris ${x.sheetRow} — TEST`:
                     x.sheetSyncState==="removed"?"Dihapus dari Sheets":x.sheetSyncState}</td>
@@ -1895,6 +1904,28 @@ export default function AdminExpenses() {
                 <p className="text-xs text-gray-500">Tidak memetakan COA, tidak membuat jurnal, dan bukan bank tujuan penerima.</p>
               </div>
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Jenis Transaksi Keluar</Label>
+                  <Select value={expenseKind} onValueChange={setExpenseKind}>
+                    <SelectTrigger><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      {["Transfer Bank","BI-FAST","QRIS","PLN Prabayar","Top Up E-Wallet",
+                        "Biaya Admin","E-Commerce","Tunai","Kartu Kredit","Virtual Account",
+                        "Kasbon Karyawan","Lainnya"].map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Bank Tujuan / Penyedia (opsional)</Label>
+                  <Input value={destinationBank} maxLength={100}
+                    onChange={e=>setDestinationBank(e.target.value)}
+                    placeholder="Contoh: BCA, Mandiri, DANA, PLN"/>
+                  <p className="text-xs text-gray-500">Berbeda dari Sumber Dana. Jangan menebak bank tujuan dari akun pengirim.</p>
+                </div>
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Nomor Referensi Bank (opsional)</Label>
               <Input value={form.bankReference} maxLength={120}
@@ -1928,13 +1959,35 @@ export default function AdminExpenses() {
                 </div>
               )}
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="rounded-md border bg-gray-50 p-3 space-y-1 text-sm">
+                <p className="font-semibold">Pratinjau Keterangan Kolom B (TEST)</p>
+                <p className="break-words">{[
+                  expenseKind==="Transfer Bank"||expenseKind==="BI-FAST"
+                    ? "Transfer ke "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="QRIS"?"Pembayaran QRIS | "+(form.vendorName.trim()||"MERCHANT")
+                    : expenseKind==="PLN Prabayar"?"Pembelian PLN Prabayar | "+(form.vendorName.trim()||"PELANGGAN")
+                    : expenseKind==="Top Up E-Wallet"?"Top Up E-Wallet | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="Biaya Admin"?"Biaya Admin | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind==="Kasbon Karyawan"?"Kasbon Karyawan | "+(form.vendorName.trim()||"KARYAWAN")
+                    : expenseKind==="Tunai"?"Pengeluaran Tunai | "+(form.vendorName.trim()||"PENERIMA")
+                    : expenseKind+" | "+(form.vendorName.trim()||"PENERIMA"),
+                  [destinationBank.trim(),form.notes.trim()].filter(Boolean).join(" - "),
+                  form.bankReference.trim(),
+                  "SC-TEST-OUT-(ID otomatis)"
+                ].filter(Boolean).join(" | ")}</p>
+                <p className="text-xs text-gray-500">
+                  Penanda SC_TEST_ONLY disimpan terpisah pada kolom H; bukti tetap dapat dilihat dari histori transaksi.
+                </p>
+              </div>
+            )}
             <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
 
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
                 Batal
               </Button>
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving}>
+              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending || expenseTestSaving || uploadingReceipt || scanningProof}>
                 {editingId ? "Simpan Perubahan" : FINANCE_SC_TEST_ONLY ? "Simpan Pengeluaran (TEST)" : "Buat Pengeluaran"}
               </Button>
             </div>

@@ -279,11 +279,15 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         console.warn("[x904-nonmember] booking schedule invalid; access held", JSON.stringify({accessId:Number(a.access_id)}));
         return;
       }
-      // GYM late arrivals remain eligible on the SAME booking day after the
-      // displayed one-hour session has ended. That tariff window is not the
-      // X904 entitlement expiry. Never activate before scheduled start, on a
-      // different day, or after 23:00 WIB. Existing grants can finish.
-      if (a.activated_at == null && now.getTime() < scheduledStart) return;
+      // A verified, fully paid same-day GYM guest PIN is entitled to immediate
+      // activation after admin payment confirmation, even when the displayed
+      // session starts later. Other booking types still wait for their start.
+      // The same-day and 06:00–23:00 checks below remain mandatory.
+      const immediatePaidGymPin = a.booking_source === "gym_public_guest" &&
+        a.identity_type === "pin" && a.booking_status === "confirmed" &&
+        a.payment_status === "confirmed" && a.verification_state === "verified" &&
+        a.access_state === "pending";
+      if (a.activated_at == null && now.getTime() < scheduledStart && !immediatePaidGymPin) return;
       // A pending booking belongs to its scheduled WIB date. If activation
       // was missed, never activate it after the facility reopens next day.
       // Advance payments for future reservations may activate on that day.

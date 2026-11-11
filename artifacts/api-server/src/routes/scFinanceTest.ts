@@ -14,8 +14,10 @@ router.get("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
       transaction_date::text AS "transactionDate",source_name AS "sourceName",
       sender_bank AS "senderBank",cash_type AS "cashType",receiving_account AS "receivingAccount",
       method,bank_reference AS "bankReference",notes,amount::text,
+      receipt_urls AS "receiptUrls",expense_kind AS "expenseKind",destination_bank AS "destinationBank",
       sheet_sync_state AS "sheetSyncState",sheet_row AS "sheetRow",
       sheet_sync_error AS "sheetSyncError",sheet_verified_at AS "sheetVerifiedAt",
+      sheet_balance::text AS "sheetBalance",
       created_at AS "createdAt"
       FROM sport_center.sc_finance_test_entries ORDER BY id DESC LIMIT 250`));
     const totals=resultRows(await db.execute(sql`SELECT
@@ -37,11 +39,18 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
   }
   try{
     const existing=resultRows(await db.execute(sql`SELECT id,direction,transaction_date::text,
-      amount::text,source_name,sheet_sync_state,cash_type
+      amount::text,source_name,sheet_sync_state,cash_type,
+      sender_bank,receiving_account,method,bank_reference,notes,receipt_urls,expense_kind,destination_bank
       FROM sport_center.sc_finance_test_entries WHERE entry_key=${input.entryKey}::uuid`))[0];
     if(existing){
       if(existing.direction!==input.direction || existing.transaction_date!==input.transactionDate
-        || Number(existing.amount)!==input.amount || existing.source_name!==input.sourceName || existing.cash_type!==input.cashType){
+        || Number(existing.amount)!==input.amount || existing.source_name!==input.sourceName || existing.cash_type!==input.cashType
+        || existing.sender_bank!==input.senderBank || existing.receiving_account!==input.receivingAccount
+        || existing.method!==input.method || (existing.bank_reference??"")!==input.bankReference
+        || (existing.notes??"")!==input.notes
+        || (existing.expense_kind??"")!==input.expenseKind
+        || (existing.destination_bank??"")!==input.destinationBank
+        || JSON.stringify(existing.receipt_urls??[])!==JSON.stringify(input.receiptUrls)){
         res.status(409).json({error:"TEST_KEY_REUSED_WITH_DIFFERENT_DATA"});return;
       }
       res.json({testNo:testNo(Number(existing.id),existing.direction),
@@ -49,11 +58,12 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
     }
     const row=resultRows(await db.execute(sql`INSERT INTO sport_center.sc_finance_test_entries
       (entry_key,direction,transaction_date,source_name,sender_bank,cash_type,receiving_account,
-        method,bank_reference,notes,amount,created_by)
+        method,bank_reference,notes,amount,created_by,receipt_urls,expense_kind,destination_bank,description_version)
       VALUES(${input.entryKey}::uuid,${input.direction},${input.transactionDate}::date,
         ${input.sourceName},${input.senderBank},${input.cashType},${input.receivingAccount},
         ${input.method},${input.bankReference||null},${input.notes||null},${input.amount},
-        ${getUserFromReq(req).userId??null})
+        ${getUserFromReq(req).userId??null},${JSON.stringify(input.receiptUrls)}::jsonb,
+        ${input.expenseKind||null},${input.destinationBank||null},${input.direction==="OUT"?2:1})
       ON CONFLICT(entry_key) DO NOTHING RETURNING id,direction`))[0];
     if(!row){res.status(409).json({error:"TEST_ENTRY_ALREADY_EXISTS"});return;}
     await logAudit({...getUserFromReq(req),action:"SC_FINANCE_TEST_CREATED",

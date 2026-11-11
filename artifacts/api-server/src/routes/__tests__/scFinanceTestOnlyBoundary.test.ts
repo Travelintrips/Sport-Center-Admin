@@ -89,7 +89,7 @@ describe("SC test-only ledger never creates bank movements or journals",()=>{
     expect(route).not.toContain("INSERT INTO public.accounting");
     expect(route).not.toContain("INSERT INTO public.bank_mutations");
     expect(ui).toContain("Mode Uji Kas Besar SC");
-    expect(ui).toContain("Sisa Saldo Uji");
+    expect(ui).toContain("Selisih Bersih Uji");
   });
 });
 
@@ -112,6 +112,11 @@ describe("Main Keuangan SC forms stay test-only until explicitly cut over", () =
     expect(route).toContain('router.post("/admin/finance-test",superAdminMiddleware');
     expect(route).not.toContain("INSERT INTO public.bank_mutations");
     expect(route).not.toContain("INSERT INTO public.accounting_entries");
+    expect(route).toContain("receipt_urls");
+    expect(route).toContain("description_version");
+    expect(source).toContain("expense_kind,destination_bank,description_version");
+    expect(ui).toContain("receiptUrls:form.receiptUrls");
+    expect(ui).toContain("Pratinjau Keterangan Kolom B (TEST)");
   });
 });
 
@@ -154,11 +159,9 @@ describe("master financial table pagination and numeric running balance",()=>{
     expect(ui).not.toContain('id="finance-status"');
   });
   it("shows numeric Masuk, Keluar and Saldo columns, using full chronological ledger for balance",()=>{
-    expect(ui).toContain('chronologicalTransactions=[...unifiedTransactions].sort');
     expect(ui).toContain('tx.status==="TEST — Tersinkron"');
-    expect(ui).toContain('runningTestBalance+=tx.kind==="income"?tx.amount:-tx.amount');
-    expect(ui).toContain('runningBalanceById.set(tx.key,runningTestBalance)');
-    expect(ui).toContain('runningBalanceById.get(tx.key)');
+    expect(ui).toContain('tx.sheetBalance.toLocaleString("id-ID"');
+    expect(ui).not.toContain("runningTestBalance+=");
     expect(ui).toContain('<th className="p-3 text-right">Masuk</th>');
     expect(ui).toContain('<th className="p-3 text-right">Keluar</th>');
     expect(ui).toContain('<th className="p-3 text-right">Saldo</th>');
@@ -191,6 +194,17 @@ describe("optional Kas selector for normal incoming form",()=>{
     expect(()=>parseTestInput({...valid,cashType:"rekening pribadi"})).toThrow("INVALID_CASH_TYPE");
     expect(testSheetRow({...sample("OUT",5000,12),cash_type:""})[1])
       .toContain("SC-TEST-OUT: Pengeluaran ke FELICIA JUSTIANI");
+    expect(testSheetRow({...sample("OUT",5000,12),description_version:2,expense_kind:"Transfer Bank",destination_bank:"BCA"})[1])
+      .toBe("Transfer ke FELICIA JUSTIANI | BCA - Tes internal | TEST-123 | SC-TEST-OUT-000012");
+    const expenseActual={...sample("OUT",1000,17),source_name:"DEDE SAEFULLAH",
+      receiving_account:"DEDE SAEFULLAH",sender_bank:"blu by BCA Digital",
+      notes:"Reimbush charger ev",bank_reference:"1793262302800488",
+      description_version:2,expense_kind:"Transfer Bank",destination_bank:"BCA"};
+    expect(testSheetRow(expenseActual)[1]).toBe(
+      "Transfer ke DEDE SAEFULLAH | BCA - Reimbush charger ev | 1793262302800488 | SC-TEST-OUT-000017"
+    );
+    expect(()=>parseTestInput({...valid,direction:"OUT",expenseKind:"tidak-ada"})).toThrow("INVALID_EXPENSE_KIND");
+    expect(()=>parseTestInput({...valid,receiptUrls:["http://unsafe"]})).toThrow("INVALID_TEST_PROOF_URLS");
     expect(ui).toContain('id="income-cash-type"');
     expect(ui).toContain('value="kas kecil"');
     expect(ui).toContain('value="kas besar"');
@@ -208,5 +222,17 @@ describe("column E TEST balance on existing test ledger writer",()=>{
     expect(source).toContain("SC_TEST_BALANCE_READBACK_MISMATCH");
     expect(source).toContain("await refreshScTestBalances(sheets);");
     expect(source).toContain("sheet_sync_state IN ('synced','syncing')");
+  });
+});
+
+describe("master balance is read back from Google Sheets E",()=>{
+  it("uses the verified Sheet E rather than an independent zero-based running subtotal",()=>{
+    expect(route).toContain('sheet_balance::text AS "sheetBalance"');
+    expect(ui).toContain('sheetBalance:entry.sheetBalance==null?null:Number(entry.sheetBalance)');
+    expect(ui).toContain('tx.sheetBalance.toLocaleString("id-ID"');
+    expect(source).toContain('SET sheet_balance=');
+    expect(source).toContain('SC_TEST_BALANCE_LEDGER_NOT_NUMERIC');
+    expect(source).toContain('SC_TEST_BALANCE_ROW_CHANGED_BEFORE_WRITE');
+    expect(source).toContain('if(updates.length>0)');
   });
 });
