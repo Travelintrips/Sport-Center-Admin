@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount } from "../../lib/expenseBluProof";
 
 describe("Blu receipts: expense OCR parsing regressions", () => {
@@ -58,11 +60,9 @@ TOTAL BAYAR RP 100.000`;
 
 describe("expense proof empty OCR response is recoverable without duplicate upload", () => {
   it("keeps the uploaded file and exposes a retry instead of silently reporting success", () => {
-    const fs=require("node:fs") as typeof import("node:fs");
-    const path=require("node:path") as typeof import("node:path");
-    const route=fs.readFileSync(path.resolve(process.cwd(),"src/routes/expenses.ts"),"utf8");
-    const ocr=fs.readFileSync(path.resolve(process.cwd(),"src/lib/paymentProofOcr.ts"),"utf8");
-    const ui=fs.readFileSync(path.resolve(process.cwd(),"../sport-center/src/pages/admin/Expenses.tsx"),"utf8");
+    const route=readFileSync(resolve(process.cwd(),"src/routes/expenses.ts"),"utf8");
+    const ocr=readFileSync(resolve(process.cwd(),"src/lib/paymentProofOcr.ts"),"utf8");
+    const ui=readFileSync(resolve(process.cwd(),"../sport-center/src/pages/admin/Expenses.tsx"),"utf8");
     expect(route).toContain('readStatus: readableFields === 0 ? "no_fields"');
     expect(route).toContain("fieldCount: 0");
     expect(ocr).toContain('(["color", "normalized", "inverted"] as const)');
