@@ -67,6 +67,6 @@ test("PIN preview remains server-side, name lookup does not return stored PIN",(
 test("unverified nonmember inventory match is informational and never grants access",()=>{
  assert.match(service,/inventoryPinMatch: submittedPin \? submittedPin === pin : null/);
  assert.match(service,/return recognized\(\)/);
- assert.match(ui,/Akses menunggu verifikasi petugas/);
+ assert.match(ui,/Booking belum memberi akses pintu/);
  assert.match(api,/resolveGymGuestName\(name, submittedPin\)/);
 });
