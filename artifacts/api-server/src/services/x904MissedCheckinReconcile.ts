@@ -52,7 +52,12 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
   store: Pick<typeof db, "execute"> = db,
   evaluationTime: Date = new Date(),
 ): Promise<number> {
-  if (process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED !== "true") return 0;
+  // Preserve the existing opt-in signed path. For FUTURE paid public Gym
+  // sessions only, reuse the authenticated LAN records already supplying WA.
+  // Emergency opt-out: GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED=false.
+  const signedEnabled = process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED === "true";
+  const lanGuestEnabled = process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED !== "false";
+  if (!signedEnabled && !lanGuestEnabled) return 0;
   const rows = await store.execute(sql`
     SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time,
       CASE WHEN e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL
@@ -100,9 +105,9 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
       AND (
-        (e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+        (${signedEnabled}::boolean AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
         OR
-        (b.source='gym_public_guest' AND b.booking_date>='2026-11-13'
+        (${lanGuestEnabled}::boolean AND b.source='gym_public_guest' AND b.booking_date>='2026-11-13'
           AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
           AND state.last_complete_at>now()-interval '90 minutes'
           AND l.last_seen_snapshot=state.last_snapshot_id
