@@ -797,7 +797,7 @@ export async function scanPaymentProof(
           visionAmount != null
             ? [...methodScan.signals, "amount extracted by vision fallback"]
             : methodScan.signals,
-        rawText: scans.map((scan) => scan.rawText).filter(Boolean).join("\n\n"),
+        rawText: scans.map((scan) => scan.rawText).filter(Boolean).join("\n[OCR_VARIANT_END]\n"),
         name,
         recipient,
         amount: amount ?? visionAmount,
