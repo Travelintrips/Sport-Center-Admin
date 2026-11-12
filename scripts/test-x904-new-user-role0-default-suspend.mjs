@@ -20,7 +20,7 @@ test("new user automation requires explicit opt-in and a fresh baseline", () => 
 });
 test("only newly appearing role 0 in Group 1 is considered", () => {
   assert.match(worker, /!previousPins\.has\(pin\)/);
-  assert.match(worker, /history\.findIndex/);
+  assert.match(worker, /currentX904IdentityEpochStart\(history, user\)/);
   assert.match(worker, /history\.slice\(firstIndex\)/);
   assert.match(worker, /candidates\.length > 10/);
   assert.match(worker, /unexpected-bulk-enrollment/);
