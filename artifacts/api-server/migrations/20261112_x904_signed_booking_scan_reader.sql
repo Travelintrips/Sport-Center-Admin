@@ -21,5 +21,5 @@ CREATE POLICY x904_verified_booking_evidence_backend_read
 CREATE POLICY x904_verified_booking_raw_event_backend_read
   ON sport_center.gym_x904_raw_events
   FOR SELECT TO sport_center_app
-  USING (attendance_status=0 AND verification_type IN (1,4,15));
+  USING (attendance_status IN (0,255) AND verification_type IN (1,4,15));
 COMMIT;
