@@ -77,6 +77,18 @@ TOTAL BAYAR RP 100.000`;
     expect(scanner).toContain("[[0.26,0.75],[0.49,0.94]]");
     expect(blu).toContain("meta.height*0.24");
   });
+  it("reconstructs right-aligned 16-digit blu reference from actual local OCR line ordering",()=>{
+    const raw=["BCA - 8881 5220 55","Tipe Transaksi BI-FAST",
+      "1793 2623 0280 Ge)","No. Ref blu 0488 LE",
+      "Punya masalah dengan transaksi ini?"].join("\n");
+    expect(parseBluProofReference(raw)).toBe("1793262302800488");
+  });
+  it("reconstructs right-aligned 20-digit PLN blu reference without reading token as reference",()=>{
+    const raw=["Kode Token","2323 0937 7275 0481 1885 Copy",
+      "Tipe Transaksi PLN Prabayar","1793 1739 9432 GG)",
+      "No. Ref blu 5002 2230 LE","Detail"].join("\n");
+    expect(parseBluProofReference(raw)).toBe("17931739943250022230");
+  });
   it("rejects incomplete OCR prefixes and conflicting vision suggestions",()=>{
     expect(parseBluProofReference("No. Ref blu\n1793 2623 0280\nPunya masalah dengan transaksi ini?")).toBeNull();
     expect(selectCompleteBluReference("179326230280",null)).toBeNull();
