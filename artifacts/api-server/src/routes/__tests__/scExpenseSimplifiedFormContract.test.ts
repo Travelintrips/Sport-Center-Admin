@@ -16,7 +16,8 @@ describe("SC Expense simple form based on bank mutation examples", () => {
     expect(ui).toContain("Penerima Pembayaran (opsional)");
     expect(ui).toContain("sc-employees-expense-recipient");
     expect(ui).toContain("setRecipientFocused(true)");
-    expect(ui).toContain("Bukti Pembayaran / Nota / Struk");
+    expect(ui).toContain("1. Bukti Transfer / Pembayaran");
+    expect(ui).toContain("2. Nota / Struk Pendukung");
   });
   it("preserves source fund separately from payment method and GL COA", () => {
     expect(ui).toContain("Sumber Dana (hanya keterangan)");

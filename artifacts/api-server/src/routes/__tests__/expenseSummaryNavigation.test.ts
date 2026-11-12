@@ -68,23 +68,41 @@ describe("Master Tabel TEST details are read-only and context-aware", () => {
   it("exposes proof when present and explicit absence otherwise, without mutating transactions", () => {
     expect(ui).toContain("Belum ada bukti terlampir");
     expect(ui).toContain("tx.receiptUrls.length>0&&<Button");
-    expect(ui).toContain("setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})");
+    expect(ui).toContain("setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0,");
   });
 });
 
 describe("SC TEST expense multi-proof gallery",()=>{
   it("uses the same receiptUrls ledger for both history and unified details",()=>{
     expect(ui).toContain('receiptUrls:entry.receiptUrls??[]');
-    expect(ui).toContain('onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0})}');
-    expect(ui).toContain('onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}');
+    expect(ui).toContain('onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0,');
+    expect(ui).toContain('onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0,');
     expect(ui).toContain('Lihat Bukti ({x.receiptUrls.length} lampiran)');
   });
   it("renders all stored attachments, highlights the selected one and navigates",()=>{
     expect(ui).toContain('proofViewer.urls.map((url,index)=>(');
     expect(ui).toContain('aria-label="Daftar lampiran pengeluaran"');
     expect(ui).toContain('aria-pressed={proofViewer.index===index}');
-    expect(ui).toContain('Bukti {proofViewer.index+1} dari {proofViewer.urls.length}');
+    expect(ui).toContain('{proofViewer.labels?.[proofViewer.index]??"Bukti"}');
     expect(ui).toContain('index:Math.min(v.urls.length-1,v.index+1)');
     expect(ui).toContain('index:Math.max(0,v.index-1)');
+  });
+});
+
+describe("Separated payment proof and supplemental receipts",()=>{
+  it("keeps OCR exclusively tied to payment evidence uploads",()=>{
+    expect(ui).toContain('handleReceiptUpload(files: FileList | File[],kind:"payment"|"supporting")');
+    expect(ui).toContain('if(kind==="payment"){');
+    expect(ui).toContain('if(autoReadProof && fileArr[0])await previewExpenseProof(fileArr[0]);');
+    expect(ui).toContain("Supporting receipts are never submitted to any OCR endpoint");
+    expect(ui).toContain('handleReceiptUpload(e.target.files,"supporting")');
+    expect(ui).toContain('handleReceiptUpload(e.target.files,"payment")');
+  });
+  it("keeps stored legacy evidence and displays categories in both views",()=>{
+    expect(ui).toContain('paymentProofUrls:entry.paymentProofUrls??[]');
+    expect(ui).toContain('supportingReceiptUrls:entry.supportingReceiptUrls??[]');
+    expect(ui).toContain('proofCategoryLabels(tx.receiptUrls,tx.paymentProofUrls,tx.supportingReceiptUrls)');
+    expect(ui).toContain('Lampiran Lama');
+    expect(ui).toContain('Nota / Struk Pendukung');
   });
 });

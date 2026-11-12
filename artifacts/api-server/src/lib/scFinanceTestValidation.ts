@@ -55,15 +55,29 @@ export function parseTestInput(body: any) {
   const destinationAccount = body.direction==="OUT" ? String(body.destinationAccount ?? "").trim() : "";
   if(destinationBank.length>100)throw Error("INVALID_DESTINATION_BANK");
   if(destinationAccount && !/^[0-9]{6,24}$/.test(destinationAccount))throw Error("INVALID_DESTINATION_ACCOUNT");
-  const rawProofs=body.receiptUrls??[];
-  if(!Array.isArray(rawProofs) || rawProofs.length>10 ||
-    rawProofs.some((url:unknown)=>typeof url!=="string" || url.length>2000 || !/^https:\/\//i.test(url)))
-    throw Error("INVALID_TEST_PROOF_URLS");
-  const receiptUrls=[...new Set(rawProofs as string[])];
+  const validateProofUrls=(value:unknown,name:string):string[]=>{
+    if(!Array.isArray(value) || value.length>10 ||
+       value.some((url:unknown)=>typeof url!=="string" || url.length>2000 || !/^https:\/\//i.test(url)))
+      throw Error(name);
+    return [...new Set(value as string[])];
+  };
+  // Existing clients/entries are supported without backfilling historical evidence.
+  if(Array.isArray(body.paymentProofUrls) && body.paymentProofUrls.length>1)
+    throw Error("ONLY_ONE_MAIN_PAYMENT_PROOF");
+  const paymentProofUrls=validateProofUrls(body.paymentProofUrls??[],"INVALID_PAYMENT_PROOF_URLS");
+  const supportingReceiptUrls=validateProofUrls(body.supportingReceiptUrls??[],"INVALID_SUPPORTING_RECEIPT_URLS");
+  if(paymentProofUrls.length>1)throw Error("ONLY_ONE_MAIN_PAYMENT_PROOF");
+  if(paymentProofUrls.some(url=>supportingReceiptUrls.includes(url)))
+    throw Error("PROOF_CATEGORY_OVERLAP");
+  const categorized=[...paymentProofUrls,...supportingReceiptUrls];
+  const receiptUrls=validateProofUrls(body.receiptUrls??categorized,"INVALID_TEST_PROOF_URLS");
+  if(receiptUrls.length>10)throw Error("MAX_TEN_TEST_PROOFS");
+  if(categorized.some(url=>!receiptUrls.includes(url)))
+    throw Error("PROOF_CATEGORY_NOT_IN_RECEIPTS");
   return {
     direction:body.direction as TestDirection, transactionDate:date, amount,
     entryKey:body.entryKey, sourceName,senderBank,receivingAccount,cashType,method,
-    bankReference,notes,expenseKind,destinationBank,destinationAccount,receiptUrls
+    bankReference,notes,expenseKind,destinationBank,destinationAccount,receiptUrls,paymentProofUrls,supportingReceiptUrls
   };
 }
 export function testSheetRow(item:TestLedgerEntry) {

@@ -23,6 +23,11 @@ import {
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
 
+function proofCategoryLabels(urls:string[],payment:string[]=[],supporting:string[]=[]):string[]{
+  return urls.map((url,index)=>payment.includes(url)?"Bukti Pembayaran":
+    supporting.includes(url)?"Nota / Struk Pendukung":`Lampiran Lama ${index+1}`);
+}
+
 const PAYMENT_METHODS = ["Transfer Bank", "BI-FAST", "QRIS", "PLN Prabayar", "E-Commerce", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -133,6 +138,8 @@ const EMPTY_FORM = {
   paymentMethod: "",
   paymentAccount: "",
   receiptUrls: [] as string[],
+  paymentProofUrls: [] as string[],
+  supportingReceiptUrls: [] as string[],
   notes: "",
   bankReference: "",
 };
@@ -233,12 +240,13 @@ export default function AdminExpenses() {
     amount:true,date:true,recipient:true,bankReference:true,paymentMethod:true,
     notes:true,destinationBank:true,destinationAccount:true,sourceBank:true
   });
-  const [proofViewer,setProofViewer] = useState<{testNo:string,urls:string[],index:number}|null>(null);
+  const [proofViewer,setProofViewer] = useState<{testNo:string,urls:string[],index:number,labels?:string[]}|null>(null);
   const [scanningProof, setScanningProof] = useState(false);
   const [proofReadMessage,setProofReadMessage] = useState("");
   const lastProofFileRef=useRef<File|null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
-  const receiptInputRef = useRef<HTMLInputElement>(null);
+  const paymentProofInputRef = useRef<HTMLInputElement>(null);
+  const supportingReceiptInputRef = useRef<HTMLInputElement>(null);
 
   async function previewExpenseProof(file:File) {
     setScanningProof(true);
@@ -268,45 +276,56 @@ export default function AdminExpenses() {
     }finally{setScanningProof(false);}
   }
 
-  async function handleReceiptUpload(files: FileList | File[]) {
-    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
-    const fileArr = Array.from(files);
-    for (const file of fileArr) {
-      if (!allowed.includes(file.type)) {
-        toast({ title: "Format tidak didukung", description: `${file.name}: Gunakan JPG, PNG, WebP, atau GIF`, variant: "destructive" });
+  async function handleReceiptUpload(files: FileList | File[],kind:"payment"|"supporting") {
+    const allowed = ["image/jpeg","image/png","image/webp"];
+    const fileArr=Array.from(files);
+    if(fileArr.length===0)return;
+    if(kind==="payment" && (fileArr.length!==1 || form.paymentProofUrls.length>0)){
+      toast({title:"Satu bukti pembayaran utama",description:"Hapus bukti utama lama sebelum menggantinya.",variant:"destructive"});
+      return;
+    }
+    if(form.receiptUrls.length+fileArr.length>10){
+      toast({title:"Batas lampiran",description:"Maksimal 10 gambar untuk satu transaksi.",variant:"destructive"});
+      return;
+    }
+    for(const file of fileArr){
+      if(!allowed.includes(file.type)){
+        toast({title:"Format tidak didukung",description:"Gunakan JPG, PNG atau WebP.",variant:"destructive"});
         return;
       }
-      if (file.size > 10 * 1024 * 1024) {
-        toast({ title: "File terlalu besar", description: `${file.name}: Maksimal 10 MB`, variant: "destructive" });
+      if(file.size>10*1024*1024){
+        toast({title:"File terlalu besar",description:"Maksimal 10 MB per foto.",variant:"destructive"});
         return;
       }
     }
     setUploadingReceipt(true);
-    try {
-      const uploaded: string[] = [];
-      for (const file of fileArr) {
-        const fd = new FormData();
-        fd.append("file", file);
-        const resp = await fetch(`${API}/storage/upload-proof`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${getToken()}` },
-          body: fd,
+    try{
+      const uploaded:string[]=[];
+      for(const file of fileArr){
+        const fd=new FormData();
+        fd.append("file",file);
+        const resp=await fetch(`${API}/storage/upload-proof`,{
+          method:"POST",headers:{Authorization:`Bearer ${getToken()}`},body:fd
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
+        const data=await resp.json();
+        if(!resp.ok)throw new Error(data.error??"Upload gagal");
         uploaded.push(data.url);
       }
-      setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
-      toast({ title: `${uploaded.length} foto nota berhasil diupload` });
-      // Keep the original image for OCR retry; never upload it a second time.
-      const firstProof = fileArr.find((file) => ["image/jpeg","image/png","image/webp"].includes(file.type));
-      if(firstProof)lastProofFileRef.current=firstProof;
-      if(firstProof && autoReadProof)await previewExpenseProof(firstProof);
-    } catch (err: any) {
-      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
-    } finally {
-      setUploadingReceipt(false);
-    }
+      setForm(prev=>({
+        ...prev,
+        receiptUrls:[...prev.receiptUrls,...uploaded],
+        paymentProofUrls:kind==="payment"?[...prev.paymentProofUrls,...uploaded]:prev.paymentProofUrls,
+        supportingReceiptUrls:kind==="supporting"?[...prev.supportingReceiptUrls,...uploaded]:prev.supportingReceiptUrls,
+      }));
+      toast({title:kind==="payment"?"Bukti pembayaran tersimpan":`${uploaded.length} nota/struk tersimpan`});
+      if(kind==="payment"){
+        lastProofFileRef.current=fileArr[0]??null;
+        if(autoReadProof && fileArr[0])await previewExpenseProof(fileArr[0]);
+      }
+      // Supporting receipts are never submitted to any OCR endpoint.
+    }catch(err:any){
+      toast({title:"Upload gagal",description:err.message,variant:"destructive"});
+    }finally{setUploadingReceipt(false);}
   }
 
   function applyProofPreview() {
@@ -333,8 +352,19 @@ export default function AdminExpenses() {
     setProofPreview(null);
   }
 
-  function removeReceiptUrl(idx: number) {
-    setForm((prev) => ({ ...prev, receiptUrls: prev.receiptUrls.filter((_, i) => i !== idx) }));
+  function removeReceiptUrl(url:string,kind:"payment"|"supporting"|"legacy"){
+    setForm(prev=>({
+      ...prev,
+      receiptUrls:prev.receiptUrls.filter(x=>x!==url),
+      paymentProofUrls:prev.paymentProofUrls.filter(x=>x!==url),
+      supportingReceiptUrls:prev.supportingReceiptUrls.filter(x=>x!==url),
+    }));
+    if(kind==="payment"){
+      lastProofFileRef.current=null;
+      setProofPreview(null);
+      setProofEvidence(null);
+      setProofReadMessage("");
+    }
   }
 
   const params = new URLSearchParams();
@@ -369,7 +399,7 @@ export default function AdminExpenses() {
       sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
       senderBank:string;receivingAccount:string;
       method:string;bankReference:string|null;notes:string|null;
-      receiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string}>;
+      receiptUrls?:string[];paymentProofUrls?:string[];supportingReceiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -438,7 +468,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
+    notes:string;amount:number;receiptUrls?:string[];paymentProofUrls?:string[];supportingReceiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -683,6 +713,7 @@ export default function AdminExpenses() {
       cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
         `Status ${entry.sheetSyncState}`,
       reference:entry.bankReference||"",notes:entry.notes||"",receiptUrls:entry.receiptUrls??[],
+      paymentProofUrls:entry.paymentProofUrls??[],supportingReceiptUrls:entry.supportingReceiptUrls??[],
     }))
     : [
     ...(incomeData?.entries ?? []).map(entry => ({
@@ -696,6 +727,7 @@ export default function AdminExpenses() {
       cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
         entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
       reference: entry.bankReference || "", notes: "",receiptUrls:[] as string[],
+      paymentProofUrls:[] as string[],supportingReceiptUrls:[] as string[],
       destinationBank:"",destinationAccount:entry.receivingAccount||"",expenseKind:"",isTest:false,
     })),
     ...allExpenses.map((expense: any) => ({
@@ -711,6 +743,7 @@ export default function AdminExpenses() {
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
       reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
       receiptUrls:Array.isArray(expense.receiptUrls)?expense.receiptUrls:[],
+      paymentProofUrls:[] as string[],supportingReceiptUrls:[] as string[],
       destinationBank:"",destinationAccount:"",expenseKind:"",isTest:false,
     })),
   ];
@@ -774,6 +807,7 @@ export default function AdminExpenses() {
     setForm({ ...EMPTY_FORM });
     setShowAdvanced(false);
     setProofPreview(null);setProofEvidence(null);setProofReadMessage("");
+    lastProofFileRef.current=null;
     setDestinationBank("");setDestinationAccount("");setExpenseKind("Transfer Bank");
     setAutoReadProof(false);
     setFormOpen(true);
@@ -795,6 +829,8 @@ export default function AdminExpenses() {
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
+      paymentProofUrls:[],
+      supportingReceiptUrls:[],
       notes: expense.notes || expense.description || "",
       bankReference: expense.bankReference ?? "",
     });
@@ -851,6 +887,8 @@ export default function AdminExpenses() {
             bankReference:form.bankReference.trim(),
             expenseKind,destinationBank:destinationBank.trim(),destinationAccount:destinationAccount.trim(),
             receiptUrls:form.receiptUrls,
+            paymentProofUrls:form.paymentProofUrls,
+            supportingReceiptUrls:form.supportingReceiptUrls,
             notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
               ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
             amount:gross
@@ -1230,7 +1268,8 @@ export default function AdminExpenses() {
                                         ? tx.receiptUrls.length+" lampiran tersedia":"Belum ada bukti terlampir"}</p>
                                     </div>
                                     {tx.receiptUrls.length>0&&<Button type="button" variant="outline" size="sm"
-                                      onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}>Lihat Bukti</Button>}
+                                      onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0,
+                                        labels:proofCategoryLabels(tx.receiptUrls,tx.paymentProofUrls,tx.supportingReceiptUrls)})}>Lihat Bukti</Button>}
                                   </div>}
                                 <div className="flex justify-end">
                                   <Button size="sm" variant="outline" onClick={() => toggleExpandedTransaction(tx.key)}>Tutup Rincian</Button>
@@ -1469,7 +1508,8 @@ export default function AdminExpenses() {
                     {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
                       <span className="block text-xs mt-1">
                         <button type="button"
-                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0})}
+                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0,
+                            labels:proofCategoryLabels(x.receiptUrls??[],x.paymentProofUrls??[],x.supportingReceiptUrls??[])})}
                           className="text-blue-700 underline">Lihat Bukti ({x.receiptUrls.length} lampiran)</button>
                       </span>}
                   </td>
@@ -1838,7 +1878,7 @@ export default function AdminExpenses() {
             <div className="flex items-center justify-between gap-2">
               <Button type="button" variant="outline" size="sm" disabled={proofViewer.index===0}
                 onClick={()=>setProofViewer(v=>v?{...v,index:Math.max(0,v.index-1)}:null)}>Sebelumnya</Button>
-              <span className="text-sm tabular-nums">Bukti {proofViewer.index+1} dari {proofViewer.urls.length}</span>
+              <span className="text-sm tabular-nums">{proofViewer.labels?.[proofViewer.index]??"Bukti"} · {proofViewer.index+1} dari {proofViewer.urls.length}</span>
               <Button type="button" variant="outline" size="sm" disabled={proofViewer.index===proofViewer.urls.length-1}
                 onClick={()=>setProofViewer(v=>v?{...v,index:Math.min(v.urls.length-1,v.index+1)}:null)}>Berikutnya</Button>
             </div>
@@ -1851,7 +1891,7 @@ export default function AdminExpenses() {
                   className={`overflow-hidden rounded-lg border-2 bg-white text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${proofViewer.index===index?"border-blue-600":"border-slate-200 hover:border-slate-400"}`}>
                   <img src={url} alt={`Pratinjau bukti ${index+1}`} loading="lazy"
                     className="h-28 sm:h-36 w-full object-contain bg-slate-50"/>
-                  <div className="px-2 py-1.5 text-xs font-medium">Bukti {index+1}</div>
+                  <div className="px-2 py-1.5 text-xs font-medium">{proofViewer.labels?.[index]??`Bukti ${index+1}`}</div>
                 </button>
               ))}
             </div>
@@ -1877,8 +1917,8 @@ export default function AdminExpenses() {
             </div>}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             <div className="space-y-2">
-              <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
-              <p className="text-xs text-gray-500">Boleh unggah bukti dulu, lalu isi formulir. Periksa hasil pembacaan sebelum menyimpan.</p>
+              <Label>1. Bukti Transfer / Pembayaran <span className="text-gray-400 font-normal text-xs">(1 gambar utama, opsional)</span></Label>
+              <p className="text-xs text-gray-500">Unggah bukti blu, QRIS atau transfer. Hanya gambar di bagian ini yang dapat diproses OCR setelah persetujuan admin.</p>
               <label className="flex items-start gap-2 text-xs text-gray-700">
                 <input type="checkbox" checked={autoReadProof} onChange={(e) => setAutoReadProof(e.target.checked)} className="mt-0.5" />
                 <span>Isi otomatis dari bukti (opsional, memerlukan persetujuan pemrosesan AI). Admin tetap memeriksa hasilnya.</span>
@@ -1925,56 +1965,74 @@ export default function AdminExpenses() {
                 </div>
               )}
               <input
-                ref={receiptInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif,image/heic"
-                multiple
+                ref={paymentProofInputRef}
+                type="file" accept="image/jpeg,image/png,image/webp"
                 className="hidden"
-                onChange={(e) => { if (e.target.files?.length) handleReceiptUpload(e.target.files); e.target.value = ""; }}
+                onChange={e=>{if(e.target.files?.length)void handleReceiptUpload(e.target.files,"payment");e.target.value="";}}
               />
-              {form.receiptUrls.length > 0 && (
-                <div className="grid grid-cols-3 gap-2">
-                  {form.receiptUrls.map((url, idx) => (
-                    <div key={idx} className="relative border rounded-lg overflow-hidden bg-gray-50 aspect-square">
-                      <img
-                        src={url}
-                        alt={`Nota ${idx + 1}`}
-                        className="w-full h-full object-cover bg-white"
-                        onError={(e) => { (e.target as HTMLImageElement).src = ""; }}
-                      />
-                      <button
-                        type="button"
-                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center shadow"
-                        onClick={() => removeReceiptUrl(idx)}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[10px] px-1 py-0.5 text-center truncate">
-                        Foto {idx + 1}
+              {form.paymentProofUrls.map((url,index)=>(
+                <div key={url} className="flex items-center gap-3 rounded-lg border p-2">
+                  <img src={url} alt="Bukti pembayaran utama" className="h-24 w-24 shrink-0 rounded object-contain bg-slate-50"/>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Bukti Pembayaran {index+1}</p>
+                    <p className="text-xs text-slate-500">OCR opsional, hanya atas persetujuan admin</p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={()=>removeReceiptUrl(url,"payment")}>Hapus</Button>
+                </div>
+              ))}
+              <button type="button" disabled={uploadingReceipt||form.paymentProofUrls.length>0}
+                onClick={()=>paymentProofInputRef.current?.click()}
+                className="w-full rounded-lg border-2 border-dashed border-slate-200 p-4 flex flex-col items-center gap-2 text-slate-500 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50">
+                <Upload className="h-5 w-5"/>
+                <span className="text-sm font-medium">
+                  {form.paymentProofUrls.length>0?"Bukti pembayaran utama sudah terpasang":"Unggah bukti transfer / pembayaran"}
+                </span>
+                <span className="text-xs">JPG, PNG atau WebP — maks. 10 MB</span>
+              </button>
+            </div>
+            <div className="space-y-2">
+              <Label>2. Nota / Struk Pendukung <span className="text-gray-400 font-normal text-xs">(opsional, beberapa foto)</span></Label>
+              <p className="text-xs text-slate-500">Struk Indomaret, Alfamart, invoice atau nota pembelian hanya disimpan sebagai lampiran. Tidak dibaca OCR dan tidak mengubah isian form.</p>
+              <input ref={supportingReceiptInputRef} type="file"
+                accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                onChange={e=>{if(e.target.files?.length)void handleReceiptUpload(e.target.files,"supporting");e.target.value="";}}/>
+              {form.supportingReceiptUrls.length>0 &&
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {form.supportingReceiptUrls.map((url,index)=>(
+                    <div key={url} className="relative rounded-lg border overflow-hidden bg-slate-50">
+                      <img src={url} alt={`Nota pendukung ${index+1}`}
+                        className="h-28 w-full object-contain"/>
+                      <div className="flex items-center justify-between gap-1 p-2">
+                        <span className="text-xs font-medium">Nota / Struk {index+1}</span>
+                        <button type="button" onClick={()=>removeReceiptUrl(url,"supporting")}
+                          className="text-xs text-red-700 underline">Hapus</button>
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => receiptInputRef.current?.click()}
-                disabled={uploadingReceipt}
-                className="w-full border-2 border-dashed border-gray-200 rounded-lg p-4 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
-              >
-                {uploadingReceipt ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
-                    <span className="text-sm font-medium text-orange-500">Mengupload...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5" />
-                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Unggah bukti dari blu atau foto nota"}</span>
-                    <span className="text-xs">JPG, PNG, WebP — maks 10 MB per foto</span>
-                  </>
-                )}
+                </div>}
+              <button type="button" disabled={uploadingReceipt}
+                onClick={()=>supportingReceiptInputRef.current?.click()}
+                className="w-full rounded-lg border-2 border-dashed border-slate-200 p-4 flex flex-col items-center gap-2 text-slate-500 hover:border-orange-300 hover:text-orange-700 disabled:opacity-50">
+                {uploadingReceipt?<Loader2 className="h-5 w-5 animate-spin"/>:<Upload className="h-5 w-5"/>}
+                <span className="text-sm font-medium">Tambah foto Nota / Struk Pendukung</span>
+                <span className="text-xs">Tanpa OCR · maks. 10 MB per foto</span>
               </button>
+              {form.receiptUrls.filter(url=>!form.paymentProofUrls.includes(url)&&!form.supportingReceiptUrls.includes(url)).length>0 &&
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-600">Lampiran lama (kategori belum diketahui, tidak diproses OCR)</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {form.receiptUrls.filter(url=>!form.paymentProofUrls.includes(url)&&!form.supportingReceiptUrls.includes(url))
+                      .map((url,index)=>(
+                        <div key={url} className="rounded-lg border p-2">
+                          <img src={url} alt={`Lampiran lama ${index+1}`} className="h-24 w-full object-contain"/>
+                          <button type="button" className="text-xs text-red-700 underline"
+                            onClick={()=>removeReceiptUrl(url,"legacy")}>Hapus lampiran</button>
+                        </div>
+                      ))}
+                  </div>
+                </div>}
+
             </div>
 
 
