@@ -668,6 +668,9 @@ export default function AdminExpenses() {
       kind:entry.direction==="IN"?"income" as const:"expense" as const,
       date:entry.transactionDate,name:entry.sourceName,amount:Number(entry.amount),
       bank:entry.senderBank||"",account:entry.receivingAccount||"",
+      destinationBank:entry.direction==="OUT"?entry.destinationBank||"":"",
+      destinationAccount:entry.direction==="OUT"?entry.destinationAccount||"":entry.receivingAccount||"",
+      expenseKind:entry.direction==="OUT"?entry.expenseKind||"Transfer Bank":"",isTest:true,
       description:entry.notes||"Simulasi Sport Center",
       method:entry.method||"Tidak ditentukan",
       status:entry.sheetSyncState==="synced"?"TEST — Tersinkron":
@@ -692,6 +695,7 @@ export default function AdminExpenses() {
       cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
         entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
       reference: entry.bankReference || "", notes: "",receiptUrls:[] as string[],
+      destinationBank:"",destinationAccount:entry.receivingAccount||"",expenseKind:"",isTest:false,
     })),
     ...allExpenses.map((expense: any) => ({
       key: `expense-${expense.id}`, id: String(expense.expenseNo ?? `EXP-${expense.id}`),
@@ -704,7 +708,9 @@ export default function AdminExpenses() {
       sheet: "Belum dikonfirmasi sebagai mutasi bank",
       sheetBalance:null as number|null,
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
-      reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),receiptUrls:[] as string[],
+      reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
+      receiptUrls:Array.isArray(expense.receiptUrls)?expense.receiptUrls:[],
+      destinationBank:"",destinationAccount:"",expenseKind:"",isTest:false,
     })),
   ];
   const activeTestIncome = (financeTestData?.entries??[]).filter(x=>x.direction==="IN");
@@ -1167,32 +1173,65 @@ export default function AdminExpenses() {
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="font-bold">Rincian {tx.kind === "income" ? "Pemasukan" : "Pengeluaran"} — {tx.id}</p>
                                   <div className="flex items-center gap-2">
-                                    {tx.kind==="expense" && tx.receiptUrls.length>0 &&
-                                      <Button type="button" variant="outline" size="sm"
-                                        onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}>Lihat Bukti</Button>}
                                     <Badge variant="outline">Baca saja</Badge>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                                  {([
-                                    ["Tanggal", tx.date],
-                                    [tx.kind === "income" ? "Pengirim" : "Penerima",tx.name],
-                                    ["Metode",tx.method || "Tidak tersedia"],
-                                    ["Bank / Sumber",tx.bank || "Tidak tersedia"],
-                                    ["Akun Tujuan",tx.account || "Tidak tersedia"],
-                                    ["Referensi Bank",tx.reference || "Tidak diisi"],
-                                    ["Status Transaksi",tx.status],
-                                    ["Register Sheets",tx.sheet],
-                                    ["Kas Besar SC",tx.cashSheet],
-                                    ["Keterangan",tx.description || "Tidak ada"],
-                                    ["Catatan",tx.notes || "Tidak ada"],
-                                  ] as Array<[string,string]>).map(([label,value]) => (
+                                <div className="flex flex-wrap items-center gap-2 text-xs">
+                                  <Badge variant="outline">{tx.isTest?"TRANSAKSI TEST":"TRANSAKSI OPERASIONAL"}</Badge>
+                                  <span className="text-slate-600">Status Sheets: <strong>{tx.isTest?tx.status.replace(/^TEST — /,""):tx.sheet}</strong></span>
+                                  <span className="text-amber-700">Status verifikasi bank: <strong>Belum diverifikasi</strong></span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                  {(tx.kind==="income"?([
+                                    ["Tanggal",tx.date],
+                                    ["Pengirim",tx.name],
+                                    ["Bank Pengirim",tx.bank||"Tidak diisi"],
+                                    ["Metode",tx.method||"Tidak diisi"],
+                                    ["Akun Penerima",tx.account||"Tidak diisi"],
+                                    ["Referensi Bank",tx.reference||"Tidak diisi"],
+                                    ["Lokasi Sheets",tx.sheet]
+                                  ] as Array<[string,string]>):([
+                                    ["Tanggal",tx.date],
+                                    ["Penerima",tx.name],
+                                    ["Jenis Pengeluaran",tx.expenseKind||"Tidak diisi"],
+                                    ["Metode Pembayaran",tx.method||"Tidak diisi"],
+                                    ["Sumber Dana",tx.bank||"Tidak diisi"],
+                                    ["Bank Tujuan",tx.destinationBank||"Belum diisi"],
+                                    ["Rekening Tujuan",tx.destinationAccount?"•••• "+tx.destinationAccount.slice(-4):"Belum diisi"],
+                                    ["Referensi Bank",tx.reference||"Tidak diisi"],
+                                    ["Lokasi Sheets",tx.sheet]
+                                  ] as Array<[string,string]>)).map(([label,value])=>(
                                     <div key={label} className="space-y-1 min-w-0">
-                                      <p className="text-xs text-gray-500">{label}</p>
+                                      <p className="text-xs text-slate-500">{label}</p>
                                       <p className="font-medium text-sm break-words">{value}</p>
                                     </div>
                                   ))}
                                 </div>
+                                <div className="grid gap-3 sm:grid-cols-2 rounded-lg border bg-white p-3">
+                                  <div>
+                                    <p className="text-xs text-slate-500">Keperluan / Keterangan</p>
+                                    <p className="text-sm font-medium break-words">{tx.notes||tx.description||"Tidak diisi"}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-slate-500">Saldo berjalan Google Sheets</p>
+                                    <p className="text-sm font-semibold tabular-nums">
+                                      {tx.isTest&&tx.status==="TEST — Tersinkron"&&tx.sheetBalance!=null
+                                        ? tx.sheetBalance.toLocaleString("id-ID",{minimumFractionDigits:2,maximumFractionDigits:2})
+                                        : "Belum tersedia"}
+                                    </p>
+                                    <p className="text-xs text-slate-500">Bukan saldo bank terverifikasi</p>
+                                  </div>
+                                </div>
+                                {tx.kind==="expense"&&
+                                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white p-3">
+                                    <div>
+                                      <p className="font-medium text-sm">Bukti Transfer / Nota</p>
+                                      <p className="text-xs text-slate-500">{tx.receiptUrls.length>0
+                                        ? tx.receiptUrls.length+" lampiran tersedia":"Belum ada bukti terlampir"}</p>
+                                    </div>
+                                    {tx.receiptUrls.length>0&&<Button type="button" variant="outline" size="sm"
+                                      onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}>Lihat Bukti</Button>}
+                                  </div>}
                                 <div className="flex justify-end">
                                   <Button size="sm" variant="outline" onClick={() => toggleExpandedTransaction(tx.key)}>Tutup Rincian</Button>
                                 </div>
