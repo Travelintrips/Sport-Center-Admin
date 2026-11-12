@@ -47,6 +47,28 @@ export function hasX904CommandForCurrentIdentityEpoch(
   return !Number.isFinite(lastCommandAtMs) || lastCommandAtMs >= firstObservedAtMs;
 }
 
+/** Only the latest contiguous appearance of the current role-0 identity
+ * belongs to this enrollment. Earlier appearances of the PIN are history,
+ * never proof that the current identity has already been handled.
+ */
+export function currentX904IdentityEpochStart(
+  history: ReadonlyArray<{ users: ReadonlyArray<SnapshotUser> }>,
+  user: SnapshotUser,
+): number {
+  if (!history.length) return -1;
+  const pin = String(user.pin ?? "");
+  const norm = (v: unknown) => String(v ?? "").trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID");
+  const name = norm(user.name);
+  const sameIdentity = (candidate: SnapshotUser) =>
+    String(candidate.pin ?? "") === pin && norm(candidate.name) === name &&
+    Number(candidate.role) === 0 && candidate.enabled === true;
+  let first = history.length - 1;
+  if ((history[first].users as SnapshotUser[]).filter(sameIdentity).length !== 1) return -1;
+  while (first > 0 &&
+    (history[first - 1].users as SnapshotUser[]).filter(sameIdentity).length === 1) first--;
+  return first;
+}
+
 export function isSafeReenrollment(input: {pin:string;name:string;oldName:string;oldRole:number;absentSnapshots:number;gapMinutes:number}): boolean {
   const norm=(x:string)=>x.trim().replace(/\s+/g," ").toUpperCase();
   const current=norm(input.name);
@@ -176,8 +198,10 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
   if (!newCandidates.length) return;
-  const firstIndexOf = (pin: string): number => history.findIndex(row =>
-    (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
+  const firstIndexOf = (pin: string): number => {
+    const user = currentUsers.find(u => String(u.pin ?? "") === pin);
+    return user ? currentX904IdentityEpochStart(history, user) : -1;
+  };
 
   // A snapshot with >10 newly enrolled ordinary identities is anomalous.
   // Restrict only THAT transition, not independent legitimate enrollments
