@@ -1149,3 +1149,54 @@ test("collector outage does not freeze later enrollment; no duplicate on retry",
     delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
   }
 });
+
+
+test("reused PIN after proven removal queues one new-epoch suspend with 30-minute simulated read-back",async()=>{
+  const saved={
+    enabled:process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED,
+    baseline:process.env.GYM_X904_NEW_USER_BASELINE_AT,
+    only:process.env.GYM_X904_NEW_USER_ONLY_PIN,
+  };
+  process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED="true";
+  process.env.GYM_X904_NEW_USER_BASELINE_AT="2026-11-08T23:59:00.000Z";
+  delete process.env.GYM_X904_NEW_USER_ONLY_PIN;
+  try {
+    const at=(s:string)=>new Date("2026-11-09T"+s+"Z");
+    const prior=(await run("SELECT users FROM sport_center.gym_x904_access_snapshots WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1")).rows[0].users;
+    const old={pin:"680",name:"OLD OWNER",role:0,group:1,enabled:true};
+    const fresh={...old,name:"NEW OWNER"};
+    const observe=async(time:string,users:any[])=>run(
+      "INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users) VALUES('TDBD234200545',$1,$2,$3::jsonb)",
+      [at(time),users.length,JSON.stringify(users)]);
+    await run("INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role) VALUES('TDBD234200545','680',680,'NEW OWNER',0)");
+    await run("INSERT INTO sport_center.x904_verified_nonmember_identities(device_serial,user_pin,device_uid,display_name,verification_state,revoked_at) VALUES('TDBD234200545','680',680,'OLD OWNER','revoked',$1)",[at("00:24:00")]);
+    await observe("00:22:00",[...prior,old]);
+    await observe("00:23:00",[...prior,old]);
+    await observe("00:24:00",prior);
+    await observe("00:27:00",prior);
+    await observe("00:30:00",[...prior,fresh]);
+    await observe("00:31:00",[...prior,fresh]);
+    await run("INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,created_at) VALUES('TDBD234200545','SUSPEND_USER','680','{}'::jsonb,301,'old-owner-680','completed',$1)",[at("00:22:30")]);
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,at("00:32:00"));
+    await processX904NewOrdinaryUserDefaultSuspend(db as any,at("00:32:00"));
+    const rows=(await run("SELECT command_id,payload,state FROM sport_center.x904_user_commands WHERE user_pin='680' AND payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'")).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({state:"queued",payload:{
+      expectedUid:680,expectedName:"NEW OWNER",firstObservedAt:"2026-11-09T00:30:00.000Z",suspendDeadlineAt:"2026-11-09T01:00:00.000Z"
+    }});
+    // This is simulated ACK/read-back stored in disposable PostgreSQL, not physical hardware.
+    await run("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$2,result=$3 WHERE command_id=$1",[
+      rows[0].command_id,at("00:34:00"),
+      JSON.stringify({readBackConfirmed:true,deviceUid:680,afterGroup:2}),
+    ]);
+    const evidence=(await run("SELECT (result->>'readBackConfirmed'='true' AND result->>'afterGroup'='2' AND completed_at<=(payload->>'firstObservedAt')::timestamptz+interval '30 minutes') AS within_30m FROM sport_center.x904_user_commands WHERE command_id=$1",[rows[0].command_id])).rows[0];
+    expect(evidence.within_30m).toBe(true);
+  } finally {
+    if(saved.enabled===undefined) delete process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED;
+    else process.env.GYM_X904_NEW_USER_DEFAULT_SUSPEND_ENABLED=saved.enabled;
+    if(saved.baseline===undefined) delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
+    else process.env.GYM_X904_NEW_USER_BASELINE_AT=saved.baseline;
+    if(saved.only===undefined) delete process.env.GYM_X904_NEW_USER_ONLY_PIN;
+    else process.env.GYM_X904_NEW_USER_ONLY_PIN=saved.only;
+  }
+});
