@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { scanPaymentProof } from "../lib/paymentProofOcr";
-import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, selectCompleteBluReference, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, selectCompleteBluReference, readExpenseBluReferenceFromFocusedImage, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -162,10 +162,25 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
       (!notes && !destinationBank && !destinationAccount))
       ? await readExpenseBluMissingFieldsWithVision(req.file.buffer, req.file.mimetype)
       : null;
+    const baseReference=selectCompleteBluReference(bankReference,fallback?.bankReference??null);
+    const complete=(value:string|null|undefined)=>{
+      const digits=String(value??"").replace(/\D/g,"");
+      return digits.length===16||digits.length===20 ? digits : null;
+    };
+    const conflictingFullReferences=Boolean(
+      complete(bankReference)&&complete(fallback?.bankReference) &&
+      complete(bankReference)!==complete(fallback?.bankReference));
+    // Expense-only targeted second look. Never overwrite two conflicting
+    // complete OCR/vision reads or create a fabricated trailing digit group.
+    const focusedReference=!baseReference&&!conflictingFullReferences &&
+      (bluProof||sourceBank)
+      ? await readExpenseBluReferenceFromFocusedImage(req.file.buffer,req.file.mimetype)
+      : null;
+    const finalReference=selectCompleteBluReference(baseReference,focusedReference);
     const fields = {
       amount: textAmount ?? fallback?.amount ?? result.amount,
       date: date ?? fallback?.date ?? null,
-      bankReference: selectCompleteBluReference(bankReference, fallback?.bankReference ?? null),
+      bankReference: finalReference,
       recipient: recipient ?? fallback?.recipient ?? genericRecipient ?? null,
       destinationBank: destinationBank ?? fallback?.destinationBank ?? null,
       destinationAccount: destinationAccount ?? fallback?.destinationAccount ?? null,
