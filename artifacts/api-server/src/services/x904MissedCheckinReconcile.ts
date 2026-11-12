@@ -50,6 +50,7 @@ export async function reconcileX904MissedPaidCheckins(): Promise<void> {
 
 export async function reconcileX904MissedNonmemberBookingCheckins(
   store: Pick<typeof db, "execute"> = db,
+  evaluationTime: Date = new Date(),
 ): Promise<number> {
   if (process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED !== "true") return 0;
   const rows = await store.execute(sql`
@@ -77,8 +78,8 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND a.access_state IN ('active','expired')
       AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
       AND b.status='confirmed' AND b.checked_in_at IS NULL
-      AND b.booking_date IN ((now() AT TIME ZONE 'Asia/Jakarta')::date::text,
-        ((now() AT TIME ZONE 'Asia/Jakarta')::date - 1)::text)
+      AND b.booking_date IN ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date::text,
+        ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date - 1)::text)
       AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
       AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
       AND l.device_time < (CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
@@ -86,7 +87,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
         || ' ' || left(b.end_time,5) || ':00')
       AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
       AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
-      AND l.device_time <= to_char(now() AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time <= to_char(${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
     ORDER BY a.booking_id,l.device_time,l.event_id LIMIT 30`);
   let checkedIn = 0;
   for (const row of rows.rows as any[]) {
