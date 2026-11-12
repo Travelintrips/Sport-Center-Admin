@@ -82,11 +82,14 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND e.verification_code IN (1,4,15)
       AND e.raw_hex ~ '^[0-9a-f]{80}$'
       AND get_byte(decode(substr(e.raw_hex,53,2),'hex'),0)=e.verification_code
-      AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)=0
+      -- 255 is the device's valid undefined Punch State, NOT a user UID.
+      -- It only qualifies after a signed, same-event VMSC attestation.
+      AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0) IN (0,255)
     JOIN sport_center.gym_x904_raw_events r
       ON r.event_id=l.event_id AND r.device_serial=l.device_serial
       AND r.user_pin=l.user_pin AND r.device_time=l.device_time
-      AND r.attendance_status=0 AND r.verification_type=e.verification_code
+      AND r.attendance_status=get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)
+      AND r.verification_type=e.verification_code
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
       AND a.identity_type='pin' -- VIS cards retain their established handover/check-in workflow
