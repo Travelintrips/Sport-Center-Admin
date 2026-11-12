@@ -54,7 +54,9 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
 ): Promise<number> {
   if (process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED !== "true") return 0;
   const rows = await store.execute(sql`
-    SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time
+    SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time,
+      CASE WHEN e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL
+        THEN 'signed_vmsc' ELSE 'authenticated_lan_snapshot' END AS scan_provenance
     FROM sport_center.x904_nonmember_daily_access a
     JOIN sport_center.sport_bookings b ON b.id=a.booking_id
     JOIN sport_center.sport_payments p
@@ -78,20 +80,204 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND upper(trim(u.display_name))=upper(trim(a.verified_name))
     JOIN sport_center.gym_x904_lan_logs l ON l.device_serial=a.device_serial
       AND l.user_pin=a.user_pin
-    -- The historical LAN device_uid stores an SDK event sequence, not roster UID.
-    -- Signed VMSC proof is required for a verified booking scan.
-    JOIN sport_center.gym_x904_verification_evidence e
+    JOIN sport_center.gym_x904_lan_state state
+      ON state.device_serial=l.device_serial
+    -- Signed attestation remains the strongest path. The existing
+    -- authenticated durable LAN observations (already used by WhatsApp)
+    -- also qualify for FUTURE paid public Gym sessions. Their provenance
+    -- remains 'authenticated_lan_snapshot', never 'signed_vmsc'.
+    LEFT JOIN sport_center.gym_x904_verification_evidence e
       ON e.device_serial=l.device_serial AND e.event_index=l.event_index
       AND e.user_pin=l.user_pin AND e.source_event_id=l.event_id
       AND e.capture_source='trusted_vmsc_ingress'
       AND e.evidence_status='protocol_verified'
       AND e.verification_code IN (1,4,15)
-      AND e.raw_hex ~ '^[0-9a-f]{80}$'
+      AND e.raw_hex ~ '^[0-9a-f]{80}
+    WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
+      AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
+      AND (
+        (e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+        OR
+        (b.source='gym_public_guest'
+          AND b.booking_date>='2026-11-13'
+          AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
+          AND state.last_complete_at>now()-interval '90 minutes'
+          AND l.last_seen_snapshot=state.last_snapshot_id
+          AND l.device_uid=l.event_index+1
+          AND l.event_index>=0 AND l.event_id ~ '^[a-f0-9]{64}
+      AND (
+        (a.identity_type='pin' AND v.device_uid IS NOT NULL)
+        OR
+        (a.identity_type='card'
+          AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006')
+          AND (
+            (b.source='admin' AND a.verification_state='verified')
+            OR
+            (b.source IN ('gym_public_guest','web')
+              AND vis.booking_id IS NOT NULL
+              AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
+                'YYYY-MM-DD HH24:MI:SS'))
+          )
+        )
+      )
+      AND a.confirmed_at IS NOT NULL
+      AND a.access_state IN ('active','expired')
+      AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
+      AND b.status='confirmed' AND b.checked_in_at IS NULL
+      AND b.booking_date IN ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date::text,
+        ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date - 1)::text)
+      AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+      AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
+      AND l.device_time < (CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
+        THEN to_char(b.booking_date::date + 1,'YYYY-MM-DD') ELSE b.booking_date END
+        || ' ' || left(b.end_time,5) || ':00')
+      AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time <= to_char(${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+    ORDER BY a.booking_id,l.device_time,l.event_id LIMIT 30`);
+  let checkedIn = 0;
+  for (const row of rows.rows as any[]) {
+    const eventTime = String(row.device_time);
+    if (!isX904UsageWithinBookingSession(
+      String(row.booking_date), String(row.start_time),
+      String(row.end_time), eventTime)) continue;
+    const observed = new Date(eventTime.replace(" ", "T") + "+07:00");
+    if (!Number.isFinite(observed.getTime())) continue;
+    // checkInBooking validates current status, session, pending reschedule and
+    // records an audit entry; the normal scheduler later calls completeBooking.
+    const result = await checkInBooking(Number(row.booking_id), {
+      userName: `X904 ${row.scan_provenance==="signed_vmsc" ? "signed scan" : "LAN observed scan"} ${String(row.event_id)}`, userRole: "system",
+    }, observed);
+    if (result.ok) checkedIn++;
+    else logger.info({ bookingId: row.booking_id, reason: result.reason },
+      "[x904] nonmember booking check-in held");
+  }
+  return checkedIn;
+}
+
       AND get_byte(decode(substr(e.raw_hex,53,2),'hex'),0)=e.verification_code
-      -- 255 is the device's valid undefined Punch State, NOT a user UID.
-      -- It only qualifies after a signed, same-event VMSC attestation.
       AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0) IN (0,255)
-    JOIN sport_center.gym_x904_raw_events r
+    LEFT JOIN sport_center.gym_x904_raw_events r
+      ON r.event_id=l.event_id AND r.device_serial=l.device_serial
+      AND r.user_pin=l.user_pin AND r.device_time=l.device_time
+      AND r.attendance_status=get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)
+      AND r.verification_type=e.verification_code
+    WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
+      AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
+      AND (
+        (a.identity_type='pin' AND v.device_uid IS NOT NULL)
+        OR
+        (a.identity_type='card'
+          AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006')
+          AND (
+            (b.source='admin' AND a.verification_state='verified')
+            OR
+            (b.source IN ('gym_public_guest','web')
+              AND vis.booking_id IS NOT NULL
+              AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
+                'YYYY-MM-DD HH24:MI:SS'))
+          )
+        )
+      )
+      AND a.confirmed_at IS NOT NULL
+      AND a.access_state IN ('active','expired')
+      AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
+      AND b.status='confirmed' AND b.checked_in_at IS NULL
+      AND b.booking_date IN ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date::text,
+        ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date - 1)::text)
+      AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+      AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
+      AND l.device_time < (CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
+        THEN to_char(b.booking_date::date + 1,'YYYY-MM-DD') ELSE b.booking_date END
+        || ' ' || left(b.end_time,5) || ':00')
+      AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time <= to_char(${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+    ORDER BY a.booking_id,l.device_time,l.event_id LIMIT 30`);
+  let checkedIn = 0;
+  for (const row of rows.rows as any[]) {
+    const eventTime = String(row.device_time);
+    if (!isX904UsageWithinBookingSession(
+      String(row.booking_date), String(row.start_time),
+      String(row.end_time), eventTime)) continue;
+    const observed = new Date(eventTime.replace(" ", "T") + "+07:00");
+    if (!Number.isFinite(observed.getTime())) continue;
+    // checkInBooking validates current status, session, pending reschedule and
+    // records an audit entry; the normal scheduler later calls completeBooking.
+    const result = await checkInBooking(Number(row.booking_id), {
+      userName: `X904 verified scan ${String(row.event_id)}`, userRole: "system",
+    }, observed);
+    if (result.ok) checkedIn++;
+    else logger.info({ bookingId: row.booking_id, reason: result.reason },
+      "[x904] nonmember booking check-in held");
+  }
+  return checkedIn;
+}
+
+          -- Do not attribute one PIN's scan to competing paid sessions.
+          AND NOT EXISTS (
+            SELECT 1 FROM sport_center.x904_nonmember_daily_access other
+            JOIN sport_center.sport_bookings ob ON ob.id=other.booking_id
+            WHERE other.booking_id<>a.booking_id AND other.device_serial=a.device_serial
+              AND other.user_pin=a.user_pin AND ob.status='confirmed'
+              AND ob.booking_date=b.booking_date
+              AND ob.start_time<b.end_time AND ob.end_time>b.start_time
+          )
+        )
+      )
+      AND (
+        (a.identity_type='pin' AND v.device_uid IS NOT NULL)
+        OR
+        (a.identity_type='card'
+          AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006')
+          AND (
+            (b.source='admin' AND a.verification_state='verified')
+            OR
+            (b.source IN ('gym_public_guest','web')
+              AND vis.booking_id IS NOT NULL
+              AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
+                'YYYY-MM-DD HH24:MI:SS'))
+          )
+        )
+      )
+      AND a.confirmed_at IS NOT NULL
+      AND a.access_state IN ('active','expired')
+      AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
+      AND b.status='confirmed' AND b.checked_in_at IS NULL
+      AND b.booking_date IN ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date::text,
+        ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date - 1)::text)
+      AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+      AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
+      AND l.device_time < (CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
+        THEN to_char(b.booking_date::date + 1,'YYYY-MM-DD') ELSE b.booking_date END
+        || ' ' || left(b.end_time,5) || ':00')
+      AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+      AND l.device_time <= to_char(${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
+    ORDER BY a.booking_id,l.device_time,l.event_id LIMIT 30`);
+  let checkedIn = 0;
+  for (const row of rows.rows as any[]) {
+    const eventTime = String(row.device_time);
+    if (!isX904UsageWithinBookingSession(
+      String(row.booking_date), String(row.start_time),
+      String(row.end_time), eventTime)) continue;
+    const observed = new Date(eventTime.replace(" ", "T") + "+07:00");
+    if (!Number.isFinite(observed.getTime())) continue;
+    // checkInBooking validates current status, session, pending reschedule and
+    // records an audit entry; the normal scheduler later calls completeBooking.
+    const result = await checkInBooking(Number(row.booking_id), {
+      userName: `X904 verified scan ${String(row.event_id)}`, userRole: "system",
+    }, observed);
+    if (result.ok) checkedIn++;
+    else logger.info({ bookingId: row.booking_id, reason: result.reason },
+      "[x904] nonmember booking check-in held");
+  }
+  return checkedIn;
+}
+
+      AND get_byte(decode(substr(e.raw_hex,53,2),'hex'),0)=e.verification_code
+      AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0) IN (0,255)
+    LEFT JOIN sport_center.gym_x904_raw_events r
       ON r.event_id=l.event_id AND r.device_serial=l.device_serial
       AND r.user_pin=l.user_pin AND r.device_time=l.device_time
       AND r.attendance_status=get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)
