@@ -22,6 +22,7 @@ import { isAuthorizedAdminProofUploader } from "../lib/adminPaymentProofReport";
 import { canRecordConfirmedBookingOutstandingPayment } from "../lib/confirmedBookingOutstandingPayment";
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
+import { wakeX904AdminVisAfterPayment } from "../services/x904VisFastWake";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
@@ -2403,6 +2404,16 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       booking?.source === "gym_public_guest" &&
       payment?.status === "confirmed" && payment?.paymentType !== "dp",
     );
+    // Older admin VIS cards use an already verified, payment-linked card
+    // grant. Wake only after payment commit; leave VIS handover/return and
+    // device read-back safeguards in the unchanged worker.
+    if (status === "confirmed" && before.status !== "confirmed" &&
+        payment?.status === "confirmed" && payment?.paymentType !== "dp" &&
+        booking?.source === "admin" && booking?.id && payment?.id) {
+      void wakeX904AdminVisAfterPayment(Number(booking.id), Number(payment.id))
+        .catch(err => logger.error({ err, bookingId: booking.id },
+          "[x904-vis-fast-wake] admin VIS wake failed; scheduled worker remains fallback"));
+    }
 
     for (const siblingSync of siblingSyncs) {
       syncStatusToBizportal(
