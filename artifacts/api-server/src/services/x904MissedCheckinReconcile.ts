@@ -114,13 +114,14 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
           -- connector liveness WITHOUT asserting that a new scan occurred.
           -- The event must still belong to the exact complete snapshot.
           AND (
-            state.last_complete_at>now()-interval '90 minutes'
+            state.last_complete_at>${evaluationTime}::timestamptz-interval '90 minutes' AND state.last_complete_at<=${evaluationTime}::timestamptz
             OR EXISTS (
               SELECT 1 FROM sport_center.gym_x904_connector_heartbeats hb
               WHERE hb.device_serial=state.device_serial
                 AND hb.connector_id='VMSC'
                 AND hb.read_authenticated IS TRUE
-                AND hb.last_seen>now()-interval '5 minutes'
+                AND hb.last_seen>${evaluationTime}::timestamptz-interval '5 minutes'
+                AND hb.last_seen<=${evaluationTime}::timestamptz
                 AND hb.last_seen>=state.last_complete_at
                 AND hb.reported_logs=state.stored_log_count
                 AND hb.reported_logs=state.device_log_count
