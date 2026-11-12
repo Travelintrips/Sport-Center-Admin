@@ -788,5 +788,47 @@ suite(
       expect((await commands())[0].command_type).toBe("ACTIVATE_USER");
       expect((await grant(id)).access_state).toBe("pending");
     });
+
+    test("real PostgreSQL RLS allows only matching signed X904 evidence writes", async()=>{
+      // Staged migration is evaluated against the same non-bypass application
+      // role as the actual Express runtime, not a mocked privileged client.
+      await pool.query("ALTER TABLE sport_center.gym_x904_raw_events ENABLE ROW LEVEL SECURITY");
+      await pool.query("ALTER TABLE sport_center.gym_x904_verification_evidence ENABLE ROW LEVEL SECURITY");
+      await pool.query(readFileSync("migrations/20261112_x904_attested_ingress_backend_rls.sql","utf8"));
+      const serial="TDBD234200545", pin="700", index=301, id="a".repeat(64);
+      const raw=Buffer.alloc(40);
+      raw.writeUInt16LE(index+1,0);raw.write(pin,2,"ascii");
+      raw[26]=15;raw[31]=255;
+      const rawHex=raw.toString("hex");
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES($1,$2,302,'2026-11-12 20:15:00',$3,$4)",
+        [serial,pin,id,index]);
+      await appPool.query("INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES($1,$2,$3,'2026-11-12 20:15:00',255,15)",
+        [id,serial,pin]);
+      await appPool.query("INSERT INTO sport_center.gym_x904_verification_evidence(device_serial,event_index,user_pin,source_event_id,capture_source,evidence_status,verification_code,verification_method,raw_hex) VALUES($1,$2,$3,$4,'trusted_vmsc_ingress','protocol_verified',15,'face',$5)",
+        [serial,index,pin,id,rawHex]);
+      const present=await appPool.query("SELECT event_index FROM sport_center.gym_x904_verification_evidence WHERE event_index=$1",[index]);
+      expect(present.rows).toHaveLength(1);
+      const invalidId="f".repeat(64);
+      await expect(appPool.query("INSERT INTO sport_center.gym_x904_raw_events(event_id,device_serial,user_pin,device_time,attendance_status,verification_type) VALUES($1,$2,$3,'2026-11-12 20:16:00',255,15)",
+        [invalidId,serial,pin])).rejects.toThrow();
+      const badRaw=Buffer.from(raw);
+      badRaw[31]=2;
+      await expect(appPool.query("INSERT INTO sport_center.gym_x904_verification_evidence(device_serial,event_index,user_pin,source_event_id,capture_source,evidence_status,verification_code,verification_method,raw_hex) VALUES($1,302,$2,$3,'trusted_vmsc_ingress','protocol_verified',15,'face',$4)",
+        [serial,pin,id,badRaw.toString("hex")])).rejects.toThrow();
+      // An existing unverified raw capture can be promoted only when the
+      // verified immutable log still ties the PIN, serial and event together.
+      const legacyId="c".repeat(64),legacyIndex=303;
+      const old=Buffer.alloc(40);
+      old.writeUInt16LE(legacyIndex+1,0);old.write(pin,2,"ascii");
+      old[26]=15;old[31]=255;
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES($1,$2,304,'2026-11-12 20:20:00',$3,$4)",
+        [serial,pin,legacyId,legacyIndex]);
+      await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence(device_serial,event_index,user_pin,source_event_id,capture_source,evidence_status,verification_code,verification_method,raw_hex) VALUES($1,$2,$3,$4,'vmsc_automated','unverified',15,'unknown',$5)",
+        [serial,legacyIndex,pin,legacyId,old.toString("hex")]);
+      const promoted=await appPool.query("UPDATE sport_center.gym_x904_verification_evidence SET capture_source='trusted_vmsc_ingress',evidence_status='protocol_verified',verification_method='face' WHERE event_index=$1 RETURNING event_index",[legacyIndex]);
+      expect(promoted.rows).toHaveLength(1);
+      await expect(appPool.query("UPDATE sport_center.gym_x904_verification_evidence SET raw_hex=$1 WHERE event_index=$2",
+        [badRaw.toString("hex"),legacyIndex])).rejects.toThrow();
+    });
   },
 );
