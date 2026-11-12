@@ -62,6 +62,8 @@ export function parseTestInput(body: any) {
     return [...new Set(value as string[])];
   };
   // Existing clients/entries are supported without backfilling historical evidence.
+  if(Array.isArray(body.paymentProofUrls) && body.paymentProofUrls.length>1)
+    throw Error("ONLY_ONE_MAIN_PAYMENT_PROOF");
   const paymentProofUrls=validateProofUrls(body.paymentProofUrls??[],"INVALID_PAYMENT_PROOF_URLS");
   const supportingReceiptUrls=validateProofUrls(body.supportingReceiptUrls??[],"INVALID_SUPPORTING_RECEIPT_URLS");
   if(paymentProofUrls.length>1)throw Error("ONLY_ONE_MAIN_PAYMENT_PROOF");
