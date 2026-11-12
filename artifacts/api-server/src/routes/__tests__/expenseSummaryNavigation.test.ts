@@ -46,7 +46,8 @@ describe("Master Tabel TEST details are read-only and context-aware", () => {
     expect(ui).toContain('destinationBank:entry.direction==="OUT"?entry.destinationBank||"":');
     expect(ui).toContain('destinationAccount:entry.direction==="OUT"?entry.destinationAccount||"":');
     expect(ui).toContain('["Bank Tujuan",tx.destinationBank||"Belum diisi"]');
-    expect(ui).toContain('["Rekening Tujuan",tx.destinationAccount?"•••• "+tx.destinationAccount.slice(-4):"Belum diisi"]');
+    expect(ui).toContain('["Rekening Tujuan",tx.destinationAccount||"Belum diisi"]');
+    expect(ui).not.toContain('tx.destinationAccount.slice(-4)');
     expect(ui).toContain('["Akun Penerima",tx.account||"Tidak diisi"]');
   });
   it("shows sync separate from bank verification and no duplicate description/notes", () => {
