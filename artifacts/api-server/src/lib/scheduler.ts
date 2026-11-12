@@ -17,6 +17,7 @@ import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePayme
 import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
 import { completeBooking } from "./bookingLifecycle";
+import { hasBookingSessionEnded } from "./bookingLifecycleRules";
 import { getBaseUrl } from "./appUrl";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "./invoiceDelivery";
 
@@ -590,6 +591,36 @@ async function autoCompleteBookings(): Promise<void> {
           logger.info(`[scheduler] Booking ${booking.orderNumber} was not completed: ${completion.reason}`);
         }
       }
+    }
+
+    // Extend the EXISTING completion scheduler for FUTURE verified-paid public
+    // Gym guests whose session ended but check-in has not been recorded.
+    // Explicit cutoff prevents unexpectedly closing hundreds of historical
+    // bookings. No fabricated scan, no payment journal, no new worker.
+    const endedGuests=await db.execute(sql`
+      SELECT DISTINCT b.id,b.booking_date,b.end_time
+      FROM sport_center.sport_bookings b
+      JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=b.id
+      JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
+      WHERE b.status='confirmed' AND b.source='gym_public_guest'
+        AND b.checked_in_at IS NULL AND b.booking_date>='2026-11-13'
+        AND a.device_serial='TDBD234200545'
+        AND a.verification_state='verified'
+        AND a.identity_type IN ('pin','card')
+        AND a.activated_at IS NOT NULL
+        AND p.status='confirmed' AND p.confirmed_at IS NOT NULL AND p.amount>0
+      ORDER BY b.booking_date,b.end_time,b.id
+      LIMIT 50`);
+    for (const row of endedGuests.rows) {
+      const bookingId=Number(row.id);
+      if (!Number.isSafeInteger(bookingId)) continue;
+      const date=String(row.booking_date),end=String(row.end_time);
+      if (!hasBookingSessionEnded(date,end,new Date())) continue;
+      const completion=await completeBooking(bookingId,{userName:"scheduler",userRole:"system"});
+      if (completion.ok && !completion.alreadyCompleted)
+        logger.info({bookingId},"[scheduler] future paid Gym guest session completed; no attendance fabricated");
+      else if (!completion.ok)
+        logger.info({bookingId,reason:completion.reason},"[scheduler] future Gym completion held");
     }
   } catch (err) {
     console.error("[scheduler] autoCompleteBookings error:", err);
