@@ -28,8 +28,8 @@ WITH CHECK (
   AND verification_type IN (1,4,15)
   AND EXISTS (
     SELECT 1 FROM sport_center.gym_x904_lan_logs l
-    WHERE l.event_id=event_id AND l.device_serial=device_serial
-      AND l.user_pin=user_pin AND l.device_time=device_time
+    WHERE l.event_id=sport_center.gym_x904_raw_events.event_id AND l.device_serial=sport_center.gym_x904_raw_events.device_serial
+      AND l.user_pin=sport_center.gym_x904_raw_events.user_pin AND l.device_time=sport_center.gym_x904_raw_events.device_time
   )
 );
 -- The existing *unverified* VMSC capture can be promoted only by the
@@ -59,8 +59,8 @@ WITH CHECK (
     + 256*get_byte(decode(raw_hex,'hex'),1)=event_index+1
   AND EXISTS (
     SELECT 1 FROM sport_center.gym_x904_lan_logs l
-    WHERE l.event_id=source_event_id AND l.device_serial=device_serial
-      AND l.user_pin=user_pin AND l.event_index=event_index
+    WHERE l.event_id=source_event_id AND l.device_serial=sport_center.gym_x904_verification_evidence.device_serial
+      AND l.user_pin=sport_center.gym_x904_verification_evidence.user_pin AND l.event_index=sport_center.gym_x904_verification_evidence.event_index
   )
 );
 CREATE POLICY x904_attest_evidence_update
@@ -86,8 +86,8 @@ WITH CHECK (
     + 256*get_byte(decode(raw_hex,'hex'),1)=event_index+1
   AND EXISTS (
     SELECT 1 FROM sport_center.gym_x904_lan_logs l
-    WHERE l.event_id=source_event_id AND l.device_serial=device_serial
-      AND l.user_pin=user_pin AND l.event_index=event_index
+    WHERE l.event_id=source_event_id AND l.device_serial=sport_center.gym_x904_verification_evidence.device_serial
+      AND l.user_pin=sport_center.gym_x904_verification_evidence.user_pin AND l.event_index=sport_center.gym_x904_verification_evidence.event_index
   )
 );
 COMMIT;
