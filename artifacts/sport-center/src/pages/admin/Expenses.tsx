@@ -1198,7 +1198,7 @@ export default function AdminExpenses() {
                                     ["Metode Pembayaran",tx.method||"Tidak diisi"],
                                     ["Sumber Dana",tx.bank||"Tidak diisi"],
                                     ["Bank Tujuan",tx.destinationBank||"Belum diisi"],
-                                    ["Rekening Tujuan",tx.destinationAccount?"•••• "+tx.destinationAccount.slice(-4):"Belum diisi"],
+                                    ["Rekening Tujuan",tx.destinationAccount||"Belum diisi"],
                                     ["Referensi Bank",tx.reference||"Tidak diisi"],
                                     ["Lokasi Sheets",tx.sheet]
                                   ] as Array<[string,string]>)).map(([label,value])=>(
