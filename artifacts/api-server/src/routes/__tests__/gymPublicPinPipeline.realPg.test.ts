@@ -677,12 +677,13 @@ suite(
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
         await pool.query("UPDATE sport_center.gym_x904_verification_evidence SET capture_source='trusted_vmsc_ingress',evidence_status='protocol_verified',raw_hex=$1 WHERE event_index=100",
           ["00".repeat(26)+"0f"+"00".repeat(4)+"ff"+"00".repeat(8)]);
-        // A contradictory raw status 255 must NOT be promoted even when a
-        // matching processed raw event incorrectly claims status 0.
+        // A contradictory processed status must NOT override signed raw 255.
+        // Punch 255 is legitimate "undefined" state, NOT unlock permission.
         await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES('valid-ordinal','TDBD234200545','700','2026-11-10 08:15:00',0,15)");
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
-        await pool.query("UPDATE sport_center.gym_x904_verification_evidence SET raw_hex=$1 WHERE event_index=100",
-          ["00".repeat(26)+"0f"+"00".repeat(13)]);
+        // Once the independently signed proof and persisted raw event agree,
+        // the canonical booking check-in may run exactly once.
+        await pool.query("UPDATE sport_center.gym_x904_raw_events SET attendance_status=255 WHERE event_id='valid-ordinal'");
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(1);
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
         const check = (await pool.query("SELECT checked_in_at,status FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0];
