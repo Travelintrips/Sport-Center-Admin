@@ -1947,8 +1947,7 @@ export default function AdminExpenses() {
                       ["paymentMethod","Metode",proofPreview.paymentMethod==="unknown"?null:proofPreview.paymentMethod],
                       ["notes","Catatan",proofPreview.notes],
                       ["destinationBank","Bank tujuan",proofPreview.destinationBank],
-                      ["destinationAccount","Rekening tujuan",proofPreview.destinationAccount
-                        ? "•••• "+proofPreview.destinationAccount.slice(-4):null],
+                      ["destinationAccount","Rekening tujuan",proofPreview.destinationAccount||null],
                       ["sourceBank","Sumber dana",proofPreview.sourceBank]
                     ] as Array<[keyof typeof proofSelection,string,string|null|undefined]>).map(([key,label,value])=>(
                       <label key={key} className="flex items-start gap-2 rounded border border-teal-200 bg-white p-2">
