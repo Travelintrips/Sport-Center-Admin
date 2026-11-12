@@ -23,6 +23,11 @@ import {
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
 
+function proofCategoryLabels(urls:string[],payment:string[]=[],supporting:string[]=[]):string[]{
+  return urls.map((url,index)=>payment.includes(url)?"Bukti Pembayaran":
+    supporting.includes(url)?"Nota / Struk Pendukung":`Lampiran Lama ${index+1}`);
+}
+
 const PAYMENT_METHODS = ["Transfer Bank", "BI-FAST", "QRIS", "PLN Prabayar", "E-Commerce", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -394,7 +399,7 @@ export default function AdminExpenses() {
       sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
       senderBank:string;receivingAccount:string;
       method:string;bankReference:string|null;notes:string|null;
-      receiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string}>;
+      receiptUrls?:string[];paymentProofUrls?:string[];supportingReceiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -708,6 +713,7 @@ export default function AdminExpenses() {
       cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
         `Status ${entry.sheetSyncState}`,
       reference:entry.bankReference||"",notes:entry.notes||"",receiptUrls:entry.receiptUrls??[],
+      paymentProofUrls:entry.paymentProofUrls??[],supportingReceiptUrls:entry.supportingReceiptUrls??[],
     }))
     : [
     ...(incomeData?.entries ?? []).map(entry => ({
@@ -721,6 +727,7 @@ export default function AdminExpenses() {
       cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
         entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
       reference: entry.bankReference || "", notes: "",receiptUrls:[] as string[],
+      paymentProofUrls:[] as string[],supportingReceiptUrls:[] as string[],
       destinationBank:"",destinationAccount:entry.receivingAccount||"",expenseKind:"",isTest:false,
     })),
     ...allExpenses.map((expense: any) => ({
@@ -736,6 +743,7 @@ export default function AdminExpenses() {
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
       reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
       receiptUrls:Array.isArray(expense.receiptUrls)?expense.receiptUrls:[],
+      paymentProofUrls:[] as string[],supportingReceiptUrls:[] as string[],
       destinationBank:"",destinationAccount:"",expenseKind:"",isTest:false,
     })),
   ];
@@ -1260,7 +1268,8 @@ export default function AdminExpenses() {
                                         ? tx.receiptUrls.length+" lampiran tersedia":"Belum ada bukti terlampir"}</p>
                                     </div>
                                     {tx.receiptUrls.length>0&&<Button type="button" variant="outline" size="sm"
-                                      onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}>Lihat Bukti</Button>}
+                                      onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0,
+                                        labels:proofCategoryLabels(tx.receiptUrls,tx.paymentProofUrls,tx.supportingReceiptUrls)})}>Lihat Bukti</Button>}
                                   </div>}
                                 <div className="flex justify-end">
                                   <Button size="sm" variant="outline" onClick={() => toggleExpandedTransaction(tx.key)}>Tutup Rincian</Button>
@@ -1499,7 +1508,8 @@ export default function AdminExpenses() {
                     {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
                       <span className="block text-xs mt-1">
                         <button type="button"
-                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0})}
+                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0,
+                            labels:proofCategoryLabels(x.receiptUrls??[],x.paymentProofUrls??[],x.supportingReceiptUrls??[])})}
                           className="text-blue-700 underline">Lihat Bukti ({x.receiptUrls.length} lampiran)</button>
                       </span>}
                   </td>
@@ -1868,7 +1878,7 @@ export default function AdminExpenses() {
             <div className="flex items-center justify-between gap-2">
               <Button type="button" variant="outline" size="sm" disabled={proofViewer.index===0}
                 onClick={()=>setProofViewer(v=>v?{...v,index:Math.max(0,v.index-1)}:null)}>Sebelumnya</Button>
-              <span className="text-sm tabular-nums">Bukti {proofViewer.index+1} dari {proofViewer.urls.length}</span>
+              <span className="text-sm tabular-nums">{proofViewer.labels?.[proofViewer.index]??"Bukti"} · {proofViewer.index+1} dari {proofViewer.urls.length}</span>
               <Button type="button" variant="outline" size="sm" disabled={proofViewer.index===proofViewer.urls.length-1}
                 onClick={()=>setProofViewer(v=>v?{...v,index:Math.min(v.urls.length-1,v.index+1)}:null)}>Berikutnya</Button>
             </div>
@@ -1881,7 +1891,7 @@ export default function AdminExpenses() {
                   className={`overflow-hidden rounded-lg border-2 bg-white text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${proofViewer.index===index?"border-blue-600":"border-slate-200 hover:border-slate-400"}`}>
                   <img src={url} alt={`Pratinjau bukti ${index+1}`} loading="lazy"
                     className="h-28 sm:h-36 w-full object-contain bg-slate-50"/>
-                  <div className="px-2 py-1.5 text-xs font-medium">Bukti {index+1}</div>
+                  <div className="px-2 py-1.5 text-xs font-medium">{proofViewer.labels?.[index]??`Bukti ${index+1}`}</div>
                 </button>
               ))}
             </div>
