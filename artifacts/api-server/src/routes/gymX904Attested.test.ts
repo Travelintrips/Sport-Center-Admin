@@ -5,11 +5,14 @@ import { createHmac } from "node:crypto";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 const rawId="b".repeat(64);
+let previousEvidence:any=null;
 const execMock=jest.fn(async (statement:any)=>{
   const q=new PgDialect().sqlToQuery(statement).sql;
   if(q.includes("SELECT l.event_id")) return {rows:[{event_id:rawId}]};
   if(q.includes("SELECT device_serial,user_pin,device_time")) return {rows:[]};
-  if(q.includes("SELECT evidence_status,raw_hex")) return {rows:[]};
+  if(q.includes("SELECT evidence_status,raw_hex")) return {rows:previousEvidence?[previousEvidence]:[]};
+  if(q.includes("INSERT INTO sport_center.gym_x904_verification_evidence"))
+    return {rows:[{event_index:101}]};
   return {rows:[]};
 });
 const transactionMock=jest.fn(async (f:(tx:any)=>Promise<any>)=>f({execute:execMock}));
@@ -62,7 +65,7 @@ describe("signed X904 VMSC attendance state compatibility — isolated route",()
     process.env.GYM_X904_VMSC_ATTEST_KEY=secret;
     process.env.GYM_X904_DEVICE_SERIAL=serial;
   });
-  beforeEach(()=>{execMock.mockClear();transactionMock.mockClear();processMock.mockClear();});
+  beforeEach(()=>{previousEvidence=null;execMock.mockClear();transactionMock.mockClear();processMock.mockClear();});
   afterAll(()=>{
     for(const [k,v] of Object.entries(old)) {
       if(v===undefined) delete process.env[k];
@@ -81,6 +84,26 @@ describe("signed X904 VMSC attendance state compatibility — isolated route",()
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ok:true,accepted:1,outcome:"review_required"});
     expect(transactionMock).toHaveBeenCalledTimes(1);
+  });
+  test("rejects collision with a previously captured mismatched raw record",async()=>{
+    previousEvidence={
+      evidence_status:"unverified",capture_source:"vmsc_automated",
+      user_pin:"700",source_event_id:rawId,verification_code:15,
+      raw_hex:"ff".repeat(40)
+    };
+    const r=await signedRequest(255);
+    expect(r.status).toBe(409);
+    expect(r.body.reason).toBe("X904_EVIDENCE_CONFLICT");
+    expect(processMock).not.toHaveBeenCalled();
+    const rendered=execMock.mock.calls.map(([sqlObj]:any[])=>new PgDialect().sqlToQuery(sqlObj).sql);
+    expect(rendered.some((q:string)=>q.includes("INSERT INTO sport_center.gym_x904_verification_evidence"))).toBe(false);
+  });
+  test("does not request write access to immutable LAN/raw event rows",async()=>{
+    const r=await signedRequest(255);
+    expect(r.status).toBe(200);
+    const rendered=execMock.mock.calls.map(([sqlObj]:any[])=>new PgDialect().sqlToQuery(sqlObj).sql);
+    expect(rendered.some((q:string)=>/FOR UPDATE OF l/.test(q))).toBe(false);
+    expect(rendered.some((q:string)=>q.includes("FROM sport_center.gym_x904_raw_events")&&/FOR UPDATE/.test(q))).toBe(false);
   });
   test("unrecognized status is rejected before any database writes",async()=>{
     const r=await signedRequest(2);
