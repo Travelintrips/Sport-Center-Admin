@@ -144,7 +144,9 @@ suite(
       INSERT INTO sport_center.payment_settlement_configs(company_id,provider_code,bank_account_id,effective_from) VALUES(5,'mandiri_direct','TEST-ACCOUNT','2026-01-01');
       CREATE TABLE sport_center.payment_business_calendar(calendar_date date,is_business_day boolean);
       CREATE SEQUENCE sport_center.booking_order_no_seq START WITH 9000;
-      CREATE TABLE sport_center.gym_x904_lan_logs(device_serial text,user_pin text,device_uid int,device_time text,event_id text,event_index int);
+      CREATE TABLE sport_center.gym_x904_lan_logs(device_serial text,user_pin text,device_uid int,device_time text,event_id text,event_index int,last_seen_snapshot uuid DEFAULT '00000000-0000-4000-8000-000000000001',received_at timestamptz DEFAULT now());
+      CREATE TABLE sport_center.gym_x904_lan_state(device_serial text,last_snapshot_id uuid,last_complete_at timestamptz);
+      INSERT INTO sport_center.gym_x904_lan_state VALUES('TDBD234200545','00000000-0000-4000-8000-000000000001',now());
       CREATE TABLE sport_center.gym_x904_verification_evidence(device_serial text,event_index int,user_pin text,source_event_id text,capture_source text,evidence_status text,verification_code int,raw_hex text);
       CREATE TABLE sport_center.gym_x904_raw_events(event_id text,device_serial text,user_pin text,device_time text,attendance_status int,verification_type int);
       CREATE TABLE sport_center.gym_vis_card_reservations(booking_id int,payment_id int,device_serial text,user_pin text,device_uid int,card_code text,state text,collected_at timestamptz);
@@ -181,6 +183,8 @@ suite(
       GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA sport_center TO sport_center_app;
       ALTER TABLE sport_center.gym_x904_lan_logs ENABLE ROW LEVEL SECURITY;
       CREATE POLICY x904_ci_app_read ON sport_center.gym_x904_lan_logs FOR SELECT TO sport_center_app USING(device_serial='TDBD234200545');
+      ALTER TABLE sport_center.gym_x904_lan_state ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY x904_ci_state_read ON sport_center.gym_x904_lan_state FOR SELECT TO sport_center_app USING(device_serial='TDBD234200545');
       ALTER TABLE sport_center.reschedule_requests ENABLE ROW LEVEL SECURITY;
       CREATE POLICY x904_ci_reschedule_read ON sport_center.reschedule_requests FOR SELECT TO sport_center_app USING(true);
       GRANT SELECT ON public.companies TO sport_center_app;
@@ -773,6 +777,49 @@ suite(
       } finally {
         delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
       }
+    });
+    test("future paid Gym check-in follows WhatsApp's durable LAN scan once without fake signed proof", async () => {
+      const {reconcileX904MissedNonmemberBookingCheckins} = await import("../../services/x904MissedCheckinReconcile.js");
+      const id=await checkout();
+      await confirm(id);
+      expect((await approve(id)).status).toBe(200);
+      await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T02:00:00Z' WHERE booking_id=$1",[id]);
+      process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="true";
+      const now=new Date("2026-11-13T01:16:00Z");
+      try {
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,now)).toBe(0);
+        await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545','700',403,'2026-11-13 08:15:00',$1,401,'2026-11-13T01:15:00Z')",["e".repeat(64)]);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,now)).toBe(0);
+        await pool.query("UPDATE sport_center.gym_x904_lan_logs SET device_uid=402 WHERE event_id=$1",["e".repeat(64)]);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,now)).toBe(1);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,now)).toBe(0);
+        const check=(await pool.query("SELECT status,checked_in_at FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0];
+        expect(check.status).toBe("confirmed");
+        expect(check.checked_in_at).toEqual(new Date("2026-11-13T01:15:00Z"));
+        const history=(await pool.query("SELECT changed_by_name FROM sport_center.booking_history WHERE booking_id=$1 AND note LIKE 'Check-in%' ORDER BY created_at DESC LIMIT 1",[id])).rows[0];
+        expect(history.changed_by_name).toContain("LAN observed scan");
+        expect((await pool.query("SELECT count(*)::int n FROM sport_center.gym_x904_verification_evidence WHERE event_index=401")).rows[0].n).toBe(0);
+      } finally {
+        delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
+      }
+    });
+    test("future paid Gym session completes automatically without inventing attendance or requiring admin note",async()=>{
+      const {completeBooking}=await import("../../lib/bookingLifecycle.js");
+      const id=await checkout();
+      await confirm(id);
+      expect((await approve(id)).status).toBe(200);
+      await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T02:00:00Z' WHERE booking_id=$1",[id]);
+      const ended=new Date("2026-11-13T02:01:00Z");
+      expect(await completeBooking(id,{userName:"scheduler",userRole:"system"},ended)).toMatchObject({ok:true,alreadyCompleted:false,withoutCheckin:true});
+      expect(await completeBooking(id,{userName:"scheduler",userRole:"system"},ended)).toMatchObject({ok:true,alreadyCompleted:true});
+      const done=(await pool.query("SELECT status,checked_in_at,completed_at FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0];
+      expect(done.status).toBe("completed");
+      expect(done.checked_in_at).toBeNull();
+      const note=(await pool.query("SELECT note FROM sport_center.booking_history WHERE booking_id=$1 AND to_status='completed'",[id])).rows[0].note;
+      expect(note).toContain("bukan bukti kehadiran");
+      expect(note).toContain("Sesi Gym mandiri");
     });
     test("stale snapshot holds activation until a fresh snapshot arrives", async () => {
       const id = await checkout();
