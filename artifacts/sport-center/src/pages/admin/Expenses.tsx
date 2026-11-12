@@ -1166,7 +1166,12 @@ export default function AdminExpenses() {
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="font-bold">Rincian {tx.kind === "income" ? "Pemasukan" : "Pengeluaran"} — {tx.id}</p>
-                                  <Badge variant="outline">Baca saja</Badge>
+                                  <div className="flex items-center gap-2">
+                                    {tx.kind==="expense" && tx.receiptUrls.length>0 &&
+                                      <Button type="button" variant="outline" size="sm"
+                                        onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}>Lihat Bukti</Button>}
+                                    <Badge variant="outline">Baca saja</Badge>
+                                  </div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                   {([
@@ -1424,8 +1429,9 @@ export default function AdminExpenses() {
                   <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span>
                     {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
                       <span className="block text-xs mt-1">
-                        {x.receiptUrls.map((url,i)=><a key={url} href={url} target="_blank" rel="noopener noreferrer"
-                          className="text-blue-700 underline mr-2">Bukti {i+1}</a>)}
+                        {x.receiptUrls.map((url,i)=><button key={url} type="button"
+                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:i})}
+                          className="text-blue-700 underline mr-2">Lihat Bukti {i+1}</button>)}
                       </span>}
                   </td>
                   <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
@@ -1774,6 +1780,22 @@ export default function AdminExpenses() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(proofViewer)} onOpenChange={open=>{if(!open)setProofViewer(null);}}>
+        <DialogContent className="w-[min(94vw,750px)] max-w-[750px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Bukti Pengeluaran {proofViewer?.testNo}</DialogTitle></DialogHeader>
+          {proofViewer && <>
+            <img src={proofViewer.urls[proofViewer.index]} alt={`Bukti pengeluaran ${proofViewer.index+1}`}
+              className="w-full max-h-[65vh] object-contain rounded-md border bg-slate-50"/>
+            <div className="flex items-center justify-between gap-2">
+              <Button type="button" variant="outline" disabled={proofViewer.index===0}
+                onClick={()=>setProofViewer(v=>v?{...v,index:v.index-1}:null)}>Sebelumnya</Button>
+              <span className="text-sm">{proofViewer.index+1} / {proofViewer.urls.length}</span>
+              <Button type="button" variant="outline" disabled={proofViewer.index===proofViewer.urls.length-1}
+                onClick={()=>setProofViewer(v=>v?{...v,index:v.index+1}:null)}>Berikutnya</Button>
+            </div>
+          </>}
+        </DialogContent>
+      </Dialog>
       {/* Form Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="w-[min(94vw,860px)] max-w-[860px] max-h-[90vh] overflow-y-auto">
@@ -1813,9 +1835,27 @@ export default function AdminExpenses() {
               {proofPreview && (
                 <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
                   <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>
-                  <p>Nominal: {proofPreview.amount == null ? "Tidak terbaca" : formatIDR(proofPreview.amount)} • Tanggal: {proofPreview.date ?? "Tidak terbaca"}</p>
-                  <p>Referensi blu: {proofPreview.bankReference ?? "Tidak terbaca"}</p>
-                  <p>Penerima terdeteksi: {proofPreview.recipient ?? "Tidak terbaca"} • Metode: {proofPreview.paymentMethod}</p>
+                  <p className="text-xs text-teal-800">Pilih hanya data OCR yang ingin diterapkan. Semua hasil belum terverifikasi bank.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {([
+                      ["amount","Nominal",proofPreview.amount==null?null:formatIDR(proofPreview.amount)],
+                      ["date","Tanggal",proofPreview.date],
+                      ["recipient","Penerima",proofPreview.recipient],
+                      ["bankReference","Referensi blu",proofPreview.bankReference],
+                      ["paymentMethod","Metode",proofPreview.paymentMethod==="unknown"?null:proofPreview.paymentMethod],
+                      ["notes","Catatan",proofPreview.notes],
+                      ["destinationBank","Bank tujuan",proofPreview.destinationBank],
+                      ["destinationAccount","Rekening tujuan",proofPreview.destinationAccount
+                        ? "•••• "+proofPreview.destinationAccount.slice(-4):null],
+                      ["sourceBank","Sumber dana",proofPreview.sourceBank]
+                    ] as Array<[keyof typeof proofSelection,string,string|null|undefined]>).map(([key,label,value])=>(
+                      <label key={key} className="flex items-start gap-2 rounded border border-teal-200 bg-white p-2">
+                        <input type="checkbox" disabled={!value} checked={Boolean(value)&&proofSelection[key]}
+                          onChange={e=>setProofSelection(prev=>({...prev,[key]:e.target.checked}))}/>
+                        <span><strong>{label}:</strong> {value||"Tidak terbaca"}</span>
+                      </label>
+                    ))}
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={applyProofPreview}>Terapkan saran ke form</Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => setProofPreview(null)}>Abaikan</Button>
@@ -1970,6 +2010,15 @@ export default function AdminExpenses() {
                 </div>
               </div>
             )}
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="space-y-1">
+                <Label>Nomor Rekening Tujuan (opsional)</Label>
+                <Input inputMode="numeric" value={destinationAccount} maxLength={24}
+                  onChange={e=>setDestinationAccount(e.target.value.replace(/\D/g,""))}
+                  placeholder="Sesuai bukti jika terbaca jelas"/>
+                <p className="text-xs text-gray-500">Metadata internal TEST; tidak dimasukkan ke keterangan Google Sheets.</p>
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Nomor Referensi Bank (opsional)</Label>
               <Input value={form.bankReference} maxLength={120}
@@ -2025,6 +2074,12 @@ export default function AdminExpenses() {
                 </p>
               </div>
             )}
+            {FINANCE_SC_TEST_ONLY && proofDifferences.length>0 &&
+              <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <strong>Periksa perbedaan terhadap bukti OCR:</strong>
+                <ul className="list-disc pl-5">{proofDifferences.map(v=><li key={v}>{v}</li>)}</ul>
+                <p className="mt-1 text-xs">OCR hanya saran. Pastikan data yang disimpan benar.</p>
+              </div>}
             <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
 
             <div className="flex gap-3 justify-end pt-2">
