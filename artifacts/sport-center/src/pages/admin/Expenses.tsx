@@ -220,11 +220,19 @@ export default function AdminExpenses() {
 
   const [expenseKind,setExpenseKind] = useState("Transfer Bank");
   const [destinationBank,setDestinationBank] = useState("");
+  const [destinationAccount,setDestinationAccount] = useState("");
   const [autoReadProof, setAutoReadProof] = useState(false);
   const [proofPreview, setProofPreview] = useState<{
     amount: number | null; date: string | null; bankReference: string | null; recipient: string | null;
     paymentMethod: string; engine: string; verified: boolean;
+    destinationBank?: string|null;destinationAccount?: string|null;notes?: string|null;sourceBank?: string|null;
   } | null>(null);
+  const [proofEvidence,setProofEvidence] = useState<typeof proofPreview>(null);
+  const [proofSelection,setProofSelection] = useState({
+    amount:true,date:true,recipient:true,bankReference:true,paymentMethod:true,
+    notes:true,destinationBank:true,destinationAccount:true,sourceBank:true
+  });
+  const [proofViewer,setProofViewer] = useState<{testNo:string,urls:string[],index:number}|null>(null);
   const [scanningProof, setScanningProof] = useState(false);
   const [proofReadMessage,setProofReadMessage] = useState("");
   const lastProofFileRef=useRef<File|null>(null);
@@ -245,13 +253,16 @@ export default function AdminExpenses() {
       if(!response.ok)throw Error(preview.error??"Pembacaan bukti tidak tersedia");
       if(preview.amount!=null || preview.date || preview.recipient || preview.bankReference){
         setProofPreview(preview);
+        setProofEvidence(preview);
         if(preview.readStatus==="partial")setProofReadMessage(preview.readMessage??"Sebagian data belum terbaca.");
       }else{
         setProofPreview(null);
+        setProofEvidence(null);
         setProofReadMessage(preview.readMessage??"OCR belum berhasil membaca data bukti. File tetap tersimpan.");
       }
     }catch(e){
       setProofPreview(null);
+      setProofEvidence(null);
       setProofReadMessage(e instanceof Error?e.message:"OCR belum tersedia. File tetap tersimpan.");
     }finally{setScanningProof(false);}
   }
@@ -298,21 +309,26 @@ export default function AdminExpenses() {
   }
 
   function applyProofPreview() {
-    if (!proofPreview) return;
-    setForm((prev) => ({
+    if(!proofPreview)return;
+    const p=proofPreview;
+    setForm(prev=>({
       ...prev,
-      expenseDate: proofPreview.date && /^\d{4}-\d{2}-\d{2}$/.test(proofPreview.date)
-        ? proofPreview.date : prev.expenseDate,
-      amount: proofPreview.amount != null && Number.isSafeInteger(proofPreview.amount) && proofPreview.amount > 0
-        ? String(proofPreview.amount) : prev.amount,
-      bankReference: proofPreview.bankReference ?? prev.bankReference,
-      vendorName: proofPreview.recipient && proofPreview.recipient.trim()
-        ? proofPreview.recipient.trim() : prev.vendorName,
-      vendorId: proofPreview.recipient ? "" : prev.vendorId,
-      paymentMethod: PAYMENT_METHODS.includes(proofPreview.paymentMethod)
-        ? proofPreview.paymentMethod : prev.paymentMethod,
+      expenseDate:proofSelection.date&&p.date&&/^\d{4}-\d{2}-\d{2}$/.test(p.date)?p.date:prev.expenseDate,
+      amount:proofSelection.amount&&p.amount!=null&&Number.isSafeInteger(p.amount)&&p.amount>0?String(p.amount):prev.amount,
+      bankReference:proofSelection.bankReference?p.bankReference??prev.bankReference:prev.bankReference,
+      vendorName:proofSelection.recipient&&p.recipient?.trim()?p.recipient.trim():prev.vendorName,
+      vendorId:proofSelection.recipient&&p.recipient?"":prev.vendorId,
+      paymentMethod:proofSelection.paymentMethod&&PAYMENT_METHODS.includes(p.paymentMethod)?p.paymentMethod:prev.paymentMethod,
+      notes:proofSelection.notes&&p.notes?.trim()?p.notes.trim():prev.notes,
+      paymentAccount:proofSelection.sourceBank&&p.sourceBank?.trim()?p.sourceBank.trim():prev.paymentAccount,
     }));
-    toast({ title: "Saran dari bukti diterapkan", description: "Periksa tanggal, nominal, penerima, nomor referensi, dan metode sebelum menyimpan." });
+    if(proofSelection.destinationBank&&p.destinationBank?.trim())setDestinationBank(p.destinationBank.trim());
+    if(proofSelection.destinationAccount&&p.destinationAccount?.trim())setDestinationAccount(p.destinationAccount.trim());
+    if(proofSelection.paymentMethod&&p.paymentMethod){
+      if(p.paymentMethod==="BI-FAST"||p.paymentMethod==="Transfer Bank")setExpenseKind("Transfer Bank");
+      else if(["QRIS","PLN Prabayar"].includes(p.paymentMethod))setExpenseKind(p.paymentMethod);
+    }
+    toast({title:"Saran OCR diterapkan",description:"Periksa kembali tiap field. OCR bukan bukti konfirmasi bank."});
     setProofPreview(null);
   }
 
@@ -352,7 +368,7 @@ export default function AdminExpenses() {
       sheetSyncError:string|null;sheetVerifiedAt:string|null;sheetBalance:string|null;
       senderBank:string;receivingAccount:string;
       method:string;bankReference:string|null;notes:string|null;
-      receiptUrls?:string[];expenseKind?:string;destinationBank?:string}>;
+      receiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string}>;
     summary:{income:number;expense:number;balance:number;pending:number;count:number};
     writeEnabled:boolean;
   }>({
@@ -421,7 +437,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string
+    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -662,7 +678,7 @@ export default function AdminExpenses() {
       sheetBalance:entry.sheetBalance==null?null:Number(entry.sheetBalance),
       cashSheet:entry.sheetSyncState==="synced"?`Baris ${entry.sheetRow} (TEST)`:
         `Status ${entry.sheetSyncState}`,
-      reference:entry.bankReference||"",notes:entry.notes||"",
+      reference:entry.bankReference||"",notes:entry.notes||"",receiptUrls:entry.receiptUrls??[],
     }))
     : [
     ...(incomeData?.entries ?? []).map(entry => ({
@@ -675,7 +691,7 @@ export default function AdminExpenses() {
       sheetBalance:null as number|null,
       cashSheet: entry.cashSheetState === "synced" ? `kas besar sc — baris ${entry.cashSheetRow}` :
         entry.cashSheetState === "not_applicable" ? "kas besar sc — tidak berlaku" : `kas besar sc — ${entry.cashSheetState}`,
-      reference: entry.bankReference || "", notes: "",
+      reference: entry.bankReference || "", notes: "",receiptUrls:[] as string[],
     })),
     ...allExpenses.map((expense: any) => ({
       key: `expense-${expense.id}`, id: String(expense.expenseNo ?? `EXP-${expense.id}`),
@@ -688,7 +704,7 @@ export default function AdminExpenses() {
       sheet: "Belum dikonfirmasi sebagai mutasi bank",
       sheetBalance:null as number|null,
       cashSheet: "Pemeriksaan mutasi BizPortal terpisah",
-      reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),
+      reference: String(expense.bankReference ?? ""), notes: String(expense.notes ?? ""),receiptUrls:[] as string[],
     })),
   ];
   const activeTestIncome = (financeTestData?.entries??[]).filter(x=>x.direction==="IN");
@@ -750,7 +766,8 @@ export default function AdminExpenses() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM });
     setShowAdvanced(false);
-    setProofPreview(null);
+    setProofPreview(null);setProofEvidence(null);setProofReadMessage("");
+    setDestinationBank("");setDestinationAccount("");setExpenseKind("Transfer Bank");
     setAutoReadProof(false);
     setFormOpen(true);
   }
@@ -825,7 +842,7 @@ export default function AdminExpenses() {
             receivingAccount:form.vendorName.trim() || "PENERIMA BELUM DIISI",
             method:form.paymentMethod || "Belum ditentukan",
             bankReference:form.bankReference.trim(),
-            expenseKind,destinationBank:destinationBank.trim(),
+            expenseKind,destinationBank:destinationBank.trim(),destinationAccount:destinationAccount.trim(),
             receiptUrls:form.receiptUrls,
             notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
               ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
@@ -837,7 +854,7 @@ export default function AdminExpenses() {
               :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
           await refetchFinanceTest();
           setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
-          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setExpenseKind("Transfer Bank");
+          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setDestinationAccount("");setExpenseKind("Transfer Bank");setProofEvidence(null);
         }catch(error:any){
           toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
         }finally{setExpenseTestSaving(false);}
@@ -847,6 +864,13 @@ export default function AdminExpenses() {
     }
   }
 
+  const proofDifferences=proofEvidence?[
+    proofEvidence.amount!=null&&Number(normalizeExpenseRupiahInput(form.amount))>0&&
+      Number(normalizeExpenseRupiahInput(form.amount))!==proofEvidence.amount?"Nominal berbeda dari bukti":null,
+    proofEvidence.date&&form.expenseDate&&proofEvidence.date!==form.expenseDate?"Tanggal berbeda dari bukti":null,
+    proofEvidence.recipient&&form.vendorName.trim()&&
+      proofEvidence.recipient.trim().toUpperCase()!==form.vendorName.trim().toUpperCase()?"Penerima berbeda dari bukti":null
+  ].filter((x):x is string=>Boolean(x)):[];
   const totalNum = Number(normalizeExpenseRupiahInput(form.amount) || 0) + Number(form.ppnAmount || 0);
 
   return (
@@ -1142,7 +1166,12 @@ export default function AdminExpenses() {
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="font-bold">Rincian {tx.kind === "income" ? "Pemasukan" : "Pengeluaran"} — {tx.id}</p>
-                                  <Badge variant="outline">Baca saja</Badge>
+                                  <div className="flex items-center gap-2">
+                                    {tx.kind==="expense" && tx.receiptUrls.length>0 &&
+                                      <Button type="button" variant="outline" size="sm"
+                                        onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}>Lihat Bukti</Button>}
+                                    <Badge variant="outline">Baca saja</Badge>
+                                  </div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                   {([
@@ -1400,8 +1429,9 @@ export default function AdminExpenses() {
                   <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span>
                     {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
                       <span className="block text-xs mt-1">
-                        {x.receiptUrls.map((url,i)=><a key={url} href={url} target="_blank" rel="noopener noreferrer"
-                          className="text-blue-700 underline mr-2">Bukti {i+1}</a>)}
+                        {x.receiptUrls.map((url,i)=><button key={url} type="button"
+                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:i})}
+                          className="text-blue-700 underline mr-2">Lihat Bukti {i+1}</button>)}
                       </span>}
                   </td>
                   <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
@@ -1750,6 +1780,22 @@ export default function AdminExpenses() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(proofViewer)} onOpenChange={open=>{if(!open)setProofViewer(null);}}>
+        <DialogContent className="w-[min(94vw,750px)] max-w-[750px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Bukti Pengeluaran {proofViewer?.testNo}</DialogTitle></DialogHeader>
+          {proofViewer && <>
+            <img src={proofViewer.urls[proofViewer.index]} alt={`Bukti pengeluaran ${proofViewer.index+1}`}
+              className="w-full max-h-[65vh] object-contain rounded-md border bg-slate-50"/>
+            <div className="flex items-center justify-between gap-2">
+              <Button type="button" variant="outline" disabled={proofViewer.index===0}
+                onClick={()=>setProofViewer(v=>v?{...v,index:v.index-1}:null)}>Sebelumnya</Button>
+              <span className="text-sm">{proofViewer.index+1} / {proofViewer.urls.length}</span>
+              <Button type="button" variant="outline" disabled={proofViewer.index===proofViewer.urls.length-1}
+                onClick={()=>setProofViewer(v=>v?{...v,index:v.index+1}:null)}>Berikutnya</Button>
+            </div>
+          </>}
+        </DialogContent>
+      </Dialog>
       {/* Form Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="w-[min(94vw,860px)] max-w-[860px] max-h-[90vh] overflow-y-auto">
@@ -1789,9 +1835,27 @@ export default function AdminExpenses() {
               {proofPreview && (
                 <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2 text-sm">
                   <p className="font-semibold text-teal-900">Pratinjau bukti (belum terverifikasi bank)</p>
-                  <p>Nominal: {proofPreview.amount == null ? "Tidak terbaca" : formatIDR(proofPreview.amount)} • Tanggal: {proofPreview.date ?? "Tidak terbaca"}</p>
-                  <p>Referensi blu: {proofPreview.bankReference ?? "Tidak terbaca"}</p>
-                  <p>Penerima terdeteksi: {proofPreview.recipient ?? "Tidak terbaca"} • Metode: {proofPreview.paymentMethod}</p>
+                  <p className="text-xs text-teal-800">Pilih hanya data OCR yang ingin diterapkan. Semua hasil belum terverifikasi bank.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {([
+                      ["amount","Nominal",proofPreview.amount==null?null:formatIDR(proofPreview.amount)],
+                      ["date","Tanggal",proofPreview.date],
+                      ["recipient","Penerima",proofPreview.recipient],
+                      ["bankReference","Referensi blu",proofPreview.bankReference],
+                      ["paymentMethod","Metode",proofPreview.paymentMethod==="unknown"?null:proofPreview.paymentMethod],
+                      ["notes","Catatan",proofPreview.notes],
+                      ["destinationBank","Bank tujuan",proofPreview.destinationBank],
+                      ["destinationAccount","Rekening tujuan",proofPreview.destinationAccount
+                        ? "•••• "+proofPreview.destinationAccount.slice(-4):null],
+                      ["sourceBank","Sumber dana",proofPreview.sourceBank]
+                    ] as Array<[keyof typeof proofSelection,string,string|null|undefined]>).map(([key,label,value])=>(
+                      <label key={key} className="flex items-start gap-2 rounded border border-teal-200 bg-white p-2">
+                        <input type="checkbox" disabled={!value} checked={Boolean(value)&&proofSelection[key]}
+                          onChange={e=>setProofSelection(prev=>({...prev,[key]:e.target.checked}))}/>
+                        <span><strong>{label}:</strong> {value||"Tidak terbaca"}</span>
+                      </label>
+                    ))}
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={applyProofPreview}>Terapkan saran ke form</Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => setProofPreview(null)}>Abaikan</Button>
@@ -1946,6 +2010,15 @@ export default function AdminExpenses() {
                 </div>
               </div>
             )}
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="space-y-1">
+                <Label>Nomor Rekening Tujuan (opsional)</Label>
+                <Input inputMode="numeric" value={destinationAccount} maxLength={24}
+                  onChange={e=>setDestinationAccount(e.target.value.replace(/\D/g,""))}
+                  placeholder="Sesuai bukti jika terbaca jelas"/>
+                <p className="text-xs text-gray-500">Metadata internal TEST; tidak dimasukkan ke keterangan Google Sheets.</p>
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Nomor Referensi Bank (opsional)</Label>
               <Input value={form.bankReference} maxLength={120}
@@ -2001,6 +2074,12 @@ export default function AdminExpenses() {
                 </p>
               </div>
             )}
+            {FINANCE_SC_TEST_ONLY && proofDifferences.length>0 &&
+              <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <strong>Periksa perbedaan terhadap bukti OCR:</strong>
+                <ul className="list-disc pl-5">{proofDifferences.map(v=><li key={v}>{v}</li>)}</ul>
+                <p className="mt-1 text-xs">OCR hanya saran. Pastikan data yang disimpan benar.</p>
+              </div>}
             <div className="text-right font-bold">Total Pengeluaran: {formatIDR(totalNum)}</div>
 
             <div className="flex gap-3 justify-end pt-2">

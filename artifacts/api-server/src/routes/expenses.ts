@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { scanPaymentProof } from "../lib/paymentProofOcr";
-import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -153,7 +153,13 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
     const genericRecipient = bluProof ? null : result.recipient;
     // This endpoint is explicitly opt-in. Missing metadata gets an image vision
     // fallback; generic payment confirmation/booking OCR remains unchanged.
-    const fallback = (!bankReference || !date || !textAmount || !(recipient ?? genericRecipient))
+    const destinationBank=parseBluProofDestinationBank(result.rawText);
+    const destinationAccount=parseBluProofDestinationAccount(result.rawText);
+    const notes=parseBluProofPurpose(result.rawText);
+    const sourceBank=parseBluProofSourceBank(result.rawText);
+    const method=parseBluTransferMethod(result.rawText);
+    const fallback = (!bankReference || !date || !textAmount || !(recipient ?? genericRecipient) ||
+      (!notes && !destinationBank && !destinationAccount))
       ? await readExpenseBluMissingFieldsWithVision(req.file.buffer, req.file.mimetype)
       : null;
     const fields = {
@@ -161,6 +167,10 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
       date: date ?? fallback?.date ?? null,
       bankReference: bankReference ?? fallback?.bankReference ?? null,
       recipient: recipient ?? fallback?.recipient ?? genericRecipient ?? null,
+      destinationBank: destinationBank ?? fallback?.destinationBank ?? null,
+      destinationAccount: destinationAccount ?? fallback?.destinationAccount ?? null,
+      notes: notes ?? fallback?.notes ?? null,
+      sourceBank: sourceBank ?? fallback?.sourceBank ?? null,
     };
     const readableFields = Object.values(fields).filter(value => value !== null && value !== undefined).length;
     if (readableFields === 0) {
@@ -170,13 +180,12 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
     }
     res.json({
       ...fields,
-      paymentMethod: /PLN\s+PRABAYAR/i.test(result.rawText) ? "PLN Prabayar" :
-        /BI[\s-]*FAST/i.test(result.rawText) ? "BI-FAST" : result.paymentMethod,
+      paymentMethod: method ?? fallback?.paymentMethod ?? result.paymentMethod,
       engine: result.engine,
-      readStatus: readableFields === 0 ? "no_fields" : readableFields === 4 ? "complete" : "partial",
+      readStatus: readableFields === 0 ? "no_fields" : readableFields === Object.keys(fields).length ? "complete" : "partial",
       readMessage: readableFields === 0
         ? "Bukti diunggah, tetapi OCR belum membaca data. Coba Baca Lagi atau isi manual."
-        : readableFields === 4 ? null : "Sebagian data terbaca. Periksa field yang kosong.",
+        : readableFields === Object.keys(fields).length ? null : "Sebagian data terbaca. Periksa field yang kosong.",
       verified: false,
     });
   } catch (err) {

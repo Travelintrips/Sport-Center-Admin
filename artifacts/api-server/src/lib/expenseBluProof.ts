@@ -85,7 +85,41 @@ export function parseBluProofRecipient(text: string): string | null {
   return null;
 }
 
-type VisionFields = { date: string | null; bankReference: string | null; amount: number | null; recipient: string | null };
+
+/** Expense-only metadata parsers. Never turn a guessed bank or account into a verified payment. */
+export function parseBluProofDestinationBank(text: string): string | null {
+  const match=text.match(/\b(BCA|MANDIRI|BNI|BRI|BSI|CIMB|PERMATA|DANAMON|BTN|OCBC)\s*[-–:]\s*(?:\d[\d\s-]{5,})/i);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+export function parseBluProofDestinationAccount(text: string): string | null {
+  const match=text.match(/\b(?:BCA|MANDIRI|BNI|BRI|BSI|CIMB|PERMATA|DANAMON|BTN|OCBC)\s*[-–:]\s*(\d[\d\s-]{5,})/i);
+  const digits=match?.[1]?.replace(/\D/g,"") ?? "";
+  return digits.length>=6 && digits.length<=24 ? digits : null;
+}
+export function parseBluProofPurpose(text: string): string | null {
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  // Most blu receipts show the free-form note in quotation marks below nominal.
+  for(const line of lines){
+    const quoted=line.match(/^[“"]\s*([^“”"]{4,110})\s*[”"]$/);
+    if(quoted?.[1])return quoted[1].trim();
+    const labeled=line.match(/^(?:CATATAN|KETERANGAN|BERITA|PESAN)\s*[:\-]\s*(.{4,110})$/i);
+    if(labeled?.[1]&&!/^(?:TRANSAKSI|TRANSFER|BANK|NOMINAL)\b/i.test(labeled[1]))
+      return labeled[1].trim();
+  }
+  return null;
+}
+export function parseBluTransferMethod(text:string):string|null {
+  if(/\bBI[\s-]*FAST\b/i.test(text))return "BI-FAST";
+  if(/\b(?:PLN\s*PRABAYAR|LISTRIK\s*PRABAYAR)\b/i.test(text))return "PLN Prabayar";
+  if(/\bQRIS\b/i.test(text))return "QRIS";
+  if(/\bTRANSFER\s+(?:BANK|KE|ANTAR)\b/i.test(text))return "Transfer Bank";
+  return null;
+}
+export function parseBluProofSourceBank(text:string):string|null {
+  return /\bbluAccount\b|\bblu\s+by\s+BCA\s+Digital\b/i.test(text) ? "blu by BCA Digital" : null;
+}
+
+type VisionFields = { date: string | null; bankReference: string | null; amount: number | null; recipient: string | null; destinationBank: string | null; destinationAccount: string | null; notes: string | null; paymentMethod: string | null; sourceBank: string | null };
 export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime: string): Promise<VisionFields | null> {
   const key=process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
@@ -100,7 +134,7 @@ export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime
     const client=new OpenAI({apiKey:key,...(process.env.OPENAI_BASE_URL ? {baseURL:process.env.OPENAI_BASE_URL}:{}),timeout:20000,maxRetries:0});
     const response=await client.chat.completions.create({
       model:process.env.PAYMENT_PROOF_VISION_MODEL||"gpt-4o-mini",temperature:0,max_tokens:220,
-      messages:[{role:"system",content:"Extract data from Indonesian blu/BCA Digital transaction proof. Return ONLY JSON with fields date (YYYY-MM-DD or null), bankReference (digits of No. Ref blu only; null if not explicitly present), amount (integer rupiah of nominal transaction or TOTAL BAYAR; not PLN RP BAYAR or fees; null if unclear), recipient (name of beneficiary/receiver of transfer or PLN service customer, or null; NEVER sender/source owner). For blu transfer proof, identify recipient near destination bank/account (e.g. DEDE SAEFULLAH near BCA account), not Felicia Justiani bluAccount; on PLN proof return DEDE YANI. Do not invent dates on receipts lacking date. A PLN meter number, token, and provider NO REF are NOT No. Ref blu. Keep exact reference digits, joining groups."},
+      messages:[{role:"system",content:"Extract visible fields from Indonesian blu/BCA Digital payment screenshot. Return ONLY JSON: date (YYYY-MM-DD or null), bankReference (No. Ref blu digits, null if absent), amount (integer nominal rupiah, null if unclear), recipient (beneficiary, NEVER sender), destinationBank (explicit beneficiary bank, e.g. BCA), destinationAccount (digits only, only if clearly printed), notes (free-form payment memo, not a generic label), paymentMethod (BI-FAST, Transfer Bank, QRIS, PLN Prabayar, or null), sourceBank (only if explicit bluAccount, use blu by BCA Digital; else null). Do not invent missing values. Ignore unrelated card/phone/token numbers. Never infer bank confirmation."},
         {role:"user",content:[{type:"text",text:"Read the screenshot and return the specified JSON fields only."},
           {type:"image_url",image_url:{url:`data:${type};base64,${data.toString("base64")}`,detail:"high"}}]}],
     });
@@ -113,8 +147,18 @@ export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime
     const safeRecipient=recipient.length>=3 && recipient.length<=120 &&
       /^[\p{L} .'-]+$/u.test(recipient) && !/^(null|unknown|tidak\s*terbaca)$/i.test(recipient)
       ? recipient.toUpperCase() : null;
+    const destinationBank=typeof parsed.destinationBank==="string" ? parsed.destinationBank.trim().toUpperCase() : "";
+    const destinationAccount=typeof parsed.destinationAccount==="string" ? parsed.destinationAccount.replace(/\D/g,"") : "";
+    const notes=typeof parsed.notes==="string" ? parsed.notes.trim().slice(0,120) : "";
+    const paymentMethod=typeof parsed.paymentMethod==="string" ? parsed.paymentMethod.trim() : "";
+    const sourceBank=typeof parsed.sourceBank==="string" ? parsed.sourceBank.trim() : "";
     return {date,bankReference:bankReference && bankReference.length>=12 && bankReference.length<=20?bankReference:null,
-      amount:Number.isSafeInteger(amount)&&amount>=1000&&amount<=1_000_000_000?amount:null, recipient:safeRecipient};
+      amount:Number.isSafeInteger(amount)&&amount>=1000&&amount<=1_000_000_000?amount:null, recipient:safeRecipient,
+      destinationBank:/^(BCA|MANDIRI|BNI|BRI|BSI|CIMB|PERMATA|DANAMON|BTN|OCBC)$/.test(destinationBank)?destinationBank:null,
+      destinationAccount:destinationAccount.length>=6&&destinationAccount.length<=24?destinationAccount:null,
+      notes:notes.length>=4&&!/[\r\n]/.test(notes)?notes:null,
+      paymentMethod:["Transfer Bank","BI-FAST","QRIS","PLN Prabayar"].includes(paymentMethod)?paymentMethod:null,
+      sourceBank:sourceBank==="blu by BCA Digital"?sourceBank:null};
   } catch {
     return null;
   }
