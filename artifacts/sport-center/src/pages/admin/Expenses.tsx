@@ -847,6 +847,16 @@ export default function AdminExpenses() {
       toast({ title: "Catatan transaksi wajib diisi", description: "Tuliskan tujuan penggunaan dana sebelum menyimpan.", variant: "destructive" });
       return;
     }
+    if(FINANCE_SC_TEST_ONLY && proofEvidence?.paymentMethod &&
+       proofEvidence.paymentMethod!=="unknown" && form.paymentMethod &&
+       proofEvidence.paymentMethod!==form.paymentMethod &&
+       !(proofEvidence.paymentMethod==="BI-FAST" && form.paymentMethod==="Transfer Bank")){
+      toast({title:"Metode tidak sesuai bukti OCR",
+        description:"Bukti menunjukkan "+proofEvidence.paymentMethod+
+          ", sedangkan form "+form.paymentMethod+". Koreksi metode sebelum menyimpan.",
+        variant:"destructive"});
+      return;
+    }
     const selectedV = vendors.find((v) => v.id === Number(form.vendorId));
     const body = {
       expenseDate: form.expenseDate,
