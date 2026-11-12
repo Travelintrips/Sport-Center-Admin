@@ -57,7 +57,7 @@ export function currentX904IdentityEpochStart(
 ): number {
   if (!history.length) return -1;
   const pin = String(user.pin ?? "");
-  const norm = (v: unknown) => String(v ?? "").trim().replace(/\\s+/g, " ").toLocaleUpperCase("id-ID");
+  const norm = (v: unknown) => String(v ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
   const name = norm(user.name);
   const sameIdentity = (candidate: SnapshotUser) =>
     String(candidate.pin ?? "") === pin && norm(candidate.name) === name &&
