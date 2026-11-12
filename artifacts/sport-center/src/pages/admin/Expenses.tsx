@@ -2151,6 +2151,19 @@ export default function AdminExpenses() {
                 placeholder="Nomor referensi pada bukti transfer / QRIS" />
               <p className="text-xs text-gray-500">Digunakan sebagai informasi pemeriksaan, bukan konfirmasi otomatis ke bank.</p>
             </div>
+            {FINANCE_SC_TEST_ONLY && !editingId && (
+              <div className="space-y-2 rounded-lg border p-3">
+                <Label>Biaya Administrasi Tambahan (Rp, opsional)</Label>
+                <Input inputMode="numeric" value={formatExpenseRupiahInput(form.adminFee)}
+                  onChange={e=>setForm(prev=>({...prev,adminFee:normalizeExpenseRupiahInput(e.target.value)}))}
+                  placeholder="0"/>
+                <p className="text-xs text-slate-500">
+                  Jika biaya admin terdebit bersama pembayaran, totalnya dicatat satu kali.
+                  Jika bank mendebit biaya admin sebagai mutasi terpisah, catat sebagai
+                  transaksi terpisah dan jangan tambahkan lagi di sini.
+                </p>
+              </div>
+            )}
             <div className="rounded-lg border">
               <button type="button" className="w-full text-left p-3 flex justify-between items-center text-sm font-medium"
                 onClick={() => setShowAdvanced(!showAdvanced)}>
@@ -2180,18 +2193,23 @@ export default function AdminExpenses() {
             {FINANCE_SC_TEST_ONLY && !editingId && (
               <div className="rounded-md border bg-gray-50 p-3 space-y-1 text-sm">
                 <p className="font-semibold">Pratinjau Keterangan Kolom B (TEST)</p>
+                <p className="text-xs text-slate-600">
+                  Pokok {formatIDR(Number(normalizeExpenseRupiahInput(form.amount)||0))}
+                  {" + "}PPN {formatIDR(Number(form.ppnAmount||0))}
+                  {" + "}Admin {formatIDR(Number(normalizeExpenseRupiahInput(form.adminFee||"0")||0))}
+                  {" = "}Total {formatIDR(totalNum)} (satu baris Sheets)
+                </p>
                 <p className="break-words">{[
-                  expenseKind==="Transfer Bank"||expenseKind==="BI-FAST"
-                    ? "Transfer ke "+(form.vendorName.trim()||"PENERIMA")
-                    : expenseKind==="QRIS"?"Pembayaran QRIS | "+(form.vendorName.trim()||"MERCHANT")
-                    : expenseKind==="PLN Prabayar"?"Pembelian PLN Prabayar | "+(form.vendorName.trim()||"PELANGGAN")
-                    : expenseKind==="Top Up E-Wallet"?"Top Up E-Wallet | "+(form.vendorName.trim()||"PENERIMA")
-                    : expenseKind==="Biaya Admin"?"Biaya Admin | "+(form.vendorName.trim()||"PENERIMA")
-                    : expenseKind==="Kasbon Karyawan"?"Kasbon Karyawan | "+(form.vendorName.trim()||"KARYAWAN")
-                    : expenseKind==="Tunai"?"Pengeluaran Tunai | "+(form.vendorName.trim()||"PENERIMA")
-                    : expenseKind+" | "+(form.vendorName.trim()||"PENERIMA"),
+                  form.paymentMethod==="QRIS"?"Pembayaran QRIS | "+(form.vendorName.trim()||"MERCHANT")
+                  :form.paymentMethod==="PLN Prabayar"?"Pembelian PLN Prabayar | "+(form.vendorName.trim()||"PELANGGAN")
+                  :form.paymentMethod==="Tunai"?"Pengeluaran Tunai | "+(form.vendorName.trim()||"PENERIMA")
+                  :form.paymentMethod==="E-Wallet"?"Pembayaran E-Wallet | "+(form.vendorName.trim()||"PENERIMA")
+                  :["Transfer Bank","BI-FAST"].includes(form.paymentMethod)?"Transfer ke "+(form.vendorName.trim()||"PENERIMA")
+                  :"Pembayaran "+(form.paymentMethod||"(pilih metode)")+" | "+(form.vendorName.trim()||"PENERIMA"),
                   [destinationBank.trim(),form.notes.trim()].filter(Boolean).join(" - "),
                   form.bankReference.trim(),
+                  Number(normalizeExpenseRupiahInput(form.adminFee||"0"))>0
+                    ?"Biaya Admin Rp"+formatExpenseRupiahInput(form.adminFee):"",
                   "SC-TEST-OUT-(ID otomatis)"
                 ].filter(Boolean).join(" | ")}</p>
                 <p className="text-xs text-gray-500">
