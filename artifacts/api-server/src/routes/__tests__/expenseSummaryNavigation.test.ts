@@ -58,6 +58,12 @@ describe("Master Tabel TEST details are read-only and context-aware", () => {
     expect(ui).not.toContain('["Catatan",tx.notes');
     expect(ui).not.toContain('["Kas Besar SC",tx.cashSheet');
   });
+  it("keeps saldo on Master Tabel row but removes duplicate detail balance and narrative border", () => {
+    expect(ui).toContain('tx.sheetBalance.toLocaleString("id-ID"');
+    expect(ui).not.toContain("Saldo berjalan Google Sheets");
+    expect(ui).not.toContain("Bukan saldo bank terverifikasi");
+    expect(ui).toContain('<div className="space-y-1 min-w-0">\n                                  <p className="text-xs text-slate-500">Keperluan / Keterangan</p>');
+  });
   it("exposes proof when present and explicit absence otherwise, without mutating transactions", () => {
     expect(ui).toContain("Belum ada bukti terlampir");
     expect(ui).toContain("tx.receiptUrls.length>0&&<Button");
