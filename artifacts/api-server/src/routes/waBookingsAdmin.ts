@@ -30,6 +30,7 @@ import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProvide
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
 import { autoReserveVisAfterFundsVerified, reserveVisAfterAdminPaymentConfirmation, collectReservedVisCard, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { notifyGymVisitorCardReserved } from "../lib/notifications";
+import { wakeX904CollectedVisAfterHandover } from "../services/x904VisFastWake";
 
 const router = Router();
 
@@ -627,6 +628,9 @@ router.post("/admin/wa-bookings/:orderNumber/collect-vis", adminMiddleware, asyn
       physicalCardHandedOver: req.body?.physicalCardHandedOver === true,
       collectedBy: actor,
     });
+    // The existing handover service has committed first. This triggers only
+    // the guarded worker; it cannot bypass confirmed funds, UID or machine ACK.
+    wakeX904CollectedVisAfterHandover(outcome.state === "collected");
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.orderNumber,String(req.params.orderNumber))).limit(1);
     if (booking) await logAudit({
