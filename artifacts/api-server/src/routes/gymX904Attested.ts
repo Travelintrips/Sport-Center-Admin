@@ -79,8 +79,7 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
         WHERE l.device_serial=${serial} AND l.event_index=${index}
           AND l.user_pin=${pin} AND l.device_time=${occurred}
           AND l.last_seen_snapshot=s.last_snapshot_id
-          AND s.last_complete_at>now()-interval '90 minutes'
-        FOR UPDATE OF l`);
+          AND s.last_complete_at>now()-interval '90 minutes'`);
       if(matched.rows.length!==1) throw Error("X904_LAN_SNAPSHOT_NOT_MATCHED");
       const eventId=String(matched.rows[0].event_id);
       // If the ID was previously used for different content, fail closed.
@@ -97,14 +96,23 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
           (event_id,device_serial,user_pin,device_time,attendance_status,verification_type)
           VALUES (${eventId},${serial},${pin},${occurred},${status},${verify})`);
       // Existing diagnostic-only evidence is not silently promoted.
-      const evidence=await tx.execute(sql`SELECT evidence_status,raw_hex
+      const evidence=await tx.execute(sql`SELECT evidence_status,raw_hex,
+          user_pin,source_event_id,verification_code,capture_source
         FROM sport_center.gym_x904_verification_evidence
         WHERE device_serial=${serial} AND event_index=${index} FOR UPDATE`);
-      if(evidence.rows.length && evidence.rows[0].evidence_status!=="unverified" &&
-         !(evidence.rows[0].evidence_status==="protocol_verified" &&
-           evidence.rows[0].raw_hex===rawHex))
-        throw Error("X904_EVIDENCE_CONFLICT");
-      await tx.execute(sql`INSERT INTO sport_center.gym_x904_verification_evidence
+      const previous=evidence.rows[0];
+      if(previous && (
+          previous.user_pin!==pin || previous.source_event_id!==eventId ||
+          (previous.raw_hex!=null && previous.raw_hex!==rawHex) ||
+          (previous.verification_code!=null &&
+            Number(previous.verification_code)!==verify) ||
+          !(
+            (previous.evidence_status==="unverified" &&
+              previous.capture_source==="vmsc_automated") ||
+            (previous.evidence_status==="protocol_verified" &&
+              previous.capture_source==="trusted_vmsc_ingress")
+          ))) throw Error("X904_EVIDENCE_CONFLICT");
+      const storedEvidence=await tx.execute(sql`INSERT INTO sport_center.gym_x904_verification_evidence
         (event_index,device_serial,user_pin,verification_code,verification_method,
          raw_hex,evidence_status,source_event_id,capture_source)
         VALUES (${index},${serial},${pin},${verify},${methods[verify]},
@@ -115,9 +123,20 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
           raw_hex=EXCLUDED.raw_hex,evidence_status=EXCLUDED.evidence_status,
           source_event_id=EXCLUDED.source_event_id,
           capture_source=EXCLUDED.capture_source
-        WHERE sport_center.gym_x904_verification_evidence.evidence_status IN
-          ('unverified','protocol_verified')
+        WHERE (
+          (sport_center.gym_x904_verification_evidence.evidence_status='unverified'
+            AND sport_center.gym_x904_verification_evidence.capture_source='vmsc_automated')
+          OR
+          (sport_center.gym_x904_verification_evidence.evidence_status='protocol_verified'
+            AND sport_center.gym_x904_verification_evidence.capture_source='trusted_vmsc_ingress')
+        )
+          AND sport_center.gym_x904_verification_evidence.user_pin=EXCLUDED.user_pin
+          AND sport_center.gym_x904_verification_evidence.source_event_id=EXCLUDED.source_event_id
+          AND (sport_center.gym_x904_verification_evidence.raw_hex IS NULL OR
+               sport_center.gym_x904_verification_evidence.raw_hex=EXCLUDED.raw_hex)
         RETURNING event_index`);
+      if(storedEvidence.rows.length!==1)
+        throw Error("X904_EVIDENCE_CONFLICT");
       return eventId;
     });
     const outcome=await processX904Event({eventId,deviceSerial:serial,userPin:pin});
