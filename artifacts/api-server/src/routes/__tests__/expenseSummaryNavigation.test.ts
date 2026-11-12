@@ -52,7 +52,9 @@ describe("Master Tabel TEST details are read-only and context-aware", () => {
   it("shows sync separate from bank verification and no duplicate description/notes", () => {
     expect(ui).toContain("Status verifikasi bank:");
     expect(ui).toContain("Keperluan / Keterangan");
-    expect(ui).toContain("tx.notes||tx.description");
+    expect(ui).toContain("presentTransactionNarrative(tx.description,tx.notes).primary");
+    expect(ui).toContain("presentTransactionNarrative(tx.description,tx.notes).additional");
+    expect(ui).toContain("Catatan Tambahan");
     expect(ui).not.toContain('["Catatan",tx.notes');
     expect(ui).not.toContain('["Kas Besar SC",tx.cashSheet');
   });
