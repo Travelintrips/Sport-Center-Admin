@@ -109,7 +109,26 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
         OR
         (${lanGuestEnabled}::boolean AND b.source='gym_public_guest' AND b.booking_date>='2026-11-13'
           AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
-          AND state.last_complete_at>now()-interval '90 minutes'
+          -- A complete snapshot remains the durable scan evidence. When it
+          -- is unchanged, a fresh authenticated VMSC heartbeat can establish
+          -- connector liveness WITHOUT asserting that a new scan occurred.
+          -- The event must still belong to the exact complete snapshot.
+          AND (
+            state.last_complete_at>${evaluationTime}::timestamptz-interval '90 minutes' AND state.last_complete_at<=${evaluationTime}::timestamptz
+            OR EXISTS (
+              SELECT 1 FROM sport_center.gym_x904_connector_heartbeats hb
+              WHERE hb.device_serial=state.device_serial
+                AND hb.connector_id='VMSC'
+                AND hb.read_authenticated IS TRUE
+                AND hb.last_seen>${evaluationTime}::timestamptz-interval '5 minutes'
+                AND hb.last_seen<=${evaluationTime}::timestamptz
+                AND hb.last_seen>=state.last_complete_at
+                AND hb.reported_logs=state.stored_log_count
+                AND hb.reported_logs=state.device_log_count
+                AND hb.reported_users=state.user_count
+                AND l.received_at<=state.last_complete_at
+            )
+          )
           AND l.last_seen_snapshot=state.last_snapshot_id
           AND l.device_uid=l.event_index+1
           AND l.event_index>=0 AND l.event_id ~ '^[a-f0-9]{64}$'
