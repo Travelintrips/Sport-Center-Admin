@@ -6,8 +6,14 @@ export function parseBluProofReference(text: string): string | null {
   const normalized=text.replace(/\r/g,"").replace(/[‐‑–—]/g,"-");
   const lines=normalized.split("\n").map(line=>line.trim()).filter(Boolean);
   for(let i=0;i<lines.length;i++){
-    const label=lines[i]!;
-    if(!/\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i.test(label))continue;
+    const first=lines[i]!;
+    // Printed receipts may OCR the label on two lines: "No. Ref" + "blu".
+    const combined=[first,lines[i+1]??""].join(" ");
+    const pattern=/\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i;
+    const labelIsSingle=pattern.test(first);
+    if(!labelIsSingle&&!pattern.test(combined))continue;
+    const label=labelIsSingle?first:combined;
+    const startIndex=labelIsSingle?i+1:i+2;
     // Read ONLY contiguous numeric lines below the explicit blu reference label.
     // A bank screenshot commonly wraps "1793 2623 0280" + "0488".
     const inline=label.replace(/^.*?\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i,"")
@@ -17,7 +23,7 @@ export function parseBluProofReference(text: string): string | null {
       if(!/^[\d\s.\-]+$/.test(inline))continue;
       parts.push(inline);
     }
-    for(const line of lines.slice(i+1,i+5)){
+    for(const line of lines.slice(startIndex,startIndex+4)){
       const numericPrefix=line.match(/^[\d][\d\s.\-]*/);
       if(!numericPrefix)break;
       const numeric=numericPrefix[0].trim();
@@ -55,9 +61,12 @@ export async function readExpenseBluReferenceFromFocusedImage(buffer:Buffer,mime
     const rotated=await sharp(buffer).rotate().toBuffer();
     const meta=await sharp(rotated).metadata();
     if(!meta.width || !meta.height || meta.height<200 || meta.width<200)return null;
-    const top=Math.floor(meta.height*0.48);
-    const focused=await sharp(rotated).extract({left:0,top,width:meta.width,height:meta.height-top})
-      .resize({width:1600,withoutEnlargement:false}).sharpen().png().toBuffer();
+    // Covers the reference on printable transfer proofs (~40% height) and
+    // mobile-app screenshots (~70% height), unlike the old lower-half-only crop.
+    const top=Math.floor(meta.height*0.24);
+    const bottom=Math.min(meta.height,Math.ceil(meta.height*0.94));
+    const focused=await sharp(rotated).extract({left:0,top,width:meta.width,height:bottom-top})
+      .resize({width:1800,withoutEnlargement:false}).sharpen().png().toBuffer();
     const client=new OpenAI({apiKey:key,
       ...(process.env.OPENAI_BASE_URL?{baseURL:process.env.OPENAI_BASE_URL}:{}),
       timeout:20000,maxRetries:0});
