@@ -631,6 +631,23 @@ async function preprocessImage(
   return image.jpeg({ quality: 90 }).toBuffer();
 }
 
+/** Dedicated local OCR on reference zones, using the existing Tesseract worker.
+ * App screenshots and printable blu transfer receipts position No. Ref blu differently.
+ * Only enabled for admin expense metadata preview, not public payment verification.
+ */
+async function preprocessReferenceRegion(buffer:Buffer,topRatio:number,bottomRatio:number):Promise<Buffer>{
+  const sharp=(await import("sharp")).default;
+  const rotated=await sharp(buffer).rotate().toBuffer();
+  const meta=await sharp(rotated).metadata();
+  if(!meta.width||!meta.height||meta.width<100||meta.height<200)
+    throw Error("INVALID_RECEIPT_IMAGE");
+  const top=Math.floor(meta.height*topRatio);
+  const bottom=Math.min(meta.height,Math.ceil(meta.height*bottomRatio));
+  return sharp(rotated).extract({left:0,top,width:meta.width,height:bottom-top})
+    .resize({width:1900,withoutEnlargement:false})
+    .grayscale().normalize().sharpen({sigma:1.1}).png().toBuffer();
+}
+
 export async function scanPaymentProof(
   buffer: Buffer,
   mimetype: string,
@@ -724,6 +741,23 @@ export async function scanPaymentProof(
           if (scan?.amount != null && variant === "color" && !options.fullMetadata) break;
         } catch (error) {
           console.error(`[payment-proof-ocr] ${variant} OCR pass failed`, error);
+        }
+      }
+
+      // Reference lines on blu's tall mobile cards and printable receipts
+      // occupy different vertical positions. Full-image OCR often loses a
+      // wrapped 4-digit suffix. Re-scan overlapping zones locally before any
+      // opt-in vision fallback; do not infer or append missing digits.
+      if(options.fullMetadata){
+        for(const [top,bottom] of [[0.26,0.75],[0.49,0.94]] as const){
+          try{
+            const cropped=await preprocessReferenceRegion(buffer,top,bottom);
+            const scan=await recognize(cropped);
+            if(scan)scans.push(scan);
+          }catch(error){
+            console.warn("[payment-proof-ocr] focused local region unreadable",
+              {top,bottom,error:error instanceof Error?error.message:"unavailable"});
+          }
         }
       }
 
