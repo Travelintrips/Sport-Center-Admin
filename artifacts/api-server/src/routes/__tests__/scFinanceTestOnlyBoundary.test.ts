@@ -236,3 +236,41 @@ describe("master balance is read back from Google Sheets E",()=>{
     expect(source).toContain('if(updates.length>0)');
   });
 });
+
+describe("Expense TEST proof categories and legacy compatibility",()=>{
+  const legacy={
+    direction:"OUT",transactionDate:"2026-11-12",amount:1000,
+    entryKey:"c29e4cb4-57fc-4e18-a25e-2304f08b5be8",
+    sourceName:"DEDE SAEFULLAH",senderBank:"blu by BCA Digital",
+    receivingAccount:"DEDE SAEFULLAH",method:"BI-FAST",
+    bankReference:"1793262302800488",notes:"Reimburse charger",
+    expenseKind:"Transfer Bank",
+  };
+  const payment="https://example.com/proof-payment.jpg";
+  const supporting="https://example.com/struk-indomaret.jpg";
+  it("records classified receipts in a single outgoing entry",()=>{
+    const entry=parseTestInput({...legacy,paymentProofUrls:[payment],
+      supportingReceiptUrls:[supporting],receiptUrls:[payment,supporting]});
+    expect(entry.receiptUrls).toEqual([payment,supporting]);
+    expect(entry.paymentProofUrls).toEqual([payment]);
+    expect(entry.supportingReceiptUrls).toEqual([supporting]);
+    expect(route).toContain("payment_proof_urls AS");
+    expect(route).toContain("supporting_receipt_urls AS");
+  });
+  it("accepts legacy proofs without fabricating a type",()=>{
+    const entry=parseTestInput({...legacy,receiptUrls:[payment]});
+    expect(entry.receiptUrls).toEqual([payment]);
+    expect(entry.paymentProofUrls).toEqual([]);
+    expect(entry.supportingReceiptUrls).toEqual([]);
+  });
+  it("blocks invalid, overlapping and orphaned classification",()=>{
+    expect(()=>parseTestInput({...legacy,paymentProofUrls:[payment,payment]}))
+      .toThrow("ONLY_ONE_MAIN_PAYMENT_PROOF");
+    expect(()=>parseTestInput({...legacy,paymentProofUrls:[payment],
+      supportingReceiptUrls:[payment]})).toThrow("PROOF_CATEGORY_OVERLAP");
+    expect(()=>parseTestInput({...legacy,paymentProofUrls:[payment],
+      receiptUrls:[supporting]})).toThrow("PROOF_CATEGORY_NOT_IN_RECEIPTS");
+    expect(()=>parseTestInput({...legacy,supportingReceiptUrls:["http://example.com/struk"]}))
+      .toThrow("INVALID_SUPPORTING_RECEIPT_URLS");
+  });
+});
