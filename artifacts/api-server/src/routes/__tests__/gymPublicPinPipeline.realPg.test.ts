@@ -144,7 +144,9 @@ suite(
       INSERT INTO sport_center.payment_settlement_configs(company_id,provider_code,bank_account_id,effective_from) VALUES(5,'mandiri_direct','TEST-ACCOUNT','2026-01-01');
       CREATE TABLE sport_center.payment_business_calendar(calendar_date date,is_business_day boolean);
       CREATE SEQUENCE sport_center.booking_order_no_seq START WITH 9000;
-      CREATE TABLE sport_center.gym_x904_lan_logs(device_serial text,user_pin text,device_uid int,device_time text,event_id text);
+      CREATE TABLE sport_center.gym_x904_lan_logs(device_serial text,user_pin text,device_uid int,device_time text,event_id text,event_index int);
+       CREATE TABLE sport_center.gym_x904_verification_evidence(device_serial text,event_index int,user_pin text,source_event_id text,capture_source text,evidence_status text,verification_code int,raw_hex text);
+       CREATE TABLE sport_center.gym_x904_raw_events(event_id text,device_serial text,user_pin text,device_time text,attendance_status int,verification_type int);
       CREATE TABLE sport_center.gym_x904_lan_users(device_serial text,user_pin text,device_uid int,display_name text,device_role int);
       INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','700',343,'TEST AUTO SUSPEND',0);
       CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
@@ -667,7 +669,14 @@ suite(
       try {
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
         expect((await pool.query("SELECT checked_in_at FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0].checked_in_at).toBeNull();
-        await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES('TDBD234200545','700',343,'2026-11-10 08:15:00','valid-uid')");
+        // SDK userSn is event sequence 101, not registered UID 343.
+        await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES('TDBD234200545','700',101,'2026-11-10 08:15:00','valid-ordinal',100)");
+        // A passive VMSC raw capture is still unverified: never use it as
+        // check-in proof regardless of matching PIN and paid access.
+        await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence VALUES('TDBD234200545',100,'700','valid-ordinal','vmsc_automated','unverified',15,repeat('00',26)||'0f'||repeat('00',13))");
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
+        await pool.query("UPDATE sport_center.gym_x904_verification_evidence SET capture_source='trusted_vmsc_ingress',evidence_status='protocol_verified' WHERE event_index=100");
+        await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES('valid-ordinal','TDBD234200545','700','2026-11-10 08:15:00',0,15)");
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(1);
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
         const check = (await pool.query("SELECT checked_in_at,status FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0];
