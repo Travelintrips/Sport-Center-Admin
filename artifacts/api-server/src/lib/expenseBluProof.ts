@@ -18,8 +18,13 @@ export function parseBluProofReference(text: string): string | null {
       parts.push(inline);
     }
     for(const line of lines.slice(i+1,i+5)){
-      if(!/^[\d\s.\-]+$/.test(line) || !/\d/.test(line))break;
-      parts.push(line);
+      const numericPrefix=line.match(/^[\d][\d\s.\-]*/);
+      if(!numericPrefix)break;
+      const numeric=numericPrefix[0].trim();
+      if(!/\d/.test(numeric))break;
+      parts.push(numeric);
+      const total=parts.join("").replace(/\D/g,"").length;
+      if(total===16 || total===20 || total>20)break;
     }
     const digits=parts.join("").replace(/\D/g,"");
     // Blu IDs in supported fixtures are 16 or 20 digits. A 12-digit
@@ -39,6 +44,40 @@ export function selectCompleteBluReference(
   const vision=clean(visionReference);
   if(ocr&&vision&&ocr!==vision)return null; // conflicting evidence: manual review
   return ocr??vision;
+}
+
+/** Expense-only second look for wrapped No. Ref blu when full-image OCR is incomplete. */
+export async function readExpenseBluReferenceFromFocusedImage(buffer:Buffer,mime:string):Promise<string|null>{
+  const key=process.env.OPENAI_API_KEY?.trim();
+  if(!key || !["image/jpeg","image/png","image/webp"].includes(mime))return null;
+  try{
+    const sharp=(await import("sharp")).default;
+    const rotated=await sharp(buffer).rotate().toBuffer();
+    const meta=await sharp(rotated).metadata();
+    if(!meta.width || !meta.height || meta.height<200 || meta.width<200)return null;
+    const top=Math.floor(meta.height*0.48);
+    const focused=await sharp(rotated).extract({left:0,top,width:meta.width,height:meta.height-top})
+      .resize({width:1600,withoutEnlargement:true}).sharpen().png().toBuffer();
+    const client=new OpenAI({apiKey:key,
+      ...(process.env.OPENAI_BASE_URL?{baseURL:process.env.OPENAI_BASE_URL}:{}),
+      timeout:20000,maxRetries:0});
+    const response=await client.chat.completions.create({
+      model:process.env.PAYMENT_PROOF_VISION_MODEL||"gpt-4o-mini",
+      temperature:0,max_tokens:80,
+      messages:[
+        {role:"system",content:"Read ONLY the number labeled No. Ref blu on this Indonesian blu bank screenshot. Digit groups may wrap to two lines. Ignore bank account, date, nominal and icons. Return ONLY JSON with a bankReference field containing all 16 or 20 visible digits. If any group is illegible or label absent return bankReference null. Do not guess or extend a 12-digit prefix."},
+        {role:"user",content:[
+          {type:"text",text:"Transcribe the full No. Ref blu, joining wrapped groups. If incomplete, return null."},
+          {type:"image_url",image_url:{url:"data:image/png;base64,"+focused.toString("base64"),detail:"high"}}
+        ]}
+      ]
+    });
+    const raw=response.choices[0]?.message?.content?.trim()||"";
+    const parsed=JSON.parse(raw.replace(/^[^{]*/,"").replace(/[^}]*$/,"")) as Record<string,unknown>;
+    if(typeof parsed.bankReference!=="string")return null;
+    const digits=parsed.bankReference.replace(/\D/g,"");
+    return digits.length===16 || digits.length===20?digits:null;
+  }catch{return null;}
 }
 
 export function parseBluProofDate(text: string): string | null {
