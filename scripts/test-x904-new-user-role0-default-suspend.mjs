@@ -20,14 +20,16 @@ test("new user automation requires explicit opt-in and a fresh baseline", () => 
 });
 test("only newly appearing role 0 in Group 1 is considered", () => {
   assert.match(worker, /!previousPins\.has\(pin\)/);
-  assert.match(worker, /history\.findIndex/);
+  assert.match(worker, /currentX904IdentityEpochStart\(history, user\)/);
   assert.match(worker, /history\.slice\(firstIndex\)/);
   assert.match(worker, /candidates\.length > 10/);
   assert.match(worker, /unexpected-bulk-enrollment/);
   assert.match(worker, /segmentStart = i/);
   assert.match(worker, /const history = allHistory\.slice\(segmentStart\)/);
-  assert.match(worker, /const previouslyHandled = new Set/);
-  assert.match(worker, /if \(previouslyHandled\.has\(pin\)\) continue/);
+  assert.match(worker, /const lastCommandByPin = new Map/);
+  assert.match(worker, /hasX904CommandForCurrentIdentityEpoch\(currentEpochAt, lastCommandAt\)/);
+  assert.match(worker, /created_at >= \$\{firstSeen\}/);
+  assert.match(worker, /revoked_at IS NULL OR verification_state IS DISTINCT FROM 'revoked'/);
   assert.match(worker, /if \(queuedThisCycle >= 5\) break/);
 
   assert.match(worker, /Number\(user\.role\) === 0/);

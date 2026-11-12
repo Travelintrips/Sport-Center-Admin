@@ -38,6 +38,37 @@ export function isNewOrdinaryX904Candidate(
     String(user.name ?? "").trim().length >= 2;
 }
 
+/** Compare device command history against a verified new enrollment epoch. */
+export function hasX904CommandForCurrentIdentityEpoch(
+  firstObservedAtMs: number, lastCommandAtMs: number | undefined,
+): boolean {
+  if (!Number.isFinite(firstObservedAtMs)) return true;
+  if (lastCommandAtMs === undefined) return false;
+  return !Number.isFinite(lastCommandAtMs) || lastCommandAtMs >= firstObservedAtMs;
+}
+
+/** Only the latest contiguous appearance of the current role-0 identity
+ * belongs to this enrollment. Earlier appearances of the PIN are history,
+ * never proof that the current identity has already been handled.
+ */
+export function currentX904IdentityEpochStart(
+  history: ReadonlyArray<{ users: ReadonlyArray<SnapshotUser> }>,
+  user: SnapshotUser,
+): number {
+  if (!history.length) return -1;
+  const pin = String(user.pin ?? "");
+  const norm = (v: unknown) => String(v ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
+  const name = norm(user.name);
+  const sameIdentity = (candidate: SnapshotUser) =>
+    String(candidate.pin ?? "") === pin && norm(candidate.name) === name &&
+    Number(candidate.role) === 0 && candidate.enabled === true;
+  let first = history.length - 1;
+  if ((history[first].users as SnapshotUser[]).filter(sameIdentity).length !== 1) return -1;
+  while (first > 0 &&
+    (history[first - 1].users as SnapshotUser[]).filter(sameIdentity).length === 1) first--;
+  return first;
+}
+
 export function isSafeReenrollment(input: {pin:string;name:string;oldName:string;oldRole:number;absentSnapshots:number;gapMinutes:number}): boolean {
   const norm=(x:string)=>x.trim().replace(/\s+/g," ").toUpperCase();
   const current=norm(input.name);
@@ -96,16 +127,20 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
     await store.execute(sql`SELECT sport_center.x904_stage_new_nonmember_candidate(${String(row.command_id)}::uuid)`);
   }
 
-  // Read-only SLA monitor. A queued command or completed command without
-  // device read-back is never counted as successful suspension.
+  // Read-only SLA monitor. Do not count completed-but-late suspensions as PASS.
+  // Historical payload deadlines were occasionally 3 minutes, so use the
+  // observed-first timestamp as the authoritative 30-minute SLA origin.
   const overdue = await store.execute(sql`SELECT count(*)::int AS overdue_count
     FROM sport_center.x904_user_commands c
     WHERE c.device_serial=${DEVICE}
       AND c.payload->>'source'='AUTO_NEW_ORDINARY_USER_DEFAULT_SUSPEND'
-      AND (c.payload->>'suspendDeadlineAt')::timestamptz <= ${now}
-      AND NOT (c.command_type='SUSPEND_USER' AND c.state='completed'
-        AND c.result->>'readBackConfirmed'='true'
-        AND c.result->>'afterGroup'='2')`);
+      AND c.created_at >= ${new Date(now.getTime() - 48 * 60 * 60_000)}
+      AND (c.payload->>'firstObservedAt') IS NOT NULL
+      AND (c.payload->>'firstObservedAt')::timestamptz + interval '30 minutes' <= ${now}
+      AND (c.state <> 'completed'
+        OR c.result->>'readBackConfirmed' IS DISTINCT FROM 'true'
+        OR c.result->>'afterGroup' IS DISTINCT FROM '2'
+        OR c.completed_at > (c.payload->>'firstObservedAt')::timestamptz + interval '30 minutes')`);
   const count = Number(overdue.rows[0]?.overdue_count ?? 0);
   if (count > 0) {
     console.error("[x904-new-user-default-suspend] 30min read-back SLA exceeded", JSON.stringify({
@@ -163,8 +198,10 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   const baselinePins = new Set(firstUsers.map(u => String(u.pin ?? "")));
   const newCandidates = currentUsers.filter(u => isNewOrdinaryX904Candidate(u, baselinePins));
   if (!newCandidates.length) return;
-  const firstIndexOf = (pin: string): number => history.findIndex(row =>
-    (row.users as SnapshotUser[]).some(u => String(u.pin ?? "") === pin));
+  const firstIndexOf = (pin: string): number => {
+    const user = currentUsers.find(u => String(u.pin ?? "") === pin);
+    return user ? currentX904IdentityEpochStart(history, user) : -1;
+  };
 
   // A snapshot with >10 newly enrolled ordinary identities is anomalous.
   // Restrict only THAT transition, not independent legitimate enrollments
@@ -192,14 +229,22 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
   // transaction. This prevents repeated advisory locks and history scans
   // every minute for the same registration during the 75-minute lookback.
   const pins = allowedCandidates.map(u => String(u.pin));
-  const existing = await store.execute(sql`SELECT DISTINCT user_pin
+  const existing = await store.execute(sql`SELECT user_pin, max(created_at) AS latest_command_at
     FROM sport_center.x904_user_commands
-    WHERE device_serial=${DEVICE} AND user_pin IN (${sql.join(pins.map(pin => sql`${pin}`), sql`,`)})`);
-  const previouslyHandled = new Set(existing.rows.map(row => String(row.user_pin)));
+    WHERE device_serial=${DEVICE} AND user_pin IN (${sql.join(pins.map(pin => sql`${pin}`), sql`,`)})
+    GROUP BY user_pin`);
+  const lastCommandByPin = new Map(existing.rows.map(row =>
+    [String(row.user_pin), new Date(String(row.latest_command_at)).getTime()] as const));
   let queuedThisCycle = 0;
   for (const candidate of allowedCandidates) {
     const pin = String(candidate.pin);
-    if (previouslyHandled.has(pin)) continue;
+    // Historical commands belong to an earlier identity epoch. Only a command
+    // observed after this enrollment's first snapshot can suppress requeue.
+    const currentEpochIndex = firstIndexOf(pin);
+    if (currentEpochIndex <= 0) continue;
+    const currentEpochAt = new Date(String(history[currentEpochIndex].observed_at)).getTime();
+    const lastCommandAt = lastCommandByPin.get(pin);
+    if (hasX904CommandForCurrentIdentityEpoch(currentEpochAt, lastCommandAt)) continue;
     // Small bounded batches prevent device command floods and keep
     // PostgreSQL/VMSC capacity available for bookings and paid access.
     if (queuedThisCycle >= 5) break;
@@ -264,14 +309,19 @@ export async function processX904NewOrdinaryUserDefaultSuspend(
       if (ownership.rows.length) return;
       const grants = await tx.execute(sql`SELECT 1 FROM sport_center.x904_nonmember_daily_access
         WHERE device_serial=${DEVICE} AND user_pin=${pin}
-          AND (access_state IN ('pending','active') OR activated_at IS NOT NULL)
+          AND (access_state IN ('pending','active')
+            OR (activated_at IS NOT NULL AND (expires_at IS NULL OR expires_at > ${now})))
         LIMIT 1`);
       if (grants.rows.length) return;
       const commands = await tx.execute(sql`SELECT 1 FROM sport_center.x904_user_commands
-        WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
+        WHERE device_serial=${DEVICE} AND user_pin=${pin}
+          AND created_at >= ${firstSeen} LIMIT 1`);
       if (commands.rows.length) return;
+      // An old verified identity must be explicitly revoked. A rename or
+      // device deletion alone is not evidence that old authorization ended.
       const registry = await tx.execute(sql`SELECT 1 FROM sport_center.x904_verified_nonmember_identities
-        WHERE device_serial=${DEVICE} AND user_pin=${pin} LIMIT 1`);
+        WHERE device_serial=${DEVICE} AND user_pin=${pin}
+          AND (revoked_at IS NULL OR verification_state IS DISTINCT FROM 'revoked') LIMIT 1`);
       if (registry.rows.length) return;
 
       const key = x904AutomaticCommandKey(
