@@ -61,11 +61,17 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       ON p.id=a.payment_id AND p.booking_id=a.booking_id
       AND p.status='confirmed' AND p.confirmed_at IS NOT NULL
       AND p.amount > 0
-    JOIN sport_center.x904_verified_nonmember_identities v
+    LEFT JOIN sport_center.x904_verified_nonmember_identities v
       ON v.device_serial=a.device_serial AND v.user_pin=a.user_pin
       AND v.device_uid=a.device_uid
       AND v.verification_state='verified' AND v.revoked_at IS NULL
       AND upper(trim(v.display_name))=upper(trim(a.verified_name))
+    LEFT JOIN sport_center.gym_vis_card_reservations vis
+      ON vis.booking_id=a.booking_id AND vis.payment_id=a.payment_id
+      AND vis.device_serial=a.device_serial AND vis.user_pin=a.user_pin
+      AND vis.device_uid=a.device_uid AND vis.card_code=a.identity_label
+      AND vis.collected_at IS NOT NULL
+      AND vis.state IN ('collected','returned')
     JOIN sport_center.gym_x904_lan_users u
       ON u.device_serial=a.device_serial AND u.user_pin=a.user_pin
       AND u.device_uid=a.device_uid AND u.device_role=0
@@ -92,7 +98,21 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND r.verification_type=e.verification_code
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
-      AND a.identity_type='pin' -- VIS cards retain their established handover/check-in workflow
+      AND (
+        (a.identity_type='pin' AND v.device_uid IS NOT NULL)
+        OR
+        (a.identity_type='card'
+          AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006')
+          AND (
+            (b.source='admin' AND a.verification_state='verified')
+            OR
+            (b.source IN ('gym_public_guest','web')
+              AND vis.booking_id IS NOT NULL
+              AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
+                'YYYY-MM-DD HH24:MI:SS'))
+          )
+        )
+      )
       AND a.confirmed_at IS NOT NULL
       AND a.access_state IN ('active','expired')
       AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
