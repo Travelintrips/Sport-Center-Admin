@@ -147,6 +147,7 @@ suite(
       CREATE TABLE sport_center.gym_x904_lan_logs(device_serial text,user_pin text,device_uid int,device_time text,event_id text,event_index int);
        CREATE TABLE sport_center.gym_x904_verification_evidence(device_serial text,event_index int,user_pin text,source_event_id text,capture_source text,evidence_status text,verification_code int,raw_hex text);
        CREATE TABLE sport_center.gym_x904_raw_events(event_id text,device_serial text,user_pin text,device_time text,attendance_status int,verification_type int);
+       CREATE TABLE sport_center.gym_vis_card_reservations(booking_id int,payment_id int,device_serial text,user_pin text,device_uid int,card_code text,state text,collected_at timestamptz);
       CREATE TABLE sport_center.gym_x904_lan_users(device_serial text,user_pin text,device_uid int,display_name text,device_role int);
       INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','700',343,'TEST AUTO SUSPEND',0);
       CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
@@ -697,6 +698,35 @@ suite(
         expect(done.status).toBe("completed");
         expect(done.completed_at).toEqual(finishedAt);
         expect((await pool.query("SELECT count(*)::int n FROM sport_center.booking_history WHERE booking_id=$1 AND to_status='completed'",[id])).rows[0].n).toBe(1);
+      } finally {
+        delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
+      }
+    });
+    test("all six VIS preserve witnessed handover before signed booking check-in", async () => {
+      const {reconcileX904MissedNonmemberBookingCheckins}=await import("../../services/x904MissedCheckinReconcile.js");
+      const id=await checkout();
+      const paymentId=await confirm(id);
+      expect((await approve(id)).status).toBe(200);
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','78',338,'VIS 001',0)");
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET identity_type='card',identity_label='VIS001',user_pin='78',device_uid=338,verified_name='VIS 001',access_state='active',activated_at=$2,expires_at=$3 WHERE booking_id=$1",
+        [id,new Date("2026-11-10T01:00:20Z"),new Date("2026-11-10T13:00:20Z")]);
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES('TDBD234200545','78',202,'2026-11-10 08:15:00','vis-signed',201)");
+      await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence VALUES('TDBD234200545',201,'78','vis-signed','trusted_vmsc_ingress','protocol_verified',4,$1)",
+        ["00".repeat(26)+"04"+"00".repeat(4)+"ff"+"00".repeat(8)]);
+      await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES('vis-signed','TDBD234200545','78','2026-11-10 08:15:00',255,4)");
+      process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="true";
+      const evaluation=new Date("2026-11-10T01:16:00Z");
+      try {
+        // Payment, verified card UID and signed scan alone cannot skip handover.
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
+        await pool.query("INSERT INTO sport_center.gym_vis_card_reservations VALUES($1,$2,'TDBD234200545','78',338,'VIS001','collected','2026-11-10T01:16:00Z')",[id,paymentId]);
+        // An earlier scan must never be attributed to a later card handover.
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
+        await pool.query("UPDATE sport_center.gym_vis_card_reservations SET collected_at='2026-11-10T01:10:00Z' WHERE booking_id=$1",[id]);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(1);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
+        expect((await pool.query("SELECT checked_in_at FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0].checked_in_at)
+          .toEqual(new Date("2026-11-10T01:15:00Z"));
       } finally {
         delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
       }
