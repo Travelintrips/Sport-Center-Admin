@@ -85,7 +85,7 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
       // If the ID was previously used for different content, fail closed.
       const prior=await tx.execute(sql`SELECT device_serial,user_pin,device_time,
          attendance_status,verification_type FROM sport_center.gym_x904_raw_events
-         WHERE event_id=${eventId} FOR UPDATE`);
+         WHERE event_id=${eventId}`);
       if(prior.rows.length && (prior.rows[0].device_serial!==serial ||
          prior.rows[0].user_pin!==pin || prior.rows[0].device_time!==occurred ||
          Number(prior.rows[0].attendance_status)!==status ||
