@@ -40,3 +40,25 @@ describe("SC expense sidebar and financial summary", () => {
     expect(lookup).toContain("incomingThisMonth: number | null = null");
   });
 });
+
+describe("Master Tabel TEST details are read-only and context-aware", () => {
+  it("separates recipient, destination bank and masked account for expenses", () => {
+    expect(ui).toContain('destinationBank:entry.direction==="OUT"?entry.destinationBank||"":');
+    expect(ui).toContain('destinationAccount:entry.direction==="OUT"?entry.destinationAccount||"":');
+    expect(ui).toContain('["Bank Tujuan",tx.destinationBank||"Belum diisi"]');
+    expect(ui).toContain('["Rekening Tujuan",tx.destinationAccount?"•••• "+tx.destinationAccount.slice(-4):"Belum diisi"]');
+    expect(ui).toContain('["Akun Penerima",tx.account||"Tidak diisi"]');
+  });
+  it("shows sync separate from bank verification and no duplicate description/notes", () => {
+    expect(ui).toContain("Status verifikasi bank:");
+    expect(ui).toContain("Keperluan / Keterangan");
+    expect(ui).toContain("tx.notes||tx.description");
+    expect(ui).not.toContain('["Catatan",tx.notes');
+    expect(ui).not.toContain('["Kas Besar SC",tx.cashSheet');
+  });
+  it("exposes proof when present and explicit absence otherwise, without mutating transactions", () => {
+    expect(ui).toContain("Belum ada bukti terlampir");
+    expect(ui).toContain("tx.receiptUrls.length>0&&<Button");
+    expect(ui).toContain("setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})");
+  });
+});
