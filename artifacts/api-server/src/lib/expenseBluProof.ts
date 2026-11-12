@@ -57,7 +57,7 @@ export async function readExpenseBluReferenceFromFocusedImage(buffer:Buffer,mime
     if(!meta.width || !meta.height || meta.height<200 || meta.width<200)return null;
     const top=Math.floor(meta.height*0.48);
     const focused=await sharp(rotated).extract({left:0,top,width:meta.width,height:meta.height-top})
-      .resize({width:1600,withoutEnlargement:true}).sharpen().png().toBuffer();
+      .resize({width:1600,withoutEnlargement:false}).sharpen().png().toBuffer();
     const client=new OpenAI({apiKey:key,
       ...(process.env.OPENAI_BASE_URL?{baseURL:process.env.OPENAI_BASE_URL}:{}),
       timeout:20000,maxRetries:0});
