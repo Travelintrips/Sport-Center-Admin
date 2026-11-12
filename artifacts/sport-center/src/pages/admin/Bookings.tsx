@@ -6072,6 +6072,14 @@ export default function AdminBookings() {
                               onCheckIn={(id) => checkInMutation.mutate({ id })}
                               onComplete={(id) => {
                                 if (!b.checkedInAt) {
+                                  if (b.source === "gym_public_guest" &&
+                                      b.bookingDate >= "2026-11-13" &&
+                                      isTimeReached(b.bookingDate, b.endTime)) {
+                                    // Existing completion service verifies payment and grant.
+                                    // No attendance is invented; backend audits administrative close.
+                                    updateBookingMutation.mutate({ id, data: { status: "completed" } });
+                                    return;
+                                  }
                                   setCompletionWithoutCheckin({
                                     id, orderNumber: b.orderNumber ?? String(id),
                                     customerName: b.customerName ?? "Pelanggan",
