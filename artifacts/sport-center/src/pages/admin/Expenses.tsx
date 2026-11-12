@@ -133,6 +133,8 @@ const EMPTY_FORM = {
   paymentMethod: "",
   paymentAccount: "",
   receiptUrls: [] as string[],
+  paymentProofUrls: [] as string[],
+  supportingReceiptUrls: [] as string[],
   notes: "",
   bankReference: "",
 };
@@ -233,12 +235,13 @@ export default function AdminExpenses() {
     amount:true,date:true,recipient:true,bankReference:true,paymentMethod:true,
     notes:true,destinationBank:true,destinationAccount:true,sourceBank:true
   });
-  const [proofViewer,setProofViewer] = useState<{testNo:string,urls:string[],index:number}|null>(null);
+  const [proofViewer,setProofViewer] = useState<{testNo:string,urls:string[],index:number,labels?:string[]}|null>(null);
   const [scanningProof, setScanningProof] = useState(false);
   const [proofReadMessage,setProofReadMessage] = useState("");
   const lastProofFileRef=useRef<File|null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
-  const receiptInputRef = useRef<HTMLInputElement>(null);
+  const paymentProofInputRef = useRef<HTMLInputElement>(null);
+  const supportingReceiptInputRef = useRef<HTMLInputElement>(null);
 
   async function previewExpenseProof(file:File) {
     setScanningProof(true);
@@ -268,45 +271,56 @@ export default function AdminExpenses() {
     }finally{setScanningProof(false);}
   }
 
-  async function handleReceiptUpload(files: FileList | File[]) {
-    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
-    const fileArr = Array.from(files);
-    for (const file of fileArr) {
-      if (!allowed.includes(file.type)) {
-        toast({ title: "Format tidak didukung", description: `${file.name}: Gunakan JPG, PNG, WebP, atau GIF`, variant: "destructive" });
+  async function handleReceiptUpload(files: FileList | File[],kind:"payment"|"supporting") {
+    const allowed = ["image/jpeg","image/png","image/webp"];
+    const fileArr=Array.from(files);
+    if(fileArr.length===0)return;
+    if(kind==="payment" && (fileArr.length!==1 || form.paymentProofUrls.length>0)){
+      toast({title:"Satu bukti pembayaran utama",description:"Hapus bukti utama lama sebelum menggantinya.",variant:"destructive"});
+      return;
+    }
+    if(form.receiptUrls.length+fileArr.length>10){
+      toast({title:"Batas lampiran",description:"Maksimal 10 gambar untuk satu transaksi.",variant:"destructive"});
+      return;
+    }
+    for(const file of fileArr){
+      if(!allowed.includes(file.type)){
+        toast({title:"Format tidak didukung",description:"Gunakan JPG, PNG atau WebP.",variant:"destructive"});
         return;
       }
-      if (file.size > 10 * 1024 * 1024) {
-        toast({ title: "File terlalu besar", description: `${file.name}: Maksimal 10 MB`, variant: "destructive" });
+      if(file.size>10*1024*1024){
+        toast({title:"File terlalu besar",description:"Maksimal 10 MB per foto.",variant:"destructive"});
         return;
       }
     }
     setUploadingReceipt(true);
-    try {
-      const uploaded: string[] = [];
-      for (const file of fileArr) {
-        const fd = new FormData();
-        fd.append("file", file);
-        const resp = await fetch(`${API}/storage/upload-proof`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${getToken()}` },
-          body: fd,
+    try{
+      const uploaded:string[]=[];
+      for(const file of fileArr){
+        const fd=new FormData();
+        fd.append("file",file);
+        const resp=await fetch(`${API}/storage/upload-proof`,{
+          method:"POST",headers:{Authorization:`Bearer ${getToken()}`},body:fd
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
+        const data=await resp.json();
+        if(!resp.ok)throw new Error(data.error??"Upload gagal");
         uploaded.push(data.url);
       }
-      setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
-      toast({ title: `${uploaded.length} foto nota berhasil diupload` });
-      // Keep the original image for OCR retry; never upload it a second time.
-      const firstProof = fileArr.find((file) => ["image/jpeg","image/png","image/webp"].includes(file.type));
-      if(firstProof)lastProofFileRef.current=firstProof;
-      if(firstProof && autoReadProof)await previewExpenseProof(firstProof);
-    } catch (err: any) {
-      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
-    } finally {
-      setUploadingReceipt(false);
-    }
+      setForm(prev=>({
+        ...prev,
+        receiptUrls:[...prev.receiptUrls,...uploaded],
+        paymentProofUrls:kind==="payment"?[...prev.paymentProofUrls,...uploaded]:prev.paymentProofUrls,
+        supportingReceiptUrls:kind==="supporting"?[...prev.supportingReceiptUrls,...uploaded]:prev.supportingReceiptUrls,
+      }));
+      toast({title:kind==="payment"?"Bukti pembayaran tersimpan":`${uploaded.length} nota/struk tersimpan`});
+      if(kind==="payment"){
+        lastProofFileRef.current=fileArr[0]??null;
+        if(autoReadProof && fileArr[0])await previewExpenseProof(fileArr[0]);
+      }
+      // Supporting receipts are never submitted to any OCR endpoint.
+    }catch(err:any){
+      toast({title:"Upload gagal",description:err.message,variant:"destructive"});
+    }finally{setUploadingReceipt(false);}
   }
 
   function applyProofPreview() {
@@ -333,8 +347,19 @@ export default function AdminExpenses() {
     setProofPreview(null);
   }
 
-  function removeReceiptUrl(idx: number) {
-    setForm((prev) => ({ ...prev, receiptUrls: prev.receiptUrls.filter((_, i) => i !== idx) }));
+  function removeReceiptUrl(url:string,kind:"payment"|"supporting"|"legacy"){
+    setForm(prev=>({
+      ...prev,
+      receiptUrls:prev.receiptUrls.filter(x=>x!==url),
+      paymentProofUrls:prev.paymentProofUrls.filter(x=>x!==url),
+      supportingReceiptUrls:prev.supportingReceiptUrls.filter(x=>x!==url),
+    }));
+    if(kind==="payment"){
+      lastProofFileRef.current=null;
+      setProofPreview(null);
+      setProofEvidence(null);
+      setProofReadMessage("");
+    }
   }
 
   const params = new URLSearchParams();
@@ -438,7 +463,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number;receiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
+    notes:string;amount:number;receiptUrls?:string[];paymentProofUrls?:string[];supportingReceiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -774,6 +799,7 @@ export default function AdminExpenses() {
     setForm({ ...EMPTY_FORM });
     setShowAdvanced(false);
     setProofPreview(null);setProofEvidence(null);setProofReadMessage("");
+    lastProofFileRef.current=null;
     setDestinationBank("");setDestinationAccount("");setExpenseKind("Transfer Bank");
     setAutoReadProof(false);
     setFormOpen(true);
@@ -795,6 +821,8 @@ export default function AdminExpenses() {
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
+      paymentProofUrls:[],
+      supportingReceiptUrls:[],
       notes: expense.notes || expense.description || "",
       bankReference: expense.bankReference ?? "",
     });
@@ -851,6 +879,8 @@ export default function AdminExpenses() {
             bankReference:form.bankReference.trim(),
             expenseKind,destinationBank:destinationBank.trim(),destinationAccount:destinationAccount.trim(),
             receiptUrls:form.receiptUrls,
+            paymentProofUrls:form.paymentProofUrls,
+            supportingReceiptUrls:form.supportingReceiptUrls,
             notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
               ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
             amount:gross
