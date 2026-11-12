@@ -135,6 +135,7 @@ const EMPTY_FORM = {
   facilityId: "",
   amount: "",
   ppnAmount: "",
+  adminFee: "",
   paymentMethod: "",
   paymentAccount: "",
   receiptUrls: [] as string[],
@@ -226,7 +227,7 @@ export default function AdminExpenses() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
-  const [expenseKind,setExpenseKind] = useState("Transfer Bank");
+  const [expenseKind,setExpenseKind] = useState("Pengeluaran Lainnya");
   const [destinationBank,setDestinationBank] = useState("");
   const [destinationAccount,setDestinationAccount] = useState("");
   const [autoReadProof, setAutoReadProof] = useState(false);
@@ -344,10 +345,7 @@ export default function AdminExpenses() {
     }));
     if(proofSelection.destinationBank&&p.destinationBank?.trim())setDestinationBank(p.destinationBank.trim());
     if(proofSelection.destinationAccount&&p.destinationAccount?.trim())setDestinationAccount(p.destinationAccount.trim());
-    if(proofSelection.paymentMethod&&p.paymentMethod){
-      if(p.paymentMethod==="BI-FAST"||p.paymentMethod==="Transfer Bank")setExpenseKind("Transfer Bank");
-      else if(["QRIS","PLN Prabayar"].includes(p.paymentMethod))setExpenseKind(p.paymentMethod);
-    }
+    // OCR selects payment method only, never the report category.
     toast({title:"Saran OCR diterapkan",description:"Periksa kembali tiap field. OCR bukan bukti konfirmasi bank."});
     setProofPreview(null);
   }
@@ -468,7 +466,7 @@ export default function AdminExpenses() {
   async function postTestEntry(payload: {
     entryKey:string; direction:"IN"|"OUT";transactionDate:string;sourceName:string;
     senderBank:string;receivingAccount:string;cashType?:string;method:string;bankReference:string;
-    notes:string;amount:number;receiptUrls?:string[];paymentProofUrls?:string[];supportingReceiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
+    notes:string;amount:number;baseAmount?:number;adminFee?:number;ppnAmount?:number;receiptUrls?:string[];paymentProofUrls?:string[];supportingReceiptUrls?:string[];expenseKind?:string;destinationBank?:string;destinationAccount?:string
   }) {
     const response=await fetch(`${API}/admin/finance-test`,{
       method:"POST",headers:authHeaders(),body:JSON.stringify(payload)
@@ -808,7 +806,7 @@ export default function AdminExpenses() {
     setShowAdvanced(false);
     setProofPreview(null);setProofEvidence(null);setProofReadMessage("");
     lastProofFileRef.current=null;
-    setDestinationBank("");setDestinationAccount("");setExpenseKind("Transfer Bank");
+    setDestinationBank("");setDestinationAccount("");setExpenseKind("Pengeluaran Lainnya");
     setAutoReadProof(false);
     setFormOpen(true);
   }
@@ -826,6 +824,7 @@ export default function AdminExpenses() {
       facilityId: expense.facilityId ? String(expense.facilityId) : "",
       amount: String(expense.amount ?? ""),
       ppnAmount: String(expense.ppnAmount ?? "0"),
+      adminFee: "",
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
       receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
@@ -869,7 +868,13 @@ export default function AdminExpenses() {
     } else if(FINANCE_SC_TEST_ONLY){
       if(expenseTestSaving)return;
       const rawAmount=Number(normalizeExpenseRupiahInput(form.amount));
-      const gross=rawAmount+Number(form.ppnAmount||0);
+      const fee=Number(normalizeExpenseRupiahInput(form.adminFee||"0")||0);
+      const ppn=Number(form.ppnAmount||0);
+      const gross=rawAmount+ppn+fee;
+      if(!form.paymentMethod || !Number.isSafeInteger(ppn)||ppn<0 ||
+         !Number.isSafeInteger(fee)||fee<0){
+        toast({title:"Metode atau komponen biaya tidak valid",variant:"destructive"});return;
+      }
       if(!Number.isSafeInteger(gross)||gross<=0||gross>1000000){
         toast({title:"Nominal uji tidak valid",description:"Total termasuk PPN maksimal Rp1.000.000.",
           variant:"destructive"});return;
@@ -887,10 +892,10 @@ export default function AdminExpenses() {
             bankReference:form.bankReference.trim(),
             expenseKind,destinationBank:destinationBank.trim(),destinationAccount:destinationAccount.trim(),
             receiptUrls:form.receiptUrls,
+            baseAmount:rawAmount,adminFee:fee,ppnAmount:ppn,
             paymentProofUrls:form.paymentProofUrls,
             supportingReceiptUrls:form.supportingReceiptUrls,
-            notes:`${form.notes.trim()}${Number(form.ppnAmount||0)>0
-              ?` | Pokok Rp${rawAmount} + PPN Rp${form.ppnAmount}`:""}`,
+            notes:form.notes.trim(),
             amount:gross
           });
           toast({title:`Pengeluaran TEST: ${result.testNo}`,
@@ -899,7 +904,7 @@ export default function AdminExpenses() {
               :"Belum tersinkron; cek ledger Uji Kas Besar sebelum mengulangi."});
           await refetchFinanceTest();
           setFormOpen(false);setEditingId(null);setForm({...EMPTY_FORM});
-          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setDestinationAccount("");setExpenseKind("Transfer Bank");setProofEvidence(null);
+          setExpenseTestEntryKey(crypto.randomUUID());setDestinationBank("");setDestinationAccount("");setExpenseKind("Pengeluaran Lainnya");setProofEvidence(null);
         }catch(error:any){
           toast({title:"Gagal menyimpan Pengeluaran TEST",description:error.message,variant:"destructive"});
         }finally{setExpenseTestSaving(false);}
@@ -916,7 +921,8 @@ export default function AdminExpenses() {
     proofEvidence.recipient&&form.vendorName.trim()&&
       proofEvidence.recipient.trim().toUpperCase()!==form.vendorName.trim().toUpperCase()?"Penerima berbeda dari bukti":null
   ].filter((x):x is string=>Boolean(x)):[];
-  const totalNum = Number(normalizeExpenseRupiahInput(form.amount) || 0) + Number(form.ppnAmount || 0);
+  const totalNum = Number(normalizeExpenseRupiahInput(form.amount) || 0) + Number(form.ppnAmount || 0)
+    + Number(normalizeExpenseRupiahInput(form.adminFee||"0")||0);
 
   return (
     <div className="p-6 space-y-6">
@@ -2110,13 +2116,13 @@ export default function AdminExpenses() {
             {FINANCE_SC_TEST_ONLY && !editingId && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Label>Jenis Transaksi Keluar</Label>
+                  <Label>Jenis Transaksi Keluar (untuk laporan, tidak dikirim ke Sheets)</Label>
                   <Select value={expenseKind} onValueChange={setExpenseKind}>
                     <SelectTrigger><SelectValue/></SelectTrigger>
                     <SelectContent>
-                      {["Transfer Bank","BI-FAST","QRIS","PLN Prabayar","Top Up E-Wallet",
-                        "Biaya Admin","E-Commerce","Tunai","Kartu Kredit","Virtual Account",
-                        "Kasbon Karyawan","Lainnya"].map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}
+                      {["Pembelian Barang","Biaya Operasional","Reimburse Karyawan",
+                        "Kasbon Karyawan","Pembayaran Vendor","Transportasi","Pengeluaran Lainnya"]
+                        .map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
