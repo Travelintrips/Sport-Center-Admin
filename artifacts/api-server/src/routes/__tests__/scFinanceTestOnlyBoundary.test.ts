@@ -114,7 +114,7 @@ describe("Main Keuangan SC forms stay test-only until explicitly cut over", () =
     expect(route).not.toContain("INSERT INTO public.accounting_entries");
     expect(route).toContain("receipt_urls");
     expect(route).toContain("description_version");
-    expect(source).toContain("expense_kind,destination_bank,description_version");
+    expect(source).toContain("expense_kind,destination_bank,base_amount,admin_fee,ppn_amount,description_version");
     expect(ui).toContain("receiptUrls:form.receiptUrls");
     expect(ui).toContain("Pratinjau Keterangan Kolom B (TEST)");
   });
@@ -244,7 +244,7 @@ describe("Expense TEST proof categories and legacy compatibility",()=>{
     sourceName:"DEDE SAEFULLAH",senderBank:"blu by BCA Digital",
     receivingAccount:"DEDE SAEFULLAH",method:"BI-FAST",
     bankReference:"1793262302800488",notes:"Reimburse charger",
-    expenseKind:"Transfer Bank",
+    expenseKind:"Reimburse Karyawan",
   };
   const payment="https://example.com/proof-payment.jpg";
   const supporting="https://example.com/struk-indomaret.jpg";
@@ -272,5 +272,47 @@ describe("Expense TEST proof categories and legacy compatibility",()=>{
       receiptUrls:[supporting]})).toThrow("PROOF_CATEGORY_NOT_IN_RECEIPTS");
     expect(()=>parseTestInput({...legacy,supportingReceiptUrls:["http://example.com/struk"]}))
       .toThrow("INVALID_SUPPORTING_RECEIPT_URLS");
+  });
+});
+
+describe("SC TEST payment method vs expense reporting category and admin fee",()=>{
+  const entryKey="c29e4cb4-57fc-4e18-a25e-2304f08b5be8";
+  const base={entryKey,transactionDate:"2026-11-12",direction:"OUT",sourceName:"DEDE SAEFULLAH",
+    amount:102500,method:"BI-FAST",expenseKind:"Reimburse Karyawan",notes:"Charger EV",
+    baseAmount:100000,ppnAmount:0,adminFee:2500};
+  it("keeps report category separate, total includes admin fee exactly once",()=>{
+    const parsed=parseTestInput(base);
+    expect(parsed.expenseKind).toBe("Reimburse Karyawan");
+    expect(parsed.amount).toBe(102500);
+    expect(parsed.baseAmount).toBe(100000);
+    expect(parsed.adminFee).toBe(2500);
+    expect(parsed.ppnAmount).toBe(0);
+    const row=testSheetRow({...sample("OUT",parsed.amount,30),method:"BI-FAST",
+      expense_kind:parsed.expenseKind,base_amount:parsed.baseAmount,admin_fee:parsed.adminFee,
+      ppn_amount:parsed.ppnAmount,description_version:3,notes:"Charger EV"});
+    expect(row[1]).toBe("Transfer ke FELICIA JUSTIANI | Charger EV | TEST-123 | Biaya Admin Rp2.500 | SC-TEST-OUT-000030");
+    expect(row[3]).toBe(102500);
+    expect(row[7]).toBe("SC_TEST_ONLY");
+    expect(row[1]).not.toContain("Reimburse Karyawan");
+  });
+  it("payment method determines QRIS/transfer label, never reporting category",()=>{
+    const qr=testSheetRow({...sample("OUT",1000,31),method:"QRIS",
+      expense_kind:"Reimburse Karyawan",description_version:3});
+    const bank=testSheetRow({...sample("OUT",1000,32),method:"BI-FAST",
+      expense_kind:"Reimburse Karyawan",description_version:3});
+    expect(qr[1]).toContain("Pembayaran QRIS");
+    expect(bank[1]).toContain("Transfer ke");
+  });
+  it("rejects invalid breakdown and payment method before saving",()=>{
+    expect(()=>parseTestInput({...base,adminFee:2501})).toThrow("TEST_AMOUNT_BREAKDOWN_MISMATCH");
+    expect(()=>parseTestInput({...base,adminFee:-1})).toThrow("INVALID_EXPENSE_COMPONENT");
+    expect(()=>parseTestInput({...base,method:"not-real"})).toThrow("INVALID_PAYMENT_METHOD");
+    expect(()=>parseTestInput({...base,expenseKind:"QRIS"})).toThrow("INVALID_EXPENSE_KIND");
+  });
+  it("keeps older v1/v2 formatting and historical amounts intact",()=>{
+    const old=testSheetRow({...sample("OUT",1000,20),expense_kind:"QRIS",
+      method:"Transfer Bank",description_version:2});
+    expect(old[1]).toContain("Pembayaran QRIS");
+    expect(old[3]).toBe(1000);
   });
 });
