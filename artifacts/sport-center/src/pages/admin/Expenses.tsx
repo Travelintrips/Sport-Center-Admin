@@ -12,6 +12,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ChevronsUpDown } from "lucide-react";
 import { getToken } from "@/lib/auth";
+import { presentTransactionNarrative } from "@/lib/transactionNarrative";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Search, TrendingDown, Banknote,
@@ -1210,7 +1211,17 @@ export default function AdminExpenses() {
                                 <div className="grid gap-3 sm:grid-cols-2 rounded-lg border bg-white p-3">
                                   <div>
                                     <p className="text-xs text-slate-500">Keperluan / Keterangan</p>
-                                    <p className="text-sm font-medium break-words">{tx.notes||tx.description||"Tidak diisi"}</p>
+                                    <p className="text-sm font-medium break-words">
+                                      {presentTransactionNarrative(tx.description,tx.notes).primary}
+                                    </p>
+                                    {presentTransactionNarrative(tx.description,tx.notes).additional && (
+                                      <div className="mt-3">
+                                        <p className="text-xs text-slate-500">Catatan Tambahan</p>
+                                        <p className="text-sm font-medium break-words">
+                                          {presentTransactionNarrative(tx.description,tx.notes).additional}
+                                        </p>
+                                      </div>
+                                    )}
                                   </div>
                                   <div>
                                     <p className="text-xs text-slate-500">Saldo berjalan Google Sheets</p>
