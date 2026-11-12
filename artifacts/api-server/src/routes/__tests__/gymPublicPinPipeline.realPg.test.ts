@@ -314,6 +314,8 @@ suite(
       await pool.query(
         "TRUNCATE sport_center.sport_bookings CASCADE; TRUNCATE sport_center.booking_history,sport_center.wa_action_tokens,sport_center.audit_logs,sport_center.x904_user_commands,sport_center.gym_x904_access_snapshots",
       );
+      await pool.query("TRUNCATE sport_center.gym_x904_connector_heartbeats");
+      await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at=now(),stored_log_count=0,device_log_count=0,user_count=0");
     });
     function submit(attach = true, bookingDate = today, customerName = "TEST AUTO SUSPEND") {
       let r = request
@@ -809,6 +811,7 @@ suite(
     });
     test("old completed snapshot with current authenticated VMSC heartbeat still accepts its exact scan once", async () => {
       const {reconcileX904MissedNonmemberBookingCheckins}=await import("../../services/x904MissedCheckinReconcile.js");
+      await pool.query("TRUNCATE sport_center.gym_x904_lan_logs");
       const id=await checkout();
       await confirm(id);
       expect((await approve(id)).status).toBe(200);
@@ -825,6 +828,7 @@ suite(
     });
     test("heartbeat alone cannot bypass failed auth, mismatched inventory or stale liveness",async()=>{
       const {reconcileX904MissedNonmemberBookingCheckins}=await import("../../services/x904MissedCheckinReconcile.js");
+      await pool.query("TRUNCATE sport_center.gym_x904_lan_logs");
       const id=await checkout(); await confirm(id); expect((await approve(id)).status).toBe(200);
       await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
       await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T13:00:00Z' WHERE booking_id=$1",[id]);
