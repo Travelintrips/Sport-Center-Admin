@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { scanPaymentProof } from "../lib/paymentProofOcr";
-import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofRecipient, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, selectCompleteBluReference, readExpenseBluMissingFieldsWithVision } from "../lib/expenseBluProof";
 import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -165,7 +165,7 @@ router.post("/admin/expenses/preview-proof", adminMiddleware, expenseProofPrevie
     const fields = {
       amount: textAmount ?? fallback?.amount ?? result.amount,
       date: date ?? fallback?.date ?? null,
-      bankReference: bankReference ?? fallback?.bankReference ?? null,
+      bankReference: selectCompleteBluReference(bankReference, fallback?.bankReference ?? null),
       recipient: recipient ?? fallback?.recipient ?? genericRecipient ?? null,
       destinationBank: destinationBank ?? fallback?.destinationBank ?? null,
       destinationAccount: destinationAccount ?? fallback?.destinationAccount ?? null,
