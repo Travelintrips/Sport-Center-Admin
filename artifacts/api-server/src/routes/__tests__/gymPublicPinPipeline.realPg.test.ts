@@ -784,7 +784,7 @@ suite(
       await confirm(id);
       expect((await approve(id)).status).toBe(200);
       await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
-      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T02:00:00Z' WHERE booking_id=$1",[id]);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T13:00:00Z' WHERE booking_id=$1",[id]);
       process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="true";
       const now=new Date("2026-11-13T01:16:00Z");
       try {
@@ -810,7 +810,7 @@ suite(
       await confirm(id);
       expect((await approve(id)).status).toBe(200);
       await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
-      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T02:00:00Z' WHERE booking_id=$1",[id]);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='expired',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T13:00:00Z' WHERE booking_id=$1",[id]);
       const ended=new Date("2026-11-13T02:01:00Z");
       expect(await completeBooking(id,{userName:"scheduler",userRole:"system"},ended)).toMatchObject({ok:true,alreadyCompleted:false,withoutCheckin:true});
       expect(await completeBooking(id,{userName:"scheduler",userRole:"system"},ended)).toMatchObject({ok:true,alreadyCompleted:true});
