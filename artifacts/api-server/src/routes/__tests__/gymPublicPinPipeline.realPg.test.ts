@@ -653,6 +653,8 @@ suite(
       const {completeBooking} = await import("../../lib/bookingLifecycle.js");
       const id = await checkout();
       const payId = await confirm(id);
+      // The existing staff attestation is mandatory; do not bypass identity review.
+      expect((await approve(id)).status).toBe(200);
       const confirmedGrant = await grant(id);
       expect(confirmedGrant.payment_id).toBe(payId);
       expect(confirmedGrant.verification_state).toBe("verified");
