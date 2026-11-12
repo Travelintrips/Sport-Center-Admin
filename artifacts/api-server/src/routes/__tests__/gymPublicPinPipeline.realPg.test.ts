@@ -790,6 +790,7 @@ suite(
       expect((await approve(id)).status).toBe(200);
       await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
       await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T13:00:00Z' WHERE booking_id=$1",[id]);
+      await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at='2026-11-13T01:15:30Z'");
       process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="true";
       const now=new Date("2026-11-13T01:16:00Z");
       try {
@@ -817,9 +818,9 @@ suite(
       expect((await approve(id)).status).toBe(200);
       await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
       await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T13:00:00Z' WHERE booking_id=$1",[id]);
-      await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at=now()-interval '3 hours',stored_log_count=1,device_log_count=1,user_count=1");
-      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545','700',402,'2026-11-13 08:15:00',$1,401,now()-interval '4 hours')",["b".repeat(64)]);
-      await pool.query("INSERT INTO sport_center.gym_x904_connector_heartbeats VALUES('TDBD234200545','VMSC',now(),1,1,true)");
+      await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at='2026-11-12T22:00:00Z',stored_log_count=1,device_log_count=1,user_count=1");
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545','700',402,'2026-11-13 08:15:00',$1,401,'2026-11-12T21:59:00Z')",["b".repeat(64)]);
+      await pool.query("INSERT INTO sport_center.gym_x904_connector_heartbeats VALUES('TDBD234200545','VMSC','2026-11-13T01:15:00Z',1,1,true)");
       process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="false";
       try {
         expect(await reconcileX904MissedNonmemberBookingCheckins(db,new Date("2026-11-13T01:16:00Z"))).toBe(1);
@@ -832,18 +833,18 @@ suite(
       const id=await checkout(); await confirm(id); expect((await approve(id)).status).toBe(200);
       await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-13',start_time='08:00',end_time='09:00' WHERE id=$1",[id]);
       await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-13T01:00:00Z',expires_at='2026-11-13T13:00:00Z' WHERE booking_id=$1",[id]);
-      await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at=now()-interval '3 hours',stored_log_count=1,device_log_count=1,user_count=1");
-      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545','700',402,'2026-11-13 08:15:00',$1,401,now()-interval '4 hours')",["c".repeat(64)]);
-      await pool.query("INSERT INTO sport_center.gym_x904_connector_heartbeats VALUES('TDBD234200545','VMSC',now(),1,1,false)");
+      await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at='2026-11-12T22:00:00Z',stored_log_count=1,device_log_count=1,user_count=1");
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545','700',402,'2026-11-13 08:15:00',$1,401,'2026-11-12T21:59:00Z')",["c".repeat(64)]);
+      await pool.query("INSERT INTO sport_center.gym_x904_connector_heartbeats VALUES('TDBD234200545','VMSC','2026-11-13T01:15:00Z',1,1,false)");
       process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="false";
       try {
         const evaluate=()=>reconcileX904MissedNonmemberBookingCheckins(db,new Date("2026-11-13T01:16:00Z"));
         expect(await evaluate()).toBe(0);
         await pool.query("UPDATE sport_center.gym_x904_connector_heartbeats SET read_authenticated=true,reported_logs=2");
         expect(await evaluate()).toBe(0);
-        await pool.query("UPDATE sport_center.gym_x904_connector_heartbeats SET reported_logs=1,last_seen=now()-interval '10 minutes'");
+        await pool.query("UPDATE sport_center.gym_x904_connector_heartbeats SET reported_logs=1,last_seen='2026-11-13T01:00:00Z'");
         expect(await evaluate()).toBe(0);
-        await pool.query("UPDATE sport_center.gym_x904_connector_heartbeats SET last_seen=now()");
+        await pool.query("UPDATE sport_center.gym_x904_connector_heartbeats SET last_seen='2026-11-13T01:15:00Z'");
         await pool.query("UPDATE sport_center.gym_x904_lan_logs SET last_seen_snapshot='00000000-0000-4000-8000-000000000002' WHERE event_id=$1",["c".repeat(64)]);
         expect(await evaluate()).toBe(0);
       } finally {delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;}
