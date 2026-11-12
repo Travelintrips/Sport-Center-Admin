@@ -19,23 +19,32 @@ export function parseBluProofReference(text: string): string | null {
     const inline=label.replace(/^.*?\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i,"")
       .replace(/^[\s:.\-]+/,"").trim();
     const parts:string[]=[];
-    if(inline){
-      if(!/^[\d\s.\-]+$/.test(inline))continue;
-      parts.push(inline);
-    }
+    // In blu mobile-app screenshots the reference is right-aligned and its
+    // first 12 digits can appear BEFORE the OCR label in reading order:
+    // "1793 2623 0280 [copy icon]" / "No. Ref blu 0488 [copy icon]".
+    // Never prepend an unrelated preceding amount, account or PLN token.
+    const preceding=lines[i-1]??"";
+    const priorGroups=preceding.match(/^((?:\d{4}[\s.\-]+){2}\d{4})(?=\s|$)/);
+    const numericPrefix=(value:string):string|null=>{
+      const match=value.match(/^\s*(\d[\d\s.\-]*)(?:[^\d]|$)/);
+      return match?.[1]?.replace(/\D/g,"")||null;
+    };
+    const inlineDigits=numericPrefix(inline);
+    if(inlineDigits)parts.push(inlineDigits);
     for(const line of lines.slice(startIndex,startIndex+4)){
-      const numericPrefix=line.match(/^[\d][\d\s.\-]*/);
-      if(!numericPrefix)break;
-      const numeric=numericPrefix[0].trim();
-      if(!/\d/.test(numeric))break;
-      parts.push(numeric);
-      const total=parts.join("").replace(/\D/g,"").length;
+      const digits=numericPrefix(line);
+      if(!digits)break;
+      parts.push(digits);
+      const total=parts.join("").length;
       if(total===16 || total===20 || total>20)break;
     }
-    const digits=parts.join("").replace(/\D/g,"");
-    // Blu IDs in supported fixtures are 16 or 20 digits. A 12-digit
-    // OCR prefix must NEVER be accepted as a complete reference.
-    if((digits.length===16 || digits.length===20))return digits;
+    const after=parts.join("");
+    if((after.length===4 || after.length===8) && priorGroups){
+      const prior=priorGroups[1]!.replace(/\D/g,"");
+      const joined=prior+after;
+      if(joined.length===16 || joined.length===20)return joined;
+    }
+    if(after.length===16 || after.length===20)return after;
   }
   return null;
 }
