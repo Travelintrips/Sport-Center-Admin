@@ -52,7 +52,9 @@ export function parseTestInput(body: any) {
   if(body.direction==="OUT" && !EXPENSE_TEST_KINDS.includes(expenseKind as typeof EXPENSE_TEST_KINDS[number]))
     throw Error("INVALID_EXPENSE_KIND");
   const destinationBank = body.direction==="OUT" ? String(body.destinationBank ?? "").trim() : "";
+  const destinationAccount = body.direction==="OUT" ? String(body.destinationAccount ?? "").trim() : "";
   if(destinationBank.length>100)throw Error("INVALID_DESTINATION_BANK");
+  if(destinationAccount && !/^[0-9]{6,24}$/.test(destinationAccount))throw Error("INVALID_DESTINATION_ACCOUNT");
   const rawProofs=body.receiptUrls??[];
   if(!Array.isArray(rawProofs) || rawProofs.length>10 ||
     rawProofs.some((url:unknown)=>typeof url!=="string" || url.length>2000 || !/^https:\/\//i.test(url)))
@@ -61,7 +63,7 @@ export function parseTestInput(body: any) {
   return {
     direction:body.direction as TestDirection, transactionDate:date, amount,
     entryKey:body.entryKey, sourceName,senderBank,receivingAccount,cashType,method,
-    bankReference,notes,expenseKind,destinationBank,receiptUrls
+    bankReference,notes,expenseKind,destinationBank,destinationAccount,receiptUrls
   };
 }
 export function testSheetRow(item:TestLedgerEntry) {
