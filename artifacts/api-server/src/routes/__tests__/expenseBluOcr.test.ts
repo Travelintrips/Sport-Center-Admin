@@ -51,6 +51,14 @@ TOTAL BAYAR RP 100.000`;
     const wrapped="Transaksi Berhasil\nNo. Ref blu\n1793 2623 0280\n0488\nPunya masalah dengan transaksi ini?";
     expect(parseBluProofReference(wrapped)).toBe("1793262302800488");
   });
+  it("reassembles a split reference when the last OCR row has an icon label",()=>{
+    const sample=["No. Ref blu","1793 2623 0280","0488 Copy"].join("\n");
+    expect(parseBluProofReference(sample)).toBe("1793262302800488");
+  });
+  it("keeps an incomplete blu reference empty",()=>{
+    const sample=["No. Ref blu","1793 2623 0280","Lihat bukti"].join("\n");
+    expect(parseBluProofReference(sample)).toBeNull();
+  });
   it("rejects incomplete OCR prefixes and conflicting vision suggestions",()=>{
     expect(parseBluProofReference("No. Ref blu\n1793 2623 0280\nPunya masalah dengan transaksi ini?")).toBeNull();
     expect(selectCompleteBluReference("179326230280",null)).toBeNull();
