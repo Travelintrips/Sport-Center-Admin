@@ -3,20 +3,42 @@ import { parsePaymentProofDate } from "./paymentProofOcr";
 
 /** Bank/merchant reference is metadata; do not infer payment verification from it. */
 export function parseBluProofReference(text: string): string | null {
-  const normalized = text.replace(/\r/g, "").replace(/[‐‑–—]/g, "-");
-  const lines = normalized.split("\n").map(s => s.trim()).filter(Boolean);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (!/\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i.test(line)) continue;
-    const inline = line.replace(/^.*?\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i, "");
-    const candidate = [inline, ...lines.slice(i + 1, i + 4)].join(" ");
-    const digits = (candidate.match(/(?:\d[\s\-.]*){12,21}/g) ?? [])
-      .map(x => x.replace(/\D/g, "")).find(x => x.length >= 12 && x.length <= 20);
-    if (digits) return digits;
+  const normalized=text.replace(/\r/g,"").replace(/[‐‑–—]/g,"-");
+  const lines=normalized.split("\n").map(line=>line.trim()).filter(Boolean);
+  for(let i=0;i<lines.length;i++){
+    const label=lines[i]!;
+    if(!/\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i.test(label))continue;
+    // Read ONLY contiguous numeric lines below the explicit blu reference label.
+    // A bank screenshot commonly wraps "1793 2623 0280" + "0488".
+    const inline=label.replace(/^.*?\b(?:NO\.?|NOMOR)\s*\.?\s*REF(?:ERENSI)?\s*BLU\b/i,"")
+      .replace(/^[\s:.\-]+/,"").trim();
+    const parts:string[]=[];
+    if(inline){
+      if(!/^[\d\s.\-]+$/.test(inline))continue;
+      parts.push(inline);
+    }
+    for(const line of lines.slice(i+1,i+5)){
+      if(!/^[\d\s.\-]+$/.test(line) || !/\d/.test(line))break;
+      parts.push(line);
+    }
+    const digits=parts.join("").replace(/\D/g,"");
+    // Blu IDs in supported fixtures are 16 or 20 digits. A 12-digit
+    // OCR prefix must NEVER be accepted as a complete reference.
+    if((digits.length===16 || digits.length===20))return digits;
   }
-  // Some PLN receipts have a provider reference, not a blu reference.
-  // Do not silently label that identifier as a blu bank reference.
   return null;
+}
+export function selectCompleteBluReference(
+  ocrReference:string|null, visionReference:string|null
+):string|null {
+  const clean=(value:string|null):string|null=>{
+    const digits=String(value??"").replace(/\D/g,"");
+    return digits.length===16 || digits.length===20 ? digits : null;
+  };
+  const ocr=clean(ocrReference);
+  const vision=clean(visionReference);
+  if(ocr&&vision&&ocr!==vision)return null; // conflicting evidence: manual review
+  return ocr??vision;
 }
 
 export function parseBluProofDate(text: string): string | null {
@@ -152,7 +174,7 @@ export async function readExpenseBluMissingFieldsWithVision(buffer: Buffer, mime
     const notes=typeof parsed.notes==="string" ? parsed.notes.trim().slice(0,120) : "";
     const paymentMethod=typeof parsed.paymentMethod==="string" ? parsed.paymentMethod.trim() : "";
     const sourceBank=typeof parsed.sourceBank==="string" ? parsed.sourceBank.trim() : "";
-    return {date,bankReference:bankReference && bankReference.length>=12 && bankReference.length<=20?bankReference:null,
+    return {date,bankReference:bankReference && [16,20].includes(bankReference.length)?bankReference:null,
       amount:Number.isSafeInteger(amount)&&amount>=1000&&amount<=1_000_000_000?amount:null, recipient:safeRecipient,
       destinationBank:/^(BCA|MANDIRI|BNI|BRI|BSI|CIMB|PERMATA|DANAMON|BTN|OCBC)$/.test(destinationBank)?destinationBank:null,
       destinationAccount:destinationAccount.length>=6&&destinationAccount.length<=24?destinationAccount:null,
