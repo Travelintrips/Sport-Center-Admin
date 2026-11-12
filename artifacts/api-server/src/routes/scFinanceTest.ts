@@ -16,7 +16,8 @@ router.get("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
       method,bank_reference AS "bankReference",notes,amount::text,
       receipt_urls AS "receiptUrls",payment_proof_urls AS "paymentProofUrls",
        supporting_receipt_urls AS "supportingReceiptUrls",expense_kind AS "expenseKind",destination_bank AS "destinationBank",
-      destination_account AS "destinationAccount",
+      destination_account AS "destinationAccount",base_amount AS "baseAmount",
+      admin_fee AS "adminFee",ppn_amount AS "ppnAmount",
       sheet_sync_state AS "sheetSyncState",sheet_row AS "sheetRow",
       sheet_sync_error AS "sheetSyncError",sheet_verified_at AS "sheetVerifiedAt",
       sheet_balance::text AS "sheetBalance",
@@ -42,7 +43,7 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
   try{
     const existing=resultRows(await db.execute(sql`SELECT id,direction,transaction_date::text,
       amount::text,source_name,sheet_sync_state,cash_type,
-      sender_bank,receiving_account,method,bank_reference,notes,receipt_urls,payment_proof_urls,supporting_receipt_urls,expense_kind,destination_bank,destination_account
+      sender_bank,receiving_account,method,bank_reference,notes,receipt_urls,payment_proof_urls,supporting_receipt_urls,expense_kind,destination_bank,destination_account,base_amount,admin_fee,ppn_amount
       FROM sport_center.sc_finance_test_entries WHERE entry_key=${input.entryKey}::uuid`))[0];
     if(existing){
       if(existing.direction!==input.direction || existing.transaction_date!==input.transactionDate
@@ -53,6 +54,9 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
         || (existing.expense_kind??"")!==input.expenseKind
         || (existing.destination_bank??"")!==input.destinationBank
         || (existing.destination_account??"")!==input.destinationAccount
+        || Number(existing.base_amount??existing.amount)!==input.baseAmount
+        || Number(existing.admin_fee??0)!==input.adminFee
+        || Number(existing.ppn_amount??0)!==input.ppnAmount
         || JSON.stringify(existing.receipt_urls??[])!==JSON.stringify(input.receiptUrls)
         || JSON.stringify(existing.payment_proof_urls??[])!==JSON.stringify(input.paymentProofUrls)
         || JSON.stringify(existing.supporting_receipt_urls??[])!==JSON.stringify(input.supportingReceiptUrls)){
@@ -63,13 +67,14 @@ router.post("/admin/finance-test",superAdminMiddleware,async(req,res)=>{
     }
     const row=resultRows(await db.execute(sql`INSERT INTO sport_center.sc_finance_test_entries
       (entry_key,direction,transaction_date,source_name,sender_bank,cash_type,receiving_account,
-        method,bank_reference,notes,amount,created_by,receipt_urls,payment_proof_urls,supporting_receipt_urls,expense_kind,destination_bank,destination_account,description_version)
+        method,bank_reference,notes,amount,created_by,receipt_urls,payment_proof_urls,supporting_receipt_urls,expense_kind,destination_bank,destination_account,base_amount,admin_fee,ppn_amount,description_version)
       VALUES(${input.entryKey}::uuid,${input.direction},${input.transactionDate}::date,
         ${input.sourceName},${input.senderBank},${input.cashType},${input.receivingAccount},
         ${input.method},${input.bankReference||null},${input.notes||null},${input.amount},
         ${getUserFromReq(req).userId??null},${JSON.stringify(input.receiptUrls)}::jsonb,
         ${JSON.stringify(input.paymentProofUrls)}::jsonb,${JSON.stringify(input.supportingReceiptUrls)}::jsonb,
-        ${input.expenseKind||null},${input.destinationBank||null},${input.destinationAccount||null},${input.direction==="OUT"?2:1})
+        ${input.expenseKind||null},${input.destinationBank||null},${input.destinationAccount||null},
+        ${input.baseAmount},${input.adminFee},${input.ppnAmount},${input.direction==="OUT"?3:1})
       ON CONFLICT(entry_key) DO NOTHING RETURNING id,direction`))[0];
     if(!row){res.status(409).json({error:"TEST_ENTRY_ALREADY_EXISTS"});return;}
     await logAudit({...getUserFromReq(req),action:"SC_FINANCE_TEST_CREATED",

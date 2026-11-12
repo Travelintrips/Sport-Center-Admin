@@ -14,8 +14,15 @@ export type TestLedgerEntry = {
   expense_kind?: string | null;
   destination_bank?: string | null;
   description_version?: number | null;
+  admin_fee?: number | string | null;
+  base_amount?: number | string | null;
+  ppn_amount?: number | string | null;
 };
-export const EXPENSE_TEST_KINDS = ["Transfer Bank","BI-FAST","QRIS","PLN Prabayar","Top Up E-Wallet","Biaya Admin","E-Commerce","Tunai","Kartu Kredit","Virtual Account","Kasbon Karyawan","Lainnya"] as const;
+// Category is for reporting only. Historical expense_kind values remain readable.
+export const EXPENSE_TEST_KINDS = ["Pembelian Barang","Biaya Operasional","Reimburse Karyawan",
+  "Kasbon Karyawan","Pembayaran Vendor","Transportasi","Pengeluaran Lainnya"] as const;
+export const PAYMENT_TEST_METHODS = ["Transfer Bank","BI-FAST","QRIS","PLN Prabayar",
+  "E-Commerce","Tunai","Kartu Kredit","Kartu Debit","Virtual Account","E-Wallet"] as const;
 export const TEST_RECON_STATUS = "SC_TEST_ONLY";
 export const TEST_GUARD_VERSION = "sc-test-only-v2";
 
@@ -48,9 +55,19 @@ export function parseTestInput(body: any) {
   const method = String(body.method ?? "").trim().slice(0,80);
   const bankReference = String(body.bankReference ?? "").trim().slice(0,120);
   const notes = String(body.notes ?? "").trim().slice(0,200);
-  const expenseKind = body.direction==="OUT" ? String(body.expenseKind ?? body.method ?? "Lainnya").trim() : "";
+  const expenseKind = body.direction==="OUT" ? String(body.expenseKind ?? "Pengeluaran Lainnya").trim() : "";
   if(body.direction==="OUT" && !EXPENSE_TEST_KINDS.includes(expenseKind as typeof EXPENSE_TEST_KINDS[number]))
     throw Error("INVALID_EXPENSE_KIND");
+  if(body.direction==="OUT" && !PAYMENT_TEST_METHODS.includes(method as typeof PAYMENT_TEST_METHODS[number]))
+    throw Error("INVALID_PAYMENT_METHOD");
+  const adminFee=Number(body.adminFee??0);
+  const ppnAmount=Number(body.ppnAmount??0);
+  const baseAmount=Number(body.baseAmount??amount-adminFee-ppnAmount);
+  if(![adminFee,ppnAmount,baseAmount].every(x=>Number.isSafeInteger(x)&&x>=0))
+    throw Error("INVALID_EXPENSE_COMPONENT");
+  if(baseAmount+adminFee+ppnAmount!==amount || (body.direction==="OUT"&&baseAmount<1) ||
+     (body.direction==="IN"&&(adminFee!==0||ppnAmount!==0)))
+    throw Error("TEST_AMOUNT_BREAKDOWN_MISMATCH");
   const destinationBank = body.direction==="OUT" ? String(body.destinationBank ?? "").trim() : "";
   const destinationAccount = body.direction==="OUT" ? String(body.destinationAccount ?? "").trim() : "";
   if(destinationBank.length>100)throw Error("INVALID_DESTINATION_BANK");
@@ -77,7 +94,7 @@ export function parseTestInput(body: any) {
   return {
     direction:body.direction as TestDirection, transactionDate:date, amount,
     entryKey:body.entryKey, sourceName,senderBank,receivingAccount,cashType,method,
-    bankReference,notes,expenseKind,destinationBank,destinationAccount,receiptUrls,paymentProofUrls,supportingReceiptUrls
+    bankReference,notes,expenseKind,destinationBank,destinationAccount,baseAmount,adminFee,ppnAmount,receiptUrls,paymentProofUrls,supportingReceiptUrls
   };
 }
 export function testSheetRow(item:TestLedgerEntry) {
@@ -119,7 +136,23 @@ export function testSheetRow(item:TestLedgerEntry) {
     reference,
     testNo(Number(item.id),"OUT")
   ].filter(Boolean).join(" | ");
-  const expenseDescription=Number(item.description_version??1)>=2?structuredExpense:legacyExpense;
+  const method=String(item.method??"").trim();
+  const paymentPrefix=method==="QRIS"?"Pembayaran QRIS | "+who:
+    method==="PLN Prabayar"?"Pembelian PLN Prabayar | "+who:
+    method==="E-Wallet"?"Pembayaran E-Wallet | "+who:
+    method==="Tunai"?"Pengeluaran Tunai | "+who:
+    method==="E-Commerce"?"Pembayaran E-Commerce | "+who:
+    method==="Kartu Kredit"||method==="Kartu Debit"?"Pembayaran Kartu | "+who:
+    method==="Virtual Account"?"Pembayaran Virtual Account | "+who:
+    "Transfer ke "+who;
+  const fee=Number(item.admin_fee??0);
+  const base=Number(item.base_amount??0);
+  const ppn=Number(item.ppn_amount??0);
+  const feeDetail=fee>0?`Biaya Admin Rp${fee.toLocaleString("id-ID")}`:"";
+  const version3Description=[paymentPrefix,[destination,note].filter(Boolean).join(" - "),reference,
+    feeDetail,testNo(Number(item.id),"OUT")].filter(Boolean).join(" | ");
+  const version=Number(item.description_version??1);
+  const expenseDescription=version>=3?version3Description:version>=2?structuredExpense:legacyExpense;
   const description=item.direction==="IN"
     ? `Dana Masuk dari ${who} | ${source||"-"} - ${cashType||account||"-"}${cashType?" | "+(account||"-"):""}${reference?" | "+reference:""} | ${testNo(Number(item.id),"IN")}`
     : expenseDescription;
