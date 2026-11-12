@@ -1017,6 +1017,10 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
         userPin: guestNameRoute.userPin, deviceUid: guestNameRoute.deviceUid,
         displayName: guestNameRoute.displayName,
       };
+      // Store the canonical registry name. The RLS insert guard requires an
+      // exact match; user-entered casing (e.g. "yuda" vs "YUDA") must not
+      // turn a verified, paid guest checkout into HTTP 500.
+      bookingCustomerName = verifiedX904Identity.displayName;
     }
     if (x904IdentityType != null || x904IdentityValue != null) {
       if (!gymWalkIn || !["pin", "card"].includes(String(x904IdentityType))) {

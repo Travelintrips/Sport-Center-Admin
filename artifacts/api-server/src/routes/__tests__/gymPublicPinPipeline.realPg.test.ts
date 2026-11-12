@@ -296,10 +296,10 @@ suite(
         "TRUNCATE sport_center.sport_bookings CASCADE; TRUNCATE sport_center.booking_history,sport_center.wa_action_tokens,sport_center.audit_logs,sport_center.x904_user_commands,sport_center.gym_x904_access_snapshots",
       );
     });
-    function submit(attach = true, bookingDate = today) {
+    function submit(attach = true, bookingDate = today, customerName = "TEST AUTO SUSPEND") {
       let r = request
         .post("/api/wa/booking")
-        .field("customerName", "TEST AUTO SUSPEND")
+        .field("customerName", customerName)
         .field("customerPhone", "628111222333")
         .field("facilityId", "6")
         .field("bookingDate", bookingDate)
@@ -624,6 +624,23 @@ suite(
         access_state: "review_required",
         activated_at: null,
       });
+      expect(await commands()).toHaveLength(0);
+    });
+    test("registered guest with lowercase name stores canonical name under RLS", async () => {
+      const response = await submit(true, today, "test auto suspend");
+      expect(response.status).toBe(201);
+      expect(response.body.proofStatus).toBe("waiting_confirmation");
+      const id = response.body.id;
+      const saved = (await pool.query("SELECT customer_name,status FROM sport_center.sport_bookings WHERE id=$1", [id])).rows[0];
+      expect(saved.customer_name).toBe("TEST AUTO SUSPEND");
+      expect(saved.status).toBe("waiting_confirmation");
+      const grantRow = await grant(id);
+      expect(grantRow.verified_name).toBe("TEST AUTO SUSPEND");
+      expect(grantRow.access_state).toBe("review_required");
+      expect(grantRow.activated_at).toBeNull();
+      const payment = await pool.query("SELECT status FROM sport_center.sport_payments WHERE booking_id=$1", [id]);
+      expect(payment.rows).toHaveLength(1);
+      expect(payment.rows[0].status).toBe("pending");
       expect(await commands()).toHaveLength(0);
     });
     test("pending receipt cannot be approved and field staff cannot confirm payment", async () => {
