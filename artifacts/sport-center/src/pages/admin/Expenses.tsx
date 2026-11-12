@@ -1907,8 +1907,8 @@ export default function AdminExpenses() {
             </div>}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             <div className="space-y-2">
-              <Label>Bukti Pembayaran / Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1, opsional)</span></Label>
-              <p className="text-xs text-gray-500">Boleh unggah bukti dulu, lalu isi formulir. Periksa hasil pembacaan sebelum menyimpan.</p>
+              <Label>1. Bukti Transfer / Pembayaran <span className="text-gray-400 font-normal text-xs">(1 gambar utama, opsional)</span></Label>
+              <p className="text-xs text-gray-500">Unggah bukti blu, QRIS atau transfer. Hanya gambar di bagian ini yang dapat diproses OCR setelah persetujuan admin.</p>
               <label className="flex items-start gap-2 text-xs text-gray-700">
                 <input type="checkbox" checked={autoReadProof} onChange={(e) => setAutoReadProof(e.target.checked)} className="mt-0.5" />
                 <span>Isi otomatis dari bukti (opsional, memerlukan persetujuan pemrosesan AI). Admin tetap memeriksa hasilnya.</span>
@@ -1955,56 +1955,74 @@ export default function AdminExpenses() {
                 </div>
               )}
               <input
-                ref={receiptInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif,image/heic"
-                multiple
+                ref={paymentProofInputRef}
+                type="file" accept="image/jpeg,image/png,image/webp"
                 className="hidden"
-                onChange={(e) => { if (e.target.files?.length) handleReceiptUpload(e.target.files); e.target.value = ""; }}
+                onChange={e=>{if(e.target.files?.length)void handleReceiptUpload(e.target.files,"payment");e.target.value="";}}
               />
-              {form.receiptUrls.length > 0 && (
-                <div className="grid grid-cols-3 gap-2">
-                  {form.receiptUrls.map((url, idx) => (
-                    <div key={idx} className="relative border rounded-lg overflow-hidden bg-gray-50 aspect-square">
-                      <img
-                        src={url}
-                        alt={`Nota ${idx + 1}`}
-                        className="w-full h-full object-cover bg-white"
-                        onError={(e) => { (e.target as HTMLImageElement).src = ""; }}
-                      />
-                      <button
-                        type="button"
-                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center shadow"
-                        onClick={() => removeReceiptUrl(idx)}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[10px] px-1 py-0.5 text-center truncate">
-                        Foto {idx + 1}
+              {form.paymentProofUrls.map((url,index)=>(
+                <div key={url} className="flex items-center gap-3 rounded-lg border p-2">
+                  <img src={url} alt="Bukti pembayaran utama" className="h-24 w-24 shrink-0 rounded object-contain bg-slate-50"/>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Bukti Pembayaran {index+1}</p>
+                    <p className="text-xs text-slate-500">OCR opsional, hanya atas persetujuan admin</p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={()=>removeReceiptUrl(url,"payment")}>Hapus</Button>
+                </div>
+              ))}
+              <button type="button" disabled={uploadingReceipt||form.paymentProofUrls.length>0}
+                onClick={()=>paymentProofInputRef.current?.click()}
+                className="w-full rounded-lg border-2 border-dashed border-slate-200 p-4 flex flex-col items-center gap-2 text-slate-500 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50">
+                <Upload className="h-5 w-5"/>
+                <span className="text-sm font-medium">
+                  {form.paymentProofUrls.length>0?"Bukti pembayaran utama sudah terpasang":"Unggah bukti transfer / pembayaran"}
+                </span>
+                <span className="text-xs">JPG, PNG atau WebP — maks. 10 MB</span>
+              </button>
+            </div>
+            <div className="space-y-2">
+              <Label>2. Nota / Struk Pendukung <span className="text-gray-400 font-normal text-xs">(opsional, beberapa foto)</span></Label>
+              <p className="text-xs text-slate-500">Struk Indomaret, Alfamart, invoice atau nota pembelian hanya disimpan sebagai lampiran. Tidak dibaca OCR dan tidak mengubah isian form.</p>
+              <input ref={supportingReceiptInputRef} type="file"
+                accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                onChange={e=>{if(e.target.files?.length)void handleReceiptUpload(e.target.files,"supporting");e.target.value="";}}/>
+              {form.supportingReceiptUrls.length>0 &&
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {form.supportingReceiptUrls.map((url,index)=>(
+                    <div key={url} className="relative rounded-lg border overflow-hidden bg-slate-50">
+                      <img src={url} alt={`Nota pendukung ${index+1}`}
+                        className="h-28 w-full object-contain"/>
+                      <div className="flex items-center justify-between gap-1 p-2">
+                        <span className="text-xs font-medium">Nota / Struk {index+1}</span>
+                        <button type="button" onClick={()=>removeReceiptUrl(url,"supporting")}
+                          className="text-xs text-red-700 underline">Hapus</button>
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => receiptInputRef.current?.click()}
-                disabled={uploadingReceipt}
-                className="w-full border-2 border-dashed border-gray-200 rounded-lg p-4 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
-              >
-                {uploadingReceipt ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
-                    <span className="text-sm font-medium text-orange-500">Mengupload...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5" />
-                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Unggah bukti dari blu atau foto nota"}</span>
-                    <span className="text-xs">JPG, PNG, WebP — maks 10 MB per foto</span>
-                  </>
-                )}
+                </div>}
+              <button type="button" disabled={uploadingReceipt}
+                onClick={()=>supportingReceiptInputRef.current?.click()}
+                className="w-full rounded-lg border-2 border-dashed border-slate-200 p-4 flex flex-col items-center gap-2 text-slate-500 hover:border-orange-300 hover:text-orange-700 disabled:opacity-50">
+                {uploadingReceipt?<Loader2 className="h-5 w-5 animate-spin"/>:<Upload className="h-5 w-5"/>}
+                <span className="text-sm font-medium">Tambah foto Nota / Struk Pendukung</span>
+                <span className="text-xs">Tanpa OCR · maks. 10 MB per foto</span>
               </button>
+              {form.receiptUrls.filter(url=>!form.paymentProofUrls.includes(url)&&!form.supportingReceiptUrls.includes(url)).length>0 &&
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-600">Lampiran lama (kategori belum diketahui, tidak diproses OCR)</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {form.receiptUrls.filter(url=>!form.paymentProofUrls.includes(url)&&!form.supportingReceiptUrls.includes(url))
+                      .map((url,index)=>(
+                        <div key={url} className="rounded-lg border p-2">
+                          <img src={url} alt={`Lampiran lama ${index+1}`} className="h-24 w-full object-contain"/>
+                          <button type="button" className="text-xs text-red-700 underline"
+                            onClick={()=>removeReceiptUrl(url,"legacy")}>Hapus lampiran</button>
+                        </div>
+                      ))}
+                  </div>
+                </div>}
+
             </div>
 
 
