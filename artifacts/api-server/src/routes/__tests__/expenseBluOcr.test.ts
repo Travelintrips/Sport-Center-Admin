@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, parseBluProofRecipient } from "../../lib/expenseBluProof";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, parseBluProofRecipient, selectCompleteBluReference } from "../../lib/expenseBluProof";
 
 describe("Blu receipts: expense OCR parsing regressions", () => {
   const prepaid = `Transaksi Berhasil
@@ -47,6 +47,17 @@ TOTAL BAYAR RP 100.000`;
     expect(parseBluProofReference(transfer)).toBe("1793262302800488");
   });
 
+  it("reconstructs blu reference wrapped after twelve digits instead of truncating",()=>{
+    const wrapped="Transaksi Berhasil\nNo. Ref blu\n1793 2623 0280\n0488\nPunya masalah dengan transaksi ini?";
+    expect(parseBluProofReference(wrapped)).toBe("1793262302800488");
+  });
+  it("rejects incomplete OCR prefixes and conflicting vision suggestions",()=>{
+    expect(parseBluProofReference("No. Ref blu\n1793 2623 0280\nPunya masalah dengan transaksi ini?")).toBeNull();
+    expect(selectCompleteBluReference("179326230280",null)).toBeNull();
+    expect(selectCompleteBluReference(null,"1793262302800488")).toBe("1793262302800488");
+    expect(selectCompleteBluReference("1793262302800488","1793262302809999")).toBeNull();
+    expect(selectCompleteBluReference("1793262302800488","1793262302800488")).toBe("1793262302800488");
+  });
   it("uses TOTAL BAYAR, not RP BAYAR, and never mislabels PLN reference as blu", () => {
     expect(parseBluExpenseAmount(pln)).toBe(100000);
     expect(parseBluProofReference(pln)).toBeNull();
