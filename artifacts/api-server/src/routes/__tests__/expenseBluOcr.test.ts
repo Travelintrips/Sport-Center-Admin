@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount } from "../../lib/expenseBluProof";
+import { parseBluProofDate, parseBluProofReference, parseBluExpenseAmount, parseBluProofDestinationBank, parseBluProofDestinationAccount, parseBluProofPurpose, parseBluTransferMethod, parseBluProofSourceBank, parseBluProofRecipient } from "../../lib/expenseBluProof";
 
 describe("Blu receipts: expense OCR parsing regressions", () => {
   const prepaid = `Transaksi Berhasil
@@ -69,5 +69,38 @@ describe("expense proof empty OCR response is recoverable without duplicate uplo
     expect(ui).toContain("Coba Baca Lagi (tanpa unggah ulang)");
     expect(ui).toContain("lastProofFileRef.current=firstProof");
     expect(ui).toContain('setProofReadMessage(preview.readMessage');
+  });
+});
+
+describe("blu expense field extraction is separate from bank verification",()=>{
+  const raw=[
+    "blu Transaksi Berhasil",
+    "29 Okt 2026 | 15:25:02 WIB",
+    "Nominal",
+    "Rp 200.000,00",
+    '"Reimbush charger ev"',
+    "Felicia Justiani",
+    "bluAccount",
+    "DEDE SAEFULLAH",
+    "BCA - 8881 5220 55",
+    "Tipe Transaksi",
+    "BI-FAST",
+    "No. Ref blu",
+    "1793 2623 0280 0488"
+  ].join("\n");
+  it("reads beneficiary destination, memo and BI-FAST without guessing from source",()=>{
+    expect(parseBluProofDestinationBank(raw)).toBe("BCA");
+    expect(parseBluProofDestinationAccount(raw)).toBe("8881522055");
+    expect(parseBluProofPurpose(raw)).toBe("Reimbush charger ev");
+    expect(parseBluTransferMethod(raw)).toBe("BI-FAST");
+    expect(parseBluProofSourceBank(raw)).toBe("blu by BCA Digital");
+    expect(parseBluProofRecipient(raw)).toBe("DEDE SAEFULLAH");
+  });
+  it("never invents beneficiary metadata from a bare amount or source bank",()=>{
+    const incomplete="Nominal\nRp 200.000,00\nbluAccount";
+    expect(parseBluProofDestinationBank(incomplete)).toBeNull();
+    expect(parseBluProofDestinationAccount(incomplete)).toBeNull();
+    expect(parseBluProofPurpose(incomplete)).toBeNull();
+    expect(parseBluTransferMethod(incomplete)).toBeNull();
   });
 });
