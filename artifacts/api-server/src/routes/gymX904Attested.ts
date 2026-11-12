@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { processX904Event } from "../services/processX904Event";
+import { isX904SupportedAttestedPunchState } from "../lib/x904PunchState";
 
 /**
  * Staged trusted-VMSC ingress. Enabled only with a separately provisioned,
@@ -58,13 +59,15 @@ router.post("/internal/gym-x904/vmsc/attest", async (req,res) => {
   const raw=Buffer.from(rawHex,"hex");
   const ordinal=raw.readUInt16LE(0);
   const rawPin=raw.subarray(2,11).toString("ascii").split("\0")[0];
+  // Byte 31 encodes attendance Punch State (0 or undefined=255);
+  // it is not the door's unlock-result bit. Both require a fresh signed proof.
   const verify=raw.readUInt8(26),status=raw.readUInt8(31);
   let recordTime:string;
   try {recordTime=unpackTime(raw.readUInt32LE(27));}
   catch {return res.status(422).json({error:"Invalid machine timestamp"});}
   const scanInstant=Date.parse(occurred.replace(" ","T")+"+07:00");
   if(ordinal!==index+1 || rawPin!==pin || recordTime!==occurred ||
-     !methods[verify] || status!==0 || !Number.isFinite(scanInstant) ||
+     !methods[verify] || !isX904SupportedAttestedPunchState(status) || !Number.isFinite(scanInstant) ||
      scanInstant>Date.now()+120000 || scanInstant<Date.now()-7200000)
     return res.status(422).json({error:"Device record mismatch"});
   try {
