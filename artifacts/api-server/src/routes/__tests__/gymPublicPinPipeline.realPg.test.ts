@@ -656,6 +656,32 @@ suite(
       expect((await grant(id)).activated_at).toBeNull();
       expect(await commands()).toHaveLength(0);
     });
+    test("paid Gym fast wake queues one guarded activation without 60s timer wait", async () => {
+      const oldFlag = process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+      try {
+        const id = await checkout();
+        await snapshot(new Date(clock.getTime() - 1000), 2);
+        process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = "true";
+        await confirm(id);
+        // No test call to tick(): the committed payment calls the same existing
+        // worker asynchronously. Never fake device ACK or grant active here.
+        let queued: any[] = [];
+        for (let i = 0; i < 45; i++) {
+          queued = await commands();
+          if (queued.length) break;
+          await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        expect(queued).toHaveLength(1);
+        expect(queued[0]).toMatchObject({
+          user_pin: "700", command_type: "ACTIVATE_USER", state: "queued",
+          payload: { source: "AUTO_NONMEMBER_GYM_12H", expectedUid: 343 },
+        });
+        expect((await grant(id)).access_state).toBe("pending");
+      } finally {
+        if (oldFlag === undefined) delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+        else process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = oldFlag;
+      }
+    });
     test("stale snapshot holds activation until a fresh snapshot arrives", async () => {
       const id = await checkout();
       await confirm(id);

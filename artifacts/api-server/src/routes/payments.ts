@@ -21,6 +21,7 @@ import { notifyPaymentConfirmed, notifyPaymentProofUploaded, notifyAdminPaymentP
 import { isAuthorizedAdminProofUploader } from "../lib/adminPaymentProofReport";
 import { canRecordConfirmedBookingOutstandingPayment } from "../lib/confirmedBookingOutstandingPayment";
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
+import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
@@ -2393,6 +2394,15 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         return;
       }
     }
+
+    // Payment, booking and verified PIN grant are already committed here.
+    // Wake the established X904 worker without waiting for its next timer
+    // tick. No hardware command or access-state change is made in this route.
+    wakeX904PaidGymAfterConfirmation(
+      status === "confirmed" && before.status !== "confirmed" &&
+      booking?.source === "gym_public_guest" &&
+      payment?.status === "confirmed" && payment?.paymentType !== "dp",
+    );
 
     for (const siblingSync of siblingSyncs) {
       syncStatusToBizportal(
