@@ -71,3 +71,20 @@ describe("Master Tabel TEST details are read-only and context-aware", () => {
     expect(ui).toContain("setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})");
   });
 });
+
+describe("SC TEST expense multi-proof gallery",()=>{
+  it("uses the same receiptUrls ledger for both history and unified details",()=>{
+    expect(ui).toContain('receiptUrls:entry.receiptUrls??[]');
+    expect(ui).toContain('onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0})}');
+    expect(ui).toContain('onClick={()=>setProofViewer({testNo:tx.id,urls:tx.receiptUrls,index:0})}');
+    expect(ui).toContain('Lihat Bukti ({x.receiptUrls.length} lampiran)');
+  });
+  it("renders all stored attachments, highlights the selected one and navigates",()=>{
+    expect(ui).toContain('proofViewer.urls.map((url,index)=>(');
+    expect(ui).toContain('aria-label="Daftar lampiran pengeluaran"');
+    expect(ui).toContain('aria-pressed={proofViewer.index===index}');
+    expect(ui).toContain('Bukti {proofViewer.index+1} dari {proofViewer.urls.length}');
+    expect(ui).toContain('index:Math.min(v.urls.length-1,v.index+1)');
+    expect(ui).toContain('index:Math.max(0,v.index-1)');
+  });
+});

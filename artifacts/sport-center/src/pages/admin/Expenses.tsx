@@ -1468,9 +1468,9 @@ export default function AdminExpenses() {
                   <td className="p-3">{x.sourceName}<span className="block text-xs text-gray-500">{x.senderBank}</span>
                     {Array.isArray(x.receiptUrls) && x.receiptUrls.length>0 &&
                       <span className="block text-xs mt-1">
-                        {x.receiptUrls.map((url,i)=><button key={url} type="button"
-                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:i})}
-                          className="text-blue-700 underline mr-2">Lihat Bukti {i+1}</button>)}
+                        <button type="button"
+                          onClick={()=>setProofViewer({testNo:x.testNo,urls:x.receiptUrls??[],index:0})}
+                          className="text-blue-700 underline">Lihat Bukti ({x.receiptUrls.length} lampiran)</button>
                       </span>}
                   </td>
                   <td className="p-3 text-right">{formatIDR(Number(x.amount))}</td>
@@ -1820,17 +1820,40 @@ export default function AdminExpenses() {
       </Dialog>
 
       <Dialog open={Boolean(proofViewer)} onOpenChange={open=>{if(!open)setProofViewer(null);}}>
-        <DialogContent className="w-[min(94vw,750px)] max-w-[750px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Bukti Pengeluaran {proofViewer?.testNo}</DialogTitle></DialogHeader>
-          {proofViewer && <>
-            <img src={proofViewer.urls[proofViewer.index]} alt={`Bukti pengeluaran ${proofViewer.index+1}`}
-              className="w-full max-h-[65vh] object-contain rounded-md border bg-slate-50"/>
+        <DialogContent className="w-[min(96vw,880px)] max-w-[880px] max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Bukti Pengeluaran — {proofViewer?.testNo}</DialogTitle>
+          </DialogHeader>
+          {proofViewer && proofViewer.urls.length>0 && <>
+            <p className="text-sm text-slate-600">
+              {proofViewer.urls.length} lampiran pada satu transaksi. Bukti ini belum merupakan verifikasi bank.
+            </p>
+            <div className="rounded-lg border bg-slate-50 p-2 sm:p-3">
+              <img
+                src={proofViewer.urls[proofViewer.index]}
+                alt={`Bukti pengeluaran ${proofViewer.index+1} dari ${proofViewer.urls.length}`}
+                className="mx-auto max-h-[48vh] w-full object-contain"
+              />
+            </div>
             <div className="flex items-center justify-between gap-2">
-              <Button type="button" variant="outline" disabled={proofViewer.index===0}
-                onClick={()=>setProofViewer(v=>v?{...v,index:v.index-1}:null)}>Sebelumnya</Button>
-              <span className="text-sm">{proofViewer.index+1} / {proofViewer.urls.length}</span>
-              <Button type="button" variant="outline" disabled={proofViewer.index===proofViewer.urls.length-1}
-                onClick={()=>setProofViewer(v=>v?{...v,index:v.index+1}:null)}>Berikutnya</Button>
+              <Button type="button" variant="outline" size="sm" disabled={proofViewer.index===0}
+                onClick={()=>setProofViewer(v=>v?{...v,index:Math.max(0,v.index-1)}:null)}>Sebelumnya</Button>
+              <span className="text-sm tabular-nums">Bukti {proofViewer.index+1} dari {proofViewer.urls.length}</span>
+              <Button type="button" variant="outline" size="sm" disabled={proofViewer.index===proofViewer.urls.length-1}
+                onClick={()=>setProofViewer(v=>v?{...v,index:Math.min(v.urls.length-1,v.index+1)}:null)}>Berikutnya</Button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" aria-label="Daftar lampiran pengeluaran">
+              {proofViewer.urls.map((url,index)=>(
+                <button type="button" key={url+"-"+index}
+                  aria-label={`Lihat bukti ${index+1}`}
+                  aria-pressed={proofViewer.index===index}
+                  onClick={()=>setProofViewer(v=>v?{...v,index}:null)}
+                  className={`overflow-hidden rounded-lg border-2 bg-white text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${proofViewer.index===index?"border-blue-600":"border-slate-200 hover:border-slate-400"}`}>
+                  <img src={url} alt={`Pratinjau bukti ${index+1}`} loading="lazy"
+                    className="h-28 sm:h-36 w-full object-contain bg-slate-50"/>
+                  <div className="px-2 py-1.5 text-xs font-medium">Bukti {index+1}</div>
+                </button>
+              ))}
             </div>
           </>}
         </DialogContent>
