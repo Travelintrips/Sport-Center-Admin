@@ -82,6 +82,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND e.verification_code IN (1,4,15)
       AND e.raw_hex ~ '^[0-9a-f]{80}$'
       AND get_byte(decode(substr(e.raw_hex,53,2),'hex'),0)=e.verification_code
+      AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)=0
     JOIN sport_center.gym_x904_raw_events r
       ON r.event_id=l.event_id AND r.device_serial=l.device_serial
       AND r.user_pin=l.user_pin AND r.device_time=l.device_time
