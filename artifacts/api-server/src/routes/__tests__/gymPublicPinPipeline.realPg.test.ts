@@ -792,6 +792,7 @@ suite(
     test("real PostgreSQL RLS allows only matching signed X904 evidence writes", async()=>{
       // Staged migration is evaluated against the same non-bypass application
       // role as the actual Express runtime, not a mocked privileged client.
+      await pool.query("ALTER TABLE sport_center.gym_x904_verification_evidence ADD COLUMN verification_method text");
       await pool.query("ALTER TABLE sport_center.gym_x904_raw_events ENABLE ROW LEVEL SECURITY");
       await pool.query("ALTER TABLE sport_center.gym_x904_verification_evidence ENABLE ROW LEVEL SECURITY");
       await pool.query(readFileSync("migrations/20261112_x904_attested_ingress_backend_rls.sql","utf8"));
