@@ -1,4 +1,4 @@
-import { isNewOrdinaryX904Candidate, isSafeReenrollment, hasX904CommandForCurrentIdentityEpoch } from "./x904NewOrdinaryUserDefaultSuspend";
+import { isNewOrdinaryX904Candidate, isSafeReenrollment, hasX904CommandForCurrentIdentityEpoch, currentX904IdentityEpochStart } from "./x904NewOrdinaryUserDefaultSuspend";
 import { decideNonmemberX904Access, x904NonmemberEffectiveExpiry } from "./x904NonmemberAccessPolicy";
 
 describe("new ordinary X904 device user stays suspended until verified paid entitlement", () => {
@@ -61,4 +61,17 @@ test("reused PIN separates old commands from the new identity epoch", () => {
   expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, firstSeen + 60_000)).toBe(true);
   expect(hasX904CommandForCurrentIdentityEpoch(firstSeen, NaN)).toBe(true);
   expect(hasX904CommandForCurrentIdentityEpoch(NaN, undefined)).toBe(true);
+});
+
+test("current identity epoch starts after actual absence, not original PIN registration", () => {
+  const old = {pin:"680",name:"OLD OWNER",role:0,group:1,enabled:true};
+  const fresh = {...old,name:"NEW OWNER"};
+  const history = [
+    {users:[old]}, {users:[old]}, {users:[]}, {users:[]},
+    {users:[fresh]}, {users:[fresh]},
+  ];
+  expect(currentX904IdentityEpochStart(history,fresh)).toBe(4);
+  expect(currentX904IdentityEpochStart(history,old)).toBe(-1);
+  expect(currentX904IdentityEpochStart([{users:[fresh]},{users:[fresh]}],fresh)).toBe(0);
+  expect(currentX904IdentityEpochStart([{users:[]},{users:[fresh]}],fresh)).toBe(1);
 });
