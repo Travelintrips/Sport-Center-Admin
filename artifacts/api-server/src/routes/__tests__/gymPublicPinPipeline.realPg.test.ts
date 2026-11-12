@@ -660,7 +660,7 @@ suite(
       expect(confirmedGrant.verification_state).toBe("verified");
       // Isolated fixture of a completed activation ACK; no physical device interaction.
       await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at=$2,expires_at=$3 WHERE booking_id=$1",
-        [id,new Date("2026-11-10T01:00:20Z"),new Date("2026-11-10T02:00:00Z")]);
+        [id,new Date("2026-11-10T01:00:20Z"),new Date("2026-11-10T13:00:20Z")]);
       await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES('TDBD234200545','700',999,'2026-11-10 08:15:00','wrong-uid')");
       process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = "true";
       const evaluation = new Date("2026-11-10T01:16:00Z");
