@@ -1,5 +1,5 @@
 import { db, bookingsTable, bookingHistoryTable, rescheduleRequestsTable, usageProofsTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { logAudit } from "./auditLog";
 export {
   CONFIRMABLE_BOOKING_STATUSES,
@@ -67,7 +67,30 @@ export async function completeBooking(
     if (booking.status !== "confirmed") {
       return { ok: false, reason: "Booking harus berstatus confirmed sebelum diselesaikan" };
     }
-    if (!booking.checkedInAt && !exceptionReason) {
+    // Reuse the existing administrative completion path for future, paid and
+    // verified public Gym guests. Ending a session is NOT evidence of attendance.
+    // Keep historical bookings, event photo proof, reschedules, and non-Gym
+    // exception requirements unchanged.
+    let completionReason = exceptionReason;
+    if (!booking.checkedInAt && !completionReason &&
+        booking.source === "gym_public_guest" &&
+        booking.bookingDate >= "2026-11-13" &&
+        hasBookingSessionEnded(booking.bookingDate, booking.endTime, now)) {
+      const entitlement = await tx.execute(sql`
+        SELECT 1 FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.sport_payments p
+          ON p.id=a.payment_id AND p.booking_id=a.booking_id
+        WHERE a.booking_id=${bookingId}
+          AND a.device_serial='TDBD234200545'
+          AND a.verification_state='verified'
+          AND a.identity_type IN ('pin','card')
+          AND a.activated_at IS NOT NULL
+          AND p.status='confirmed' AND p.confirmed_at IS NOT NULL AND p.amount>0
+        LIMIT 1`);
+      if (entitlement.rows.length===1)
+        completionReason = "Sesi Gym mandiri sudah berakhir; check-in tidak tercatat otomatis";
+    }
+    if (!booking.checkedInAt && !completionReason) {
       return { ok: false, reason: "Booking belum check-in. Gunakan Selesaikan tanpa check-in dengan alasan minimal 12 karakter." };
     }
     if (booking.bookingType === "event") {
@@ -97,7 +120,7 @@ export async function completeBooking(
       changedByName: actor.userName ?? "system",
       note: booking.checkedInAt
         ? "Booking completed setelah check-in dan waktu sesi berakhir"
-        : `Selesai administratif tanpa check-in (bukan bukti kehadiran): ${exceptionReason}`,
+        : `Selesai administratif tanpa check-in (bukan bukti kehadiran): ${completionReason}`,
     });
     return { ok: true, bookingId, alreadyCompleted: false, withoutCheckin: !booking.checkedInAt };
   });
@@ -111,7 +134,7 @@ export async function completeBooking(
       before: { status: "confirmed" },
       after: { status: "completed", completedAt: now.toISOString(),
         reason: result.withoutCheckin ? "admin_close_without_checkin" : "checked_in_and_session_ended",
-        withoutCheckInReason: result.withoutCheckin ? exceptionReason : undefined,
+        withoutCheckInReason: result.withoutCheckin ? (exceptionReason ?? "Sesi Gym mandiri sudah berakhir; check-in tidak tercatat otomatis") : undefined,
         checkedInAtUntouched: true },
     });
   }

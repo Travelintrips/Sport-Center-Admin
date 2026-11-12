@@ -15,17 +15,28 @@ const row = {
 
 describe("nonmember X904 scan reconciliation keeps existing booking lifecycle", () => {
   const prev = process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
+  const prevLan = process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
   afterEach(() => {
     checkInMock.mockReset();
     if (prev === undefined) delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
     else process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = prev;
+    if (prevLan === undefined) delete process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
+    else process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED = prevLan;
   });
-  test("default off does not even read database or write check-in", async () => {
+  test("both explicit opt-out gates avoid DB reads and check-in", async () => {
     delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
+    process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED = "false";
     const store = { execute: jest.fn(async () => ({rows:[row]})) };
     expect(await reconcileX904MissedNonmemberBookingCheckins(store as any)).toBe(0);
     expect(store.execute).not.toHaveBeenCalled();
     expect(checkInMock).not.toHaveBeenCalled();
+  });
+  test("future guest LAN reconciliation is enabled without turning on legacy signed mode", async()=>{
+    delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
+    delete process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
+    const store={execute:jest.fn(async()=>({rows:[]}))};
+    expect(await reconcileX904MissedNonmemberBookingCheckins(store as any)).toBe(0);
+    expect(store.execute).toHaveBeenCalledTimes(1);
   });
   test("SC-1773 earlier PIN 16 scans must not trigger check-in", async () => {
     process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = "true";

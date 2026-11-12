@@ -52,9 +52,16 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
   store: Pick<typeof db, "execute"> = db,
   evaluationTime: Date = new Date(),
 ): Promise<number> {
-  if (process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED !== "true") return 0;
+  // Preserve the existing opt-in signed path. For FUTURE paid public Gym
+  // sessions only, reuse the authenticated LAN records already supplying WA.
+  // Emergency opt-out: GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED=false.
+  const signedEnabled = process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED === "true";
+  const lanGuestEnabled = process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED !== "false";
+  if (!signedEnabled && !lanGuestEnabled) return 0;
   const rows = await store.execute(sql`
-    SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time
+    SELECT DISTINCT ON (a.booking_id) a.booking_id,b.booking_date,b.start_time,b.end_time,l.event_id,l.device_time,
+      CASE WHEN e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL
+        THEN 'signed_vmsc' ELSE 'authenticated_lan_snapshot' END AS scan_provenance
     FROM sport_center.x904_nonmember_daily_access a
     JOIN sport_center.sport_bookings b ON b.id=a.booking_id
     JOIN sport_center.sport_payments p
@@ -78,9 +85,10 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND upper(trim(u.display_name))=upper(trim(a.verified_name))
     JOIN sport_center.gym_x904_lan_logs l ON l.device_serial=a.device_serial
       AND l.user_pin=a.user_pin
-    -- The historical LAN device_uid stores an SDK event sequence, not roster UID.
-    -- Signed VMSC proof is required for a verified booking scan.
-    JOIN sport_center.gym_x904_verification_evidence e
+    JOIN sport_center.gym_x904_lan_state state ON state.device_serial=l.device_serial
+    -- Signed attestation or future-only authenticated durable LAN observation.
+    -- Keep provenance explicit: LAN observation is not signed HMAC evidence.
+    LEFT JOIN sport_center.gym_x904_verification_evidence e
       ON e.device_serial=l.device_serial AND e.event_index=l.event_index
       AND e.user_pin=l.user_pin AND e.source_event_id=l.event_id
       AND e.capture_source='trusted_vmsc_ingress'
@@ -88,16 +96,33 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND e.verification_code IN (1,4,15)
       AND e.raw_hex ~ '^[0-9a-f]{80}$'
       AND get_byte(decode(substr(e.raw_hex,53,2),'hex'),0)=e.verification_code
-      -- 255 is the device's valid undefined Punch State, NOT a user UID.
-      -- It only qualifies after a signed, same-event VMSC attestation.
       AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0) IN (0,255)
-    JOIN sport_center.gym_x904_raw_events r
+    LEFT JOIN sport_center.gym_x904_raw_events r
       ON r.event_id=l.event_id AND r.device_serial=l.device_serial
       AND r.user_pin=l.user_pin AND r.device_time=l.device_time
       AND r.attendance_status=get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)
       AND r.verification_type=e.verification_code
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
+      AND (
+        (${signedEnabled}::boolean AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+        OR
+        (${lanGuestEnabled}::boolean AND b.source='gym_public_guest' AND b.booking_date>='2026-11-13'
+          AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
+          AND state.last_complete_at>now()-interval '90 minutes'
+          AND l.last_seen_snapshot=state.last_snapshot_id
+          AND l.device_uid=l.event_index+1
+          AND l.event_index>=0 AND l.event_id ~ '^[a-f0-9]{64}$'
+          AND NOT EXISTS (
+            SELECT 1 FROM sport_center.x904_nonmember_daily_access other
+            JOIN sport_center.sport_bookings ob ON ob.id=other.booking_id
+            WHERE other.booking_id<>a.booking_id
+              AND other.device_serial=a.device_serial AND other.user_pin=a.user_pin
+              AND ob.status='confirmed' AND ob.booking_date=b.booking_date
+              AND ob.start_time<b.end_time AND ob.end_time>b.start_time
+          )
+        )
+      )
       AND (
         (a.identity_type='pin' AND v.device_uid IS NOT NULL)
         OR
@@ -139,7 +164,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     // checkInBooking validates current status, session, pending reschedule and
     // records an audit entry; the normal scheduler later calls completeBooking.
     const result = await checkInBooking(Number(row.booking_id), {
-      userName: `X904 verified scan ${String(row.event_id)}`, userRole: "system",
+      userName: `X904 ${row.scan_provenance==="signed_vmsc" ? "signed scan" : "LAN observed scan"} ${String(row.event_id)}`, userRole: "system",
     }, observed);
     if (result.ok) checkedIn++;
     else logger.info({ bookingId: row.booking_id, reason: result.reason },
