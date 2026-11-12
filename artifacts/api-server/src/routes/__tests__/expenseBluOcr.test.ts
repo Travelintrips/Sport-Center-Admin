@@ -116,7 +116,9 @@ describe("expense proof empty OCR response is recoverable without duplicate uplo
     expect(route).toContain("fieldCount: 0");
     expect(ocr).toContain('(["color", "normalized", "inverted"] as const)');
     expect(ui).toContain("Coba Baca Lagi (tanpa unggah ulang)");
-    expect(ui).toContain("lastProofFileRef.current=firstProof");
+    expect(ui).toContain("lastProofFileRef.current=fileArr[0]??null");
+    expect(ui).toContain('if(kind==="payment"){');
+    expect(ui).toContain("Supporting receipts are never submitted to any OCR endpoint");
     expect(ui).toContain('setProofReadMessage(preview.readMessage');
   });
 });
