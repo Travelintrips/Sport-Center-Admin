@@ -1750,16 +1750,15 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       ...getClientInfo(req),
     });
 
-    let accounting: "posted" | "skipped" = "skipped";
-    if (payment.status === "confirmed" && effectiveMethod === "QRIS" && metadataBooking) {
-      await postPaymentAccountingProjection(payment, metadataBooking);
-      accounting = "posted";
-    }
-
+    // This endpoint changes descriptive metadata only. The database transaction
+    // already synchronizes posted journal/public mirror metadata through scoped
+    // triggers. Re-running the payment posting projection after COMMIT can throw
+    // HTTP 500 even when the correction was saved, and must not create a second
+    // accounting event for a previously confirmed payment.
     res.json({
       ...payment,
       amount: Number(payment.amount),
-      accounting,
+      accounting: "skipped",
       warnings: revisionWarnings,
     });
   } catch (err: any) {
