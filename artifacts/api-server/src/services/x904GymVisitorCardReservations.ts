@@ -325,9 +325,8 @@ export async function collectReservedVisCard(input: {
           AND identity_label=${String(row.card_code)}
           AND user_pin=${String(row.user_pin)}
           AND device_uid=${Number(row.device_uid)}
-          AND verification_state='pending'
-          AND access_state='pending'
-          AND activated_at IS NULL
+          AND verification_state IN ('pending','verified')
+          AND access_state IN ('pending','active')
           AND expires_at>now()
         RETURNING access_id`);
       if (linkedGrant.rows.length !== 1) {
