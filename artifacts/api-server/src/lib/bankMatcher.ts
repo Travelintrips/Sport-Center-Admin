@@ -210,7 +210,6 @@ async function computeStrictQrisCandidate(mutation: BankMutation): Promise<Match
     rawPayload,
   };
   const evaluation = evaluateQrisMutation(qrisMutation, payments, rules);
-  const candidateId = evaluation.paymentIds[0] ?? 0;
 
   if (evaluation.decision === "UNMATCHED" && !evaluation.paymentIds.length) {
     // Historical Gym payments can predate the mandatory settlement metadata.
@@ -295,6 +294,14 @@ async function computeStrictQrisCandidate(mutation: BankMutation): Promise<Match
     if (legacyCandidates.length) return legacyCandidates;
     return [];
   }
+
+  // Never manufacture payment ID 0 when the strict QRIS evaluator finds no
+  // actual payment. A zero candidate used to overwrite a real payment-side
+  // reconciliation link with matched_payment_id=0 on every matcher rerun.
+  if (!evaluation.paymentIds.length || !Number.isInteger(evaluation.paymentIds[0]) || evaluation.paymentIds[0] <= 0) {
+    return [];
+  }
+  const candidateId = evaluation.paymentIds[0];
 
   return [{
     candidateType: "payment",
