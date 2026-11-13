@@ -506,7 +506,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     if (paginationRequested && (paidDateFrom || paidDateTo)) {
       const from = paidDateFrom ? String(paidDateFrom) : null;
       const to = paidDateTo ? String(paidDateTo) : null;
-      const isoDate = /^\\d{4}-\\d{2}-\\d{2}$/;
+      const isoDate = /^\d{4}-\d{2}-\d{2}$/;
       if ((from && !isoDate.test(from)) || (to && !isoDate.test(to)) || (from && to && from > to)) {
         res.status(400).json({ error: "Rentang tanggal pembayaran tidak valid" });
         return;
