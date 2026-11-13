@@ -28,6 +28,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
+import { x904PaidPinNeedsResolution } from "../services/x904PaidPinVisitWindow";
 import { autoReserveVisAfterFundsVerified, reserveVisAfterAdminPaymentConfirmation, collectReservedVisCard, returnVerifiedVisCard, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { notifyGymVisitorCardReserved } from "../lib/notifications";
 import { wakeX904CollectedVisAfterHandover } from "../services/x904VisFastWake";
@@ -161,12 +162,12 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
   // booking endpoints; VIS card allocation and return logic remain separate.
   let x904PinGrant: {
     accessId: number; userPin: string; deviceUid: number; verifiedName: string;
-    accessState: string; verificationState: string; paymentStatus: string | null;
+    accessState: string; verificationState: string; paymentStatus: string | null; requiresResolution: boolean;
   } | null = null;
   if (booking.source === "gym_public_guest") {
     try {
       const linked = await db.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
-          a.access_state,a.verification_state,p.status::text AS payment_status
+          a.access_state,a.verification_state,a.activated_at,p.status::text AS payment_status
         FROM sport_center.x904_nonmember_daily_access a
         LEFT JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
         WHERE a.booking_id=${booking.id} AND a.identity_type='pin'
@@ -178,6 +179,10 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
           deviceUid: Number(row.device_uid), verifiedName: String(row.verified_name),
           accessState: String(row.access_state), verificationState: String(row.verification_state),
           paymentStatus: row.payment_status == null ? null : String(row.payment_status),
+          requiresResolution: x904PaidPinNeedsResolution({
+            bookingDate: booking.bookingDate, identityType: "pin",
+            paymentStatus: row.payment_status, activatedAt: row.activated_at,
+          }),
         };
       }
     } catch (error) {

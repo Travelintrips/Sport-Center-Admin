@@ -24,7 +24,7 @@ interface BookingStatus {
   status: string;
   source: string;
   visitorCard?: { code: string; state: string } | null;
-  gymAccessStatus?: "not_active" | "pending" | "active" | "expired" | null;
+  gymAccessStatus?: "not_active" | "pending" | "active" | "expired" | "needs_resolution" | null;
   gymAccessExpiresAt?: string | null;
   notes: string | null;
   paymentDeadline: string | null;
@@ -151,7 +151,7 @@ export default function WaBookingStatus() {
   const paymentConfirmed = ["confirmed", "completed"].includes(booking.status) && booking.payment?.status === "confirmed";
   const bookingCancelled = ["cancelled", "rejected", "expired", "refunded"].includes(booking.status);
   const paymentDescription = paymentConfirmed ? "Lunas" : bookingCancelled ? "Tidak Aktif" : booking.status === "pending_payment" ? "Menunggu Pembayaran" : "Menunggu Verifikasi Admin";
-  const gymAccessDescription = booking.gymAccessStatus === "active" ? "Aktif — Silakan Scan" : booking.gymAccessStatus === "expired" ? "Masa Akses Berakhir" : booking.gymAccessStatus === "pending" ? "Menunggu Aktivasi X904" : "Belum Aktif";
+  const gymAccessDescription = booking.gymAccessStatus === "active" ? "Aktif — Silakan Scan" : booking.gymAccessStatus === "needs_resolution" ? "Perlu Penyelesaian Admin" : booking.gymAccessStatus === "expired" ? "Masa Akses Berakhir" : booking.gymAccessStatus === "pending" ? "Menunggu Aktivasi X904" : "Belum Aktif";
   const hasWithholding = Number(booking.pphAmount ?? 0) > 0 && booking.netAmount != null;
 
   return (
@@ -206,6 +206,13 @@ export default function WaBookingStatus() {
               <div className="flex items-center justify-between gap-3"><span>Booking</span><strong>{bookingCancelled ? "Tidak Aktif" : "Berhasil Dibuat"}</strong></div>
               <div className="flex items-center justify-between gap-3"><span>Pembayaran</span><strong className={paymentConfirmed ? "text-green-700" : "text-amber-700"}>{paymentDescription}</strong></div>
               <div className="flex items-center justify-between gap-3"><span>Akses X904</span><strong className={booking.gymAccessStatus === "active" && paymentConfirmed ? "text-green-700" : "text-slate-700"}>{paymentConfirmed && booking.gymAccessStatus === "active" ? "Aktif — Silakan Scan" : gymAccessDescription}</strong></div>
+              {paymentConfirmed && booking.gymAccessStatus === "needs_resolution" && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900" role="status">
+                  Pembayaran telah diterima, tetapi masa akses PIN untuk tanggal booking sudah berakhir pukul 23.00 WIB tanpa aktivasi.
+                  Silakan hubungi admin Sport Center untuk penjadwalan ulang yang disepakati atau pengembalian dana sesuai ketentuan.
+                  PIN tidak akan diaktifkan otomatis keesokan hari. Jangan membayar kedua kali untuk booking ini.
+                </p>
+              )}
               {paymentConfirmed && booking.gymAccessStatus === "active" && booking.gymAccessExpiresAt && (
                 <p className="rounded-lg bg-green-50 p-2 text-xs text-green-800">Berlaku hingga {formatDateTime(booking.gymAccessExpiresAt)}. Gunakan identitas yang telah diverifikasi petugas.</p>
               )}
