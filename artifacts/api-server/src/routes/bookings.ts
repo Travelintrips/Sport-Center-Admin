@@ -1413,9 +1413,12 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           if (!date ||
               (paidDateFrom && date < String(paidDateFrom)) ||
               (paidDateTo && date > String(paidDateTo))) continue;
-          const linkedMembershipId = receipt.sourceMembershipPaymentId ?? receipt.source_membership_payment_id;
+          const linkedMembershipId = "sourceMembershipPaymentId" in receipt
+            ? receipt.sourceMembershipPaymentId : null;
+          const isInvoiceReceipt = "isCompanyInvoicePayment" in receipt &&
+            receipt.isCompanyInvoicePayment === true;
           const key = linkedMembershipId != null ? `membership:${linkedMembershipId}` :
-            receipt.isCompanyInvoicePayment ? `invoice:${Math.abs(Number(receipt.id))}` :
+            isInvoiceReceipt ? `invoice:${Math.abs(Number(receipt.id))}` :
             `payment:${receipt.id}`;
           if (!confirmedPaymentAmounts.has(key)) {
             confirmedPaymentAmounts.set(key, Math.max(0, Number(receipt.amount ?? 0)));
