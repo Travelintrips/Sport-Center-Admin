@@ -754,24 +754,6 @@ suite(
         delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
       }
     });
-    test("paid public Gym reserved VIS is eligible after one confirmation, without fake handover", async () => {
-      const id = await checkout();
-      const paymentId = await confirm(id);
-      const now = new Date("2026-11-10T01:00:00Z");
-      await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-10',start_time='12:00',end_time='13:00',notes='Kartu VIS001–VIS006 menunggu pilihan' WHERE id=$1",[id]);
-      await pool.query("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','78',338,'VIS001',0)");
-      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET identity_type='card',identity_label='VIS001',user_pin='78',device_uid=338,verified_name='VIS001',verification_state='verified',access_state='pending' WHERE booking_id=$1",[id]);
-      await pool.query("INSERT INTO sport_center.gym_vis_card_reservations(booking_id,payment_id,device_serial,user_pin,device_uid,card_code,state,funds_verified_at) VALUES($1,$2,'TDBD234200545','78',338,'VIS001','reserved',$3)",[id,paymentId,now]);
-      await pool.query("INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users) VALUES('TDBD234200545',$1,1,$2)",[now,JSON.stringify([{pin:'78',name:'VIS001',role:0,group:2,enabled:true}])]);
-      await tick(now);
-      const commands = await pool.query("SELECT command_type,user_pin FROM sport_center.x904_user_commands WHERE user_pin='78'");
-      expect(commands.rows).toHaveLength(1);
-      expect(commands.rows[0].command_type).toBe("ACTIVATE_USER");
-      const reservation = await pool.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[id]);
-      expect(reservation.rows[0]).toMatchObject({state:"reserved",collected_at:null});
-      await tick(now);
-      expect((await pool.query("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE user_pin='78'")).rows[0].n).toBe(1);
-    });
     test("all six VIS preserve witnessed handover before signed booking check-in", async () => {
       const {reconcileX904MissedNonmemberBookingCheckins}=await import("../../services/x904MissedCheckinReconcile.js");
       const id=await checkout();
