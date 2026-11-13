@@ -23,7 +23,6 @@ import { canRecordConfirmedBookingOutstandingPayment } from "../lib/confirmedBoo
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
 import { wakeX904AdminVisAfterPayment } from "../services/x904VisFastWake";
-import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
