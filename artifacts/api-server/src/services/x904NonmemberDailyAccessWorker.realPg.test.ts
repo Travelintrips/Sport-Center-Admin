@@ -1150,3 +1150,23 @@ test("collector outage does not freeze later enrollment; no duplicate on retry",
     delete process.env.GYM_X904_NEW_USER_BASELINE_AT;
   }
 });
+
+test("existing confirmed VIS001 booking recovers pending grant and queues one activation without second admin click", async () => {
+  const at = new Date("2026-11-06T01:30:00Z");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = "78";
+  try {
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,customer_name,grand_total,total_price) VALUES (9850,'2026-11-06','12:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed','CI VIS FANDI',30000,30000)");
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES (9950,9850,'confirmed','2026-11-06T01:00:00Z',30000,'ci://confirmed-payment')");
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,visitor_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state) VALUES ('TDBD234200545','card','VIS001','78',338,'VIS 001','CI VIS FANDI',9850,9950,'2026-11-06T01:00:00Z','2026-11-06T16:00:00Z','pending','pending')");
+    await run("INSERT INTO sport_center.gym_vis_card_reservations(booking_id,payment_id,card_code,user_pin,device_uid,state,funds_reference,funds_verified_by,funds_verified_at) VALUES(9850,9950,'VIS001','78',338,'reserved','ADMINPAY-9950','CI_ADMIN','2026-11-06T01:00:10Z')");
+    await addSnapshot(new Date(at.getTime()-1000),'78','VIS 001',2);
+    await processX904NonmemberDailyAccess(db as any,at);
+    const linked = (await run("SELECT access_id,access_state,verification_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9850")).rows[0];
+    expect(linked).toMatchObject({access_state:"pending",verification_state:"verified"});
+    const queued = await commandFor("ACTIVATE_USER",Number(linked.access_id));
+    expect(queued?.payload).toMatchObject({expectedUid:338,accessId:Number(linked.access_id)});
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='ACTIVATE_USER' AND payload->>'accessId'=$1",[String(linked.access_id)])).rows[0].n).toBe(1);
+    expect((await run("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=9850")).rows[0]).toMatchObject({state:"reserved",collected_at:null});
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
