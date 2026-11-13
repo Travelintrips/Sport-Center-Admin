@@ -1178,6 +1178,7 @@ test("paid public Gym booking without VIS recovers after temporary inventory fai
   const order="CI-RECOVER-NO-CARD-15101";
   await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,grand_total,total_price) VALUES(15101,$1,'10:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI RECOVERY',30000,30000)",[day,order]);
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount) VALUES(16101,15101,'confirmed',now(),30000)");
+  await run("INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role) VALUES('TDBD234200545','11',11,'VIS 005',0)");
   await addSnapshot(new Date(),"11","VIS 005",2);
   // The earlier payment confirmation is real within the fixture, but a
   // missing proof must never cause a VIS grant or additional payment row.
