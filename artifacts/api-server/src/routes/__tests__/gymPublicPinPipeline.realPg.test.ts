@@ -758,7 +758,7 @@ suite(
       const id = await checkout();
       const paymentId = await confirm(id);
       const now = new Date("2026-11-10T01:00:00Z");
-      await pool.query("UPDATE sport_center.sport_bookings SET start_time='12:00',end_time='13:00' WHERE id=$1",[id]);
+      await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-10',start_time='12:00',end_time='13:00',notes='Kartu VIS001–VIS006 menunggu pilihan' WHERE id=$1",[id]);
       await pool.query("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','78',338,'VIS001',0)");
       await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET identity_type='card',identity_label='VIS001',user_pin='78',device_uid=338,verified_name='VIS001',verification_state='verified',access_state='pending' WHERE booking_id=$1",[id]);
       await pool.query("INSERT INTO sport_center.gym_vis_card_reservations(booking_id,payment_id,device_serial,user_pin,device_uid,card_code,state,funds_verified_at) VALUES($1,$2,'TDBD234200545','78',338,'VIS001','reserved',$3)",[id,paymentId,now]);
