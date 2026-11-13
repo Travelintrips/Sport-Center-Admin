@@ -136,6 +136,9 @@ export default function AdminWaBookings() {
   const [pinOwnershipChecked, setPinOwnershipChecked] = useState(false);
   const [pinFundsChecked, setPinFundsChecked] = useState(false);
   const [pinBankReference, setPinBankReference] = useState("");
+  const [pinResolutionChoice, setPinResolutionChoice] = useState("");
+  const [pinResolutionReference, setPinResolutionReference] = useState("");
+  const [pinResolutionNote, setPinResolutionNote] = useState("");
   const [visCardHandedOver, setVisCardHandedOver] = useState(false);
   const [visCardReturned, setVisCardReturned] = useState(false);
   const [visReadbackChecked, setVisReadbackChecked] = useState(false);
@@ -145,6 +148,9 @@ export default function AdminWaBookings() {
     setPinOwnershipChecked(false);
     setPinFundsChecked(false);
     setPinBankReference("");
+    setPinResolutionChoice("");
+    setPinResolutionReference("");
+    setPinResolutionNote("");
   }, [selectedOrder]);
 
   const queryKey = ["wa-bookings", activeTab, sourceFilter, search];
@@ -211,6 +217,35 @@ export default function AdminWaBookings() {
       invalidate();
     },
     onError: (e: any) => toast({ title: "Verifikasi PIN ditolak", description: e.message, variant: "destructive" }),
+  });
+
+  // Reuses the established audited notes-only path. No payment, date, or X904 mutations.
+  const pinResolutionMutation = useMutation({
+    mutationFn: (booking: Record<string, any>) => {
+      const choice = pinResolutionChoice.trim();
+      const reference = pinResolutionReference.trim();
+      const detailNote = pinResolutionNote.trim();
+      if (!choice || reference.length < 6 || detailNote.length < 10) {
+        throw new Error("Pilih keputusan pelanggan, referensi minimal 6 karakter, dan keterangan minimal 10 karakter.");
+      }
+      const entry = "Tindak lanjut akses PIN setelah 23.00 WIB | Keputusan pelanggan: " + choice +
+        " | Referensi: " + reference + " | Keterangan: " + detailNote;
+      const previous = String(booking.adminNotes ?? "").trim();
+      const adminNotes = previous ? previous + "\n" + entry : entry;
+      if (adminNotes.length > 2000) throw new Error("Catatan melebihi 2.000 karakter. Ringkas keterangan tanpa menghapus informasi sebelumnya.");
+      return apiFetch("/bookings/" + Number(booking.id), {
+        method: "PATCH",
+        body: JSON.stringify({ adminNotes }),
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Tindak lanjut tersimpan", description: "Tercatat di booking dan histori. Pembayaran, status, PIN, serta jurnal tidak berubah." });
+      setPinResolutionChoice("");
+      setPinResolutionReference("");
+      setPinResolutionNote("");
+      invalidate();
+    },
+    onError: (e: any) => toast({ title: "Gagal mencatat tindak lanjut", description: e.message, variant: "destructive" }),
   });
 
   const collectVisMutation = useMutation({
@@ -506,6 +541,33 @@ export default function AdminWaBookings() {
                         Jangan sahkan PIN untuk hari lama. Hubungi pelanggan untuk penjadwalan ulang yang disetujui atau refund melalui alur keuangan yang ada.
                         Jangan membuat pembayaran atau jurnal kedua.
                       </p>
+                    )}
+                    {detail.x904PinGrant.requiresResolution && (
+                      <div className="space-y-2 rounded-lg border border-amber-200 bg-white p-3" aria-label="Catat tindak lanjut booking PIN">
+                        <p className="text-xs font-semibold">Catat hasil komunikasi pelanggan pada booking lama</p>
+                        <select className="w-full rounded-md border p-2 text-sm" aria-label="Keputusan pelanggan"
+                          value={pinResolutionChoice} onChange={e => setPinResolutionChoice(e.target.value)}>
+                          <option value="">Pilih hasil komunikasi pelanggan...</option>
+                          <option value="Menunggu jawaban pelanggan">Menunggu jawaban pelanggan</option>
+                          <option value="Pelanggan meminta penjadwalan ulang">Pelanggan meminta penjadwalan ulang</option>
+                          <option value="Pelanggan meminta refund">Pelanggan meminta refund</option>
+                        </select>
+                        <Input value={pinResolutionReference} onChange={e => setPinResolutionReference(e.target.value)}
+                          maxLength={80} placeholder="Referensi komunikasi / tiket (minimal 6 karakter)"
+                          aria-label="Referensi tindak lanjut PIN"/>
+                        <Textarea value={pinResolutionNote} onChange={e => setPinResolutionNote(e.target.value)}
+                          placeholder="Ringkasan komunikasi dan tindakan berikutnya (minimal 10 karakter)"
+                          aria-label="Ringkasan tindak lanjut PIN"/>
+                        <Button type="button" className="w-full" variant="outline"
+                          disabled={pinResolutionMutation.isPending || !pinResolutionChoice || pinResolutionReference.trim().length < 6 || pinResolutionNote.trim().length < 10}
+                          onClick={() => pinResolutionMutation.mutate(detail.booking)}>
+                          {pinResolutionMutation.isPending ? "Menyimpan..." : "Simpan Tindak Lanjut di Booking"}
+                        </Button>
+                        <p className="text-xs text-slate-600">Pencatatan bukan persetujuan refund atau penjadwalan ulang. Penyelesaian keuangan dan booking baru mengikuti prosedur yang ada, setelah persetujuan pelanggan. PIN lama tidak diaktifkan kembali.</p>
+                        {detail.booking.adminNotes && (
+                          <p className="rounded-md bg-slate-50 p-2 text-xs whitespace-pre-wrap">Catatan admin: {detail.booking.adminNotes}</p>
+                        )}
+                      </div>
                     )}
                     {!detail.x904PinGrant.requiresResolution && detail.x904PinGrant.verificationState === "review_required" &&
                       detail.x904PinGrant.accessState === "review_required" ? (
