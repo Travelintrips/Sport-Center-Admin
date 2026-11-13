@@ -2,7 +2,7 @@ import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { pool as appDatabasePool } from "@workspace/db";
 import { readFileSync } from "node:fs";
-import { processX904NonmemberDailyAccess } from "./x904NonmemberDailyAccessWorker";
+import { processX904NonmemberDailyAccess, recoverPaidPublicGymPin } from "./x904NonmemberDailyAccessWorker";
 import { processX904NewOrdinaryUserDefaultSuspend } from "./x904NewOrdinaryUserDefaultSuspend";
 import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
 
@@ -1200,6 +1200,34 @@ test("paid public Gym booking without VIS recovers after temporary inventory fai
   expect(await recoverUnallocatedPaidGymVis(midday)).toBe(0);
   expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=15101")).rows[0].n).toBe(1);
   expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=15101")).rows[0].n).toBe(1);
+});
+
+
+test("public website PIN recovers from a temporarily stale X904 image without another payment", async () => {
+  // Runs against disposable local PostgreSQL only, never PROD.
+  const t = new Date("2026-11-06T01:00:00Z");
+  const pin = "606", uid = 606, name = "CI WEB PIN";
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN = pin;
+  try {
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES ('TDBD234200545','606',606,'CI WEB PIN',0)");
+    await run("INSERT INTO sport_center.x904_verified_nonmember_identities(device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at) VALUES('TDBD234200545','606',606,'CI WEB PIN','verified','CI',now())");
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES(9606,'2026-11-06','08:00','gym_public_guest','Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required','confirmed','SC-CI-WEB-9606','CI WEB PIN',30000)");
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state) VALUES('TDBD234200545','pin','PIN:606','606',606,'CI WEB PIN',9606,'review_required','review_required')");
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES(9706,9606,'pending',$1,30000,'ci://receipt')",[t]);
+    await run("UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9706");
+    await addSnapshot(new Date(t.getTime()-360000),pin,name,2);
+    expect(await recoverPaidPublicGymPin(db as any,t,301)).toBe(0);
+    await addSnapshot(new Date(t.getTime()+1000),pin,name,2);
+    expect(await recoverPaidPublicGymPin(db as any,new Date(t.getTime()+2000),301)).toBe(1);
+    expect(await recoverPaidPublicGymPin(db as any,new Date(t.getTime()+3000),301)).toBe(0);
+    const grant=(await run("SELECT access_id,access_state,verification_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9606")).rows[0];
+    expect(grant).toMatchObject({access_state:"pending",verification_state:"verified"});
+    await processX904NonmemberDailyAccess(db as any,new Date(t.getTime()+4000));
+    expect(await commandFor("ACTIVATE_USER",Number(grant.access_id))).toBeTruthy();
+    expect((await run("SELECT count(*)::int n FROM sport_center.audit_logs WHERE action='x904_guest_pin_payment_auto_recovered' AND entity_id=9606")).rows[0].n).toBe(1);
+    expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=9606")).rows[0].n).toBe(1);
+    expect(await recoverPaidPublicGymPin(db as any,new Date("2026-11-07T01:00:00Z"),301)).toBe(0);
+  } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
 });
 
 test.each([
