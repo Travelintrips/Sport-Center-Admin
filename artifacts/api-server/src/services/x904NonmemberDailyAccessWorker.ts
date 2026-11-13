@@ -246,8 +246,9 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           !Number.isSafeInteger(Number(a.device_uid)) || Number(a.device_uid) <= 0 ||
           !String(a.verified_name ?? "").trim()) return;
 
-      // Only the new self-service VIS flow requires witnessed physical handover.
-      // Legacy verified-card/PIN grants retain their established behavior.
+      // The one-click, paid self-service VIS flow may preauthorize its reserved
+      // card without falsifying physical handover. A confirmed payment and
+      // verified grant are required; old web VIS still requires handover.
       if (a.identity_type === "card" &&
           ((a.booking_source === "gym_public_guest" &&
             String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) ||
@@ -265,7 +266,13 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             AND r.card_code=${String(a.identity_label)}
             AND r.user_pin=${String(a.user_pin)}
             AND r.device_uid=${Number(a.device_uid)}
-            AND r.state='collected' AND r.collected_at IS NOT NULL
+            AND (
+              (r.state='collected' AND r.collected_at IS NOT NULL)
+              OR (
+                r.state='reserved' AND r.collected_at IS NULL
+                AND ${a.booking_source === "gym_public_guest" && a.payment_status === "confirmed" && a.verification_state === "verified"}
+              )
+            )
           LIMIT 1`);
         if (handover.rows.length !== 1) return;
         // A reservation may not be activated after its booking-day closing.
@@ -287,7 +294,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         a.identity_type === "pin" && a.booking_status === "confirmed" &&
         a.payment_status === "confirmed" && a.verification_state === "verified" &&
         a.access_state === "pending";
-      if (a.activated_at == null && now.getTime() < scheduledStart && !immediatePaidGymPin) return;
+      const immediatePaidGymVis = a.booking_source === "gym_public_guest" &&
+        a.identity_type === "card" && a.booking_status === "confirmed" &&
+        a.payment_status === "confirmed" && a.verification_state === "verified" &&
+        a.access_state === "pending";
+      if (a.activated_at == null && now.getTime() < scheduledStart &&
+          !immediatePaidGymPin && !immediatePaidGymVis) return;
       // A pending booking belongs to its scheduled WIB date. If activation
       // was missed, never activate it after the facility reopens next day.
       // Advance payments for future reservations may activate on that day.
