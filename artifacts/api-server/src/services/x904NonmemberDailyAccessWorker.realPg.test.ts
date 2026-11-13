@@ -4,7 +4,7 @@ import { pool as appDatabasePool } from "@workspace/db";
 import { readFileSync } from "node:fs";
 import { processX904NonmemberDailyAccess } from "./x904NonmemberDailyAccessWorker";
 import { processX904NewOrdinaryUserDefaultSuspend } from "./x904NewOrdinaryUserDefaultSuspend";
-import { autoReserveVisAfterFundsVerified, collectReservedVisCard } from "./x904GymVisitorCardReservations";
+import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard } from "./x904GymVisitorCardReservations";
 
 // All paid access scenarios use 08:00 WIB on 2026-11-06 as a stable
 // simulated confirmation time. A wall-clock now() fixture would unpredictably
