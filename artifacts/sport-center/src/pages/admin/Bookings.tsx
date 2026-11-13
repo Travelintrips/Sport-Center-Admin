@@ -5983,8 +5983,7 @@ export default function AdminBookings() {
                                     {when ? new Date(when).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" }) : "—"}
                                   </div>
                                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                    {when ? new Date(when).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }) : ""}
-                                    {" · "}{formatCurrency(Number(payment.amount ?? 0))}
+                                    {formatCurrency(Number(payment.amount ?? 0))}
                                   </div>
                                 </div>
                               );
