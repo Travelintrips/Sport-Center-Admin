@@ -430,7 +430,7 @@ test("public booking with verified ordinary X904 PIN: pending payment holds, con
   }
 });
 
-test("real worker: new VIS003 cannot activate while reserved; activates only after handover, then cancels to suspend", async()=>{
+test("real worker: paid VIS003 activates from one confirmation without fake handover, then cancels to suspend", async()=>{
   const at = new Date("2026-11-06T01:00:00Z");
   process.env.GYM_X904_NONMEMBER_ONLY_PIN = "13";
   try {
@@ -443,7 +443,8 @@ test("real worker: new VIS003 cannot activate while reserved; activates only aft
     await run("INSERT INTO sport_center.gym_vis_card_reservations (booking_id,payment_id,card_code,user_pin,device_uid,state,funds_reference,funds_verified_by) VALUES(9123,9223,'VIS003','13',13,'reserved','CI-BANK-9123','CI_STAFF')");
     await addSnapshot(new Date(at.getTime()-1000),'13','VIS 003',2);
     await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+100));
-    expect(await commandFor("ACTIVATE_USER",Number(linked.access_id))).toBeUndefined();
+    expect(await commandFor("ACTIVATE_USER",Number(linked.access_id))).toBeTruthy();
+    expect((await run("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=9123")).rows[0]).toMatchObject({state:"reserved",collected_at:null});
     await run("UPDATE sport_center.gym_vis_card_reservations SET state='collected',collected_at='2026-11-06T01:00:00Z' WHERE booking_id=9123");
     await addSnapshot(new Date(at.getTime()+200),'13','VIS 003',2);
     await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+500));
@@ -480,7 +481,7 @@ test("completed gym guest booking keeps an already activated entitlement until e
   } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
 });
 
-test("real VIS reservation service: admin-confirmed payment creates one held grant and only card handover releases it", async()=>{
+test("real VIS reservation service: one confirmation authorizes grant without falsifying handover", async()=>{
   // Directly call the production service against isolated x904_nonmember_safe2.
   // No app DEV/PROD DB credentials and no physical X904 command.
   const futureDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"})
@@ -499,7 +500,7 @@ test("real VIS reservation service: admin-confirmed payment creates one held gra
   expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9322")).rows[0].access_state).toBe("expired");
   const grants=await run("SELECT access_state,verification_state,identity_label,user_pin,device_uid,booking_id,payment_id,expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9323");
   expect(grants.rows).toHaveLength(1);
-  expect(grants.rows[0]).toMatchObject({access_state:"pending",verification_state:"pending",identity_label:"VIS004",user_pin:"17",device_uid:17,booking_id:9323,payment_id:9423});
+  expect(grants.rows[0]).toMatchObject({access_state:"pending",verification_state:"verified",identity_label:"VIS004",user_pin:"17",device_uid:17,booking_id:9323,payment_id:9423});
   expect((await run("SELECT count(*)::int AS n FROM sport_center.x904_user_commands WHERE user_pin='17'")).rows[0].n).toBe(0);
   const repeat=await autoReserveVisAfterFundsVerified(request);
   expect(repeat).toMatchObject({cardCode:"VIS004",state:"reserved",newReservation:false});
