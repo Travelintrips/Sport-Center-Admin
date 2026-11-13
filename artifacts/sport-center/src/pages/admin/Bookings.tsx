@@ -5115,24 +5115,28 @@ export default function AdminBookings() {
               </div>
               <div>
                 <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
-                  {paymentFilter === "confirmed" ? "Total Nilai Booking Lunas" : "Total Nilai Booking"} ({totalBookings} booking)
+                  {paidDateFrom || paidDateTo
+                    ? "Total Pembayaran Diterima"
+                    : paymentFilter === "confirmed" ? "Total Nilai Booking Lunas" : "Total Nilai Booking"} ({paidDateFrom || paidDateTo ? bookingPage?.paymentPeriod?.count ?? 0 : totalBookings} {paidDateFrom || paidDateTo ? "transaksi" : "booking"})
                 </div>
                 <div className="text-2xl font-black text-emerald-800 dark:text-emerald-300">
-                  {formatCurrency(revenueStats.total)}
+                  {formatCurrency(paidDateFrom || paidDateTo ? bookingPage?.paymentPeriod?.amount ?? 0 : revenueStats.total)}
                 </div>
                 <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-emerald-800/80 dark:text-emerald-200/80">
-                  {paymentFilter === "confirmed"
-                    ? "Nilai booking dengan pembayaran lunas dan terkonfirmasi sesuai filter. Periode mengikuti tanggal booking, bukan tanggal pembayaran."
-                    : "Total nilai seluruh booking sesuai filter, termasuk booking yang sudah lunas, belum lunas, dan masih menunggu pembayaran."}
+                  {paidDateFrom || paidDateTo
+                    ? "Total pembayaran yang dikonfirmasi pada rentang tanggal pembayaran WIB. Satu booking dapat memiliki beberapa transaksi pada tanggal berbeda; tidak termasuk settlement bank yang belum terbukti."
+                    : paymentFilter === "confirmed"
+                      ? "Nilai booking dengan pembayaran lunas dan terkonfirmasi sesuai filter tanggal booking."
+                      : "Total nilai seluruh booking sesuai filter, termasuk booking yang sudah lunas, belum lunas, dan masih menunggu pembayaran."}
                 </p>
               </div>
             </div>
 
             {(paidDateFrom || paidDateTo) && bookingPage?.paymentPeriod && (
               <div className="rounded-lg border border-emerald-200 bg-white/70 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
-                <span className="font-semibold">Pembayaran diterima pada periode terpilih: </span>
-                <span className="font-bold">{formatCurrency(bookingPage.paymentPeriod.amount)}</span>
-                <span className="ml-1 text-xs">({bookingPage.paymentPeriod.count} transaksi pembayaran, bukan jumlah booking)</span>
+                <span className="font-semibold">Total nilai booking terkait: </span>
+                <span className="font-bold">{formatCurrency(revenueStats.total)}</span>
+                <span className="ml-1 text-xs">({totalBookings} booking; bukan total kas pada tanggal terpilih)</span>
               </div>
             )}
             {/* Breakdown */}
@@ -5141,7 +5145,7 @@ export default function AdminBookings() {
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800">
                   <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span className="text-emerald-700 dark:text-emerald-300 font-medium">
-                    Lunas
+                    {paidDateFrom || paidDateTo ? "Nilai Booking Lunas" : "Lunas"}
                   </span>
                   <span className="font-black text-emerald-800 dark:text-emerald-200">
                     {formatCurrency(revenueStats.lunas)}
