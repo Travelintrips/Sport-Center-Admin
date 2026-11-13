@@ -1190,6 +1190,10 @@ test("paid public Gym booking without VIS recovers after temporary inventory fai
   expect(await recoverUnallocatedPaidGymVis(midday)).toBe(0);
   expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=15101")).rows[0].n).toBe(0);
   await run("UPDATE sport_center.sport_payments SET proof_url='ci://valid-bank-receipt' WHERE id=16101");
+  // Even with valid payment, a stale X904 image must not allocate a card.
+  await addSnapshot(new Date(Date.now()-6*60_000),"11","VIS 005",2);
+  expect(await recoverUnallocatedPaidGymVis(midday)).toBe(0);
+  await addSnapshot(new Date(),"11","VIS 005",2);
   expect(await recoverUnallocatedPaidGymVis(midday)).toBe(1);
   const recovered=(await run("SELECT r.card_code,r.state,a.verification_state,a.access_state FROM sport_center.gym_vis_card_reservations r JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=r.booking_id WHERE r.booking_id=15101")).rows;
   expect(recovered).toMatchObject([{card_code:"VIS005",state:"reserved",verification_state:"verified",access_state:"pending"}]);
