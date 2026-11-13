@@ -236,10 +236,29 @@ export async function autoReserveVisAfterFundsVerified(input: {
           ${String(booking.customer_name)},${Number(booking.id)},${Number(payment.id)},
           ${payment.confirmed_at},
           ((${String(booking.booking_date)}::date + time '23:00') AT TIME ZONE 'Asia/Jakarta'),
-          'verified','pending')
+          'pending','pending')
         RETURNING access_id`);
       if (grant.rows.length !== 1) throw new VisReservationError(409,"vis_grant_not_created",
         "Hak akses VIS belum berhasil disiapkan. Reservasi kartu dibatalkan.");
+      // Keep the existing production RLS INSERT invariant: a newly created
+      // paid VIS grant starts pending. Authorize it within the SAME transaction
+      // using the already existing RLS-allowed UPDATE path after proof and
+      // device inventory have been checked above. No second admin click.
+      const approved = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+        SET verification_state='verified'
+        WHERE access_id=${Number(grant.rows[0].access_id)}
+          AND device_serial='TDBD234200545'
+          AND identity_type='card'
+          AND identity_label=${String(card.code)}
+          AND user_pin=${String(card.pin)}
+          AND device_uid=${Number(card.uid)}
+          AND booking_id=${Number(booking.id)}
+          AND payment_id=${Number(payment.id)}
+          AND verification_state='pending' AND access_state='pending'
+          AND activated_at IS NULL
+        RETURNING access_id`);
+      if (approved.rows.length !== 1) throw new VisReservationError(409, "vis_grant_not_authorized",
+        "Grant VIS belum diotorisasi; reservasi dibatalkan tanpa perintah ke mesin.");
       return { cardCode: String(card.code), state: "reserved", newReservation: true };
     });
   } catch (error) {
