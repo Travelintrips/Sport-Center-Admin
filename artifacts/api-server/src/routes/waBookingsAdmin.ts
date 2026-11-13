@@ -41,7 +41,7 @@ function formatIDR(n: number): string {
 
 // ─── GET /api/admin/wa-bookings ───────────────────────────────────────────────
 router.get("/admin/wa-bookings", adminMiddleware, async (req, res) => {
-  const { status, source = "all", search, page = "1", limit = "30" } = req.query as Record<string, string>;
+  const { status, source = "all", search, pinResolution, page = "1", limit = "30" } = req.query as Record<string, string>;
   const pageNum = Math.max(1, parseInt(page) || 1);
   const limitNum = Math.min(100, parseInt(limit) || 30);
   const offset = (pageNum - 1) * limitNum;
@@ -61,6 +61,17 @@ router.get("/admin/wa-bookings", adminMiddleware, async (req, res) => {
   }
   if (status && status !== "all") {
     conditions.push(eq(bookingsTable.status, status as any));
+  }
+  // Read-only unresolved PIN filter; evaluated before pagination.
+  if (pinResolution === "needed") {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM sport_center.x904_nonmember_daily_access a
+      JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+      WHERE a.booking_id=${bookingsTable.id} AND a.device_serial='TDBD234200545'
+        AND a.identity_type='pin' AND a.activated_at IS NULL
+        AND p.status::text='confirmed'
+        AND ((${bookingsTable.bookingDate}::date + time '23:00') AT TIME ZONE 'Asia/Jakarta') <= now()
+    )` as any);
   }
   if (search) {
     const like = `%${search}%`;

@@ -128,6 +128,7 @@ export default function AdminWaBookings() {
 
   const [activeTab, setActiveTab] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [pinResolutionFilter, setPinResolutionFilter] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
@@ -153,7 +154,7 @@ export default function AdminWaBookings() {
     setPinResolutionNote("");
   }, [selectedOrder]);
 
-  const queryKey = ["wa-bookings", activeTab, sourceFilter, search];
+  const queryKey = ["wa-bookings", activeTab, sourceFilter, pinResolutionFilter, search];
 
   const { data, isLoading, refetch } = useQuery({
     queryKey,
@@ -161,6 +162,7 @@ export default function AdminWaBookings() {
       const params = new URLSearchParams({ limit: "50" });
       if (activeTab !== "all") params.set("status", activeTab);
       if (sourceFilter !== "all") params.set("source", sourceFilter);
+      if (pinResolutionFilter) params.set("pinResolution", "needed");
       if (search) params.set("search", search);
       return apiFetch(`/admin/wa-bookings?${params}`);
     },
@@ -345,6 +347,20 @@ export default function AdminWaBookings() {
         ))}
       </div>
 
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant={pinResolutionFilter ? "default" : "outline"}
+          aria-pressed={pinResolutionFilter} onClick={() => {
+            setPinResolutionFilter(current => !current);
+            setActiveTab("all");
+            setSourceFilter("gym_public_guest");
+          }}>
+          PIN Perlu Penyelesaian
+        </Button>
+        {pinResolutionFilter && (
+          <span className="text-xs text-amber-800">Booking PIN sudah lunas tetapi tidak pernah aktif setelah 23.00 WIB.</span>
+        )}
+      </div>
+
       {/* Search */}
       <div className="flex gap-2">
         <div className="relative flex-1 max-w-sm">
@@ -415,6 +431,7 @@ export default function AdminWaBookings() {
                 <td className="px-4 py-3 font-semibold">{formatIDR(b.grandTotal ?? b.totalPrice)}</td>
                 <td className="px-4 py-3">
                   {statusBadge(b.status)}
+                  {pinResolutionFilter && <p className="mt-1 text-xs font-semibold text-amber-800">Perlu tindak lanjut PIN</p>}
                   {b.source === "gym_public_guest" && ["pending_payment", "waiting_confirmation"].includes(b.status) && (
                     <p className="mt-1 text-xs text-amber-700">Verifikasi di Booking Admin</p>
                   )}
