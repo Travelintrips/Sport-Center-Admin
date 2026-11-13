@@ -3746,6 +3746,8 @@ export default function AdminBookings() {
   const [debouncedSearch, setDebouncedSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [paidDateFrom, setPaidDateFrom] = useState("");
+  const [paidDateTo, setPaidDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100 | 200 | 300>(25);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
@@ -3813,7 +3815,7 @@ export default function AdminBookings() {
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [statusFilter, settlementFilter, groupFilter, facilityFilter, billingFilter, paymentFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
+  }, [statusFilter, settlementFilter, groupFilter, facilityFilter, billingFilter, paymentFilter, debouncedSearch, dateFrom, dateTo, paidDateFrom, paidDateTo, pageSize]);
 
   const bookingQueryKey = useMemo(
     () => [
@@ -3830,6 +3832,8 @@ export default function AdminBookings() {
       debouncedSearch,
       dateFrom,
       dateTo,
+      paidDateFrom,
+      paidDateTo,
     ],
     [
       page,
@@ -3843,6 +3847,8 @@ export default function AdminBookings() {
       debouncedSearch,
       dateFrom,
       dateTo,
+      paidDateFrom,
+      paidDateTo,
     ],
   );
 
@@ -3877,6 +3883,8 @@ export default function AdminBookings() {
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
+      if (paidDateFrom) params.set("paidDateFrom", paidDateFrom);
+      if (paidDateTo) params.set("paidDateTo", paidDateTo);
 
       const response = await fetch(`/api/bookings?${params.toString()}`, {
         signal,
@@ -5400,6 +5408,33 @@ export default function AdminBookings() {
                 onClick={() => { setDateFrom(""); setDateTo(""); }}
                 className="w-5 h-5 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5" aria-label="Filter tanggal pembayaran">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">Tanggal Pembayaran</span>
+            <input
+              type="date"
+              aria-label="Tanggal pembayaran dari"
+              value={paidDateFrom}
+              max={paidDateTo || undefined}
+              onChange={(e) => setPaidDateFrom(e.target.value)}
+              className="h-8 px-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            <span className="text-xs text-slate-400">—</span>
+            <input
+              type="date"
+              aria-label="Tanggal pembayaran sampai"
+              value={paidDateTo}
+              min={paidDateFrom || undefined}
+              onChange={(e) => setPaidDateTo(e.target.value)}
+              className="h-8 px-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            {(paidDateFrom || paidDateTo) && (
+              <button type="button" aria-label="Hapus filter tanggal pembayaran"
+                onClick={() => { setPaidDateFrom(""); setPaidDateTo(""); }}
+                className="w-5 h-5 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                 <X size={11} />
               </button>
             )}
