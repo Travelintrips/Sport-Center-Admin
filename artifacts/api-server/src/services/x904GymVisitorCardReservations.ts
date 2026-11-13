@@ -223,7 +223,9 @@ export async function autoReserveVisAfterFundsVerified(input: {
           ${String(card.pin)},${Number(card.uid)},${ref},${actor})`);
       // Create the paid grant in the SAME transaction, but do not authorize a
       // machine command until a physical card handover is witnessed.
-      // 'pending' verification_state is deliberately excluded by the worker.
+      // Confirmed paid VIS grant is independently eligible for the existing
+      // worker's access authorization; reservation != physical handover.
+      // A physical handover is still recorded separately (never fabricated).
       // expires_at holds the booking-day 23:00 WIB hard closing time; the
       // worker starts the 12-hour clock from its authenticated ACTIVATE ACK.
       const grant = await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
@@ -234,7 +236,7 @@ export async function autoReserveVisAfterFundsVerified(input: {
           ${String(booking.customer_name)},${Number(booking.id)},${Number(payment.id)},
           ${payment.confirmed_at},
           ((${String(booking.booking_date)}::date + time '23:00') AT TIME ZONE 'Asia/Jakarta'),
-          'pending','pending')
+          'verified','pending')
         RETURNING access_id`);
       if (grant.rows.length !== 1) throw new VisReservationError(409,"vis_grant_not_created",
         "Hak akses VIS belum berhasil disiapkan. Reservasi kartu dibatalkan.");
