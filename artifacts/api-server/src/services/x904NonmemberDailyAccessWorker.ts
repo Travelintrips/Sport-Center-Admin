@@ -1,4 +1,5 @@
 import { db } from "@workspace/db";
+import { recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
 import { sql } from "drizzle-orm";
 import { isX904AutoSuspendExempt, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry, x904NonmemberSameWibDate } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
@@ -29,7 +30,10 @@ export function startX904NonmemberAccessWorker(): void {
   const tick = async () => {
     if (running) return;
     running = true;
-    try { await processX904NonmemberDailyAccess(); }
+    try {
+      await recoverUnallocatedPaidGymVis();
+      await processX904NonmemberDailyAccess();
+    }
     catch (error) {
       console.error("[x904-nonmember] worker cycle failed",
         error instanceof Error ? error.message : String(error));
