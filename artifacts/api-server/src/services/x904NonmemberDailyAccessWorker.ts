@@ -31,7 +31,9 @@ export function startX904NonmemberAccessWorker(): void {
     if (running) return;
     running = true;
     try {
-      await recoverUnallocatedPaidGymVis();
+      await recoverUnallocatedPaidGymVis().catch(error =>
+        console.warn("[gym-vis] recovery query unavailable; existing worker continues",
+          error instanceof Error ? error.message : String(error)));
       await processX904NonmemberDailyAccess();
     }
     catch (error) {
