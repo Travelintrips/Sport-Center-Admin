@@ -1213,8 +1213,8 @@ test("public website PIN recovers from a temporarily stale X904 image without an
     await run("INSERT INTO sport_center.x904_verified_nonmember_identities(device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at) VALUES('TDBD234200545','990606',990606,'CI WEB PIN','verified','CI',now())");
     await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES(9990606,'2026-11-06','08:00','gym_public_guest','Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required','confirmed','SC-CI-WEB-9990606','CI WEB PIN',30000)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state) VALUES('TDBD234200545','pin','PIN:990606','990606',990606,'CI WEB PIN',9990606,'review_required','review_required')");
-    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES(9706,9990606,'pending',$1,30000,'ci://receipt')",[t]);
-    await run("UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9706");
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES(9970606,9990606,'pending',$1,30000,'ci://receipt')",[t]);
+    await run("UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9970606");
     await addSnapshot(new Date(t.getTime()-360000),pin,name,2);
     expect(await recoverPaidPublicGymPin(db as any,t,301)).toBe(0);
     await addSnapshot(new Date(t.getTime()+1000),pin,name,2);
