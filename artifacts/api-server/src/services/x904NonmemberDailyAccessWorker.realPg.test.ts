@@ -1176,6 +1176,10 @@ test("paid public Gym booking without VIS recovers after temporary inventory fai
   const day = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Jakarta", year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
   const midday = new Date(day + "T12:00:00+07:00");
   const order="CI-RECOVER-NO-CARD-15101";
+  // A prior scenario leaves a historical VIS005 entitlement active in this
+  // disposable database; reset only that fixture, never production records.
+  await run("DELETE FROM sport_center.gym_vis_card_reservations WHERE booking_id=9199");
+  await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9199");
   await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,grand_total,total_price) VALUES(15101,$1,'10:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI RECOVERY',30000,30000)",[day,order]);
   await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount) VALUES(16101,15101,'confirmed',now(),30000)");
   await run("INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role) VALUES('TDBD234200545','11',11,'VIS 005',0)");
