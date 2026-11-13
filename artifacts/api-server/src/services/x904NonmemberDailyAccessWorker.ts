@@ -270,6 +270,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
               (r.state='collected' AND r.collected_at IS NOT NULL)
               OR (
                 r.state='reserved' AND r.collected_at IS NULL
+                AND r.funds_verified_at IS NOT NULL
                 AND ${a.booking_source === "gym_public_guest" && a.payment_status === "confirmed" && a.verification_state === "verified"}
               )
             )
