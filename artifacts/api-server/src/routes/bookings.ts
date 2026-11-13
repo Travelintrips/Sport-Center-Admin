@@ -482,6 +482,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       paymentFilter,
       dateFrom,
       dateTo,
+      paidDateFrom,
+      paidDateTo,
     } = req.query;
     const paginationRequested = page != null || pageSize != null;
     const conditions = [];
@@ -498,6 +500,58 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     }
     if (paginationRequested && dateTo) {
       conditions.push(sql`${bookingsTable.bookingDate} <= ${String(dateTo)}`);
+    }
+    // Payment date is separate from the booking session date. Filter in SQL
+    // before list enrichment, group aggregation, summary totals, and pagination.
+    if (paginationRequested && (paidDateFrom || paidDateTo)) {
+      const from = paidDateFrom ? String(paidDateFrom) : null;
+      const to = paidDateTo ? String(paidDateTo) : null;
+      const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+      if ((from && !isoDate.test(from)) || (to && !isoDate.test(to)) || (from && to && from > to)) {
+        res.status(400).json({ error: "Rentang tanggal pembayaran tidak valid" });
+        return;
+      }
+      // Use Jakarta calendar dates, not UTC date truncation.
+      // Require confirmed payments, rather than treating an uploaded proof as paid.
+      const paymentTimestamp = sql`(COALESCE(pd.paid_at, pd.confirmed_at) AT TIME ZONE 'Asia/Jakarta')::date`;
+      const invoiceTimestamp = sql`(ci.paid_at AT TIME ZONE 'Asia/Jakarta')::date`;
+      const membershipTimestamp = sql`(COALESCE(mp.payment_date::timestamp, mp.confirmed_at AT TIME ZONE 'Asia/Jakarta'))::date`;
+      const dateWithinRange = (value: ReturnType<typeof sql>) => sql`
+        (${from ? sql`${value} >= ${from}::date` : sql`TRUE`}
+         AND ${to ? sql`${value} <= ${to}::date` : sql`TRUE`})
+      `;
+      conditions.push(sql`(
+        EXISTS (
+          SELECT 1 FROM sport_center.sport_payments pd
+          WHERE pd.status = 'confirmed'
+            AND (
+              pd.booking_id = ${bookingsTable.id}
+              OR (${bookingsTable.groupRef} IS NOT NULL AND pd.booking_id IN (
+                SELECT sbg.id FROM sport_center.sport_bookings sbg
+                WHERE sbg.group_ref = ${bookingsTable.groupRef}
+              ))
+            )
+            AND ${dateWithinRange(paymentTimestamp)}
+        )
+        OR EXISTS (
+          SELECT 1 FROM sport_center.company_invoices ci
+          WHERE ci.status = 'paid' AND ci.paid_at IS NOT NULL
+            AND (
+              ci.id = ${bookingsTable.companyInvoiceId}
+              OR EXISTS (
+                SELECT 1 FROM sport_center.company_invoice_items cii
+                WHERE cii.invoice_id = ci.id AND cii.booking_id = ${bookingsTable.id}
+              )
+            )
+            AND ${dateWithinRange(invoiceTimestamp)}
+        )
+        OR EXISTS (
+          SELECT 1 FROM sport_center.sport_membership_payments mp
+          WHERE mp.id = ${bookingsTable.membershipPaymentId}
+            AND mp.status = 'confirmed'
+            AND ${dateWithinRange(membershipTimestamp)}
+        )
+      )`);
     }
     if (facilityId) conditions.push(eq(bookingsTable.facilityId, Number(facilityId)));
     if (customerId) conditions.push(eq(bookingsTable.customerId, Number(customerId)));
