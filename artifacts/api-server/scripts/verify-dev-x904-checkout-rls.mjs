@@ -33,9 +33,12 @@ try {
       await client.connect();
       break;
     } catch (err) {
+      // Supabase pooler can report nested lowercase :econnrefused in
+      // addition to native Node error codes.
+      const diagnostic = [String(err?.code ?? ""), String(err?.message ?? ""), String(err)]
+        .join(" ").toUpperCase();
       const transient = ["ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"]
-        .some(code => String(err?.code ?? "").includes(code)
-          || String(err?.message ?? "").includes(code));
+        .some(code => diagnostic.includes(code));
       await client?.end().catch(() => {});
       if (!transient || attempt === maxAttempts) throw err;
       console.warn(`DEV_X904_RLS_POOLER_RETRY attempt=${attempt} of ${maxAttempts}`);
