@@ -23,7 +23,22 @@ const client = new pg.Client({
   query_timeout: 8000,
 });
 try {
-  await client.connect();
+  // Retry transient pooler connection refusal without relaxing the DEV-only
+  // destination validation or the actual RLS assertions below.
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await client.connect();
+      break;
+    } catch (err) {
+      const transient = ["ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"]
+        .some(code => String(err?.code ?? "").includes(code)
+          || String(err?.message ?? "").includes(code));
+      if (!transient || attempt === maxAttempts) throw err;
+      console.warn(`DEV_X904_RLS_POOLER_RETRY attempt=${attempt} of ${maxAttempts}`);
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+    }
+  }
   await client.query("BEGIN READ ONLY");
   const result = await client.query(`
     SELECT tablename,policyname,cmd,roles,qual,with_check
