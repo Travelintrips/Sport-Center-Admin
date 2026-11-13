@@ -1170,3 +1170,72 @@ test("existing confirmed VIS001 booking recovers pending grant and queues one ac
     expect((await run("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=9850")).rows[0]).toMatchObject({state:"reserved",collected_at:null});
   } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
 });
+
+
+test.each([
+  ["VIS001","78",338], ["VIS002","90",339], ["VIS003","13",13],
+  ["VIS004","17",17], ["VIS005","11",11], ["VIS006","15",15],
+])("isolated six-card lifecycle %s: one paid approval, ACK, suspend, return and reuse", async (code,pin,uid) => {
+  const n=Number(code.slice(-3)), bookingId=11000+n, paymentId=12000+n;
+  const newBookingId=13000+n, newPaymentId=14000+n;
+  const machineName="VIS "+String(n).padStart(3,"0");
+  const t=new Date("2026-11-06T01:40:00Z");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  try {
+    // Disposable localhost database only. Prior scenarios have already run.
+    await run("DELETE FROM sport_center.gym_vis_card_reservations WHERE user_pin=$1",[pin]);
+    await run("DELETE FROM sport_center.x904_user_commands WHERE user_pin=$1",[pin]);
+    await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE user_pin=$1",[pin]);
+    await run("DELETE FROM sport_center.gym_x904_member_mapping WHERE user_pin=$1",[pin]);
+    await run("DELETE FROM sport_center.gym_x904_lan_users WHERE user_pin=$1",[pin]);
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES ('TDBD234200545',$1,$2,$3,0)",[pin,uid,machineName]);
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,grand_total,total_price) VALUES($1,'2026-11-06','12:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI SIX CARDS',30000,30000)",[bookingId,"CI-PAID-"+code]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed','2026-11-06T01:39:00Z',30000,'ci://mock-receipt')",[paymentId,bookingId]);
+    // Simulate a previously reserved and paid card requiring no second approval.
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,visitor_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state) VALUES('TDBD234200545','card',$1,$2,$3,$4,'CI SIX CARDS',$5,$6,'2026-11-06T01:39:00Z','2026-11-06T16:00:00Z','pending','pending')",[code,pin,uid,machineName,bookingId,paymentId]);
+    await run("INSERT INTO sport_center.gym_vis_card_reservations(booking_id,payment_id,card_code,user_pin,device_uid,state,funds_reference,funds_verified_by) VALUES($1,$2,$3,$4,$5,'reserved',$6,'CI_STAFF')",[bookingId,paymentId,code,pin,uid,"ADMINPAY-"+paymentId]);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].access_id);
+    await addSnapshot(new Date(t.getTime()-1000),pin,machineName,2);
+    await processX904NonmemberDailyAccess(db as any,t);
+    expect((await run("SELECT verification_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].verification_state).toBe("verified");
+    const activation=await commandFor("ACTIVATE_USER",accessId);
+    expect(activation?.payload).toMatchObject({accessId,expectedUid:uid});
+    await processX904NonmemberDailyAccess(db as any,t);
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='ACTIVATE_USER' AND payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(1);
+    const activateAt=new Date(t.getTime()+2000);
+    await ack(String(activation.command_id),activateAt,pin,machineName,uid,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(t.getTime()+4000));
+    const active=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(active.access_state).toBe("active");
+    expect(new Date(active.activated_at).getTime()).toBe(activateAt.getTime());
+    const expires=new Date(active.expires_at);
+    expect(expires.getTime()).toBe(Math.min(activateAt.getTime()+12*3600000,Date.parse("2026-11-06T16:00:00Z")));
+    await addSnapshot(new Date(expires.getTime()+1000),pin,machineName,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+2000));
+    const suspension=await commandFor("SUSPEND_USER",accessId);
+    expect(suspension?.payload).toMatchObject({accessId,expectedUid:uid});
+    await ack(String(suspension.command_id),new Date(expires.getTime()+3000),pin,machineName,uid,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+5000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("expired");
+    // The device + payment lifecycle must never pretend a physical handover happened.
+    expect((await run("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[bookingId])).rows[0]).toMatchObject({state:"reserved",collected_at:null});
+    await run("UPDATE sport_center.sport_bookings SET status='completed' WHERE id=$1",[bookingId]);
+    // Return checks use a fresh physical snapshot, not historical test-clock evidence.
+    await run("UPDATE sport_center.x904_user_commands SET completed_at=now() WHERE command_id=$1",[suspension.command_id]);
+    await addSnapshot(new Date(Date.now()+1000),pin,machineName,2);
+    const returned=await returnVerifiedVisCard({orderNumber:"CI-PAID-"+code,physicalCardReturned:true,x904ReadbackChecked:true,returnedBy:"CI_STAFF"});
+    expect(returned.state).toBe("returned");
+    expect((await run("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[bookingId])).rows[0].state).toBe("returned");
+    // Reuse through the original production allocator, not a second fake worker.
+    const date=new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Jakarta"});
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,grand_total,total_price) VALUES($1,$2,'12:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$3,'CI NEXT VISITOR',30000,30000)",[newBookingId,date,"CI-REUSE-"+code]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed',now(),30000,'ci://next-receipt')",[newPaymentId,newBookingId]);
+    await addSnapshot(new Date(),pin,machineName,2);
+    const reuse=await autoReserveVisAfterFundsVerified({orderNumber:"CI-REUSE-"+code,officialBankReference:"ADMINPAY-"+newPaymentId,confirmedPaymentId:newPaymentId,officialFundsChecked:true,verifiedBy:"CI_STAFF"});
+    expect(reuse).toMatchObject({cardCode:code,state:"reserved",newReservation:true});
+    const again=await autoReserveVisAfterFundsVerified({orderNumber:"CI-REUSE-"+code,officialBankReference:"ADMINPAY-"+newPaymentId,confirmedPaymentId:newPaymentId,officialFundsChecked:true,verifiedBy:"CI_STAFF"});
+    expect(again).toMatchObject({cardCode:code,state:"reserved",newReservation:false});
+  } finally {
+    delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  }
+});
