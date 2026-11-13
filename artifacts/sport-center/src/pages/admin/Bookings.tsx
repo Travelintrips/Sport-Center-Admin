@@ -3719,6 +3719,7 @@ type BookingPageData = {
     completed: number;
     cancelled: number;
   };
+  paymentPeriod?: { amount: number; count: number };
   revenue: {
     total: number;
     lunas: number;
@@ -3916,6 +3917,10 @@ export default function AdminBookings() {
           completed: numberHeader("X-Stats-Completed"),
           cancelled: numberHeader("X-Stats-Cancelled"),
         },
+        paymentPeriod: paidDateFrom || paidDateTo ? {
+          amount: numberHeader("X-Payment-Period-Amount"),
+          count: numberHeader("X-Payment-Period-Count"),
+        } : undefined,
         revenue: {
           total: numberHeader("X-Revenue-Total"),
           lunas: numberHeader("X-Revenue-Lunas"),
@@ -5123,6 +5128,13 @@ export default function AdminBookings() {
               </div>
             </div>
 
+            {(paidDateFrom || paidDateTo) && bookingPage?.paymentPeriod && (
+              <div className="rounded-lg border border-emerald-200 bg-white/70 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+                <span className="font-semibold">Pembayaran diterima pada periode terpilih: </span>
+                <span className="font-bold">{formatCurrency(bookingPage.paymentPeriod.amount)}</span>
+                <span className="ml-1 text-xs">({bookingPage.paymentPeriod.count} transaksi pembayaran, bukan jumlah booking)</span>
+              </div>
+            )}
             {/* Breakdown */}
             <div className="flex flex-wrap items-center gap-3 text-xs">
               {revenueStats.lunas > 0 && (
@@ -5636,6 +5648,27 @@ export default function AdminBookings() {
                       b.paidAt ??
                       listPayment?.updatedAt ??
                       listPayment?.createdAt;
+                    const paymentHistoryForTable = (isMultiSessionGroup
+                      ? groupPayments
+                      : (Array.isArray(b.payments) ? b.payments : []))
+                      .filter((p: any) => p?.id != null && p.status === "confirmed")
+                      .filter((p: any, idx: number, arr: any[]) =>
+                        arr.findIndex((row: any) => row.id === p.id) === idx)
+                      .sort((a: any, b: any) =>
+                        new Date(a.paidAt ?? a.confirmedAt ?? 0).getTime() -
+                        new Date(b.paidAt ?? b.confirmedAt ?? 0).getTime());
+                    const paymentHistoryInPeriod = paymentHistoryForTable.filter((payment: any) => {
+                      if (!paidDateFrom && !paidDateTo) return true;
+                      const timestamp = payment.paidAt ?? payment.confirmedAt;
+                      if (!timestamp) return false;
+                      const date = new Date(timestamp);
+                      if (Number.isNaN(date.getTime())) return false;
+                      const paymentDay = new Intl.DateTimeFormat("sv-SE", {
+                        timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+                      }).format(date);
+                      return (!paidDateFrom || paymentDay >= paidDateFrom) &&
+                        (!paidDateTo || paymentDay <= paidDateTo);
+                    });
                     const isMembershipPayment = Boolean(b.membershipPayment);
                     const isBankReconciled = Boolean(
                       listPayment?.isBankReconciled ||
@@ -5900,7 +5933,16 @@ export default function AdminBookings() {
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {isMultiSessionGroup ? (
+                        {paymentHistoryForTable.length > 1 ? (
+                          <div className="flex flex-col gap-1.5 text-xs">
+                            {paymentHistoryInPeriod.map((payment: any) => (
+                              <div key={payment.id} className="whitespace-nowrap text-slate-700 dark:text-slate-300">
+                                <span className="font-semibold">{payment.paymentMethod ?? "—"}</span>
+                                <span className="ml-1 text-[10px] text-slate-400">#{payment.id}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : isMultiSessionGroup ? (
                           <span className="text-xs font-medium text-violet-600 dark:text-violet-300">
                             {groupPaymentMethods.length === 1 ? groupPaymentMethods[0] : "Campuran"}
                           </span>
@@ -5927,13 +5969,30 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {listPaymentDate ? (
+                        {paymentHistoryForTable.length > 1 ? (
+                          <div className="flex flex-col gap-1.5">
+                            {paymentHistoryInPeriod.map((payment: any) => {
+                              const when = payment.paidAt ?? payment.confirmedAt;
+                              return (
+                                <div key={payment.id} className="whitespace-nowrap">
+                                  <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                                    {when ? new Date(when).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {when ? new Date(when).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" }) : ""}
+                                    {" · "}{formatCurrency(Number(payment.amount ?? 0))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : listPaymentDate ? (
                           <div>
                             <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                              {new Date(listPaymentDate).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                              {new Date(listPaymentDate).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" })}
                             </div>
                             <div className="text-[11px] text-slate-400">
-                              {new Date(listPaymentDate).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                              {new Date(listPaymentDate).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })}
                             </div>
                           </div>
                         ) : (
