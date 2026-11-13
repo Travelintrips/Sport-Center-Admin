@@ -49,6 +49,7 @@ beforeAll(async () => {
   await run(`ALTER TABLE sport_center.sport_bookings
     ADD COLUMN order_number text,
     ADD COLUMN customer_name text,
+    ADD COLUMN customer_phone text,
     ADD COLUMN grand_total numeric,
     ADD COLUMN total_price numeric;
     ALTER TABLE sport_center.sport_payments
