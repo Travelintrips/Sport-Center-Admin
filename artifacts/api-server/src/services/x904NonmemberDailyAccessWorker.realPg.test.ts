@@ -4,7 +4,7 @@ import { pool as appDatabasePool } from "@workspace/db";
 import { readFileSync } from "node:fs";
 import { processX904NonmemberDailyAccess } from "./x904NonmemberDailyAccessWorker";
 import { processX904NewOrdinaryUserDefaultSuspend } from "./x904NewOrdinaryUserDefaultSuspend";
-import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard } from "./x904GymVisitorCardReservations";
+import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
 
 // All paid access scenarios use 08:00 WIB on 2026-11-06 as a stable
 // simulated confirmation time. A wall-clock now() fixture would unpredictably
@@ -49,6 +49,7 @@ beforeAll(async () => {
   await run(`ALTER TABLE sport_center.sport_bookings
     ADD COLUMN order_number text,
     ADD COLUMN customer_name text,
+    ADD COLUMN customer_phone text,
     ADD COLUMN grand_total numeric,
     ADD COLUMN total_price numeric;
     ALTER TABLE sport_center.sport_payments
@@ -1172,6 +1173,35 @@ test("existing confirmed VIS001 booking recovers pending grant and queues one ac
 });
 
 
+test("paid public Gym booking without VIS recovers after temporary inventory failure without a second payment", async () => {
+  const day = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Jakarta", year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+  const midday = new Date(day + "T12:00:00+07:00");
+  const order="CI-RECOVER-NO-CARD-15101";
+  // A prior scenario leaves a historical VIS005 entitlement active in this
+  // disposable database; reset only that fixture, never production records.
+  await run("DELETE FROM sport_center.gym_vis_card_reservations WHERE booking_id=9199");
+  await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9199");
+  await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,grand_total,total_price) VALUES(15101,$1,'10:00','gym_public_guest','Kartu VIS001–VIS006 menunggu pilihan','confirmed',$2,'CI RECOVERY',30000,30000)",[day,order]);
+  await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount) VALUES(16101,15101,'confirmed',now(),30000)");
+  await run("INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role) VALUES('TDBD234200545','11',11,'VIS 005',0)");
+  await addSnapshot(new Date(),"11","VIS 005",2);
+  // The earlier payment confirmation is real within the fixture, but a
+  // missing proof must never cause a VIS grant or additional payment row.
+  expect(await recoverUnallocatedPaidGymVis(midday)).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=15101")).rows[0].n).toBe(0);
+  await run("UPDATE sport_center.sport_payments SET proof_url='ci://valid-bank-receipt' WHERE id=16101");
+  // Even with valid payment, a stale X904 image must not allocate a card.
+  await addSnapshot(new Date(Date.now()-6*60_000),"11","VIS 005",2);
+  expect(await recoverUnallocatedPaidGymVis(midday)).toBe(0);
+  await addSnapshot(new Date(),"11","VIS 005",2);
+  expect(await recoverUnallocatedPaidGymVis(midday)).toBe(1);
+  const recovered=(await run("SELECT r.card_code,r.state,a.verification_state,a.access_state FROM sport_center.gym_vis_card_reservations r JOIN sport_center.x904_nonmember_daily_access a ON a.booking_id=r.booking_id WHERE r.booking_id=15101")).rows;
+  expect(recovered).toMatchObject([{card_code:"VIS005",state:"reserved",verification_state:"verified",access_state:"pending"}]);
+  expect(await recoverUnallocatedPaidGymVis(midday)).toBe(0);
+  expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=15101")).rows[0].n).toBe(1);
+  expect((await run("SELECT count(*)::int n FROM sport_center.gym_vis_card_reservations WHERE booking_id=15101")).rows[0].n).toBe(1);
+});
+
 test.each([
   ["VIS001","78",338], ["VIS002","90",339], ["VIS003","13",13],
   ["VIS004","17",17], ["VIS005","11",11], ["VIS006","15",15],
@@ -1239,3 +1269,4 @@ test.each([
     delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
   }
 });
+

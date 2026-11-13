@@ -1,4 +1,5 @@
 import { processX904NonmemberDailyAccess } from "./x904NonmemberDailyAccessWorker";
+import { recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
 
 /**
  * A post-commit wake-up for an already confirmed Gym guest payment.
@@ -11,7 +12,12 @@ let rerunRequested = false;
 
 export function wakeX904PaidGymAfterConfirmation(
   eligibleCommittedPayment: boolean,
-  run: () => Promise<void> = () => processX904NonmemberDailyAccess(),
+  run: () => Promise<void> = async () => {
+    await recoverUnallocatedPaidGymVis().catch(error =>
+      console.warn("[gym-vis] fast recovery failed; worker fallback remains",
+        error instanceof Error ? error.message : String(error)));
+    await processX904NonmemberDailyAccess();
+  },
 ): boolean {
   if (process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED !== "true" ||
       !eligibleCommittedPayment) return false;
