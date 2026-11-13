@@ -2059,7 +2059,9 @@ function BookingDetailDrawer({
                   <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
                   <div className="mt-1 text-2xl font-black">{gymVisReservation.cardCode}</div>
                   <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
-                  <div className="mt-2 text-xs font-semibold">Kartu belum berarti pintu aktif; tunggu serah-terima, worker, ACK dan read-back X904.</div>
+                  <div className="mt-2 text-xs font-semibold">{gymVisAccess?.accessState === "active" && gymVisAccess?.latestCommand?.readBackConfirmed
+                    ? "Akses X904 aktif dan ACK telah diverifikasi. Serahkan kartu yang dialokasikan; catat serah-terima fisik secara terpisah."
+                    : "Alokasi otomatis bukan bukti pintu aktif. Tunggu ACK dan read-back X904."}</div>
                   {gymVisReservation.state === "reserved" && (
                     <div className="mt-3 space-y-2">
                       <label className="flex items-start gap-2 text-xs">
@@ -2079,11 +2081,13 @@ function BookingDetailDrawer({
                       </button>
                     </div>
                   )}
-                  {gymVisReservation.state === "collected" && (
+                  {(gymVisReservation.state === "collected" ||
+                    (gymVisReservation.state === "reserved" && (gymVisAccess?.accessState === "active" || gymVisAccess?.returnReady))) && (
                     <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">
                       <div className="font-semibold">
                         {gymVisAccess?.accessState === "active" ? "Akses aktif — read-back X904 sudah diterima." :
                           gymVisAccess?.returnReady ? "Akses sudah disuspend — kartu siap dikembalikan ke pool." :
+                          gymVisReservation.state === "reserved" ? "VIS sudah dialokasikan; akses dan serah-terima fisik dicatat secara terpisah." :
                           "Kartu sudah diserahkan. Menunggu worker / suspend / ACK dan read-back X904."}
                       </div>
                       {gymVisAccess && (

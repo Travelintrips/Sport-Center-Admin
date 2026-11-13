@@ -388,7 +388,11 @@ export async function returnVerifiedVisCard(input: {
       if (!result.rows.length) throw new VisReservationError(404,"no_reservation","Kartu VIS belum dialokasikan.");
       const row = result.rows[0] as any;
       if (row.state === "returned") return { cardCode:String(row.card_code),state:"returned",deviceSnapshotAt:null };
-      if (row.state !== "collected" || !row.collected_at)
+      // A paid VIS may be activated immediately while its physical handover
+      // remains unrecorded. Do not fabricate collected_at; allow an actual
+      // witnessed return only after independently verified suspend/read-back.
+      if (!((row.state === "collected" && row.collected_at) ||
+            (row.state === "reserved" && !row.collected_at && row.reserved_at)))
         throw new VisReservationError(409,"invalid_return_state","Status kartu tidak dapat dikembalikan.");
       if (!["completed","cancelled","refunded","expired","rejected"].includes(String(row.booking_status))) {
         throw new VisReservationError(409,"booking_still_open",
@@ -409,7 +413,7 @@ export async function returnVerifiedVisCard(input: {
       const readback = await tx.execute(sql`WITH latest AS (
           SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
           WHERE device_serial='TDBD234200545'
-            AND observed_at >= ${row.collected_at}
+            AND observed_at >= ${row.collected_at ?? row.reserved_at}
             AND observed_at >= now()-interval '10 minutes'
           ORDER BY observed_at DESC LIMIT 1
         ) SELECT observed_at FROM latest
@@ -434,7 +438,7 @@ export async function returnVerifiedVisCard(input: {
               FROM sport_center.x904_user_commands
               WHERE device_serial='TDBD234200545'
                 AND user_pin=${String(row.user_pin)}
-                AND created_at>=${row.collected_at}
+                AND created_at>=${row.collected_at ?? row.reserved_at}
               ORDER BY created_at DESC,command_id DESC LIMIT 1
             ) last_command
             WHERE last_command.command_type<>'SUSPEND_USER'
@@ -447,9 +451,30 @@ export async function returnVerifiedVisCard(input: {
           ) LIMIT 1`);
       if (!readback.rows.length) throw new VisReservationError(409,"x904_readback_missing",
         "Snapshot X904 terbaru belum membuktikan PIN tersuspend di Grup 2. Kartu tetap ditahan.");
+      if (row.state === "reserved") {
+        // Reserved cards that were auto-activated require an actual completed
+        // SUSPEND_USER/ACK for the same grant, not merely an old Group 2 image.
+        const suspended = await tx.execute(sql`SELECT 1
+          FROM sport_center.x904_nonmember_daily_access a
+          JOIN sport_center.x904_user_commands c
+            ON c.device_serial=a.device_serial
+           AND c.user_pin=a.user_pin
+           AND c.payload->>'accessId'=a.access_id::text
+          WHERE a.booking_id=${Number(row.booking_id)}
+            AND a.activated_at IS NOT NULL
+            AND c.command_type='SUSPEND_USER' AND c.state='completed'
+            AND c.completed_at IS NOT NULL
+            AND c.completed_at <= ${readback.rows[0].observed_at}
+            AND c.result->>'readBackConfirmed'='true'
+            AND c.result->>'afterGroup'='2'
+            AND c.result->>'deviceUid'=${String(row.device_uid)}
+          ORDER BY c.completed_at DESC LIMIT 1`);
+        if (!suspended.rows.length) throw new VisReservationError(409,"vis_suspend_proof_missing",
+          "Kartu otomatis aktif hanya dapat dikembalikan setelah ACK suspend X904 terbukti.");
+      }
       await tx.execute(sql`UPDATE sport_center.gym_vis_card_reservations
         SET state='returned',returned_at=now()
-        WHERE id=${Number(row.id)} AND state='collected'`);
+        WHERE id=${Number(row.id)} AND state=${String(row.state)}`);
       return { cardCode:String(row.card_code),state:"returned",deviceSnapshotAt:new Date(String(readback.rows[0].observed_at)).toISOString() };
     });
   } catch (error) {

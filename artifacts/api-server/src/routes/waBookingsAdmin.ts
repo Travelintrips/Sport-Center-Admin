@@ -744,12 +744,15 @@ router.get('/admin/wa-bookings/:orderNumber/x904-monitoring', adminMiddleware, a
     const currentUser = row ? users.find((u:any) => String(u?.pin) === String(row.user_pin)) : null;
     const commandResult = latestCommand?.result ?? null;
     const terminal = ['completed','cancelled','refunded','expired','rejected'].includes(String(booking.status));
-    const returnReady = Boolean(row && row.card_state === 'collected' && terminal &&
+    const paidAutoVisReturn = Boolean(row && row.card_state === 'reserved' && !row.collected_at && row.activated_at);
+    const returnReady = Boolean(row && (row.card_state === 'collected' || paidAutoVisReturn) && terminal &&
       !['pending','active','review_required'].includes(String(row.access_state)) &&
       currentUser && Number(currentUser.group) === 2 && Number(currentUser.role) === 0 &&
       latestCommand?.command_type === 'SUSPEND_USER' && latestCommand?.state === 'completed' &&
       commandResult?.readBackConfirmed === true && Number(commandResult?.afterGroup) === 2 &&
-      Number(commandResult?.deviceUid) === Number(row.device_uid));
+      Number(commandResult?.deviceUid) === Number(row.device_uid) &&
+      (!paidAutoVisReturn || Boolean(latestCommand?.completed_at && row.reserved_at &&
+        new Date(String(latestCommand.completed_at)).getTime() >= new Date(String(row.reserved_at)).getTime())));
     const cards = [['VIS001','78',338],['VIS002','90',339],['VIS003','13',13],['VIS004','17',17],['VIS005','11',11],['VIS006','15',15]] as const;
     const busy = await db.execute(sql`SELECT r.card_code,NULL::text AS pin,'reservation'::text AS kind
       FROM sport_center.gym_vis_card_reservations r
