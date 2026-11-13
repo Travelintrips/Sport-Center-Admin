@@ -63,7 +63,7 @@ type WaBooking = {
 };
 
 type DetailData = {
-  x904PinGrant?: { accessId: number; userPin: string; deviceUid: number; verifiedName: string; accessState: string; verificationState: string; paymentStatus: string | null } | null;
+  x904PinGrant?: { accessId: number; userPin: string; deviceUid: number; verifiedName: string; accessState: string; verificationState: string; paymentStatus: string | null; requiresResolution?: boolean } | null;
   booking: Record<string, any>;
   facility: Record<string, any> | null;
   session: Record<string, any> | null;
@@ -500,7 +500,14 @@ export default function AdminWaBookings() {
                     <p className="font-bold">Pengesahan PIN biasa — booking tanpa login</p>
                     <p>Nama X904: <strong>{detail.x904PinGrant.verifiedName}</strong> · PIN: <strong>{detail.x904PinGrant.userPin}</strong> · UID: {detail.x904PinGrant.deviceUid}</p>
                     <p>Pembayaran resmi: <strong>{detail.x904PinGrant.paymentStatus ?? "belum ada"}</strong> · Akses: <strong>{detail.x904PinGrant.accessState}</strong></p>
-                    {detail.x904PinGrant.verificationState === "review_required" &&
+                    {detail.x904PinGrant.requiresResolution && (
+                      <p className="rounded-lg border border-amber-300 bg-amber-100 p-3 text-xs font-medium text-amber-950" role="status">
+                        Tindak lanjut wajib: pembayaran sudah confirmed, tetapi akses PIN untuk tanggal booking tidak pernah aktif dan sudah melewati pukul 23.00 WIB.
+                        Jangan sahkan PIN untuk hari lama. Hubungi pelanggan untuk penjadwalan ulang yang disetujui atau refund melalui alur keuangan yang ada.
+                        Jangan membuat pembayaran atau jurnal kedua.
+                      </p>
+                    )}
+                    {!detail.x904PinGrant.requiresResolution && detail.x904PinGrant.verificationState === "review_required" &&
                       detail.x904PinGrant.accessState === "review_required" ? (
                       <>
                         <p className="text-xs text-amber-900">Pemeriksaan nama saja tidak membuktikan pemilik PIN. Periksa identitas fisik pengunjung dan pastikan pembayaran benar-benar confirmed di sistem; bukti upload/OCR saja tidak cukup.</p>

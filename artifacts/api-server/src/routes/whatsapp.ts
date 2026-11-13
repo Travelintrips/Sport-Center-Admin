@@ -61,6 +61,7 @@ import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoic
 import { uploadProofWithFallback } from "./storage";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
 import { resolveGymGuestName } from "../services/x904GymGuestNameRouting";
+import { x904PaidPinNeedsResolution } from "../services/x904PaidPinVisitWindow";
 import {
   generateAiReply,
   logAiMessageReceived,
@@ -1513,12 +1514,12 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
     }
     // Public status: fail closed. Never expose the X904 PIN/UID, raw command or audit data.
     // An access becomes scan-ready only after an authenticated command's durable read-back.
-    let gymAccessStatus: "not_active" | "pending" | "active" | "expired" = "not_active";
+    let gymAccessStatus: "not_active" | "pending" | "active" | "expired" | "needs_resolution" = "not_active";
     let gymAccessExpiresAt: string | null = null;
     if (booking.source === "gym_public_guest") {
       try {
         const accessRows = await db.execute(sql`
-          SELECT a.access_state, a.verification_state, a.activated_at, a.expires_at,
+          SELECT a.identity_type, a.access_state, a.verification_state, a.activated_at, a.expires_at,
                  last_command.command_type, last_command.state AS command_state,
                  last_command.result AS command_result
           FROM sport_center.x904_nonmember_daily_access a
@@ -1542,7 +1543,12 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
             access.command_result?.readBackConfirmed === true &&
             Number(access.command_result?.afterGroup) === 1;
           const paymentVerified = ["confirmed", "completed"].includes(booking.status) && payment?.status === "confirmed";
-          if (access.access_state === "expired" || (expiresAt && !accessNotExpired)) {
+          if (x904PaidPinNeedsResolution({
+            bookingDate: booking.bookingDate, identityType: access.identity_type,
+            paymentStatus: payment?.status, activatedAt: access.activated_at,
+          })) {
+            gymAccessStatus = "needs_resolution";
+          } else if (access.access_state === "expired" || (expiresAt && !accessNotExpired)) {
             gymAccessStatus = "expired";
           } else if (paymentVerified && access.verification_state === "verified" &&
                      access.access_state === "active" && access.activated_at &&
