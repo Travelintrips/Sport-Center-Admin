@@ -5952,7 +5952,9 @@ export default function AdminBookings() {
                           </div>
                         ) : isMultiSessionGroup ? (
                           <span className="text-xs font-medium text-violet-600 dark:text-violet-300">
-                            {groupPaymentMethods.length === 1 ? groupPaymentMethods[0] : "Campuran"}
+                            {groupPaymentMethods.length === 0
+                              ? (b.payerType === "company" ? "Menunggu Pembayaran Invoice" : "Belum Ada Pembayaran")
+                              : groupPaymentMethods.length === 1 ? groupPaymentMethods[0] : "Campuran"}
                           </span>
                         ) : (
                           <PaymentMethodSelect
