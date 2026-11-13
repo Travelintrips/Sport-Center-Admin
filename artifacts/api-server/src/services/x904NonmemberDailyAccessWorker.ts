@@ -46,6 +46,75 @@ export function startX904NonmemberAccessWorker(): void {
   timer.unref();
 }
 
+
+/** Recheck a paid public WEB PIN held only because VMSC snapshot was stale.
+ * No new booking, financial event, PIN or device command is created here.
+ */
+export async function recoverPaidPublicGymPin(
+  store: Store = db, now = new Date(), actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY),
+): Promise<number> {
+  if (!x904NonmemberOpeningHours(now) || !Number.isSafeInteger(actor) || actor <= 0 ||
+      process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true" ||
+      process.env.GYM_X904_MANUAL_ACCESS_ENABLED !== "true" ||
+      process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return 0;
+  const onlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  if (onlyPin !== undefined && !/^[0-9]{1,8}$/.test(onlyPin)) return 0;
+  return store.transaction(async tx => {
+    const changed = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access a
+      SET verification_state='verified',access_state='pending'
+      FROM sport_center.sport_bookings b,
+           sport_center.sport_payments p,
+           sport_center.x904_verified_nonmember_identities r,
+           sport_center.gym_x904_lan_users u,
+           (SELECT observed_at,user_count,users FROM sport_center.gym_x904_access_snapshots
+            WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1) snap
+      WHERE a.booking_id=b.id AND a.payment_id=p.id AND p.booking_id=b.id
+        AND a.device_serial=${DEVICE} AND a.identity_type='pin'
+        AND a.verification_state='review_required' AND a.access_state='review_required'
+        AND a.activated_at IS NULL AND a.user_pin NOT IN ('12','79','237')
+        AND (${onlyPin ?? null}::text IS NULL OR a.user_pin=${onlyPin ?? null})
+        AND b.source='gym_public_guest' AND b.status::text='confirmed'
+        AND b.notes LIKE 'Gym mandiri; nama cocok dengan registry X904%'
+        AND b.booking_date::date=(${now}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date
+        AND p.status::text='confirmed' AND p.confirmed_at IS NOT NULL AND p.confirmed_at<=${now}
+        AND NULLIF(btrim(p.proof_url),'') IS NOT NULL
+        AND p.amount>=COALESCE(b.grand_total,b.total_price) AND a.confirmed_at IS NOT NULL
+        AND r.device_serial=a.device_serial AND r.user_pin=a.user_pin
+        AND r.device_uid=a.device_uid AND r.verification_state='verified' AND r.revoked_at IS NULL
+        AND u.device_serial=a.device_serial AND u.user_pin=a.user_pin
+        AND u.device_uid=a.device_uid AND u.device_role=0
+        AND upper(regexp_replace(trim(r.display_name),'[[:space:]]+',' ','g'))=
+            upper(regexp_replace(trim(a.verified_name),'[[:space:]]+',' ','g'))
+        AND upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=
+            upper(regexp_replace(trim(a.verified_name),'[[:space:]]+',' ','g'))
+        AND snap.observed_at<=${now}
+        AND snap.observed_at>=${now}::timestamptz-interval '5 minutes'
+        AND jsonb_typeof(snap.users)='array' AND jsonb_array_length(snap.users)=snap.user_count
+        AND (SELECT count(*) FROM jsonb_array_elements(snap.users) su
+             WHERE su->>'pin'=a.user_pin AND su->>'group'='2'
+               AND su->>'role'='0' AND su->>'enabled'='true'
+               AND upper(regexp_replace(trim(su->>'name'),'[[:space:]]+',' ','g'))=
+                   upper(regexp_replace(trim(a.verified_name),'[[:space:]]+',' ','g')))=1
+        AND NOT EXISTS (SELECT 1 FROM sport_center.gym_x904_member_mapping m
+          WHERE m.device_serial=a.device_serial AND m.user_pin=a.user_pin)
+        AND NOT EXISTS (SELECT 1 FROM sport_center.x904_nonmember_daily_access other
+          WHERE other.device_serial=a.device_serial AND other.user_pin=a.user_pin
+            AND other.access_id<>a.access_id AND other.access_state IN ('pending','active'))
+      RETURNING a.access_id,a.booking_id,a.payment_id`);
+    for (const row of changed.rows as Array<{access_id: number;booking_id: number;payment_id: number}>) {
+      await tx.execute(sql`INSERT INTO sport_center.audit_logs
+        (user_id,user_name,user_role,action,entity,entity_id,"before","after")
+        VALUES (${actor},'X904 AUTOMATION SERVICE','staff',
+          'x904_guest_pin_payment_auto_recovered','booking',${Number(row.booking_id)},
+          '{"verificationState":"review_required","accessState":"review_required"}'::jsonb,
+          ${JSON.stringify({verificationState:'verified',accessState:'pending',
+            accessId:Number(row.access_id),paymentId:Number(row.payment_id),
+            basis:'confirmed_payment_registry_and_fresh_group2_snapshot'})}::jsonb)`);
+    }
+    return changed.rows.length;
+  });
+}
+
 /**
  * Advance-paid Gym visits only become eligible on their booking day, at the
  * facility's scheduled start. Accept the stored YYYY-MM-DD / HH:mm shape only.
@@ -82,6 +151,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND registration_source='system_x904_automation'
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
+
+  await recoverPaidPublicGymPin(store, now, actor).catch(error =>
+    console.warn("[x904-web-pin] recovery deferred; existing worker continues",
+      error instanceof Error ? error.message : String(error)));
 
   // Recover only SAME-DAY public Gym VIS allocations that were confirmed by
   // the existing one-click admin flow before this fix was deployed.
