@@ -1,6 +1,8 @@
 import { db } from "@workspace/db";
 import { logAudit } from "../lib/auditLog";
 import { sql } from "drizzle-orm";
+import { notifyGymVisitorCardReserved } from "../lib/notifications";
+import { getBaseUrl } from "../lib/appUrl";
 
 // Assignment is a physical-card reservation, NOT an X904 door entitlement.
 // Physical handover and X904 activation remain independently verified.
@@ -298,7 +300,7 @@ export async function recoverUnallocatedPaidGymVis(now = new Date()): Promise<nu
     timeZone: "Asia/Jakarta", hour: "2-digit", hourCycle: "h23",
   }).format(now));
   if (hour < 6 || hour >= 23) return 0;
-  const pending = await db.execute(sql`SELECT b.order_number,p.id AS payment_id
+  const pending = await db.execute(sql`SELECT b.id AS booking_id,b.order_number,b.customer_name,b.customer_phone,p.id AS payment_id
     FROM sport_center.sport_bookings b
     JOIN sport_center.sport_payments p ON p.booking_id=b.id
     WHERE b.source='gym_public_guest' AND b.status::text='confirmed'
@@ -313,14 +315,30 @@ export async function recoverUnallocatedPaidGymVis(now = new Date()): Promise<nu
       )
     ORDER BY p.confirmed_at,b.id LIMIT 12`);
   let recovered = 0;
-  for (const row of pending.rows as Array<{order_number: string;payment_id: number}>) {
+  for (const row of pending.rows as Array<{booking_id: number;order_number: string;customer_name: string;customer_phone: string;payment_id: number}>) {
     try {
       const result = await reserveVisAfterAdminPaymentConfirmation({
         orderNumber: String(row.order_number),
         paymentId: Number(row.payment_id),
         confirmedBy: "X904 AUTO RECOVERY",
       });
-      if (result.newReservation) recovered++;
+      if (result.newReservation) {
+        recovered++;
+        if (process.env.NODE_ENV === "production" && String(row.customer_phone ?? "").trim()) {
+          // A recovered VIS must also reach its customer. Fire only for the
+          // newly inserted reservation (never on idempotent retries).
+          const statusUrl = `${await getBaseUrl()}/status/${String(row.order_number)}`;
+          void notifyGymVisitorCardReserved({
+            bookingId: Number(row.booking_id),
+            orderNumber: String(row.order_number),
+            customerName: String(row.customer_name ?? ""),
+            customerPhone: String(row.customer_phone),
+            cardCode: result.cardCode,
+            statusUrl,
+          }).catch(error => console.warn("[gym-vis] recovered VIS customer notice failed",
+            error instanceof Error ? error.message : String(error)));
+        }
+      }
     } catch (error) {
       const code = error instanceof VisReservationError ? error.code : "unknown";
       console.warn("[gym-vis] paid booking allocation retry pending", {
