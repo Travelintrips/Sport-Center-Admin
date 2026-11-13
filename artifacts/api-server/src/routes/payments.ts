@@ -1344,6 +1344,7 @@ router.post("/payments/:id/reconciliation-sync", adminMiddleware, async (req, re
       if (existing) {
         if (
           existing.matchedPaymentId != null &&
+          existing.matchedPaymentId !== 0 &&
           existing.matchedPaymentId !== payment.id
         ) {
           throw new ReconciliationSyncError(
