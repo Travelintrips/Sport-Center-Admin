@@ -16,6 +16,24 @@ describe("Gym VIS operational monitoring contract", () => {
     expect(api).toContain("available");
   });
 
+  test("all six paid VIS preserve active ACK and require secure return without fake handover", () => {
+    const service = readFileSync(join(process.cwd(),"src/services/x904GymVisitorCardReservations.ts"),"utf8");
+    const worker = readFileSync(join(process.cwd(),"src/services/x904NonmemberDailyAccessWorker.ts"),"utf8");
+    for (const code of ["VIS001","VIS002","VIS003","VIS004","VIS005","VIS006"]) {
+      expect(api).toContain(code);
+      expect(service).toContain(code);
+    }
+    expect(worker).toContain("a.identity_type === \"card\"");
+    expect(worker).toContain("r.state='reserved'");
+    expect(worker).toContain("r.funds_verified_at IS NOT NULL");
+    expect(api).toContain("paidAutoVisReturn");
+    expect(api).toContain("latestCommand?.command_type === 'SUSPEND_USER'");
+    expect(service).toContain("row.state === \"reserved\" && !row.collected_at");
+    expect(service).toContain("vis_suspend_proof_missing");
+    expect(service).toContain("physicalCardReturned");
+    expect(ui).toContain('gymVisReservation.state === "reserved" && (gymVisAccess?.accessState === "active" || gymVisAccess?.returnReady)');
+  });
+
   test("Booking Admin shows one-place lifecycle, pool and guarded return", () => {
     expect(ui).toContain("Pool VIS / X904");
     expect(ui).toContain("Access ID");
