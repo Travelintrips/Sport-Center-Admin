@@ -122,7 +122,7 @@ test("one admin payment confirmation triggers idempotent physical VIS reservatio
  assert.doesNotMatch(admin,/Alokasikan Kartu VIS Otomatis/);
 });
 
-test("paid VIS creates a held nonmember grant atomically; physical handover is the only unlock",()=>{
+test("paid VIS creates held grant atomically and retains independently witnessed handover",()=>{
  const reserve=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function reserveVisAfterAdminPaymentConfirmation"));
  assert.match(reserve,/INSERT INTO sport_center\.gym_vis_card_reservations/);
  assert.match(reserve,/INSERT INTO sport_center\.x904_nonmember_daily_access/);
@@ -135,8 +135,10 @@ test("paid VIS creates a held nonmember grant atomically; physical handover is t
  assert.match(handover,/physicalCardHandedOver !== true/);
  assert.match(handover,/UPDATE sport_center\.x904_nonmember_daily_access/);
  assert.match(handover,/verification_state='verified'/);
- assert.match(handover,/verification_state='pending'/);
- assert.match(handover,/access_state='pending'/);
+ assert.match(handover,/verification_state IN \('pending','verified'\)/);
+ assert.match(reserve,/SET verification_state='verified'/);
+ assert.match(reserve,/vis_grant_not_authorized/);
+ assert.match(handover,/access_state IN \('pending','active'\)/);
  assert.match(handover,/payment_id=/);
  assert.match(handover,/device_uid=/);
  assert.match(handover,/expires_at>now\(\)/);
@@ -237,7 +239,7 @@ test("VIS release requires fresh actual device snapshot with suspended group and
  const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
  assert.match(release,/gym_x904_access_snapshots/);
  assert.match(release,/observed_at >= now\(\)-interval '10 minutes'/);
- assert.match(release,/observed_at >= \$\{row\.collected_at\}/);
+ assert.match(release,/observed_at >= \$\{row\.collected_at \?\? row\.reserved_at\}/);
  assert.match(release,/jsonb_array_elements\(users\)/);
  assert.match(release,/u->>'group'='2'/);
  assert.match(release,/u->>'role'='0'/);
@@ -247,15 +249,19 @@ test("VIS release requires fresh actual device snapshot with suspended group and
  assert.match(release,/access_state IN \('pending','active','review_required'\)/);
 });
 
-test("physical handover is required before VIS can be returned or reused",()=>{
+test("witnessed physical return is required before collected or autoactivated VIS can be reused",()=>{
  const handover=service.slice(service.indexOf("export async function collectReservedVisCard"),service.indexOf("export async function returnVerifiedVisCard"));
  const release=service.slice(service.indexOf("export async function returnVerifiedVisCard"));
  assert.match(handover,/physicalCardHandedOver !== true/);
  assert.match(handover,/state='collected',collected_at=now\(\)/);
  assert.match(handover,/row\.booking_status !== "confirmed" \|\| row\.payment_status !== "confirmed"/);
  assert.match(handover,/vis_payment_or_booking_changed/);
- assert.match(release,/row\.state !== "collected" \|\| !row\.collected_at/);
- assert.match(release,/observed_at >= \$\{row\.collected_at\}/);
+ assert.match(release,/row\.state === "collected" && row\.collected_at/);
+ assert.match(release,/row\.state === "reserved" && !row\.collected_at && row\.reserved_at/);
+ assert.match(release,/vis_suspend_proof_missing/);
+ assert.match(release,/physicalCardReturned !== true/);
+ assert.match(release,/x904ReadbackChecked !== true/);
+ assert.match(release,/observed_at >= \$\{row\.collected_at \?\? row\.reserved_at\}/);
  assert.match(api,/\/admin\/wa-bookings\/:orderNumber\/collect-vis/);
  assert.match(admin,/Tandai Kartu Sudah Diambil/);
  assert.match(admin,/detail\.visCardReservation\?\.state === "collected"/);
@@ -270,7 +276,7 @@ test("return requires verified PROD X904 read-back, not a DEV-only receipts tabl
  assert.match(release,/afterGroup/);
  assert.match(release,/deviceUid/);
  assert.match(release,/last_command\.completed_at>latest\.observed_at/);
- assert.match(release,/created_at>=\$\{row\.collected_at\}/);
+ assert.match(release,/created_at>=\$\{row\.collected_at \?\? row\.reserved_at\}/);
 });
 
 test("VIS cannot return to the available pool while the customer booking remains open",()=>{
