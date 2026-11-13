@@ -282,6 +282,55 @@ export async function autoReserveVisAfterFundsVerified(input: {
   }
 }
 
+
+/**
+ * Retry an already-confirmed public Gym booking if a transient failure left
+ * payment committed but no VIS reservation. No financial or device writes.
+ */
+export async function recoverUnallocatedPaidGymVis(now = new Date()): Promise<number> {
+  if (process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true" ||
+      process.env.GYM_X904_MANUAL_ACCESS_ENABLED !== "true" ||
+      process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return 0;
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now);
+  const hour = Number(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta", hour: "2-digit", hourCycle: "h23",
+  }).format(now));
+  if (hour < 6 || hour >= 23) return 0;
+  const pending = await db.execute(sql`SELECT b.order_number,p.id AS payment_id
+    FROM sport_center.sport_bookings b
+    JOIN sport_center.sport_payments p ON p.booking_id=b.id
+    WHERE b.source='gym_public_guest' AND b.status::text='confirmed'
+      AND b.notes LIKE '%Kartu VIS001–VIS006 menunggu pilihan%'
+      AND b.booking_date::date=${day}::date
+      AND p.status::text='confirmed' AND p.confirmed_at IS NOT NULL
+      AND NULLIF(btrim(p.proof_url),'') IS NOT NULL
+      AND p.amount>=COALESCE(b.grand_total,b.total_price)
+      AND NOT EXISTS (
+        SELECT 1 FROM sport_center.gym_vis_card_reservations r
+        WHERE r.booking_id=b.id
+      )
+    ORDER BY p.confirmed_at,b.id LIMIT 12`);
+  let recovered = 0;
+  for (const row of pending.rows as Array<{order_number: string;payment_id: number}>) {
+    try {
+      const result = await reserveVisAfterAdminPaymentConfirmation({
+        orderNumber: String(row.order_number),
+        paymentId: Number(row.payment_id),
+        confirmedBy: "X904 AUTO RECOVERY",
+      });
+      if (result.newReservation) recovered++;
+    } catch (error) {
+      const code = error instanceof VisReservationError ? error.code : "unknown";
+      console.warn("[gym-vis] paid booking allocation retry pending", {
+        orderNumber: String(row.order_number), code,
+      });
+    }
+  }
+  return recovered;
+}
+
 /**
  * Called by Booking Admin after its existing payment+booking confirmation.
  * One admin click: the backend reserves a physical card idempotently.
