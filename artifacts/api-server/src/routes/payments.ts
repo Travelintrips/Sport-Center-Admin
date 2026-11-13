@@ -23,6 +23,7 @@ import { canRecordConfirmedBookingOutstandingPayment } from "../lib/confirmedBoo
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
 import { wakeX904AdminVisAfterPayment } from "../services/x904VisFastWake";
+import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
@@ -93,6 +94,10 @@ async function reserveVisitorCardAfterPaymentConfirmation(
         cardCode: allocated.cardCode, statusUrl,
       }).catch(err => logger.error({ err, orderNumber: booking.orderNumber }, "[gym-vis] reservation notice failed"));
     }
+    // Payment and matching VIS grant are committed. Reuse the existing guarded
+    // worker immediately instead of waiting for its next 60-second cycle.
+    // It still owns UID, member mapping, fresh snapshot, ACK and read-back.
+    wakeX904PaidGymAfterConfirmation(true);
     return { status: "reserved", cardCode: allocated.cardCode };
   } catch (err) {
     const code = err instanceof VisReservationError ? err.code : "reservation_unavailable";

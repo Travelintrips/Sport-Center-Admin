@@ -77,6 +77,40 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
 
+  // Recover only SAME-DAY public Gym VIS allocations that were confirmed by
+  // the existing one-click admin flow before this fix was deployed.
+  // No booking/payment recreation, no fabricated handover, no machine writes.
+  // The regular worker still independently checks fresh inventory, UID,
+  // member ownership, expiry and device ACK before declaring access active.
+  // RLS UPDATE is used; production RLS INSERT requires initial pending state.
+  await store.execute(sql`UPDATE sport_center.x904_nonmember_daily_access a
+    SET verification_state='verified'
+    FROM sport_center.sport_bookings b,
+         sport_center.sport_payments p,
+         sport_center.gym_vis_card_reservations r
+    WHERE a.booking_id=b.id AND a.payment_id=p.id AND p.booking_id=b.id
+      AND r.booking_id=b.id AND r.payment_id=p.id
+      AND a.device_serial=${DEVICE} AND r.device_serial=${DEVICE}
+      AND a.identity_type='card'
+      AND a.identity_label=r.card_code
+      AND a.user_pin=r.user_pin AND a.device_uid=r.device_uid
+      AND a.verification_state='pending' AND a.access_state='pending'
+      AND a.activated_at IS NULL AND a.expires_at>${now}
+      AND b.source='gym_public_guest' AND b.status::text='confirmed'
+      AND b.notes LIKE '%Kartu VIS001–VIS006 menunggu pilihan%'
+      AND b.booking_date::date=(${now}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date
+      AND p.status::text='confirmed' AND p.confirmed_at IS NOT NULL
+      AND NULLIF(btrim(p.proof_url),'') IS NOT NULL
+      AND p.amount>=COALESCE(b.grand_total,b.total_price)
+      AND a.confirmed_at=p.confirmed_at
+      AND r.state='reserved' AND r.collected_at IS NULL
+      AND r.funds_verified_at IS NOT NULL
+      AND r.funds_reference=('ADMINPAY-' || p.id::text)
+      AND NOT EXISTS (
+        SELECT 1 FROM sport_center.gym_x904_member_mapping m
+        WHERE m.device_serial=${DEVICE} AND m.user_pin=a.user_pin
+      )`);
+
   // Inventory reconciliation is read-only unless a PIN has an independently
   // verified nonmember grant. An absent member mapping is NOT proof of nonmembership.
   // In particular, do not enqueue commands for legacy PINs based on Group 1 alone.
@@ -246,8 +280,9 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           !Number.isSafeInteger(Number(a.device_uid)) || Number(a.device_uid) <= 0 ||
           !String(a.verified_name ?? "").trim()) return;
 
-      // Only the new self-service VIS flow requires witnessed physical handover.
-      // Legacy verified-card/PIN grants retain their established behavior.
+      // The one-click, paid self-service VIS flow may preauthorize its reserved
+      // card without falsifying physical handover. A confirmed payment and
+      // verified grant are required; old web VIS still requires handover.
       if (a.identity_type === "card" &&
           ((a.booking_source === "gym_public_guest" &&
             String(a.booking_notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan")) ||
@@ -265,7 +300,14 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             AND r.card_code=${String(a.identity_label)}
             AND r.user_pin=${String(a.user_pin)}
             AND r.device_uid=${Number(a.device_uid)}
-            AND r.state='collected' AND r.collected_at IS NOT NULL
+            AND (
+              (r.state='collected' AND r.collected_at IS NOT NULL)
+              OR (
+                r.state='reserved' AND r.collected_at IS NULL
+                AND r.funds_verified_at IS NOT NULL
+                AND ${a.booking_source === "gym_public_guest" && a.payment_status === "confirmed" && a.verification_state === "verified"}
+              )
+            )
           LIMIT 1`);
         if (handover.rows.length !== 1) return;
         // A reservation may not be activated after its booking-day closing.
@@ -287,7 +329,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         a.identity_type === "pin" && a.booking_status === "confirmed" &&
         a.payment_status === "confirmed" && a.verification_state === "verified" &&
         a.access_state === "pending";
-      if (a.activated_at == null && now.getTime() < scheduledStart && !immediatePaidGymPin) return;
+      const immediatePaidGymVis = a.booking_source === "gym_public_guest" &&
+        a.identity_type === "card" && a.booking_status === "confirmed" &&
+        a.payment_status === "confirmed" && a.verification_state === "verified" &&
+        a.access_state === "pending";
+      if (a.activated_at == null && now.getTime() < scheduledStart &&
+          !immediatePaidGymPin && !immediatePaidGymVis) return;
       // A pending booking belongs to its scheduled WIB date. If activation
       // was missed, never activate it after the facility reopens next day.
       // Advance payments for future reservations may activate on that day.

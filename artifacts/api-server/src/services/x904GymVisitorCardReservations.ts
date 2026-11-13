@@ -223,7 +223,9 @@ export async function autoReserveVisAfterFundsVerified(input: {
           ${String(card.pin)},${Number(card.uid)},${ref},${actor})`);
       // Create the paid grant in the SAME transaction, but do not authorize a
       // machine command until a physical card handover is witnessed.
-      // 'pending' verification_state is deliberately excluded by the worker.
+      // Confirmed paid VIS grant is independently eligible for the existing
+      // worker's access authorization; reservation != physical handover.
+      // A physical handover is still recorded separately (never fabricated).
       // expires_at holds the booking-day 23:00 WIB hard closing time; the
       // worker starts the 12-hour clock from its authenticated ACTIVATE ACK.
       const grant = await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
@@ -238,6 +240,25 @@ export async function autoReserveVisAfterFundsVerified(input: {
         RETURNING access_id`);
       if (grant.rows.length !== 1) throw new VisReservationError(409,"vis_grant_not_created",
         "Hak akses VIS belum berhasil disiapkan. Reservasi kartu dibatalkan.");
+      // Keep the existing production RLS INSERT invariant: a newly created
+      // paid VIS grant starts pending. Authorize it within the SAME transaction
+      // using the already existing RLS-allowed UPDATE path after proof and
+      // device inventory have been checked above. No second admin click.
+      const approved = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+        SET verification_state='verified'
+        WHERE access_id=${Number(grant.rows[0].access_id)}
+          AND device_serial='TDBD234200545'
+          AND identity_type='card'
+          AND identity_label=${String(card.code)}
+          AND user_pin=${String(card.pin)}
+          AND device_uid=${Number(card.uid)}
+          AND booking_id=${Number(booking.id)}
+          AND payment_id=${Number(payment.id)}
+          AND verification_state='pending' AND access_state='pending'
+          AND activated_at IS NULL
+        RETURNING access_id`);
+      if (approved.rows.length !== 1) throw new VisReservationError(409, "vis_grant_not_authorized",
+        "Grant VIS belum diotorisasi; reservasi dibatalkan tanpa perintah ke mesin.");
       return { cardCode: String(card.code), state: "reserved", newReservation: true };
     });
   } catch (error) {
@@ -323,9 +344,8 @@ export async function collectReservedVisCard(input: {
           AND identity_label=${String(row.card_code)}
           AND user_pin=${String(row.user_pin)}
           AND device_uid=${Number(row.device_uid)}
-          AND verification_state='pending'
-          AND access_state='pending'
-          AND activated_at IS NULL
+          AND verification_state IN ('pending','verified')
+          AND access_state IN ('pending','active')
           AND expires_at>now()
         RETURNING access_id`);
       if (linkedGrant.rows.length !== 1) {
