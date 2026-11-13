@@ -2744,28 +2744,11 @@ function BookingDetailDrawer({
                           </a>
                         </div>
                       ) : null}
-                      {pmt.proofUrl && (
-                        <>
-                          {!pmt.isCompanyInvoicePayment && (
-                            <ProofImage
-                              paymentId={pmt.id}
-                              membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
-                            />
-                          )}
-                          {paymentDate && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full gap-1.5 text-xs"
-                              disabled={isUpdating || savingDates}
-                              onClick={() => onUpdateDates(booking.id, undefined, paymentDate)}
-                            >
-                              <RefreshCw size={13} className={savingDates ? "animate-spin" : ""} />
-                              Sinkronkan Rekonsiliasi
-                            </Button>
-                          )}
-                        </>
+                      {pmt.proofUrl && !pmt.isCompanyInvoicePayment && (
+                        <ProofImage
+                          paymentId={pmt.id}
+                          membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
+                        />
                       )}
                        {!isSyntheticPayment && canSyncReconciliation && (
                          <div className="space-y-1.5 pt-1">
