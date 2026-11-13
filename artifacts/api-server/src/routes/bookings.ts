@@ -1389,6 +1389,45 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         return true;
       });
 
+      // Cash collected in the selected PAYMENT period is not the total value
+      // of bookings having a payment in that period. Count each real receipt once
+      // (SC-1741 has two receipts on different days).
+      const paymentRangeActive = Boolean(paidDateFrom || paidDateTo);
+      const paymentDayWib = (value: unknown): string | null => {
+        if (!value) return null;
+        const date = new Date(String(value));
+        if (Number.isNaN(date.getTime())) return null;
+        return new Intl.DateTimeFormat("sv-SE", {
+          timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+        }).format(date);
+      };
+      const confirmedPaymentAmounts = new Map<string, number>();
+      for (const booking of filteredResult) {
+        const candidates = [
+          ...(Array.isArray(booking.payments) ? booking.payments : []),
+          booking.payment,
+        ].filter(Boolean);
+        for (const receipt of candidates) {
+          if (receipt?.id == null || receipt.status !== "confirmed") continue;
+          const date = paymentDayWib(receipt.paidAt ?? receipt.confirmedAt);
+          if (!date ||
+              (paidDateFrom && date < String(paidDateFrom)) ||
+              (paidDateTo && date > String(paidDateTo))) continue;
+          const linkedMembershipId = receipt.sourceMembershipPaymentId ?? receipt.source_membership_payment_id;
+          const key = linkedMembershipId != null ? `membership:${linkedMembershipId}` :
+            receipt.isCompanyInvoicePayment ? `invoice:${Math.abs(Number(receipt.id))}` :
+            `payment:${receipt.id}`;
+          if (!confirmedPaymentAmounts.has(key)) {
+            confirmedPaymentAmounts.set(key, Math.max(0, Number(receipt.amount ?? 0)));
+          }
+        }
+      }
+      if (paymentRangeActive) {
+        res.setHeader("X-Payment-Period-Amount",
+          String([...confirmedPaymentAmounts.values()].reduce((sum, amount) => sum + amount, 0)));
+        res.setHeader("X-Payment-Period-Count", String(confirmedPaymentAmounts.size));
+      }
+
       const revenueAmount = (booking: any) =>
         booking.grandTotal != null
           ? Number(booking.grandTotal)
