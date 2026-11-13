@@ -16,24 +16,27 @@ if (!devOnly) {
   console.error("DEV_X904_RLS_BLOCKED: refusing non-DEV pooler target");
   process.exit(1);
 }
-const client = new pg.Client({
+const connectionOptions = {
   connectionString: raw,
   connectionTimeoutMillis: 8000,
   statement_timeout: 5000,
   query_timeout: 8000,
-});
+};
+let client;
 try {
   // Retry transient pooler connection refusal without relaxing the DEV-only
   // destination validation or the actual RLS assertions below.
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
+      client = new pg.Client(connectionOptions);
       await client.connect();
       break;
     } catch (err) {
       const transient = ["ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"]
         .some(code => String(err?.code ?? "").includes(code)
           || String(err?.message ?? "").includes(code));
+      await client?.end().catch(() => {});
       if (!transient || attempt === maxAttempts) throw err;
       console.warn(`DEV_X904_RLS_POOLER_RETRY attempt=${attempt} of ${maxAttempts}`);
       await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
@@ -73,6 +76,6 @@ try {
   console.error("DEV_X904_RLS_GATE_FAILED:", err.message);
   process.exitCode = 1;
 } finally {
-  try { await client.query("ROLLBACK"); } catch {}
+  try { await client?.query("ROLLBACK"); } catch {}
   await client.end().catch(() => {});
 }
