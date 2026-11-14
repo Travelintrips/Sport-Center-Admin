@@ -41,9 +41,17 @@ export function compareParity(expected, actualFunctions, actualTriggers) {
 
 export async function verifyDevParity() {
   const rawUrl = process.env.SUPABASE_DATABASE_URL_DEV || "";
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new Error("PARITY_VERIFICATION_DEV_DATABASE_ONLY"); }
+  const devRef = "xssrfshdrtdfupgqwfdw";
+  const username = decodeURIComponent(parsed.username);
+  const isDevPooler = parsed.hostname.endsWith(".pooler.supabase.com") &&
+    username.endsWith("." + devRef);
+  const isDevDirect = parsed.hostname === ("db." + devRef + ".supabase.co");
   if (process.env.PARITY_TARGET !== "DEV" ||
-      !rawUrl.includes("xssrfshdrtdfupgqwfdw") ||
-      rawUrl.includes("nzdweipzckfszczzqtuw") ||
+      !["postgres:", "postgresql:"].includes(parsed.protocol) ||
+      !(isDevPooler || isDevDirect) ||
+      !username ||
       process.env.SUPABASE_DATABASE_URL)
     throw new Error("PARITY_VERIFICATION_DEV_DATABASE_ONLY");
   const baseline = JSON.parse(readFileSync(baselinePath,"utf8"));
