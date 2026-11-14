@@ -10,6 +10,10 @@ async function check() {
   const liveUrl = process.env.DEV_PUBLIC_HEALTH_URL ?? "";
   const token = process.env.GITHUB_TOKEN ?? "";
   if (!/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repo) || !sha.test(candidate) || !token || !ciName) fail("Invalid release inputs");
+  // Explicitly reject missing acceptance evidence before ancestry/network checks.
+  // The values themselves must never be printed to the CI log.
+  if (!sha.test(approved)) fail("Missing or invalid DEV_E2E_APPROVED_SHA (exact 40-character DEV commit required)");
+  if (!/^https:\/\//i.test(liveUrl)) fail("Missing or invalid DEV_PUBLIC_HEALTH_URL (HTTPS required)");
   git("fetch", "--no-tags", "origin", "develop");
   const devSha = git("rev-parse", "FETCH_HEAD");
   if (!sha.test(devSha)) fail("DEV HEAD is invalid");
@@ -17,7 +21,6 @@ async function check() {
   try { git("merge-base", "--is-ancestor", devSha, candidate); }
   catch { fail("Candidate is not descended from current tested DEV"); }
   if (approved !== devSha) fail("Missing DEV E2E acceptance for exact DEV commit");
-  if (!/^https:\/\//i.test(liveUrl)) fail("Missing public HTTPS DEV health URL");
   const health = await fetch(liveUrl, { signal: AbortSignal.timeout(15000) });
   if (health.status !== 200) fail("DEV live health HTTP " + health.status);
   const liveSha = (health.headers.get("x-cst-commit-sha") || health.headers.get("x-deploy-sha") || "").trim();
