@@ -1,4 +1,4 @@
-name: Sport Center Deploy
+﻿name: Sport Center Hostinger Release Verification
 
 on:
   workflow_dispatch:
@@ -7,32 +7,56 @@ on:
       - main
 
 jobs:
-  deploy:
-    name: Deploy Sport Center
+  verify:
+    name: Verify Hostinger Production Release
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Checkout exact production candidate
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Enforce DEV E2E, CI and commit ancestry
+      - name: Verify production health and X904 OPTIONS handler
         shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ github.sha }}
-          DEV_CI_WORKFLOW: Sport Center CI
-          DEV_E2E_APPROVED_SHA: ${{ vars.DEV_E2E_APPROVED_SHA }}
-          DEV_PUBLIC_HEALTH_URL: ${{ vars.DEV_PUBLIC_HEALTH_URL }}
         run: |
           set -euo pipefail
-          test "${{ github.ref }}" = "refs/heads/main"
-          node scripts/verify-dev-first-promotion.mjs
-
-      - name: Deployment started
+          base="https://sc.travelintrips.co.id"
+          health=$(curl --fail --silent --show-error --location --max-time 20 -o /dev/null -w '%{http_code}' "$base/api/health")
+          echo "Production API health: $health"
+          response=$(curl --silent --show-error --max-time 20 -X OPTIONS -o /dev/null -w '%{http_code}' "$base/iclock/cdata")
+          echo "Production ADMS OPTIONS (no device identity): $response"
+          # The fixed native ADMS route rejects unauthenticated requests; the
+          # old global Express CORS layer short-circuits with HTTP 204.
+          if [[ "$response" == "204" ]]; then
+            echo "::error::Hostinger still uses the old generic CORS handler (204). GitHub merge is not production deployment."
+            exit 1
+          fi
+          if [[ "$response" != "404" ]]; then
+            echo "::error::Unexpected unauthenticated ADMS response ($response); cannot prove safe release."
+            exit 1
+          fi
+          echo "PASS: Production no longer short-circuits ADMS OPTIONS with CORS."
+      - name: Verify published Gym X904 frontend is VMSC build
+        shell: bash
         run: |
-          echo "Sport Center deployment workflow started"
-          echo "Hostinger deployment handled separately"
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, urllib.request
+          base="https://sc.travelintrips.co.id"
+          def get(path):
+              req=urllib.request.Request(base+path,headers={"Cache-Control":"no-cache","User-Agent":"x904-release-verifier"})
+              with urllib.request.urlopen(req,timeout=25) as response:
+                  return response.read().decode("utf-8")
+          html=get("/admin/gym-x904")
+          entry=re.search(r'/assets/index-[^"\s]+\.js',html)
+          if not entry: raise SystemExit("FAIL: missing frontend entry")
+          js=get(entry.group(0))
+          chunk=re.search(r'assets/GymX904-[A-Za-z0-9_-]+\.js',js)
+          if not chunk: raise SystemExit("FAIL: missing GymX904 chunk reference")
+          bundle=get("/"+chunk.group(0))
+          if "Sinkronisasi LAN via VMSC" not in bundle or "Sinkronisasi LAN via ALMANO" in bundle:
+              raise SystemExit("FAIL: Hostinger still serves obsolete ALMANO frontend")
+          print("PASS: Production Gym X904 frontend references VMSC")
+          PY
+      - name: Explain deployment boundary
+        if: always()
+        run: |
+          echo "This workflow VERIFY ONLY; it does not deploy to Hostinger."
+          echo "A real Hostinger application deployment must occur separately."
