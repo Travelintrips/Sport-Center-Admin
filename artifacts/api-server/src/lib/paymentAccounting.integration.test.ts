@@ -79,7 +79,7 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     return { rows: [], rowCount: 1 };
   }
 
-  if (sql.includes("SELECT COUNT(*) AS pending")) {
+  if (sql.includes("SELECT COUNT(DISTINCT sp.id) AS pending")) {
     const pending = state.confirmedSourcePaymentIds.filter((sourcePaymentId) => {
       const mirror = state.mirrors.find((row) => row.sourcePaymentId === sourcePaymentId);
       if (!mirror) return true;
