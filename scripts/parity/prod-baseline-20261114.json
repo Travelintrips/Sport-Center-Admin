@@ -1,0 +1,304 @@
+{
+  "baseline": "Sport Center PROD 2026-11-14",
+  "source_commit": "9660cfe2ac3ea005018bab33d846cd8bd4813926",
+  "source_database": "PROD",
+  "functions": [
+    {
+      "proname": "cascade_delete_public_booking",
+      "args": "",
+      "hash": "29badde89d4e3414ca6027bf97520e2d"
+    },
+    {
+      "proname": "cascade_update_public_booking",
+      "args": "",
+      "hash": "c4648ae1ffb54c0ae8ec4aa90f670afc"
+    },
+    {
+      "proname": "create_payment_accounting_draft",
+      "args": "p_payment_id integer",
+      "hash": "00da6be0779b64f587215e415b23c4f5"
+    },
+    {
+      "proname": "create_payment_accounting_draft_owner",
+      "args": "p_payment_id integer, p_legacy_public_entry_id integer",
+      "hash": "06aee6461b68efc2c846d291f954623f"
+    },
+    {
+      "proname": "create_payment_settlement_batch",
+      "args": "p_settlement_reference text, p_company_id integer, p_provider_code text, p_bank_account_id text, p_settlement_date date, p_payment_ids integer[], p_actor text",
+      "hash": "d1221f0de73bb9f144d2ec334fd09a5b"
+    },
+    {
+      "proname": "create_payment_settlement_batch_legacy",
+      "args": "p_settlement_reference text, p_company_id integer, p_provider_code text, p_bank_account_id text, p_settlement_date date, p_payment_ids integer[], p_actor text",
+      "hash": "a5266921d02243db2712c031c7e9540c"
+    },
+    {
+      "proname": "create_payment_settlement_supplemental_batch",
+      "args": "p_company_id integer, p_provider_code text, p_bank_account_id text, p_settlement_date date, p_base_rule_version text, p_payment_ids integer[], p_actor text",
+      "hash": "98d9b976961567211f95fe4ca97d0dd7"
+    },
+    {
+      "proname": "enforce_settlement_payment_state_after_post",
+      "args": "",
+      "hash": "e030c55cbe82538bc97e9deb2b39efef"
+    },
+    {
+      "proname": "enqueue_booking_sheets_after_confirmation",
+      "args": "",
+      "hash": "94dc151fd60ee01cca511423bec25b3d"
+    },
+    {
+      "proname": "enqueue_payment_accounting_outbox",
+      "args": "",
+      "hash": "94d853024dc41cd7a8b9da0aac20c97a"
+    },
+    {
+      "proname": "finalize_payment_settlement",
+      "args": "p_settlement_id bigint, p_actor text",
+      "hash": "d6b6ebe66133f967a25d612994503187"
+    },
+    {
+      "proname": "finalize_payment_settlement_legacy",
+      "args": "p_settlement_id bigint, p_actor text",
+      "hash": "d26259bc2272e1e7870f5a463cb2c9c4"
+    },
+    {
+      "proname": "get_unmirrored_confirmed_payments",
+      "args": "",
+      "hash": "620f46b5f7a1cdabd4ec71995fafc0fc"
+    },
+    {
+      "proname": "link_x904_nonmember_daily_payment",
+      "args": "",
+      "hash": "c4520dc7d76f5082b5f33b74dce13edf"
+    },
+    {
+      "proname": "mark_settlement_payments_settled",
+      "args": "p_settlement_id bigint, p_actor text",
+      "hash": "ee27745f7dacaca6989f61f5b1acbd3a"
+    },
+    {
+      "proname": "mirror_confirmed_payment_to_public",
+      "args": "",
+      "hash": "665d059d9cde9182f1aedcefb23db53c"
+    },
+    {
+      "proname": "on_confirmed_payment_create_accounting_draft",
+      "args": "",
+      "hash": "cce6358d593fa4765946725c30a8657b"
+    },
+    {
+      "proname": "recover_payment_accounting_draft",
+      "args": "p_payment_id integer, p_public_entry_id integer",
+      "hash": "44e9f7e46c0a7a783770fd4c6fa9071e"
+    },
+    {
+      "proname": "replay_confirmed_payment_mirror",
+      "args": "p_payment_id integer",
+      "hash": "598dd683c9c1afd96b8496e4b356ac2e"
+    },
+    {
+      "proname": "resolve_and_persist_payment_metadata",
+      "args": "p_payment_id integer",
+      "hash": "fe98f398cc106394683e88d3c3e83277"
+    },
+    {
+      "proname": "resolve_payment_settlement_config",
+      "args": "p_company_id integer, p_provider_code text, p_bank_account_id text, p_effective_date date",
+      "hash": "7a76acd36d739adb9e14c46a8e843504"
+    },
+    {
+      "proname": "sync_admin_payment_date_projection",
+      "args": "",
+      "hash": "ba61d30e65414da1f6420ef898f75852"
+    },
+    {
+      "proname": "sync_membership_payment_to_canonical",
+      "args": "",
+      "hash": "110a77b42c7df15d94af47c6e000e9d8"
+    },
+    {
+      "proname": "sync_payment_accounting_journal",
+      "args": "",
+      "hash": "a0ffcdfdfc6519aa0d8a81de21d12eed"
+    },
+    {
+      "proname": "validate_new_payment_metadata",
+      "args": "",
+      "hash": "b73464f42143390342b9e2b0ea9839a2"
+    },
+    {
+      "proname": "x904_apply_first_daily_checkin",
+      "args": "p_event_id text",
+      "hash": "9df23514cbffd7cca5cb366d66e4b13c"
+    },
+    {
+      "proname": "x904_auto_checkin_log_trigger",
+      "args": "",
+      "hash": "829191d139e0e915f6e28db1072a2cf3"
+    },
+    {
+      "proname": "x904_claim_batch_delete_command",
+      "args": "",
+      "hash": "21e4c23ae15bfbd10158cda72bfaac10"
+    },
+    {
+      "proname": "x904_claim_individual_delete_command",
+      "args": "",
+      "hash": "5ce4effff9bfc955eeeea258b227b879"
+    },
+    {
+      "proname": "x904_claim_name_edit_command",
+      "args": "",
+      "hash": "3568ce3a3c506cf71d068f106dfc5c76"
+    },
+    {
+      "proname": "x904_claim_user_command",
+      "args": "",
+      "hash": "15ea3000e067cb970865d62dca8aac91"
+    },
+    {
+      "proname": "x904_claim_user_command",
+      "args": "p_user_pin text, p_expected_uid integer",
+      "hash": "f683e67a978b72f4b1b70e31ea414abf"
+    },
+    {
+      "proname": "x904_complete_batch_delete_command",
+      "args": "p_command_id uuid, p_lease_token uuid, p_readback boolean, p_device_uid integer, p_count_before integer, p_count_after integer, p_error_code text",
+      "hash": "980ea326328aa404116d40771ca826f8"
+    },
+    {
+      "proname": "x904_complete_group_command",
+      "args": "p_command_id uuid, p_lease_token uuid, p_readback boolean, p_device_uid integer, p_count_before integer, p_count_after integer, p_group_before integer, p_group_after integer, p_error_code text",
+      "hash": "58365a7249755ed707c3a5a4dcf3af59"
+    },
+    {
+      "proname": "x904_complete_individual_delete_command",
+      "args": "p_command_id uuid, p_lease_token uuid, p_readback boolean, p_device_uid integer, p_count_before integer, p_count_after integer, p_error_code text",
+      "hash": "31695a07761a3e1764a67de0c047ed49"
+    },
+    {
+      "proname": "x904_complete_read_command",
+      "args": "p_id uuid, p_result jsonb, p_error text",
+      "hash": "65c862422c3bfa115efcbc40c8f5545a"
+    },
+    {
+      "proname": "x904_complete_user_command",
+      "args": "p_command_id uuid, p_lease_token uuid, p_readback boolean, p_device_uid integer, p_count_before integer, p_count_after integer, p_error_code text",
+      "hash": "1e6119d3be105db45edfda2e1df36cb8"
+    },
+    {
+      "proname": "x904_import_verified_raw",
+      "args": "p_event_index integer, p_device_serial text, p_user_pin text, p_raw_hex text",
+      "hash": "a312243cfd62e90925265d2c4a75f190"
+    },
+    {
+      "proname": "x904_ingest_new_raw",
+      "args": "p_event_index integer, p_device_serial text, p_raw_hex text",
+      "hash": "e350bce4eca500537b05bd68efba5980"
+    },
+    {
+      "proname": "x904_ingest_new_raw",
+      "args": "p_event_index integer, p_device_serial text, p_user_pin text, p_raw_hex text",
+      "hash": "30885e0c076c3bebcd27dbbba305abb9"
+    },
+    {
+      "proname": "x904_nonmember_payment_revocation_guard",
+      "args": "",
+      "hash": "8a89ca10a990b051ece318aeac55b42d"
+    },
+    {
+      "proname": "x904_normalize_lan_batch",
+      "args": "p_serial text, p_pin text, p_limit integer",
+      "hash": "73ebd89b9bb2bb091dd06ca701606042"
+    },
+    {
+      "proname": "x904_publish_access_snapshot",
+      "args": "p_users jsonb, p_count integer",
+      "hash": "f1f3adbea64f3539ce9ab2642a67b86c"
+    },
+    {
+      "proname": "x904_queue_gym_usage_on_first_checkin",
+      "args": "",
+      "hash": "7ae12e5945cac13cf16eee63da8b1105"
+    },
+    {
+      "proname": "x904_stage_new_nonmember_candidate",
+      "args": "p_command_id uuid",
+      "hash": "d9c28f87ae810d893b33e509a542b46f"
+    }
+  ],
+  "triggers": [
+    {
+      "table_name": "gym_x904_auto_checkin_sources",
+      "tgname": "x904_queue_gym_usage",
+      "hash": "a1d86bfb253d9d87bfd476f88029b0f7"
+    },
+    {
+      "table_name": "gym_x904_lan_logs",
+      "tgname": "gym_x904_auto_checkin_on_log",
+      "hash": "1ff52224348760a1f04326fda493cc81"
+    },
+    {
+      "table_name": "sport_bookings",
+      "tgname": "trg_cascade_delete_public_booking",
+      "hash": "619013d0cba640936407e1dc28bf881a"
+    },
+    {
+      "table_name": "sport_bookings",
+      "tgname": "trg_cascade_update_public_booking",
+      "hash": "b0627492f779ba081332f89dcf58375f"
+    },
+    {
+      "table_name": "sport_membership_payments",
+      "tgname": "trg_sync_membership_payment_to_canonical",
+      "hash": "1c816f727248f8eafe1ff06181e908a0"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "booking_sheets_auto_enqueue_confirmed",
+      "hash": "27508e11979b9bfc71af1db957916746"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_confirmed_payment_create_accounting_draft",
+      "hash": "7e358da507198ee7708019fd16655784"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_link_x904_nonmember_daily_payment",
+      "hash": "28190bed9a324317b25e1b39515d3368"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_mirror_confirmed_payment_to_public",
+      "hash": "b8f06bc21a89876428cc2d994b263e29"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_payment_accounting_outbox",
+      "hash": "bc5f20c78a5445b8737ed103d68370ed"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_sync_admin_payment_date_projection",
+      "hash": "024c0efd25f4e716f128f1e840942650"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_sync_payment_accounting_journal",
+      "hash": "476524371406e27aa819200bedc43f16"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_validate_new_payment_metadata",
+      "hash": "4bfc3c8beb01865bdadf71a31e327908"
+    },
+    {
+      "table_name": "sport_payments",
+      "tgname": "trg_x904_nonmember_payment_revocation_guard",
+      "hash": "663851a62eb23f36a3b0d3685a541f12"
+    }
+  ]
+}

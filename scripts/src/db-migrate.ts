@@ -258,7 +258,18 @@ try {
   // splitting inside PL/pgSQL bodies.
   const statements = splitSqlStatements(CUSTOM_MIGRATION_SQL);
   let ok = 0, skipped = 0;
+  // DEV must never replace the audited, PROD-aligned journal function with
+  // the legacy definition embedded in CUSTOM_MIGRATION_SQL. This block is
+  // DEV-only and leaves fresh empty databases able to initialize normally.
+  const existingJournalFunction = !isProd && (await client.query(
+    "SELECT to_regprocedure('sport_center.sync_payment_accounting_journal()') IS NOT NULL AS present"
+  )).rows[0]?.present === true;
   for (const stmt of statements) {
+    if (existingJournalFunction &&
+        stmt.includes('CREATE OR REPLACE FUNCTION sport_center.sync_payment_accounting_journal()')) {
+      console.log("      — Preserved audited DEV payment journal function; parity gate follows migration");
+      continue;
+    }
     try {
       await client.query(stmt);
       ok++;

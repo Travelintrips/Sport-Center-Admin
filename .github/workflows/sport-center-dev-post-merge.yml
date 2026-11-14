@@ -45,5 +45,13 @@ jobs:
             exit 1
           fi
 
+      - name: Verify pinned PROD parity guard unit tests
+        run: pnpm --filter @workspace/scripts run parity:dev:test
+
       - name: Apply idempotent DEV migrations
         run: pnpm --filter scripts migrate:dev
+
+      - name: Fail release on DEV drift from audited PROD SQL
+        env:
+          PARITY_TARGET: DEV
+        run: pnpm --filter @workspace/scripts run parity:dev:verify

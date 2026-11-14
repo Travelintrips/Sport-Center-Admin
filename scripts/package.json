@@ -35,7 +35,9 @@
     "audit:production-read-only": "NODE_ENV=production-audit tsx ./audit/production-read-only-runner.ts",
     "audit:production-integrity": "NODE_ENV=production-audit tsx ./audit/production-transaction-integrity-audit.ts",
     "test:uat-qris": "tsx ./src/uat-qris-harness.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "parity:dev:test": "node --test ./parity/check-dev-prod-parity.test.mjs",
+    "parity:dev:verify": "node ./parity/check-dev-prod-parity.mjs"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
