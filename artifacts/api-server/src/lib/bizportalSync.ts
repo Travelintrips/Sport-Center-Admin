@@ -1744,7 +1744,7 @@ export interface BulkPaymentPushResult {
 
 export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number> {
   const { rows } = await pool.query(`
-    SELECT COUNT(*) AS pending
+    SELECT COUNT(DISTINCT sp.id) AS pending
     FROM sport_center.sport_payments sp
     JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
      LEFT JOIN sport_center.accounting_journals saj
