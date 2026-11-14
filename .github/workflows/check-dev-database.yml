@@ -1,0 +1,56 @@
+name: Check Supabase DEV Connection
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-dev-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check DEV database configuration (no secrets printed)
+        env:
+          DEV_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL_DEV }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const raw = process.env.DEV_DATABASE_URL;
+          if (!raw) {
+            console.error("FAIL: SUPABASE_DATABASE_URL_DEV is missing");
+            process.exit(1);
+          }
+
+          let url;
+          try {
+            url = new URL(raw);
+          } catch {
+            console.error("FAIL: Database connection URL is invalid");
+            process.exit(1);
+          }
+
+          const projectRef = "xssrfshdrtdfupgqwfdw";
+          const username = decodeURIComponent(url.username);
+          const hostOK = url.hostname.endsWith(".pooler.supabase.com");
+          const roleOK = username.endsWith("." + projectRef);
+          const portOK = ["5432", "6543"].includes(url.port);
+          const secretPresent = Boolean(url.password);
+
+          if (!["postgres:", "postgresql:"].includes(url.protocol) ||
+              !hostOK || !roleOK || !portOK || !secretPresent) {
+            console.error("FAIL: Connection configuration does not match CST-DEV pooler requirements");
+            console.log("Validation: host=" + hostOK + ", role=" + roleOK +
+                        ", supported_port=" + portOK + ", password_present=" + secretPresent);
+            process.exit(1);
+          }
+
+          console.log("PASS: Supabase CST-DEV secret structure valid");
+          console.log("Project: " + projectRef);
+          console.log("Pooler port: " + url.port);
+          console.log("Pooler mode: " + (url.port === "5432" ? "SESSION" : "TRANSACTION"));
+          console.log("Database role: " + username.slice(0, -(projectRef.length + 1)));
+          console.log("Password: PRESENT (not displayed)");
+          console.log("NOTE: This diagnostic validates secret configuration, not live PostgreSQL authentication.");
+          NODE
