@@ -33,9 +33,9 @@ test("server-resolved name+PIN may prepare unpaid grant; no device command until
  assert.match(bookingRoute,/publicGymGuest && !selfGymMachinePinMatched \? "review_required" : "verified"/);
  assert.match(bookingRoute,/publicGymGuest && !selfGymMachinePinMatched \? "review_required" : "pending"/);
  const newTrigger=read("artifacts/api-server/migrations/20261116_x904_verified_self_pin_auto_payment.sql");
- assert.match(newTrigger,/a\.verification_state='review_required'/);
+ assert.match(newTrigger,/a\.verification_state<>'verified'/);
  assert.match(newTrigger,/NEW.status::text = 'confirmed'/);
- assert.match(newTrigger,/WHEN is_guest AND a\.verification_state='review_required'/);
+ assert.match(newTrigger,/WHEN is_guest AND a\.verification_state<>'verified'/);
  assert.match(bookingRoute,/status: "pending"/);
  assert.match(bookingRoute,/x904Identity: !publicGymGuest && verifiedX904Identity/);
  assert.match(bookingRoute,/const customer = publicGymGuest \? null : await ensureCustomer/);

@@ -451,6 +451,19 @@ suite(
       // Command queued != door opened: physical SDK ACK and group readback still mandatory.
     });
 
+    test("unverified public Gym PIN cannot become live merely because funds were confirmed",async()=>{
+      const result=await submit();
+      expect(result.status).toBe(201);
+      const id=Number(result.body.id);
+      // Simulate a non-verified intermediate state on an otherwise valid public booking.
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET verification_state='pending',access_state='pending' WHERE booking_id=$1",[id]);
+      await confirm(id);
+      expect(await grant(id)).toMatchObject({verification_state:"review_required",access_state:"review_required"});
+      await snapshot(new Date(clock.getTime()-1000),2);
+      await tick(clock);
+      expect(await commands()).toHaveLength(0);
+    });
+
     test("already-paid Gym guest with no grant is restored by staff without a second booking or payment",async()=>{
       const id=await checkout();
       const paid=await confirm(id);

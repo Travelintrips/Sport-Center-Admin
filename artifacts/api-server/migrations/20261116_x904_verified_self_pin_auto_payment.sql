@@ -33,9 +33,9 @@ BEGIN
        SET payment_id = NEW.id,
            confirmed_at = COALESCE(NEW.confirmed_at, NEW.paid_at, now()),
            expires_at = COALESCE(NEW.confirmed_at, NEW.paid_at, now()) + interval '12 hours',
-           access_state = CASE WHEN is_guest AND a.verification_state='review_required'
+           access_state = CASE WHEN is_guest AND a.verification_state<>'verified'
                             THEN 'review_required' ELSE 'pending' END,
-           verification_state = CASE WHEN is_guest AND a.verification_state='review_required'
+           verification_state = CASE WHEN is_guest AND a.verification_state<>'verified'
                                   THEN 'review_required' ELSE 'verified' END
      WHERE a.booking_id = NEW.booking_id AND a.payment_id IS NULL;
   ELSIF NEW.status::text IN ('cancelled','rejected','refunded') AND changed THEN

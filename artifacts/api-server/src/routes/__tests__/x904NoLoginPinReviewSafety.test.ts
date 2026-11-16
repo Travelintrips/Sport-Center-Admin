@@ -33,7 +33,7 @@ describe("No-login ordinary PIN booking/payment isolation", () => {
     expect(migration).toContain("WHEN is_guest THEN 'review_required' ELSE 'verified'");
     expect(migration).toContain("NEW.status::text = 'confirmed'");
     const auto=readFileSync("migrations/20261116_x904_verified_self_pin_auto_payment.sql","utf8");
-    expect(auto).toContain("WHEN is_guest AND a.verification_state='review_required'");
+    expect(auto).toContain("WHEN is_guest AND a.verification_state<>'verified'");
     expect(auto).toContain("NEW.status::text = 'confirmed'");
   });
   test("staff handoff requires authenticated role, payment, correct identity, and open hours", () => {
