@@ -24,7 +24,9 @@ WITH CHECK (
   WHERE b.id=x904_nonmember_daily_access.booking_id
    AND b.source='gym_public_guest'
    AND b.status::text IN ('confirmed','paid','completed')
-   AND b.booking_date::date=(now() AT TIME ZONE 'Asia/Jakarta')::date
+   -- RLS authorizes only creation of a HELD review row, never activation.
+   -- The authenticated endpoint separately enforces today's WIB date and opening hours.
+   AND b.booking_date::date >= (p.confirmed_at AT TIME ZONE 'Asia/Jakarta')::date
    AND p.id=x904_nonmember_daily_access.payment_id
    AND p.status::text='confirmed'
    AND p.confirmed_at=x904_nonmember_daily_access.confirmed_at
