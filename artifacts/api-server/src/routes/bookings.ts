@@ -33,6 +33,7 @@ import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/addit
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { syncBookingGroupTotal } from "../lib/groupTotals";
+import { hasAdminCartOverlap, adminCartLockKeys } from "../lib/adminMultiFacilityCart";
 import { evaluateBookingCancellation } from "../lib/bookingCancellationPolicy";
 import {
   FINAL_BANK_MATCH_STATUSES,
@@ -2762,28 +2763,43 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
     if (!customerName || !customerPhone || customerPhone.replace(/\D/g, "").length < 9) {
       res.status(400).json({ error: "Nama dan WhatsApp wajib valid" }); return;
     }
-    const multiSessions: Array<{ date: string; startTime: string; durationHours: number }> = rawSessions.map((item: any) => ({
+    // Each stored session owns its facility; old clients may still send only the parent facilityId.
+    const multiSessions: Array<{ date: string; startTime: string; durationHours: number; facilityId: number; activityType: string | null }> = rawSessions.map((item: any) => ({
       date: String(item?.date ?? ""),
       startTime: String(item?.startTime ?? ""),
       durationHours: Number(item?.durationHours),
+      facilityId: item?.facilityId == null ? facilityId : Number(item.facilityId),
+      activityType: item?.activityType == null ? activityType : String(item.activityType),
     })).sort((a, b) =>
-      a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+      a.date.localeCompare(b.date) || a.facilityId - b.facilityId || a.startTime.localeCompare(b.startTime));
+    const facilityById = new Map<number, typeof facility>([[facilityId, facility]]);
+    for (const id of new Set(multiSessions.map((session) => session.facilityId))) {
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        res.status(400).json({ error: "ID fasilitas sesi tidak valid" }); return;
+      }
+      if (!facilityById.has(id)) {
+        const [record] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, id)).limit(1);
+        if (!record) { res.status(400).json({ error: "Fasilitas sesi tidak ditemukan" }); return; }
+        facilityById.set(id, record);
+      }
+    }
     for (const session of multiSessions) {
-      const err = recurringScheduleError(facility, session.date, session.startTime,
+      const sessionFacility = facilityById.get(session.facilityId)!;
+      if (!sessionFacility.isActive || sessionFacility.bookingMode === "walk_in" ||
+          isGymFacility(sessionFacility) || isCustomPriceFacility(sessionFacility)) {
+        res.status(400).json({ error: "Salah satu fasilitas tidak tersedia untuk multi-jadwal" }); return;
+      }
+      if (isMultigunaFacility(sessionFacility) && !["futsal","basket","voli"].includes(session.activityType ?? "")) {
+        res.status(400).json({ error: "Jenis olahraga Multiguna wajib diisi untuk setiap fasilitas" }); return;
+      }
+      const err = recurringScheduleError(sessionFacility, session.date, session.startTime,
         session.durationHours, { allowPastSchedule: isOperationalBookingRole(identity.role) });
       if (err) { res.status(400).json({ error: err }); return; }
     }
-    const minute = (s: string) => timeToMinutes(s);
-    for (let i = 0; i < multiSessions.length; i++) {
-      for (let j = i + 1; j < multiSessions.length; j++) {
-        const first = multiSessions[i], second = multiSessions[j];
-        if (first.date === second.date &&
-            minute(first.startTime) < minute(second.startTime) + second.durationHours * 60 &&
-            minute(second.startTime) < minute(first.startTime) + first.durationHours * 60) {
-          res.status(400).json({ error: "Ada jadwal bertabrakan dalam booking" }); return;
-        }
-      }
+    if (hasAdminCartOverlap(multiSessions)) {
+      res.status(400).json({ error: "Ada jadwal bertabrakan dalam booking" }); return;
     }
+    const minute = (s: string) => timeToMinutes(s);
     const isCorporate = payerType === "company";
     const bodyId = Number(bodyCustomerId);
     const customerId = Number.isInteger(bodyId) && bodyId > 0 ? bodyId : null;
@@ -2808,14 +2824,15 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
         res.status(400).json({ error: "Pembayaran perusahaan mengikuti invoice" }); return;
       }
     }
-    const prepared: Array<{date:string;startTime:string;durationHours:number;price:number;tax:Awaited<ReturnType<typeof resolveCustomerTax>>;withholding:Awaited<ReturnType<typeof resolveWithholdingTax>>}> = [];
+    const prepared: Array<{date:string;startTime:string;durationHours:number;facilityId:number;activityType:string|null;facility:typeof facility;price:number;tax:Awaited<ReturnType<typeof resolveCustomerTax>>;withholding:Awaited<ReturnType<typeof resolveWithholdingTax>>}> = [];
     for (const session of multiSessions) {
-      const price = Number(facility.pricePerHour) * session.durationHours;
+      const sessionFacility = facilityById.get(session.facilityId)!;
+      const price = Number(sessionFacility.pricePerHour) * session.durationHours;
       const tax = await resolveCustomerTax(price, {
         customerId, companyCustomerId: company?.id ?? null, bookingDate: session.date,
       });
       const withholding = await resolveWithholdingTax(company?.id, tax.grandTotal, tax.dpp);
-      prepared.push({ ...session, price, tax, withholding });
+      prepared.push({ ...session, facility: sessionFacility, price, tax, withholding });
     }
     // Generate order numbers before acquiring the single pool connection for
     // the transaction (PROD DB_POOL_MAX=1). Generating them inside tx can deadlock.
@@ -2825,9 +2842,9 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
       Math.floor(Math.random() * 100000).toString().padStart(5,"0");
     const groupTotal = prepared.reduce((sum, item) => sum + item.tax.grandTotal, 0);
     const created = await db.transaction(async (tx) => {
-      for (const date of [...new Set(multiSessions.map(item => item.date))].sort()) {
-        const dateInteger = Number(date.replace(/-/g,""));
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(${facilityId}, ${dateInteger})`);
+      for (const key of adminCartLockKeys(multiSessions)) {
+        const dateInteger = Number(key.date.replace(/-/g, ""));
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${key.facilityId}, ${dateInteger})`);
       }
       // All conflict checks and all writes share this transaction connection.
       for (const session of prepared) {
@@ -2836,13 +2853,13 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
           endTime: bookingsTable.endTime,
           status: bookingsTable.status,
         }).from(bookingsTable).where(and(
-          eq(bookingsTable.facilityId, facilityId),
+          eq(bookingsTable.facilityId, session.facilityId),
           eq(bookingsTable.bookingDate, session.date)));
         const blocked = await tx.select({
           startTime: blockedSchedulesTable.startTime,
           endTime: blockedSchedulesTable.endTime,
         }).from(blockedSchedulesTable).where(and(
-          eq(blockedSchedulesTable.facilityId, facilityId),
+          eq(blockedSchedulesTable.facilityId, session.facilityId),
           eq(blockedSchedulesTable.date, session.date)));
         const start = minute(session.startTime);
         const end = start + session.durationHours * 60;
@@ -2868,10 +2885,10 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
           orderNumber, groupRef, customerId,
           bookedByUserId: identity.userId,
           customerName, customerPhone, customerEmail,
-          facilityId, bookingDate: item.date, startTime: item.startTime,
+          facilityId: item.facilityId, bookingDate: item.date, startTime: item.startTime,
           endTime: addHours(item.startTime, item.durationHours),
           durationHours: item.durationHours,
-          activityType,
+          activityType: item.activityType,
           totalPrice: String(item.price), basePrice: String(item.price),
           source: "admin", bookingType: "regular",
           discountAmount: "0", additionalCharges: [],
@@ -2903,16 +2920,16 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
           ...row,
           totalPrice: Number(row.totalPrice),
           grandTotal: Number(row.grandTotal ?? item.price),
-          facilityName: facility.name,
+          facilityName: item.facility.name,
         });
       }
       return rows;
     });
     await syncBookingGroupTotal(groupRef).catch((err) =>
       req.log.error({ err }, "Multi-schedule group total synchronization failed"));
-    for (const item of prepared) broadcastAvailabilityChange(facilityId, item.date);
+    for (const item of prepared) broadcastAvailabilityChange(item.facilityId, item.date);
     for (const row of created) {
-      const item = prepared.find(p => p.date === row.bookingDate && p.startTime === row.startTime);
+      const item = prepared.find(p => p.facilityId === row.facilityId && p.date === row.bookingDate && p.startTime === row.startTime);
       if (item?.tax.taxCode) {
         recordTaxTransaction("booking", row.id, row.orderNumber,
           item.tax, item.date).catch(() => {});

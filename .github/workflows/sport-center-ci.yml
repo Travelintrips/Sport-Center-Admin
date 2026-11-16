@@ -416,6 +416,49 @@ jobs:
           ./node_modules/jest/bin/jest.js --runInBand
           src/routes/__tests__/gymPublicCheckout.realPg.test.ts
 
+  # Actual Admin booking HTTP integration, private disposable PostgreSQL only.
+  admin-multifacility-real-postgres:
+    name: Admin multi-facility — actual HTTP and isolated PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: admin_multi_ci_only
+          POSTGRES_DB: multifacility_checkout_isolated
+        ports:
+          - 55444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d multifacility_checkout_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test six Court A/B sessions, duplicate submit and atomic rollback
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: isolated-admin-multifacility-ci-not-a-production-secret
+          SUPABASE_DATABASE_URL_DEV: postgresql://postgres:admin_multi_ci_only@127.0.0.1:55444/multifacility_checkout_isolated
+          ADMIN_MULTIFACILITY_ISOLATED_PG_URL: postgresql://postgres:admin_multi_ci_only@127.0.0.1:55444/multifacility_checkout_isolated
+        run: >-
+          pnpm --filter @workspace/api-server exec node --experimental-vm-modules
+          ./node_modules/jest/bin/jest.js --runInBand
+          src/routes/__tests__/adminMultiFacility.realPg.test.ts
+
   gym-pin-pipeline-real-postgres:
     name: PIN pipeline — real routes, payment trigger, RLS and worker
     runs-on: ubuntu-latest

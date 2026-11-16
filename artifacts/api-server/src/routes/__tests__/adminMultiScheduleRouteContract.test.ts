@@ -4,8 +4,18 @@ import { resolve } from "node:path";
 
 const route = readFileSync(resolve(process.cwd(), "src/routes/bookings.ts"), "utf8");
 const multi = route.split('router.post("/bookings/admin-multi-schedule", adminMiddleware')[1]?.split('// POST /bookings/recurring/check')[0] ?? "";
+const checkout = readFileSync(resolve(process.cwd(), "../sport-center/src/pages/admin/CheckoutForm.tsx"), "utf8");
 
 describe("admin multi-schedule booking contract", () => {
+  it("keeps Court A patterns after changing the facility picker and sends facility-specific sessions", () => {
+    const picker = checkout.split('<Select value={selectedFacilityId} onValueChange=')[1]?.split('<SelectTrigger id="facility">')[0] ?? "";
+    expect(picker).not.toContain("setMultiPatterns([])");
+    expect(checkout).toContain("facilityId: Number(selectedFacilityId), facilityName:");
+    expect(checkout).toContain("pattern.facilityId === next.facilityId");
+    expect(checkout).toContain("facilityId: pattern.facilityId, activityType: pattern.activityType");
+    expect(checkout).toContain("{pattern.facilityName} • {pattern.startDate}");
+  });
+
   it("uses one admin-only endpoint without changing legacy recurring route", () => {
     expect(multi).toContain('verifyToken(token)');
     expect(multi).toContain('identity.role === "customer"');
@@ -19,7 +29,7 @@ describe("admin multi-schedule booking contract", () => {
     expect(multi).toContain('facility.bookingMode === "walk_in"');
   });
   it("rejects overlap within the cart and rechecks occupied and blocked slots", () => {
-    expect(multi).toContain('minute(first.startTime) < minute(second.startTime)');
+    expect(multi).toContain("hasAdminCartOverlap(multiSessions)");
     expect(multi).toContain('blockedSchedulesTable');
     expect(multi).toContain('INACTIVE_STATUSES.includes(b.status)');
   });
@@ -29,6 +39,21 @@ describe("admin multi-schedule booking contract", () => {
     expect(multi).toContain('pg_advisory_xact_lock');
     expect(multi).toContain('tx.insert(bookingGroupsTable)');
     expect(multi).toContain('tx.insert(bookingsTable)');
+  });
+
+  it("stores facility per session and locks each court/date separately", () => {
+    expect(multi).toContain("facilityId: item?.facilityId == null ? facilityId : Number(item.facilityId)");
+    expect(multi).toContain("facilityById.get(session.facilityId)");
+    expect(multi).toContain("hasAdminCartOverlap(multiSessions)");
+    expect(multi).toContain("adminCartLockKeys(multiSessions)");
+    expect(multi).toContain("eq(bookingsTable.facilityId, session.facilityId)");
+    expect(multi).toContain("eq(blockedSchedulesTable.facilityId, session.facilityId)");
+    expect(multi).toContain("facilityId: item.facilityId, bookingDate: item.date");
+    expect(multi).toContain("broadcastAvailabilityChange(item.facilityId, item.date)");
+  });
+  it("preserves old single-facility clients when per-session facilityId is omitted", () => {
+    expect(multi).toContain("item?.facilityId == null ? facilityId");
+    expect(multi).toContain("facilityId: rawFacilityId");
   });
   it("creates a single group and reserves payment notification until settlement", () => {
     expect(multi).toContain('groupRef, customerPhone, customerName');
