@@ -169,6 +169,7 @@ export default function WaBookingForm() {
   const [proofOcrPreview, setProofOcrPreview] = useState<BookingProofOcrPreview | null>(null);
   const [x904IdentityType, setX904IdentityType] = useState<"pin" | "card">("pin");
   const [x904IdentityValue, setX904IdentityValue] = useState("");
+  const [selfGymMachinePin, setSelfGymMachinePin] = useState("");
   const [x904VerifiedName, setX904VerifiedName] = useState("");
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
@@ -536,6 +537,10 @@ export default function WaBookingForm() {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
       return;
     }
+    if (publicGymGuest && guestIdentityRoute === "registered" && !selfGymMachinePin.trim()) {
+      setError("Nama sudah dikenali di X904. Masukkan PIN mesin Anda agar pembayaran lunas langsung diproses menjadi akses GYM otomatis tanpa verifikasi Admin kedua.");
+      return;
+    }
     if (dedicatedNonmember && (!form.paymentMethod || paymentOptions.length === 0)) {
       setError("Pilih QRIS atau transfer bank yang tersedia sebelum mengunggah bukti.");
       return;
@@ -563,7 +568,7 @@ export default function WaBookingForm() {
         durationHours: gymWalkIn ? gymDurationHours : Number(form.durationHours),
         notes: form.notes,
         paymentMethod: form.paymentMethod || undefined,
-        ...(publicGymGuest ? { publicGymGuest: true } : {}),
+        ...(publicGymGuest ? { publicGymGuest: true, ...(guestIdentityRoute === "registered" ? { requestedX904Pin: selfGymMachinePin.trim() } : {}) } : {}),
         ...(!publicGymGuest && gymWalkIn && x904IdentityValue.trim()
           ? { x904IdentityType, x904IdentityValue: x904IdentityValue.trim().toUpperCase() } : {}),
       };
@@ -874,7 +879,17 @@ export default function WaBookingForm() {
                   />
                   {publicGymGuest && guestIdentityRoute === "checking" && <p className="text-xs text-slate-500" role="status">Memeriksa nama...</p>}
                   {publicGymGuest && guestLookupError && <p className="text-xs text-amber-700" role="status">{guestLookupError}</p>}
-                  {publicGymGuest && guestIdentityRoute === "registered" && <p className="text-xs font-semibold text-green-700" role="status">Data Anda dikenali. Akses akan aktif setelah pembayaran diverifikasi.</p>}
+                  {publicGymGuest && guestIdentityRoute === "registered" && (
+                    <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                      <p className="text-xs font-semibold text-green-700" role="status">Nama ditemukan di mesin X904. Isi PIN mesin Anda untuk menghubungkan pembayaran dengan akses otomatis.</p>
+                      <Label htmlFor="self-gym-machine-pin" className="text-xs font-semibold">PIN mesin X904 *</Label>
+                      <Input id="self-gym-machine-pin" type="password" inputMode="numeric" pattern="[0-9]{1,8}"
+                        maxLength={8} autoComplete="off" value={selfGymMachinePin}
+                        onChange={e => setSelfGymMachinePin(e.target.value.replace(/\\D/g, ""))}
+                        placeholder="PIN X904 yang sudah terdaftar" required />
+                      <p className="text-xs text-slate-600">PIN dan nama harus cocok di mesin. Setelah pembayaran resmi confirmed, sistem memproses akses GYM tanpa persetujuan Admin kedua, hingga 23.00 WIB pada tanggal booking.</p>
+                    </div>
+                  )}
                   {publicGymGuest && guestIdentityRoute === "expired_member" && <p className="text-xs font-semibold text-green-700" role="status">Data Anda dikenali. Anda dapat melanjutkan booking kunjungan harian.</p>}
                   {publicGymGuest && guestIdentityRoute === "recognized_review" && <p className="text-xs font-semibold text-green-700" role="status">Data Anda dikenali. Silakan lanjutkan booking dan pembayaran.</p>}
                 </div>
