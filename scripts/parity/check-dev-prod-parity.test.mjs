@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { compareParity } from "./check-dev-prod-parity.mjs";
+import { compareParity, withAuditedX904Payment } from "./check-dev-prod-parity.mjs";
+const audited=JSON.parse(readFileSync(new URL("./audited-x904-payment-20261116.json",import.meta.url),"utf8"));
 const baseline=JSON.parse(readFileSync(new URL("./prod-baseline-20261114.json",import.meta.url),"utf8"));
 const fixtures=()=>({
  functions:baseline.functions.map(x=>({...x})),
@@ -10,6 +11,21 @@ const fixtures=()=>({
 test("the pinned PROD contract passes unchanged",()=>{
  const {functions,triggers}=fixtures();
  assert.equal(compareParity(baseline,functions,triggers).ok,true);
+});
+test("only exact audited PROD X904 payment migration passes; other drift still blocks",()=>{
+ const {functions,triggers}=fixtures();
+ const approved=withAuditedX904Payment(baseline,audited);
+ const revised=functions.map(x=>x.proname===audited.function&&x.args===audited.args
+   ? {...x,hash:audited.current_prod_hash}:x);
+ assert.equal(compareParity(approved,revised,triggers).ok,true);
+ const changed=revised.map(x=>x.proname==="sync_payment_accounting_journal"
+   ? {...x,hash:"bad"}:x);
+ assert.equal(compareParity(approved,changed,triggers).ok,false);
+ const bad=revised.map(x=>x.proname===audited.function
+   ? {...x,hash:"00000000000000000000000000000000"}:x);
+ assert.equal(compareParity(approved,bad,triggers).ok,false);
+ assert.throws(()=>withAuditedX904Payment(baseline,{...audited,current_prod_hash:"bad"}),/UNREVIEWED/);
+ assert.throws(()=>withAuditedX904Payment({...baseline,functions:baseline.functions.map(x=>x.proname===audited.function?{...x,hash:"bad"}:x)},audited),/HISTORICAL/);
 });
 test("a stale journal definition blocks DEV parity",()=>{
  const {functions,triggers}=fixtures();

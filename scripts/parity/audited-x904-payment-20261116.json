@@ -1,0 +1,9 @@
+{
+  "function": "link_x904_nonmember_daily_payment",
+  "args": "",
+  "historical_hash": "c4520dc7d76f5082b5f33b74dce13edf",
+  "current_prod_hash": "aeb8d6099b6da69d8f691ada9a035f04",
+  "verified_date": "2026-11-16",
+  "release_commit": "10910f7b53a5ab631fbd187241f723e007527194",
+  "migration": "artifacts/api-server/migrations/20261116_x904_verified_self_pin_auto_payment.sql"
+}
