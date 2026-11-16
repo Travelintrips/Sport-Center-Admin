@@ -9,27 +9,32 @@ describe("No-login ordinary PIN booking/payment isolation", () => {
   const bookingEnd = wa.indexOf('router.get("/wa/status/', guestStart);
   const guest = wa.slice(guestStart, bookingEnd);
 
-  test("anonymous form cannot select a PIN; registered name yields server-resolved PIN", () => {
-    expect(guest).toContain("guestSubmittedPin !== guestNameRoute.userPin");
+  test("anonymous form accepts only a PIN matching a uniquely registered machine name", () => {
+    expect(guest).toContain("guestSubmittedPin!==guestNameRoute.userPin");
+    expect(guest).toContain("gymGuestPinFailures");
     expect(guest).toContain("publicGymGuest && guestNameRoute?.route === \"registered\"");
     expect(guest).toContain("guestNameRoute.userPin");
     expect(guest).toContain("guestNameRoute.deviceUid");
     expect(guest).toContain('identityType: "pin"');
     expect(guest).toContain("X904_NONMEMBER_PIN_BUSY");
   });
-  test("booking is atomic and starts review_required, not automatic door activation", () => {
+  test("booking atomicity holds: name-only review_required, name+PIN verified unpaid; no door command", () => {
     expect(guest).toContain("pg_advisory_xact_lock(");
     expect(guest).toContain("x904_verified_nonmember_identities");
     expect(guest).toContain("FOR SHARE");
-    expect(guest).toContain('${publicGymGuest ? "review_required" : "verified"}');
-    expect(guest).toContain('${publicGymGuest ? "review_required" : "pending"}');
+    expect(guest).toContain('${publicGymGuest && !selfGymMachinePinMatched ? "review_required" : "verified"}');
+    expect(guest).toContain('${publicGymGuest && !selfGymMachinePinMatched ? "review_required" : "pending"}');
+    expect(guest).not.toContain('ACTIVATE_USER');
   });
-  test("confirmed bank payment cannot bypass identity staff review for guests", () => {
+  test("name-only remains held; preverified self PIN requires canonical payment confirmation", () => {
     expect(migration).toContain("b.source='gym_public_guest'");
     expect(migration).toContain("AND a.identity_type='pin'");
     expect(migration).toContain("WHEN is_guest THEN 'review_required'");
     expect(migration).toContain("WHEN is_guest THEN 'review_required' ELSE 'verified'");
     expect(migration).toContain("NEW.status::text = 'confirmed'");
+    const auto=readFileSync("migrations/20261116_x904_verified_self_pin_auto_payment.sql","utf8");
+    expect(auto).toContain("WHEN is_guest AND a.verification_state='review_required'");
+    expect(auto).toContain("NEW.status::text = 'confirmed'");
   });
   test("staff handoff requires authenticated role, payment, correct identity, and open hours", () => {
     const start = bookings.indexOf('router.post("/bookings/:bookingId/x904-guest-pin-approve"');
