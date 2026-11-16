@@ -160,6 +160,10 @@ router.get("/admin/gym-x904/nonmember-registry-review", adminMiddleware, async (
   try {
     const rows = await db.execute(sql`
       SELECT r.user_pin,r.device_uid,r.display_name,r.verification_state,
+        u.display_name AS machine_name,
+        (r.verification_state='verified' AND u.device_uid=r.device_uid AND u.device_role=0 AND
+         upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))<>
+         upper(regexp_replace(trim(r.display_name),'[[:space:]]+',' ','g'))) AS name_drift,
         (SELECT count(*)::int FROM sport_center.gym_x904_member_mapping m
          WHERE m.device_serial=r.device_serial AND m.user_pin=r.user_pin) AS mapping_count,
         (SELECT count(*)::int FROM sport_center.gym_x904_lan_users u
@@ -174,8 +178,14 @@ router.get("/admin/gym-x904/nonmember-registry-review", adminMiddleware, async (
          WHERE c.device_serial=r.device_serial AND c.user_pin=r.user_pin
            AND c.state IN ('queued','claimed')) AS pending_commands
       FROM sport_center.x904_verified_nonmember_identities r
+      LEFT JOIN sport_center.gym_x904_lan_users u
+        ON u.device_serial=r.device_serial AND u.user_pin=r.user_pin
       WHERE r.device_serial='TDBD234200545'
-        AND r.verification_state='review_required' AND r.revoked_at IS NULL
+        AND (r.verification_state='review_required' OR
+          (r.verification_state='verified' AND u.device_uid=r.device_uid AND u.device_role=0 AND
+           upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))<>
+           upper(regexp_replace(trim(r.display_name),'[[:space:]]+',' ','g'))))
+        AND r.revoked_at IS NULL
       ORDER BY r.user_pin::integer LIMIT 150`);
     return res.json({candidates:rows.rows,source:"verified-device-registry",requiresOperatorConfirmation:true});
   } catch {
@@ -188,7 +198,8 @@ router.post("/admin/gym-x904/nonmember-registry-review/verify", adminMiddleware,
   const actor = (req as any).user;
   if (!actor || !["owner","super_admin"].includes(actor.role))
     return res.status(403).json({error:"OWNER_OR_SUPER_ADMIN_REQUIRED"});
-  const {pin,uid,confirmPin,confirmedNonmember} = req.body ?? {};
+  const {pin,uid,confirmPin,confirmedNonmember,confirmName} = req.body ?? {};
+  const rename = typeof confirmName === 'string' && confirmName.trim().length >= 2 && confirmName.trim().length <= 100;
   if (typeof pin!=="string" || !/^[0-9]{1,8}$/.test(pin) ||
       confirmPin!==pin || !Number.isSafeInteger(uid) || uid<=0 ||
       confirmedNonmember!==true)
@@ -199,14 +210,19 @@ router.post("/admin/gym-x904/nonmember-registry-review/verify", adminMiddleware,
   try {
     const outcome = await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
-      const candidate = await tx.execute(sql`SELECT user_pin,device_uid,display_name
+      const candidate = await tx.execute(sql`SELECT user_pin,device_uid,display_name,verification_state
         FROM sport_center.x904_verified_nonmember_identities
         WHERE device_serial='TDBD234200545' AND user_pin=${pin}
-          AND verification_state='review_required' AND revoked_at IS NULL FOR UPDATE`);
+          AND verification_state IN ('review_required','verified') AND revoked_at IS NULL FOR UPDATE`);
       if (candidate.rows.length!==1 || Number(candidate.rows[0].device_uid)!==uid)
         return "REGISTRY_CHANGED_OR_NOT_PENDING";
-      const name=String(candidate.rows[0].display_name).trim();
+      const priorName=String(candidate.rows[0].display_name).trim();
+      const priorState=String(candidate.rows[0].verification_state);
+      if (rename && priorState!=="verified") return "RENAME_NOT_VERIFIED";
+      if (!rename && priorState!=="review_required") return "REGISTRY_ALREADY_VERIFIED";
+      const name=rename ? String(confirmName).trim() : priorName;
       if (!name || /^(VIS\s*0*[1-6]|KARTU\s*\d+|TEST\b)/i.test(name))return "SPECIAL_MACHINE_IDENTITY";
+      if (rename && name.toLocaleUpperCase("id-ID")===priorName.toLocaleUpperCase("id-ID")) return "NAME_UNCHANGED";
       const inventory=await tx.execute(sql`SELECT device_uid,display_name,device_role
         FROM sport_center.gym_x904_lan_users
         WHERE device_serial='TDBD234200545' AND user_pin=${pin}`);
@@ -246,14 +262,23 @@ router.post("/admin/gym-x904/nonmember-registry-review/verify", adminMiddleware,
       if (!row || ["mapping_count","membership_name_count","duplicate_name_count","live_grants","pending_commands"]
           .some(k=>Number(row[k])!==0))return "CONFLICT_REQUIRES_MANUAL_RECONCILIATION";
       const changed=await tx.execute(sql`UPDATE sport_center.x904_verified_nonmember_identities
-        SET verification_state='verified',verified_by=${"admin:"+String(actor.userId)},verified_at=now(),updated_at=now()
+        SET display_name=${name},verification_state='verified',
+            verified_by=CASE WHEN ${rename}::boolean THEN verified_by ELSE ${'admin:'+String(actor.userId)} END,
+            verified_at=CASE WHEN ${rename}::boolean THEN verified_at ELSE now() END,updated_at=now()
         WHERE device_serial='TDBD234200545' AND user_pin=${pin}
-          AND device_uid=${uid} AND verification_state='review_required'
-          AND revoked_at IS NULL RETURNING user_pin`);
-      return changed.rows.length===1?"VERIFIED":"REGISTRY_CHANGED_OR_NOT_PENDING";
+          AND device_uid=${uid} AND verification_state=${priorState}
+          AND display_name=${priorName} AND revoked_at IS NULL RETURNING user_pin`);
+      if (changed.rows.length!==1) return 'REGISTRY_CHANGED_OR_NOT_PENDING';
+      if (rename) await tx.execute(sql`INSERT INTO sport_center.audit_logs
+        (user_id,user_name,user_role,action,entity,entity_id,"before","after")
+        VALUES (${Number(actor.userId)},'X904 Owner Review','super_admin',
+          'x904_registry_name_reconciled','x904_verified_nonmember_identities',${uid},
+          ${JSON.stringify({pin,uid,displayName:priorName})}::jsonb,
+          ${JSON.stringify({pin,uid,displayName:name,machineCommandIssued:false})}::jsonb)`);
+      return rename ? 'NAME_RECONCILED' : 'VERIFIED';
     });
-    if(outcome!=="VERIFIED")return res.status(409).json({error:outcome});
-    return res.json({ok:true,pin,state:"verified",commandEnqueued:false});
+    if(outcome!=="VERIFIED" && outcome!=="NAME_RECONCILED")return res.status(409).json({error:outcome});
+    return res.json({ok:true,pin,state:"verified",nameReconciled:outcome==="NAME_RECONCILED",commandEnqueued:false});
   } catch {
     return res.status(503).json({error:"REGISTRY_VERIFICATION_UNAVAILABLE"});
   }
