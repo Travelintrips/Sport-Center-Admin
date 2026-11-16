@@ -31,10 +31,11 @@ export function startX904NonmemberAccessWorker(): void {
     if (running) return;
     running = true;
     try {
-      await recoverUnallocatedPaidGymVis().catch(error =>
-        console.warn("[gym-vis] recovery query unavailable; existing worker continues",
-          error instanceof Error ? error.message : String(error)));
+      // Paid grants must not be held behind VIS inventory recovery.
       await processX904NonmemberDailyAccess();
+      await recoverUnallocatedPaidGymVis().catch(error =>
+        console.warn("[gym-vis] recovery query unavailable; paid-access worker already ran",
+          error instanceof Error ? error.message : String(error)));
     }
     catch (error) {
       console.error("[x904-nonmember] worker cycle failed",
@@ -188,11 +189,16 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND NOT EXISTS (
         SELECT 1 FROM sport_center.gym_x904_member_mapping m
         WHERE m.device_serial=${DEVICE} AND m.user_pin=a.user_pin
-      )`);
+      )`).catch(error =>
+        console.warn("[x904-nonmember] legacy VIS verification deferred; paid grants remain eligible",
+          error instanceof Error ? error.message : String(error)));
 
   // Inventory reconciliation is read-only unless a PIN has an independently
   // verified nonmember grant. An absent member mapping is NOT proof of nonmembership.
   // In particular, do not enqueue commands for legacy PINs based on Group 1 alone.
+  // Legacy reconciliation is advisory; its failures must never starve independently
+  // verified paid grants handled below (with their own inventory/UID/ACK guards).
+  try {
   const inventory = await store.execute(sql`SELECT observed_at,user_count,users
     FROM sport_center.gym_x904_access_snapshots
     WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
@@ -322,6 +328,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     }
   }
 
+  } catch (error) {
+    console.warn("[x904-nonmember] legacy inventory reconciliation failed; continuing paid grants",
+      error instanceof Error ? error.message : String(error));
+  }
+
   // Only independently verified paid grants can enqueue X904 access commands.
   const due = await store.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
       a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
@@ -339,6 +350,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     ORDER BY a.confirmed_at LIMIT 25`);
 
   for (const row of due.rows as any[]) {
+    try {
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.booking_id,a.user_pin,a.device_uid,a.verified_name,
@@ -689,5 +701,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         VALUES (${DEVICE},${commandType},${pin},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
     });
+    } catch (error) {
+      // A bad historical grant must not prevent the next paid booking from
+      // reaching the existing idempotent queue and physical ACK guard.
+      console.error("[x904-nonmember] paid grant failed; continuing next grant", JSON.stringify({
+        accessId: Number(row.access_id), error: error instanceof Error ? error.message : String(error),
+      }));
+    }
   }
 }
