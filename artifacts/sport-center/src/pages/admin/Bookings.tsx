@@ -6302,7 +6302,7 @@ export default function AdminBookings() {
                                             : `Server invoice gagal (HTTP ${response.status}).`);
                                       }
                                       const html = await response.text();
-                                      if (!/<html[\\s>]/i.test(html) || !html.includes("Invoice")) {
+                                      if (!html.toLowerCase().includes("<html") || !html.includes("Invoice")) {
                                         throw new Error("Respons invoice bukan dokumen HTML yang valid.");
                                       }
                                       const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
