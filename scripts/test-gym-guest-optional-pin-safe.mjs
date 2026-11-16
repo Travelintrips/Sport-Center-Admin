@@ -15,19 +15,31 @@ test("public Gym never allows arbitrary unverified PIN self-selection",()=>{
  assert.match(form,/publicGymGuest \|\| !dedicatedNonmember \|\| !x904IdentityValue\.trim\(\)/);
  assert.match(form,/\/api\/wa\/gym-name-route/);
  assert.doesNotMatch(form,/requestedX904Pin: x904IdentityValue/);
+ assert.match(form,/requestedX904Pin: selfGymMachinePin.trim\(\)/);
+ assert.match(form,/guestIdentityRoute === "registered"/);
+ assert.match(form,/PIN mesin X904 \*/);
 });
-test("server-resolved registered name creates review-only grant, never a machine command",()=>{
+test("server-resolved name+PIN may prepare unpaid grant; no device command until bank confirms",()=>{
  const bookingRoute=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('router.get("/wa/status/:orderNumber"'));
  assert.match(bookingRoute,/guestSubmittedPin/);
- assert.match(bookingRoute,/guestSubmittedPin && guestNameRoute\?\.route === "registered"/);
- assert.match(bookingRoute,/guestSubmittedPin !== guestNameRoute\.userPin/);
+ assert.match(bookingRoute,/guestNameRoute\?\.route!=="registered"/);
+ assert.match(bookingRoute,/guestSubmittedPin!==guestNameRoute\.userPin/);
+ assert.match(bookingRoute,/gymGuestPinFailures/);
  assert.match(bookingRoute,/resolveGymGuestName\(bookingCustomerName\)/);
- assert.match(bookingRoute,/status review_required/);
+ assert.match(bookingRoute,/selfGymMachinePinMatched/);
  assert.match(bookingRoute,/if \(!gymWalkIn \|\| x904IdentityType != null \|\| x904IdentityValue != null\)/);
  assert.match(bookingRoute,/if \(verifiedX904Identity\) \{/);
  assert.match(bookingRoute,/guestNameRoute\.userPin/);
- assert.match(bookingRoute,/publicGymGuest \? "review_required" : "verified"/);
- assert.match(bookingRoute,/publicGymGuest \? "review_required" : "pending"/);
+ assert.match(bookingRoute,/publicGymGuest && !selfGymMachinePinMatched \? "review_required" : "verified"/);
+ assert.match(bookingRoute,/publicGymGuest && !selfGymMachinePinMatched \? "review_required" : "pending"/);
+ const worker=read("artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts");
+ assert.match(worker,/b\.notes LIKE 'Gym mandiri; nama dan PIN X904 sama dengan identitas mesin terverifikasi%'/);
+ assert.doesNotMatch(worker,/b\.notes LIKE 'Gym mandiri; nama cocok dengan registry X904%'/);
+ const newTrigger=read("artifacts/api-server/migrations/20261116_x904_verified_self_pin_auto_payment.sql");
+ assert.match(newTrigger,/a\.verification_state<>'verified'/);
+ assert.match(newTrigger,/NEW.status::text = 'confirmed'/);
+ assert.match(newTrigger,/WHEN is_guest AND a\.verification_state<>'verified'/);
+ assert.match(bookingRoute,/status: "pending"/);
  assert.match(bookingRoute,/x904Identity: !publicGymGuest && verifiedX904Identity/);
  assert.match(bookingRoute,/const customer = publicGymGuest \? null : await ensureCustomer/);
  assert.match(bookingRoute,/GYM_PUBLIC_GUEST_DUPLICATE_BOOKING/);

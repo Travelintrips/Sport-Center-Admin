@@ -171,6 +171,7 @@ suite(
         "20261116_x904_gym_day_admission_clock.sql",
         "20261107_x904_review_required_not_live.sql",
         "20261106_x904_guest_pin_payment_review_guard.sql",
+        "20261116_x904_verified_self_pin_auto_payment.sql",
       ]) {
         await pool.query(readFileSync("migrations/" + file, "utf8"));
       }
@@ -201,6 +202,7 @@ suite(
         "20261109_x904_verified_registry_for_share_rls.sql",
         "20261109_x904_public_pin_review_insert_rls.sql",
         "20261116_x904_paid_guest_pin_recovery_rls.sql",
+        "20261116_x904_self_pin_insert_rls.sql",
       ])
         await pool.query(readFileSync("migrations/" + file, "utf8"));
       for (const table of [
@@ -319,7 +321,7 @@ suite(
       await pool.query("TRUNCATE sport_center.gym_x904_connector_heartbeats");
       await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at=now(),stored_log_count=0,device_log_count=0,user_count=0");
     });
-    function submit(attach = true, bookingDate = today, customerName = "TEST AUTO SUSPEND") {
+    function submit(attach = true, bookingDate = today, customerName = "TEST AUTO SUSPEND", machinePin = "") {
       let r = request
         .post("/api/wa/booking")
         .field("customerName", customerName)
@@ -330,6 +332,7 @@ suite(
         .field("durationHours", "1")
         .field("publicGymGuest", "true")
         .field("paymentMethod", "qris");
+      if (machinePin) r=r.field("requestedX904Pin",machinePin);
       if (attach)
         r = r.attach("proof", Buffer.from([255, 216, 255, 217]), {
           filename: "isolated.jpeg",
@@ -425,6 +428,42 @@ suite(
         ),
       ).rejects.toHaveProperty("code", "42501");
     });
+    test("machine-matched self PIN + canonical paid booking activates without second Admin approval",async()=>{
+      const bad=await submit(true,today,"TEST AUTO SUSPEND","701");
+      expect(bad.status).toBe(409);
+      expect(await counts()).toMatchObject({bookings:0,payments:0,grants:0});
+      const good=await submit(true,today,"TEST AUTO SUSPEND","700");
+      expect(good.status).toBe(201);
+      const id=Number(good.body.id);
+      expect(await grant(id)).toMatchObject({user_pin:"700",device_uid:343,verification_state:"verified",access_state:"pending",payment_id:null});
+      const paymentId=await confirm(id);
+      expect(await grant(id)).toMatchObject({payment_id:paymentId,verification_state:"verified",access_state:"pending"});
+      await snapshot(new Date(clock.getTime()-1000),2);
+      await tick(clock);
+      const all=await commands();
+      const activate=all.filter((c:any)=>c.command_type==="ACTIVATE_USER");
+      expect(activate).toHaveLength(1);
+      expect(activate[0].payload).toMatchObject({expectedUid:343,source:"AUTO_NONMEMBER_GYM_12H"});
+      expect((await pool.query("SELECT count(*)::int n FROM sport_center.audit_logs WHERE action='x904_guest_pin_staff_attestation' AND entity_id=$1",[id])).rows[0].n).toBe(0);
+      expect(await counts()).toMatchObject({bookings:1,payments:1,grants:1});
+      await tick(clock);
+      expect((await commands()).filter((c:any)=>c.command_type==="ACTIVATE_USER")).toHaveLength(1);
+      // Command queued != door opened: physical SDK ACK and group readback still mandatory.
+    });
+
+    test("unverified public Gym PIN cannot become live merely because funds were confirmed",async()=>{
+      const result=await submit();
+      expect(result.status).toBe(201);
+      const id=Number(result.body.id);
+      // Simulate a non-verified intermediate state on an otherwise valid public booking.
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET verification_state='pending',access_state='pending' WHERE booking_id=$1",[id]);
+      await confirm(id);
+      expect(await grant(id)).toMatchObject({verification_state:"review_required",access_state:"review_required"});
+      await snapshot(new Date(clock.getTime()-1000),2);
+      await tick(clock);
+      expect(await commands()).toHaveLength(0);
+    });
+
     test("already-paid Gym guest with no grant is restored by staff without a second booking or payment",async()=>{
       const id=await checkout();
       const paid=await confirm(id);

@@ -900,6 +900,8 @@ router.get("/wa/x904-identity", async (req, res) => {
 // Limit automated enumeration attempts per source address; the booking
 // independently recalculates the route even if this preview is skipped.
 const gymGuestNameAttempts = new Map<string, { hits: number; expires: number }>();
+// Protect short physical PIN identifiers against repeated anonymous guesses.
+const gymGuestPinFailures = new Map<string, { hits: number; expires: number }>();
 router.post("/wa/gym-name-route", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const key = String(req.ip ?? "unknown");
@@ -991,21 +993,36 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
     if (publicGymGuest && !guestNameRoute) {
       res.status(503).json({ error: "Verifikasi identitas X904 belum tersedia." }); return;
     }
-    // PIN matching happens server-side using the uniquely verified name.
-    // Anonymous visitors are never required to know a device PIN; any PIN
-    // supplied by an older client must still match, and no grant activates
-    // until an authenticated operator checks the physical identity and funds.
-    if (publicGymGuest && guestSubmittedPin && guestNameRoute?.route === "registered" &&
-        guestSubmittedPin !== guestNameRoute.userPin) {
-      res.status(409).json({ error: "Nama dan PIN X904 tidak cocok atau belum lengkap. Periksa kembali atau hubungi petugas." }); return;
-    }
-    if (publicGymGuest && guestSubmittedPin && guestNameRoute?.route !== "registered") {
-      res.status(409).json({ error: "PIN X904 belum dapat diverifikasi untuk nama ini. Hubungi petugas." }); return;
+    // A customer who knows the existing machine PIN can self-assert the exact
+    // server-resolved PIN/name pair. This is not a payment confirmation;
+    // the grant can only reach the device after canonical funds, fresh machine
+    // identity, worker command, physical ACK and group read-back.
+    if (publicGymGuest && guestSubmittedPin) {
+      const key=String(req.ip ?? "unknown");
+      const nowMs=Date.now();
+      if (gymGuestPinFailures.size>10000) {
+        for (const [address,fail] of gymGuestPinFailures) {
+          if (fail.expires<=nowMs) gymGuestPinFailures.delete(address);
+        }
+      }
+      const previous=gymGuestPinFailures.get(key);
+      if (previous && previous.expires>nowMs && previous.hits>=5) {
+        res.status(429).json({ error: "Percobaan PIN terlalu banyak. Minta bantuan petugas." }); return;
+      }
+      if (guestNameRoute?.route!=="registered" || guestSubmittedPin!==guestNameRoute.userPin) {
+        const current=previous && previous.expires>nowMs
+          ? previous : {hits:0,expires:nowMs+15*60_000};
+        current.hits++;
+        gymGuestPinFailures.set(key,current);
+        res.status(409).json({ error: "Nama dan PIN X904 tidak cocok. Periksa kembali." }); return;
+      }
     }
     if (gymWalkIn && !publicGymGuest && (!x904IdentityType || !String(x904IdentityValue ?? "").trim())) {
       res.status(400).json({ error: "Masukkan PIN X904 atau pilih kartu VIS001–VIS006 untuk akses Gym harian." });
       return;
     }
+    const selfGymMachinePinMatched = publicGymGuest && guestSubmittedPin.length > 0 &&
+      guestNameRoute?.route === "registered" && guestSubmittedPin === guestNameRoute.userPin;
     let verifiedX904Identity: { identityType: "pin" | "card"; identityLabel: string; userPin: string; deviceUid: number; displayName: string } | null = null;
     // Anonymous booking may link only a server-resolved, registry-approved PIN.
     // This is NOT proof of ownership: review_required prevents any machine grant
@@ -1266,7 +1283,9 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
       source: publicGymGuest ? "gym_public_guest" : "whatsapp",
       notes: publicGymGuest
         ? (guestNameRoute?.route === "registered"
-          ? "Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required; verifikasi kepemilikan wajib oleh petugas. Hak akses menunggu pembayaran resmi."
+          ? (selfGymMachinePinMatched
+            ? "Gym mandiri; nama dan PIN X904 sama dengan identitas mesin terverifikasi. Hak akses otomatis menunggu pembayaran resmi, snapshot mesin dan ACK."
+            : "Gym mandiri; nama cocok dengan registry X904, tetapi PIN belum diberikan. Grant review_required; verifikasi kepemilikan wajib oleh petugas. Hak akses menunggu pembayaran resmi.")
           : guestNameRoute?.route === "expired_member"
             ? "Gym mandiri; membership sebelumnya expired. Tiket harian tanpa perpanjangan; petugas wajib verifikasi identitas dan pembayaran, lalu menetapkan akses nonmember terpisah (misalnya kartu VIS). PIN membership lama tidak diberikan hak akses."
           : guestNameRoute?.route === "recognized_review"
@@ -1292,8 +1311,8 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
           VALUES ('TDBD234200545',${verifiedX904Identity.identityType},${verifiedX904Identity.identityLabel},
             ${verifiedX904Identity.userPin},${verifiedX904Identity.deviceUid},${verifiedX904Identity.displayName},
             ${created.id},
-            ${publicGymGuest ? "review_required" : "verified"},
-            ${publicGymGuest ? "review_required" : "pending"})`);
+            ${publicGymGuest && !selfGymMachinePinMatched ? "review_required" : "verified"},
+            ${publicGymGuest && !selfGymMachinePinMatched ? "review_required" : "pending"})`);
       }
       if (publicGymGuest && publicProof) {
         // The same database transaction commits the booking, its held PIN
@@ -1331,7 +1350,9 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
         await tx.insert(bookingHistoryTable).values({
           bookingId: created.id, fromStatus: null, toStatus: "waiting_confirmation",
           changedByName: bookingCustomerName,
-          note: "Booking Gym mandiri dan bukti pembayaran disimpan bersamaan; menunggu verifikasi admin dan kepemilikan PIN. Akses X904 tetap ditahan.",
+          note: selfGymMachinePinMatched
+            ? "Booking Gym mandiri, nama+PIN mesin sudah cocok; menunggu konfirmasi dana resmi, aktivasi worker dan ACK mesin."
+            : "Booking Gym mandiri dan bukti pembayaran disimpan bersamaan; menunggu verifikasi admin dan kepemilikan PIN. Akses X904 tetap ditahan.",
         });
         // Include the recovery link in the same commit. Failure here rolls back
         // booking+payment instead of returning an HTTP 500 after persistence.

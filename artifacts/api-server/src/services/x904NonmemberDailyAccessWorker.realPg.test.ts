@@ -1204,7 +1204,7 @@ test("paid public Gym booking without VIS recovers after temporary inventory fai
 });
 
 
-test("public website PIN recovers from a temporarily stale X904 image without another payment", async () => {
+test("server-verified self PIN recovers from a temporarily stale X904 image without another payment", async () => {
   // Runs against disposable local PostgreSQL only, never PROD.
   const t = new Date("2026-11-06T01:00:00Z");
   const pin = "990606", uid = 990606, name = "CI WEB PIN";
@@ -1212,7 +1212,7 @@ test("public website PIN recovers from a temporarily stale X904 image without an
   try {
     await run("INSERT INTO sport_center.gym_x904_lan_users VALUES ('TDBD234200545','990606',990606,'CI WEB PIN',0)");
     await run("INSERT INTO sport_center.x904_verified_nonmember_identities(device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at) VALUES('TDBD234200545','990606',990606,'CI WEB PIN','verified','CI',now())");
-    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES(9990606,'2026-11-06','08:00','gym_public_guest','Gym mandiri; nama cocok dengan registry X904, PIN tertaut internal dalam status review_required','confirmed','SC-CI-WEB-9990606','CI WEB PIN',30000)");
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,notes,status,order_number,customer_name,total_price) VALUES(9990606,'2026-11-06','08:00','gym_public_guest','Gym mandiri; nama dan PIN X904 sama dengan identitas mesin terverifikasi. Hak akses otomatis menunggu pembayaran resmi, snapshot mesin dan ACK.','confirmed','SC-CI-WEB-9990606','CI WEB PIN',30000)");
     await run("INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,verification_state,access_state) VALUES('TDBD234200545','pin','PIN:990606','990606',990606,'CI WEB PIN',9990606,'review_required','review_required')");
     await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES(9970606,9990606,'pending',$1,30000,'ci://receipt')",[t]);
     await run("UPDATE sport_center.sport_payments SET status='confirmed' WHERE id=9970606");
