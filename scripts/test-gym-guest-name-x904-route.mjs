@@ -27,11 +27,11 @@ test("public preview reveals route but never machine PIN, UID or name",()=>{
  assert.doesNotMatch(preview,/res\.json\(\{[^}]*deviceUid/);
  assert.match(preview,/Never send user_pin, UID/);
 });
-test("server-resolved name holds for staff review and legacy supplied PIN must match",()=>{
+test("server resolves exact public self PIN while name-only still waits for staff",()=>{
  const route=api.slice(api.indexOf('router.post("/wa/booking"'),api.indexOf('// GET /api/wa/status/:orderNumber'));
  assert.match(route,/guestSubmittedPin/);
- assert.match(route,/guestSubmittedPin !== guestNameRoute\.userPin/);
- assert.match(route,/guestSubmittedPin && guestNameRoute\?\.route !== "registered"/);
+ assert.match(route,/guestSubmittedPin!==guestNameRoute\.userPin/);
+ assert.match(route,/guestNameRoute\?\.route!=="registered"/);
  assert.match(route,/resolveGymGuestName\(bookingCustomerName\)/);
  assert.match(route,/guestNameRoute\?\.route === "registered"/);
  assert.match(route,/guestNameRoute\?\.route === "visitor_card"/);
@@ -39,6 +39,8 @@ test("server-resolved name holds for staff review and legacy supplied PIN must m
  assert.match(route,/if \(verifiedX904Identity\) \{/);
  assert.match(route,/const customer = publicGymGuest \? null : await ensureCustomer/);
  assert.match(route,/GYM_PUBLIC_GUEST_DUPLICATE_BOOKING/);
+ assert.match(route,/selfGymMachinePinMatched/);
+ assert.match(route,/gymGuestPinFailures/);
  assert.doesNotMatch(route,/ACTIVATE_USER|SUSPEND_USER/);
 });
 test("compact UI marks only verified nonmember names and never exposes machine PIN",()=>{
