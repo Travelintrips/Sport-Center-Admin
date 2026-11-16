@@ -4,8 +4,18 @@ import { resolve } from "node:path";
 
 const route = readFileSync(resolve(process.cwd(), "src/routes/bookings.ts"), "utf8");
 const multi = route.split('router.post("/bookings/admin-multi-schedule", adminMiddleware')[1]?.split('// POST /bookings/recurring/check')[0] ?? "";
+const checkout = readFileSync(resolve(process.cwd(), "../sport-center/src/pages/admin/CheckoutForm.tsx"), "utf8");
 
 describe("admin multi-schedule booking contract", () => {
+  it("keeps Court A patterns after changing the facility picker and sends facility-specific sessions", () => {
+    const picker = checkout.split('<Select value={selectedFacilityId} onValueChange=')[1]?.split('<SelectTrigger id="facility">')[0] ?? "";
+    expect(picker).not.toContain("setMultiPatterns([])");
+    expect(checkout).toContain("facilityId: Number(selectedFacilityId), facilityName:");
+    expect(checkout).toContain("pattern.facilityId === next.facilityId");
+    expect(checkout).toContain("facilityId: pattern.facilityId, activityType: pattern.activityType");
+    expect(checkout).toContain("{pattern.facilityName} • {pattern.startDate}");
+  });
+
   it("uses one admin-only endpoint without changing legacy recurring route", () => {
     expect(multi).toContain('verifyToken(token)');
     expect(multi).toContain('identity.role === "customer"');
