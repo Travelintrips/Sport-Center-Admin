@@ -4,14 +4,17 @@ const source = readFileSync(join(process.cwd(),'src/services/x904NonmemberDailyA
 test('only verified, paid, confirmed same-day GYM PIN can skip scheduled start',()=>{
   expect(source).toContain('a.booking_source === "gym_public_guest"');
   expect(source).toContain('a.identity_type === "pin"');
-  expect(source).toContain('a.booking_status === "confirmed"');
+  expect(source).toContain('["confirmed","completed"].includes(String(a.booking_status))');
   expect(source).toContain('a.payment_status === "confirmed"');
   expect(source).toContain('a.verification_state === "verified"');
   expect(source).toContain('a.access_state === "pending"');
   expect(source).toContain('now.getTime() < scheduledStart &&');
   expect(source).toContain('!immediatePaidGymPin && !immediatePaidGymVis');
   expect(source).toContain('const immediatePaidGymVis = a.booking_source === "gym_public_guest"');
-  expect(source).toContain('a.identity_type === "card" && a.booking_status === "confirmed"');
+  expect(source).toContain('a.identity_type === "card" && ["confirmed","completed"].includes(String(a.booking_status))');
+  expect(source).toContain('const immediatePaidGymAdmin = a.booking_source === "admin"');
+  expect(source).toContain('const immediatePaidGymWebCard = a.booking_source === "web"');
+  expect(source).toContain('!immediatePaidGymAdmin && !immediatePaidGymWebCard');
   expect(source).toContain('x904NonmemberSameWibDate(now, new Date(scheduledStart))');
   expect(source).toContain('x904NonmemberOpeningHours(now)');
 });

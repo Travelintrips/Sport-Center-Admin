@@ -50,7 +50,8 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     expect(source).toContain("x904NonmemberSameWibDate(now, new Date(scheduledStart))");
     expect(source).toContain("AND other.activated_at IS NOT NULL");
     expect(source).toContain("LEAST(other.expires_at");
-    expect(source).toContain("expires_at=LEAST(");
+    expect(source).toContain("expires_at=(${String(a.booking_date)}::date + time '23:00')");
+    expect(source).toContain("x904GymBookingDayClose(a.booking_date)");
     expect(source).toContain("readBackConfirmed");
     expect(source).toContain("afterGroup");
     expect(source).toContain("AUTO_NONMEMBER_GYM_12H");
@@ -63,6 +64,10 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     expect(source).toContain("OR expires_at = activated_at + interval '12 hours'");
     expect(source).toContain("WHERE access_state = 'active' AND activated_at IS NOT NULL");
     expect(source).toContain("time '23:00'");
+    const dayPolicy=readFileSync("migrations/20261116_x904_gym_day_admission_clock.sql","utf8");
+    expect(dayPolicy).toContain("x904_nonmember_business_hours_clock_check");
+    expect(dayPolicy).toContain("activated_at + interval '12 hours'");
+    expect(dayPolicy).toContain("VALIDATE CONSTRAINT");
     expect(source).toContain("VALIDATE CONSTRAINT");
   });
 });
