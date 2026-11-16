@@ -7,6 +7,8 @@ interface Candidate {
   display_name: string;
   device_uid: number;
   verification_state: string;
+  machine_name?: string | null;
+  name_drift?: boolean;
   mapping_count: number;
   duplicate_name_count: number;
   membership_name_count: number;
@@ -37,7 +39,9 @@ export default function X904NonmemberRegistryReview() {
   }
   async function verify(row:Candidate) {
     if (busyPin) return;
-    if (!window.confirm("Konfirmasi secara independen bahwa PIN "+row.user_pin+
+    if (!window.confirm(row.name_drift
+      ? "Nama registry X904 berbeda dari mesin. Pastikan secara independen PIN "+row.user_pin+" UID "+row.device_uid+" milik orang yang sama.\n\nRegistry: "+row.display_name+"\nMesin: "+row.machine_name+"\n\nSetelah disetujui nama registry diselaraskan, tanpa perintah membuka pintu."
+      : "Konfirmasi secara independen bahwa PIN "+row.user_pin+
       " ("+row.display_name+", UID "+row.device_uid+
       ") benar-benar NONMEMBER biasa, bukan member, staf, kartu VIS, akun khusus, atau identitas ganda?\n\n"+
       "Setelah disetujui, worker dapat melakukan suspend otomatis bila tidak ada akses berbayar aktif."))return;
@@ -49,18 +53,22 @@ export default function X904NonmemberRegistryReview() {
       if (!token)throw new Error("Sesi admin tidak tersedia.");
       const response=await fetch(API+"/admin/gym-x904/nonmember-registry-review/verify",{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
-        body:JSON.stringify({pin:row.user_pin,uid:Number(row.device_uid),confirmPin:typed,confirmedNonmember:true})
+        body:JSON.stringify({pin:row.user_pin,uid:Number(row.device_uid),confirmPin:typed,confirmedNonmember:true,
+          ...(row.name_drift ? {confirmName:row.machine_name} : {})})
       });
       const result=await response.json();
       if(!response.ok)throw new Error(result.error??"Verifikasi tidak dapat dilakukan.");
-      setNotice("PIN "+row.user_pin+" verified. Tidak ada perintah manual dibuat. Worker akan memeriksa hak akses dan snapshot.");
+      setNotice(row.name_drift
+        ? "Nama registry PIN "+row.user_pin+" diselaraskan dengan snapshot X904. Tidak ada perintah pintu dibuat."
+        : "PIN "+row.user_pin+" verified. Tidak ada perintah manual dibuat. Worker akan memeriksa hak akses dan snapshot.");
       await reload();
     }catch(e){setError(e instanceof Error?e.message:"Verifikasi gagal");}
     finally{setBusyPin("");}
   }
   const visible=rows.filter(row=>!search.trim() ||
     row.user_pin.includes(search.trim()) ||
-    row.display_name.toLocaleLowerCase("id-ID").includes(search.trim().toLocaleLowerCase("id-ID")));
+    row.display_name.toLocaleLowerCase("id-ID").includes(search.trim().toLocaleLowerCase("id-ID")) ||
+    String(row.machine_name??"").toLocaleLowerCase("id-ID").includes(search.trim().toLocaleLowerCase("id-ID")));
   return <div className="rounded-lg border p-3 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div><p className="font-semibold text-sm">Verifikasi Registry Nonmember</p>
@@ -72,7 +80,7 @@ export default function X904NonmemberRegistryReview() {
       <div className="flex flex-wrap items-center gap-2">
         <input aria-label="Cari kandidat nonmember" className="rounded-lg border bg-background px-3 py-2 text-sm" placeholder="Cari nama atau PIN" value={search} onChange={e=>setSearch(e.target.value)}/>
         <button type="button" disabled={loading} onClick={()=>void reload()} className="rounded-lg border px-3 py-2 text-sm">Muat ulang</button>
-        <span className="text-xs text-muted-foreground">{rows.length} kandidat menunggu</span>
+        <span className="text-xs text-muted-foreground">{rows.length} kandidat / nama berbeda</span>
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-green-700">{notice}</p>}
@@ -84,14 +92,14 @@ export default function X904NonmemberRegistryReview() {
             Number(row.membership_name_count)+Number(row.live_grants)+Number(row.pending_commands);
           const blocked=issues>0;
           return <tr key={row.user_pin} className="border-b">
-            <td className="p-2">{row.user_pin}</td><td className="p-2">{row.display_name}</td>
+            <td className="p-2">{row.user_pin}</td><td className="p-2">{row.display_name}{row.name_drift && <span className="block text-amber-700">Nama mesin: {row.machine_name}</span>}</td>
             <td className="p-2">{row.device_uid}</td>
             <td className="p-2">{blocked?
               <span className="text-amber-700">Perlu rekonsiliasi{Number(row.duplicate_name_count)>0?" · nama ganda":""}{Number(row.mapping_count)>0?" · mapping member":""}{Number(row.membership_name_count)>0?" · nama member":""}{Number(row.live_grants)>0?" · akses aktif":""}{Number(row.pending_commands)>0?" · perintah berjalan":""}</span>:
-              <span className="text-muted-foreground">Data cocok; status nonmember perlu konfirmasi</span>}</td>
+              <span className="text-muted-foreground">{row.name_drift ? "Nama berubah; verifikasi identitas sebelum sinkronisasi" : "Data cocok; status nonmember perlu konfirmasi"}</span>}</td>
             <td className="p-2"><button type="button" disabled={blocked || Boolean(busyPin)}
               className="rounded border px-2 py-1 disabled:opacity-40" onClick={()=>void verify(row)}>
-              {busyPin===row.user_pin?"Memeriksa...":"Verifikasi"}</button></td>
+              {busyPin===row.user_pin?"Memeriksa...":row.name_drift?"Selaraskan nama":"Verifikasi"}</button></td>
           </tr>;
         })}</tbody></table>
       </div>
