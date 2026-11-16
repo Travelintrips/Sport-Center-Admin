@@ -27,6 +27,16 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     })).toBe("suspend");
   });
 
+  it("Admin Gym badge uses date and opening hours, not one-hour slot",()=> {
+    const page=readFileSync(join(process.cwd(),"../sport-center/src/pages/admin/Bookings.tsx"),"utf8");
+    const section=page.slice(page.indexOf("function InlineCheckInSelect("));
+    expect(section).toContain("const gymAdmissionDayOpen = isToday");
+    expect(section).toContain("minutesWib >= 6 * 60 && minutesWib < 23 * 60");
+    expect(section).toContain("GYM · Hari Ini");
+    expect(section.indexOf("if (gymAdmissionDayOpen && booking.status === \"confirmed\")")).toBeLessThan(section.indexOf("Sudah Lewat"));
+    expect(section).toContain("Akses pintu tetap memerlukan pembayaran, identitas, dan ACK X904");
+  });
+
   it("facility is closed at 23:00 and before 06:00 exactly", () => {
     expect(x904NonmemberOpeningHours(instant("2026-11-05T22:59:59"))).toBe(true);
     expect(x904NonmemberOpeningHours(instant("2026-11-05T23:00:00"))).toBe(false);
