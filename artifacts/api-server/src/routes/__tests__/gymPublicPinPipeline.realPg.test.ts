@@ -200,6 +200,7 @@ suite(
       for (const file of [
         "20261109_x904_verified_registry_for_share_rls.sql",
         "20261109_x904_public_pin_review_insert_rls.sql",
+        "20261116_x904_paid_guest_pin_recovery_rls.sql",
       ])
         await pool.query(readFileSync("migrations/" + file, "utf8"));
       for (const table of [
@@ -424,6 +425,44 @@ suite(
         ),
       ).rejects.toHaveProperty("code", "42501");
     });
+    test("already-paid Gym guest with no grant is restored by staff without a second booking or payment",async()=>{
+      const id=await checkout();
+      const paid=await confirm(id);
+      await pool.query("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id]);
+      expect(await grant(id)).toBeUndefined();
+      expect(await counts()).toMatchObject({bookings:1,payments:1,grants:0});
+      await snapshot(new Date(clock.getTime()-1000),2);
+      const anonymous=await request.post(`/api/bookings/${id}/x904-guest-pin-approve`).send(attest);
+      expect(anonymous.status).toBe(401);
+      const denied=await request.post(`/api/bookings/${id}/x904-guest-pin-approve`)
+        .set("Authorization","Bearer "+token).send({...attest,officialFundsChecked:false});
+      expect(denied.status).toBe(400);
+      expect(await grant(id)).toBeUndefined();
+      const approved=await approve(id);
+      expect(approved.status).toBe(200);
+      expect(approved.body).toMatchObject({success:true,accessState:"pending"});
+      expect(await grant(id)).toMatchObject({payment_id:paid,verification_state:"verified",access_state:"pending",user_pin:"700",device_uid:343});
+      expect(await counts()).toMatchObject({bookings:1,payments:1,grants:1});
+      expect(await commands()).toHaveLength(0);
+      const again=await approve(id);
+      expect(again.status).toBe(200);
+      expect(again.body.idempotent).toBe(true);
+      expect((await pool.query("SELECT count(*)::int n FROM sport_center.audit_logs WHERE action='x904_guest_pin_staff_attestation' AND entity_id=$1",[id])).rows[0].n).toBe(1);
+    });
+
+    test("missing-grant recovery holds when the X904 device snapshot is stale",async()=>{
+      const id=await checkout();
+      await confirm(id);
+      await pool.query("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id]);
+      await snapshot(new Date(clock.getTime()-6*60_000),2);
+      const result=await approve(id);
+      expect(result.status).toBe(409);
+      expect(result.body.code).toBe("snapshot_stale");
+      expect(await grant(id)).toBeUndefined();
+      expect(await counts()).toMatchObject({bookings:1,payments:1,grants:0});
+      expect(await commands()).toHaveLength(0);
+    });
+
     test("audit failure must roll back PIN authorization, not return success", async () => {
       const id = await checkout();
       await confirm(id);

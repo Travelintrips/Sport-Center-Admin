@@ -8,7 +8,7 @@ describe("X904 ordinary PIN booking preflight", () => {
       const check = source.indexOf('if (identityType === "pin") {');
       const ownership = source.indexOf("sport_center.gym_x904_member_mapping", check);
       const exempt = source.indexOf("['12', '79', '237'].includes(userPin)", check);
-      const grant = source.indexOf("INSERT INTO sport_center.x904_nonmember_daily_access");
+      const grant = source.indexOf("INSERT INTO sport_center.x904_nonmember_daily_access", exempt);
       expect(check).toBeGreaterThan(-1);
       expect(ownership).toBeGreaterThan(check);
       expect(exempt).toBeGreaterThan(check);
