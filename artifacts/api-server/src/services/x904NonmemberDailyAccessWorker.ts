@@ -350,6 +350,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
     ORDER BY a.confirmed_at LIMIT 25`);
 
   for (const row of due.rows as any[]) {
+    try {
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
       const locked = await tx.execute(sql`SELECT a.access_id,a.booking_id,a.user_pin,a.device_uid,a.verified_name,
@@ -700,5 +701,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         VALUES (${DEVICE},${commandType},${pin},${payload}::jsonb,${actor},${key})
         ON CONFLICT (idempotency_key) DO NOTHING`);
     });
+    } catch (error) {
+      // A bad historical grant must not prevent the next paid booking from
+      // reaching the existing idempotent queue and physical ACK guard.
+      console.error("[x904-nonmember] paid grant failed; continuing next grant", JSON.stringify({
+        accessId: Number(row.access_id), error: error instanceof Error ? error.message : String(error),
+      }));
+    }
   }
 }

@@ -21,8 +21,8 @@ const execute=async q=>{
     if(legacyInventoryFailures++===0 && injectFailure) throw Error('LEGACY_INVENTORY_PREFLIGHT_UNAVAILABLE');
     return {rows:[snapshot]};
   }
-  if(q.includes('SELECT a.access_id,a.user_pin')&&q.includes('ORDER BY a.confirmed_at LIMIT')) return {rows:[grant]};
-  if(q.includes('FOR UPDATE OF a')) return {rows:[grant]};
+  if(q.includes('SELECT a.access_id,a.user_pin')&&q.includes('ORDER BY a.confirmed_at LIMIT')) return {rows:[{access_id:3},grant]};
+  if(q.includes('FOR UPDATE OF a')) {if(q.includes('a.access_id=3'))throw Error('HISTORICAL_GRANT_ROW_FAILED');return {rows:[grant]};}
   if(q.includes('SELECT membership_id,status')||q.includes('SELECT command_id,command_type')||q.includes('SELECT 1 FROM sport_center.x904_user_commands')||q.includes('SELECT 1 FROM sport_center.x904_nonmember_daily_access other')) return {rows:[]};
   if(q.includes('SELECT count(*)::int AS n')) return {rows:[{n:0}]};
   if(q.includes('INSERT INTO sport_center.x904_user_commands')) {inserts.push(q);return {rows:[]};}
@@ -49,5 +49,5 @@ moduleObj.exports.processX904NonmemberDailyAccess(store,now).then(()=>{
  assert.ok(legacyInventoryFailures>=1);
  assert.equal(inserts.length,1,'exactly one activation command queued');
  assert.ok(inserts[0].includes('ACTIVATE_USER'));
- console.log('PASS isolated admin VIS001 booking 1830 -> ACTIVATE_USER queued ('+(injectFailure?'legacy preflights failing':'legacy preflights healthy')+'); no DB/device touched');
+ console.log('PASS isolated admin VIS001 booking 1830 -> ACTIVATE_USER queued after historical grant failed ('+(injectFailure?'legacy preflights failing':'legacy preflights healthy')+'); no DB/device touched');
 }).catch(error=>{console.error(error);process.exitCode=1;});
