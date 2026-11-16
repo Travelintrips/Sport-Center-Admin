@@ -4,6 +4,28 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const baselinePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "prod-baseline-20261114.json");
+const x904PaymentOverridePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "audited-x904-payment-20261116.json");
+
+/** Preserve the 14-Nov audited PROD manifest; allow only the new exact X904
+ * payment trigger function hash independently checked on both DEV and PROD.
+ * Never waive parity for any other function or trigger. */
+export function withAuditedX904Payment(baseline, audit) {
+  const id = audit.function + "(" + audit.args + ")";
+  if (audit.function !== "link_x904_nonmember_daily_payment" ||
+      audit.args !== "" ||
+      audit.historical_hash !== "c4520dc7d76f5082b5f33b74dce13edf" ||
+      audit.current_prod_hash !== "aeb8d6099b6da69d8f691ada9a035f04" ||
+      audit.release_commit !== "10910f7b53a5ab631fbd187241f723e007527194") {
+    throw new Error("UNREVIEWED_PROD_BASELINE_OVERRIDE");
+  }
+  const matching = baseline.functions.filter(x =>
+    x.proname + "(" + x.args + ")" === id &&
+    x.hash === audit.historical_hash);
+  if (matching.length !== 1) throw new Error("HISTORICAL_BASELINE_CHANGED");
+  return {...baseline, functions:baseline.functions.map(x =>
+    x.proname + "(" + x.args + ")" === id
+      ? {...x,hash:audit.current_prod_hash} : x)};
+}
 const functionQuery = `SELECT p.proname,pg_get_function_identity_arguments(p.oid) args, md5(pg_get_functiondef(p.oid)) hash
  FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
  WHERE n.nspname='sport_center'
@@ -54,7 +76,9 @@ export async function verifyDevParity() {
       !username ||
       process.env.SUPABASE_DATABASE_URL)
     throw new Error("PARITY_VERIFICATION_DEV_DATABASE_ONLY");
-  const baseline = JSON.parse(readFileSync(baselinePath,"utf8"));
+  const historicalBaseline = JSON.parse(readFileSync(baselinePath,"utf8"));
+  const audited = JSON.parse(readFileSync(x904PaymentOverridePath,"utf8"));
+  const baseline = withAuditedX904Payment(historicalBaseline,audited);
   const url = rawUrl.replace("pooler.supabase.com:6543","pooler.supabase.com:5432");
   const client = new pg.Client({ connectionString:url,
     ...(/supabase\.(co|com|in)/.test(url) ? { ssl: { rejectUnauthorized:false } } : {}) });
@@ -65,7 +89,8 @@ export async function verifyDevParity() {
       client.query(functionQuery), client.query(triggerQuery)
     ]);
     const result = compareParity(baseline,functions.rows,triggers.rows);
-    console.log("[dev-parity] baseline",baseline.source_commit.slice(0,12),
+    console.log("[dev-parity] historical baseline",baseline.source_commit.slice(0,12),
+      "audited X904 payment",audited.release_commit.slice(0,12),
       "functions",result.checkedFunctions,"triggers",result.checkedTriggers,
       "result",result.ok ? "PASS" : "BLOCKED");
     if (!result.ok) {
