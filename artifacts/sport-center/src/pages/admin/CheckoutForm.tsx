@@ -497,7 +497,7 @@ export default function AdminCheckoutForm() {
     selectedCustomerId &&
     customerFormValid &&
     (multiPatterns.length > 0 || (selectedFacilityId && activeFacilities.some((item: any) => String(item.id) === selectedFacilityId))) &&
-    (multiPatterns.length > 0 || !isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
+    (multiPatterns.length > 0 || (!isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType))) &&
     (selectedDate || multiPatterns.length > 0) &&
     bookingScheduleValid &&
     !isSubmitting &&
