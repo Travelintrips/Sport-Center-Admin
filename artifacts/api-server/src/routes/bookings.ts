@@ -33,6 +33,7 @@ import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/addit
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { syncBookingGroupTotal } from "../lib/groupTotals";
+import { hasAdminCartOverlap, adminCartLockKeys } from "../lib/adminMultiFacilityCart";
 import { evaluateBookingCancellation } from "../lib/bookingCancellationPolicy";
 import {
   FINAL_BANK_MATCH_STATUSES,
@@ -2795,17 +2796,10 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
         session.durationHours, { allowPastSchedule: isOperationalBookingRole(identity.role) });
       if (err) { res.status(400).json({ error: err }); return; }
     }
-    const minute = (s: string) => timeToMinutes(s);
-    for (let i = 0; i < multiSessions.length; i++) {
-      for (let j = i + 1; j < multiSessions.length; j++) {
-        const first = multiSessions[i], second = multiSessions[j];
-        if (first.facilityId === second.facilityId && first.date === second.date &&
-            minute(first.startTime) < minute(second.startTime) + second.durationHours * 60 &&
-            minute(second.startTime) < minute(first.startTime) + first.durationHours * 60) {
-          res.status(400).json({ error: "Ada jadwal bertabrakan dalam booking" }); return;
-        }
-      }
+    if (hasAdminCartOverlap(multiSessions)) {
+      res.status(400).json({ error: "Ada jadwal bertabrakan dalam booking" }); return;
     }
+    const minute = (s: string) => timeToMinutes(s);
     const isCorporate = payerType === "company";
     const bodyId = Number(bodyCustomerId);
     const customerId = Number.isInteger(bodyId) && bodyId > 0 ? bodyId : null;
@@ -2848,11 +2842,9 @@ router.post("/bookings/admin-multi-schedule", adminMiddleware, async (req, res) 
       Math.floor(Math.random() * 100000).toString().padStart(5,"0");
     const groupTotal = prepared.reduce((sum, item) => sum + item.tax.grandTotal, 0);
     const created = await db.transaction(async (tx) => {
-      const lockKeys = [...new Set(multiSessions.map(item => item.facilityId + ":" + item.date))].sort();
-      for (const key of lockKeys) {
-        const [lockedFacility, date] = key.split(":");
-        const dateInteger = Number(date!.replace(/-/g,""));
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(${Number(lockedFacility)}, ${dateInteger})`);
+      for (const key of adminCartLockKeys(multiSessions)) {
+        const dateInteger = Number(key.date.replace(/-/g, ""));
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${key.facilityId}, ${dateInteger})`);
       }
       // All conflict checks and all writes share this transaction connection.
       for (const session of prepared) {
