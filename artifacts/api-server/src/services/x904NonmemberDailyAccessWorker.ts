@@ -75,7 +75,7 @@ export async function recoverPaidPublicGymPin(
         AND a.activated_at IS NULL AND a.user_pin NOT IN ('12','79','237')
         AND (${onlyPin ?? null}::text IS NULL OR a.user_pin=${onlyPin ?? null})
         AND b.source='gym_public_guest' AND b.status::text='confirmed'
-        AND b.notes LIKE 'Gym mandiri; nama cocok dengan registry X904%'
+        AND b.notes LIKE 'Gym mandiri; nama dan PIN X904 sama dengan identitas mesin terverifikasi%'
         AND b.booking_date::date=(${now}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date
         AND p.status::text='confirmed' AND p.confirmed_at IS NOT NULL AND p.confirmed_at<=${now}
         AND NULLIF(btrim(p.proof_url),'') IS NOT NULL

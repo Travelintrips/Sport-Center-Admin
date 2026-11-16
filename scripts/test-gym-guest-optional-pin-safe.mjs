@@ -32,6 +32,9 @@ test("server-resolved name+PIN may prepare unpaid grant; no device command until
  assert.match(bookingRoute,/guestNameRoute\.userPin/);
  assert.match(bookingRoute,/publicGymGuest && !selfGymMachinePinMatched \? "review_required" : "verified"/);
  assert.match(bookingRoute,/publicGymGuest && !selfGymMachinePinMatched \? "review_required" : "pending"/);
+ const worker=read("artifacts/api-server/src/services/x904NonmemberDailyAccessWorker.ts");
+ assert.match(worker,/b\.notes LIKE 'Gym mandiri; nama dan PIN X904 sama dengan identitas mesin terverifikasi%'/);
+ assert.doesNotMatch(worker,/b\.notes LIKE 'Gym mandiri; nama cocok dengan registry X904%'/);
  const newTrigger=read("artifacts/api-server/migrations/20261116_x904_verified_self_pin_auto_payment.sql");
  assert.match(newTrigger,/a\.verification_state<>'verified'/);
  assert.match(newTrigger,/NEW.status::text = 'confirmed'/);
