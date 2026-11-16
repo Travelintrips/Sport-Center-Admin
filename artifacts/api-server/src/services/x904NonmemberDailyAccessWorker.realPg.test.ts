@@ -102,7 +102,7 @@ const ack = async (id: string, at: Date, pin: string, name: string, uid: number,
   await addSnapshot(new Date(at.getTime()+1000),pin,name,group);
 };
 
-test("pending payment holds; confirmed VIS payment activates, retries DEVICE_BUSY once, then suspends after 12h", async () => {
+test("pending payment holds; confirmed VIS activates after ACK, retries DEVICE_BUSY, then suspends at Gym closing", async () => {
   await processX904NonmemberDailyAccess(db as any,new Date());
   expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands")).rows[0].n).toBe(0);
 
@@ -132,9 +132,9 @@ test("pending payment holds; confirmed VIS payment activates, retries DEVICE_BUS
   expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9001")).rows[0].access_state).toBe("active");
   const verifiedClock = (await run("SELECT activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9001")).rows[0];
   expect(new Date(verifiedClock.activated_at).getTime()).toBe(activateAck.getTime());
-  expect(new Date(verifiedClock.expires_at).getTime()-activateAck.getTime()).toBe(12*60*60*1000);
+  expect(new Date(verifiedClock.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
 
-  const expiredAt = new Date(activateAck.getTime()+12*60*60*1000+1000);
+  const expiredAt = new Date("2026-11-06T16:00:01.000Z");
   await addSnapshot(expiredAt,'78','VIS 001',1);
   await processX904NonmemberDailyAccess(db as any,new Date(expiredAt.getTime()+100));
   const suspend = await commandFor("SUSPEND_USER",1);
@@ -416,7 +416,7 @@ test("public booking with verified ordinary X904 PIN: pending payment holds, con
     const active=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(active.access_state).toBe("active");
     expect(new Date(active.activated_at).getTime()).toBe(activatedAt.getTime());
-    expect(new Date(active.expires_at).getTime()-activatedAt.getTime()).toBe(12*60*60*1000);
+    expect(new Date(active.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
 
     const afterExpiry = new Date(new Date(active.expires_at).getTime()+3000);
     await addSnapshot(new Date(afterExpiry.getTime()-1000),pin,name,1);
@@ -653,7 +653,7 @@ test("public PIN review gate: checkout and confirmed payment alone never activat
     const activated=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(activated.access_state).toBe("active");
     expect(new Date(activated.activated_at).getTime()).toBe(ackAt.getTime());
-    expect(new Date(activated.expires_at).getTime()-ackAt.getTime()).toBe(12*60*60*1000);
+    expect(new Date(activated.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
 
     // End-to-end completion for the anonymous-booking identity review path:
     // expiry must suspend through the same worker, with a matching X904 ACK,
@@ -1268,7 +1268,7 @@ test.each([
     expect(active.access_state).toBe("active");
     expect(new Date(active.activated_at).getTime()).toBe(activateAt.getTime());
     const expires=new Date(active.expires_at);
-    expect(expires.getTime()).toBe(Math.min(activateAt.getTime()+12*3600000,Date.parse("2026-11-06T16:00:00Z")));
+    expect(expires.toISOString()).toBe("2026-11-06T16:00:00.000Z");
     await addSnapshot(new Date(expires.getTime()+1000),pin,machineName,1);
     await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+2000));
     const suspension=await commandFor("SUSPEND_USER",accessId);

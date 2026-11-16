@@ -148,8 +148,9 @@ test("paid VIS creates held grant atomically and retains independently witnessed
 test("cancelled active visitor access still suspends, but cancelled pending access never activates",()=>{
  const worker=grantWorker;
  assert.match(worker,/a\.activated_at == null\) return/);
- assert.match(worker,/const bookingEligible = a\.booking_source === "web" && a\.identity_type === "card"/);
- assert.match(worker,/a\.booking_source !== "gym_public_guest" \|\| \["confirmed","completed"\]\.includes\(String\(a\.booking_status\)\)/);
+ assert.match(worker,/const bookingEligible = \["confirmed","completed"\]\.includes\(String\(a\.booking_status\)\)/);
+ assert.match(worker,/a\.payment_status === "confirmed"/);
+ assert.match(worker,/a\.activated_at == null/);
  assert.match(worker,/a\.payment_status === "confirmed"/);
  assert.match(worker,/const targetGroup = shouldBeActive \? 1 : 2/);
  assert.match(worker,/const commandType = shouldBeActive \? "ACTIVATE_USER" : "SUSPEND_USER"/);
@@ -172,7 +173,9 @@ test("VIS activation worker requires collected reservation, leaves ordinary PINs
  assert.match(grantWorker,/r\.payment_id=/);
  assert.match(grantWorker,/r\.device_uid=/);
  assert.match(grantWorker,/if \(handover\.rows\.length !== 1\) return/);
- assert.match(grantWorker,/now\.getTime\(\) >= new Date\(String\(a\.expires_at\)\)\.getTime\(\)/);
+ // A tentative payment+12h expiry must not cut off a paid same-day Gym visit before 23:00.
+ assert.doesNotMatch(grantWorker,/now\.getTime\(\) >= new Date\(String\(a\.expires_at\)\)\.getTime\(\)/);
+ assert.match(grantWorker,/x904NonmemberSameWibDate\(now, new Date\(scheduledStart\)\)/);
  assert.match(grantWorker,/GYM_X904_NONMEMBER_ACCESS_ENABLED/);
  assert.match(grantWorker,/GYM_X904_USER_WRITE_ENABLED/);
  assert.match(grantWorker,/x904NonmemberOpeningHours/);
