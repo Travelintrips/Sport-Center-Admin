@@ -100,6 +100,13 @@ describe("Gym no-login ordinary PIN field and server-side match", () => {
     expect(api).toContain('accessNotExpired && latestActivationVerified');
     expect(api).toContain('payment?.status === "confirmed"');
     expect(api).toContain('gymAccessStatus: booking.source === "gym_public_guest"');
+    expect(api).toContain('gymAccessProblem: booking.source === "gym_public_guest"');
+    expect(api).toContain('accessRows.rows.length === 0');
+    expect(api).toContain('Date.now() - confirmedAt >= 2 * 60_000');
+    expect(api).toContain('gymAccessProblem = "missing_grant"');
+    expect(api).toContain('[gym-x904] PAID_NO_GRANT');
+    expect(statusPage).toContain('booking.gymAccessProblem === "missing_grant"');
+    expect(statusPage).toContain('Jangan membayar atau membuat booking kedua');
     expect(statusPage).toContain('Aktif — Silakan Scan');
     expect(statusPage).toContain('Perbarui Status');
     expect(statusPage).toContain('cache: "no-store"');
