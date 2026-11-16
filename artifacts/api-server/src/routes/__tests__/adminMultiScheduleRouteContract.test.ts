@@ -30,6 +30,21 @@ describe("admin multi-schedule booking contract", () => {
     expect(multi).toContain('tx.insert(bookingGroupsTable)');
     expect(multi).toContain('tx.insert(bookingsTable)');
   });
+
+  it("stores facility per session and locks each court/date separately", () => {
+    expect(multi).toContain("facilityId: item?.facilityId == null ? facilityId : Number(item.facilityId)");
+    expect(multi).toContain("facilityById.get(session.facilityId)");
+    expect(multi).toContain("first.facilityId === second.facilityId");
+    expect(multi).toContain("item.facilityId + \":\" + item.date");
+    expect(multi).toContain("eq(bookingsTable.facilityId, session.facilityId)");
+    expect(multi).toContain("eq(blockedSchedulesTable.facilityId, session.facilityId)");
+    expect(multi).toContain("facilityId: item.facilityId, bookingDate: item.date");
+    expect(multi).toContain("broadcastAvailabilityChange(item.facilityId, item.date)");
+  });
+  it("preserves old single-facility clients when per-session facilityId is omitted", () => {
+    expect(multi).toContain("item?.facilityId == null ? facilityId");
+    expect(multi).toContain("facilityId: rawFacilityId");
+  });
   it("creates a single group and reserves payment notification until settlement", () => {
     expect(multi).toContain('groupRef, customerPhone, customerName');
     expect(multi).toContain('adminPaymentChoice !== "paid"');
