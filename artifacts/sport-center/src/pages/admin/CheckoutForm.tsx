@@ -234,6 +234,7 @@ export default function AdminCheckoutForm() {
     startDate: string; startTime: string; durationHours: number;
     repeatType: "weekly" | "monthly"; repeatCount: number;
     dates: string[]; pricePerSession: number;
+    facilityId: number; facilityName: string; activityType: string | null;
   };
   const [multiPatterns, setMultiPatterns] = useState<BookingPattern[]>([]);
   const [repeatType, setRepeatType] = useState<"weekly" | "monthly">("weekly");
@@ -447,8 +448,8 @@ export default function AdminCheckoutForm() {
   // validation problem, rather than silently disabling it.
   const multiScheduleBlockers: string[] = multiPatterns.length === 0 ? [] : [
     ...(!selectedCustomerId || !customerFormValid ? ["Pilih pelanggan dengan nama dan nomor WhatsApp yang valid."] : []),
-    ...(!selectedFacilityId || !activeFacilities.some((item: any) => String(item.id) === selectedFacilityId)
-      ? ["Pilih fasilitas aktif."] : []),
+    ...(multiPatterns.some((pattern) => !activeFacilities.some((item: any) => Number(item.id) === pattern.facilityId))
+      ? ["Salah satu fasilitas pada pola tidak aktif."] : []),
     ...(isMultigunaFacility && !multigunaActivities.some((item) => item.value === selectedActivityType)
       ? ["Pilih jenis olahraga (Futsal, Basket, atau Voli)."] : []),
     ...(multiPatterns.reduce((sum, pattern) => sum + pattern.dates.length, 0) > 52
@@ -495,9 +496,8 @@ export default function AdminCheckoutForm() {
   const canSubmitBooking = Boolean(
     selectedCustomerId &&
     customerFormValid &&
-    selectedFacilityId &&
-    activeFacilities.some((item: any) => String(item.id) === selectedFacilityId) &&
-    (!isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
+    (multiPatterns.length > 0 || (selectedFacilityId && activeFacilities.some((item: any) => String(item.id) === selectedFacilityId))) &&
+    (multiPatterns.length > 0 || !isMultigunaFacility || multigunaActivities.some(a => a.value === selectedActivityType)) &&
     (selectedDate || multiPatterns.length > 0) &&
     bookingScheduleValid &&
     !isSubmitting &&
@@ -1201,7 +1201,7 @@ export default function AdminCheckoutForm() {
       toast({ title: "Isi nama orang yang memakai kartu", description: "Nama pengunjung wajib diisi, berbeda dari identitas kartu VIS.", variant: "destructive" });
       return;
     }
-    if (!selectedFacilityId) {
+    if (!selectedFacilityId && multiPatterns.length === 0) {
       toast({ title: "Pilih fasilitas terlebih dahulu", variant: "destructive" });
       return;
     }
@@ -1306,6 +1306,7 @@ export default function AdminCheckoutForm() {
               multiSessions: multiPatterns.flatMap((pattern) =>
                 pattern.dates.map((date) => ({
                   date, startTime: pattern.startTime, durationHours: pattern.durationHours,
+                  facilityId: pattern.facilityId, activityType: pattern.activityType,
                 })),
               ),
             }),
@@ -1735,7 +1736,7 @@ export default function AdminCheckoutForm() {
             {/* Facility */}
             {!isMembership && <div className="space-y-2">
               <Label htmlFor="facility">Fasilitas <span className="text-destructive">*</span></Label>
-              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setSelectedActivityType(""); setStartTime(""); setMultiPatterns([]); }}>
+              <Select value={selectedFacilityId} onValueChange={(value) => { setSelectedFacilityId(value); setSelectedActivityType(""); setStartTime(""); setBookingDay(""); setRepeatEnabled(false); }}>
                 <SelectTrigger id="facility">
                   <SelectValue placeholder="Pilih fasilitas..." />
                 </SelectTrigger>
@@ -1936,9 +1937,12 @@ export default function AdminCheckoutForm() {
                     durationHours: Number(duration), repeatType, repeatCount,
                     dates: repeatPreview.dates.map((row) => row.date),
                     pricePerSession: Number(repeatPreview.pricePerSession),
+                    facilityId: Number(selectedFacilityId), facilityName: String(facility?.name ?? ""),
+                    activityType: isMultigunaFacility ? selectedActivityType : null,
                   };
                   const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
                   const overlaps = multiPatterns.some((pattern) =>
+                    pattern.facilityId === next.facilityId &&
                     pattern.dates.some((date) => next.dates.includes(date)) &&
                     toMinutes(pattern.startTime) < toMinutes(next.startTime) + next.durationHours * 60 &&
                     toMinutes(next.startTime) < toMinutes(pattern.startTime) + pattern.durationHours * 60
@@ -1965,7 +1969,7 @@ export default function AdminCheckoutForm() {
                 {multiPatterns.map((pattern, index) => (
                   <div key={index} className="rounded-lg bg-background border p-3 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold">{pattern.startDate} • {pattern.startTime} • {pattern.durationHours} jam</span>
+                      <span className="text-sm font-semibold">{pattern.facilityName} • {pattern.startDate} • {pattern.startTime} • {pattern.durationHours} jam</span>
                       <Button type="button" variant="ghost" size="sm"
                         onClick={() => setMultiPatterns((prev) => prev.filter((_, i) => i !== index))}>Hapus</Button>
                     </div>
@@ -2410,7 +2414,7 @@ export default function AdminCheckoutForm() {
                     <p className="font-semibold">Ringkasan Multi-Jadwal</p>
                     {multiPatterns.map((pattern, index) => (
                       <div key={index} className="flex justify-between gap-2">
-                        <span>{pattern.startDate} • {pattern.startTime} • {pattern.dates.length} sesi</span>
+                        <span>{pattern.facilityName} • {pattern.startDate} • {pattern.startTime} • {pattern.dates.length} sesi</span>
                         <strong>{formatRupiah(pattern.pricePerSession * pattern.dates.length)}</strong>
                       </div>
                     ))}
