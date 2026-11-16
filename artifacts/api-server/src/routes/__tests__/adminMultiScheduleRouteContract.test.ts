@@ -29,7 +29,7 @@ describe("admin multi-schedule booking contract", () => {
     expect(multi).toContain('facility.bookingMode === "walk_in"');
   });
   it("rejects overlap within the cart and rechecks occupied and blocked slots", () => {
-    expect(multi).toContain('minute(first.startTime) < minute(second.startTime)');
+    expect(multi).toContain("hasAdminCartOverlap(multiSessions)");
     expect(multi).toContain('blockedSchedulesTable');
     expect(multi).toContain('INACTIVE_STATUSES.includes(b.status)');
   });
@@ -44,8 +44,8 @@ describe("admin multi-schedule booking contract", () => {
   it("stores facility per session and locks each court/date separately", () => {
     expect(multi).toContain("facilityId: item?.facilityId == null ? facilityId : Number(item.facilityId)");
     expect(multi).toContain("facilityById.get(session.facilityId)");
-    expect(multi).toContain("first.facilityId === second.facilityId");
-    expect(multi).toContain("item.facilityId + \":\" + item.date");
+    expect(multi).toContain("hasAdminCartOverlap(multiSessions)");
+    expect(multi).toContain("adminCartLockKeys(multiSessions)");
     expect(multi).toContain("eq(bookingsTable.facilityId, session.facilityId)");
     expect(multi).toContain("eq(blockedSchedulesTable.facilityId, session.facilityId)");
     expect(multi).toContain("facilityId: item.facilityId, bookingDate: item.date");
