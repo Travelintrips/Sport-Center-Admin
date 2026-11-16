@@ -1651,11 +1651,99 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
         WHERE id=${principal.userId} FOR SHARE`);
       if (actor.rows.length !== 1 || actor.rows[0].account_status !== 'active' ||
           actor.rows[0].role !== principal.role) return "actor_changed";
-      // Payment updates acquire their row lock before their grant trigger.
-      // Use the same order here, rather than approving a concurrently revoked payment.
-      await tx.execute(sql`SELECT p.id FROM sport_center.sport_payments p
-        JOIN sport_center.x904_nonmember_daily_access a ON a.payment_id=p.id AND a.booking_id=p.booking_id
-        WHERE a.booking_id=${bookingId} FOR UPDATE OF p`);
+      // Payment updates acquire the bank row lock before their grant trigger.
+      // A paid public Gym booking created while the registry name was stale
+      // may have NO grant row. Restore only its canonical payment -> PIN link
+      // after this authenticated staff identity+bank attestation, never by name
+      // alone or via a second booking/payment.
+      await tx.execute(sql`SELECT id FROM sport_center.sport_payments
+        WHERE booking_id=${bookingId} AND status::text='confirmed' FOR UPDATE`);
+      const existing = await tx.execute(sql`SELECT access_id
+        FROM sport_center.x904_nonmember_daily_access
+        WHERE booking_id=${bookingId} FOR UPDATE`);
+      if (existing.rows.length === 0) {
+        const bookings = await tx.execute(sql`SELECT b.id,b.customer_name,b.booking_date::text AS booking_date,
+            b.status::text AS booking_status,b.source,
+            COALESCE(b.grand_total,b.total_price) AS payable
+          FROM sport_center.sport_bookings b
+          WHERE b.id=${bookingId} FOR UPDATE`);
+        if (bookings.rows.length!==1) return 'not_found';
+        const b=bookings.rows[0] as any;
+        if (b.source!=='gym_public_guest' ||
+            String(b.booking_date).slice(0,10)!==currentDate ||
+            !['confirmed','paid','completed'].includes(String(b.booking_status)) ||
+            !String(b.customer_name??'').trim()) return 'not_ready';
+        const pay=await tx.execute(sql`SELECT id,confirmed_at,amount,proof_url
+          FROM sport_center.sport_payments WHERE booking_id=${bookingId}
+            AND status::text='confirmed' FOR UPDATE`);
+        if (pay.rows.length!==1 || !pay.rows[0].confirmed_at ||
+            !String(pay.rows[0].proof_url??'').trim() ||
+            !Number.isFinite(Number(b.payable)) || Number(b.payable)<=0 ||
+            Number(pay.rows[0].amount)<Number(b.payable)) return 'payment_not_ready';
+        // Do not convert an existing VIS handover into a PIN grant.
+        const vis=await tx.execute(sql`SELECT 1 FROM sport_center.gym_vis_card_reservations
+          WHERE booking_id=${bookingId} LIMIT 1`);
+        if(vis.rows.length) return 'vis_already_reserved';
+        const candidate=await tx.execute(sql`SELECT u.user_pin,u.device_uid,u.display_name
+          FROM sport_center.gym_x904_lan_users u
+          JOIN sport_center.x904_verified_nonmember_identities r
+            ON r.device_serial=u.device_serial AND r.user_pin=u.user_pin
+              AND r.device_uid=u.device_uid
+          WHERE u.device_serial='TDBD234200545' AND u.device_role=0
+            AND r.verification_state='verified' AND r.revoked_at IS NULL
+            AND upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=
+                upper(regexp_replace(trim(${String(b.customer_name)}::text),'[[:space:]]+',' ','g'))
+            AND upper(regexp_replace(trim(r.display_name),'[[:space:]]+',' ','g'))=
+                upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))
+          LIMIT 3`);
+        if (candidate.rows.length!==1) return 'pin_identity_review';
+        const c=candidate.rows[0] as any;
+        const pin=String(c.user_pin);
+        const uid=Number(c.device_uid);
+        if (!/^[0-9]{1,8}$/.test(pin) || !Number.isSafeInteger(uid) || uid<=0 ||
+            ['12','79','237','78','90','13','17','11','15'].includes(pin))
+          return 'pin_protected';
+        const conflict=await tx.execute(sql`SELECT
+          (SELECT count(*)::int FROM sport_center.gym_x904_member_mapping m
+            WHERE m.device_serial='TDBD234200545' AND m.user_pin=${pin}) AS members,
+          (SELECT count(*)::int FROM sport_center.gym_x904_lan_users u
+            WHERE u.device_serial='TDBD234200545' AND u.user_pin<>${pin}
+              AND upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=
+                  upper(regexp_replace(trim(${String(c.display_name)}::text),'[[:space:]]+',' ','g'))) AS duplicates,
+          (SELECT count(*)::int FROM sport_center.x904_nonmember_daily_access a
+            WHERE a.device_serial='TDBD234200545' AND a.user_pin=${pin}
+              AND a.access_state IN ('pending','active','review_required')) AS grants,
+          (SELECT count(*)::int FROM sport_center.x904_user_commands q
+            WHERE q.device_serial='TDBD234200545' AND q.user_pin=${pin}
+              AND q.state IN ('queued','claimed')) AS commands`);
+        if (!conflict.rows.length ||
+            ['members','duplicates','grants','commands'].some(k=>Number((conflict.rows[0] as any)[k])!==0))
+          return 'pin_busy_or_ambiguous';
+        const snapshot=await tx.execute(sql`SELECT observed_at,user_count,users
+          FROM sport_center.gym_x904_access_snapshots
+          WHERE device_serial='TDBD234200545'
+          ORDER BY snapshot_id DESC LIMIT 1`);
+        if (snapshot.rows.length!==1) return 'snapshot_unavailable';
+        const s=snapshot.rows[0] as any;
+        const observed=new Date(String(s.observed_at));
+        const users=Array.isArray(s.users)?s.users:[];
+        if (!Number.isFinite(observed.getTime()) || observed.getTime()>now.getTime() ||
+            now.getTime()-observed.getTime()>300_000 ||
+            users.length!==Number(s.user_count)) return 'snapshot_stale';
+        const matches=users.filter((u:any)=>String(u.pin)===pin &&
+          String(u.name??'').trim().toLocaleUpperCase('id-ID')===
+            String(c.display_name).trim().toLocaleUpperCase('id-ID') &&
+          Number(u.role)===0 && Number(u.group)===2 && u.enabled===true);
+        if(matches.length!==1) return 'snapshot_identity_or_group_changed';
+        await tx.execute(sql`INSERT INTO sport_center.x904_nonmember_daily_access
+          (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+           booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state)
+          VALUES ('TDBD234200545','pin',${'PIN:'+pin},${pin},${uid},
+            ${String(c.display_name)},${bookingId},${Number(pay.rows[0].id)},
+            ${new Date(String(pay.rows[0].confirmed_at))},
+            ${new Date(new Date(String(pay.rows[0].confirmed_at)).getTime()+12*3600_000)},
+            'review_required','review_required')`);
+      }
       const found = await tx.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
           a.payment_id,a.verification_state,a.access_state,
           b.source,b.status::text AS booking_status,b.booking_date::text AS booking_date,p.status::text AS payment_status,
@@ -1672,7 +1760,7 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
       if (grant.source !== "gym_public_guest" ||
           String(grant.booking_date).slice(0, 10) !== currentDate ||
           grant.payment_status !== "confirmed" || !grant.payment_id ||
-          !["confirmed", "paid"].includes(String(grant.booking_status)) ||
+          !["confirmed", "paid", "completed"].includes(String(grant.booking_status)) ||
           !grant.payment_confirmed_at || !String(grant.proof_url ?? "").trim() ||
           !Number.isFinite(Number(grant.payable_total)) || Number(grant.payable_total) <= 0 ||
           !Number.isFinite(Number(grant.amount)) || Number(grant.amount) < Number(grant.payable_total)) return "not_ready";

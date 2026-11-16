@@ -547,6 +547,31 @@ export default function AdminWaBookings() {
                   )}
                 </div>
 
+                {detail.booking.source === "gym_public_guest" && !detail.x904PinGrant &&
+                  detail.booking.status === "confirmed" && Boolean(detail.booking.paidAt) &&
+                  detail.x904IdentityMatch?.route === "registered" && (
+                  <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm space-y-3">
+                    <p className="font-bold">Pulihkan hak akses PIN — booking GYM lunas yang sudah ada</p>
+                    <p>Booking lama belum memiliki grant X904. Tidak membuat booking atau pembayaran baru, dan tidak membuka pintu secara langsung.</p>
+                    <p>Identitas mesin: <strong>{detail.x904IdentityMatch.displayName}</strong> · PIN {detail.x904IdentityMatch.userPin} · UID {detail.x904IdentityMatch.deviceUid}</p>
+                    <p className="text-xs">Hanya pada tanggal booking pukul 06:00–23:00 WIB. Petugas harus memeriksa pemilik PIN secara langsung dan memastikan penerimaan dana resmi.</p>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={pinOwnershipChecked} onChange={e => setPinOwnershipChecked(e.target.checked)} />
+                      Saya memeriksa identitas pengunjung dan cocok dengan mesin X904.
+                    </label>
+                    <Input placeholder="Referensi transaksi bank/QRIS resmi" aria-label="Referensi pembayaran untuk pemulihan PIN"
+                      value={pinBankReference} onChange={e => setPinBankReference(e.target.value.toUpperCase())}/>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" checked={pinFundsChecked} onChange={e => setPinFundsChecked(e.target.checked)} />
+                      Saya memastikan pembayaran resmi sudah diterima untuk booking ini.
+                    </label>
+                    <Button type="button" className="w-full" disabled={!pinOwnershipChecked || !pinFundsChecked ||
+                      pinBankReference.trim().length < 6 || approveGuestPinMutation.isPending}
+                      onClick={() => approveGuestPinMutation.mutate(Number(detail.booking.id))}>
+                      {approveGuestPinMutation.isPending ? "Memeriksa..." : "Verifikasi dan Pulihkan Grant Booking"}
+                    </Button>
+                  </section>
+                )}
                 {detail.booking.source === "gym_public_guest" && detail.x904PinGrant && (
                   <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-slate-900 space-y-3">
                     <p className="font-bold">Pengesahan PIN biasa — booking tanpa login</p>
