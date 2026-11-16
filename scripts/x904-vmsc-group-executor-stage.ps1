@@ -63,8 +63,16 @@ try {
     }
   }
   Require ($count -gt 0 -and $count -le 10000 -and $matches -eq 1 -and $count -eq [int]$proof.userCount) 'USER_SNAPSHOT_CHANGED'
-  $before=0
-  Require ([bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$before)) 'GROUP_READ_FAILED'
+  # Retry only transient SDK read failures under the existing device mutex.
+  # Never issue a write if no authenticated group value was read.
+  $before=0;$beforeOk=$false
+  for($groupReadAttempt=1;$groupReadAttempt -le 3;$groupReadAttempt++){
+    $before=0
+    $beforeOk=[bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$before)
+    if($beforeOk){break}
+    if($groupReadAttempt -lt 3){Start-Sleep -Milliseconds 200}
+  }
+  Require $beforeOk 'GROUP_READ_FAILED'
   Require (@(1,2) -contains $before) 'UNEXPECTED_ACCESS_GROUP'
   $desired=if($cmd.commandType -ceq 'SUSPEND_USER'){2}else{1}
   # Group 2 must never be included in any door unlock combination.
@@ -79,8 +87,14 @@ try {
     AssertGymPaidActivationOpen $cmd
     Require ([bool]$zk.SetUserGroup(1,[int]$cmd.userPin,$desired)) 'SET_GROUP_FAILED'
   }
-  $after=0
-  Require ([bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$after) -and $after -eq $desired) 'GROUP_READBACK_MISMATCH'
+  $after=0;$afterOk=$false
+  for($groupReadAttempt=1;$groupReadAttempt -le 3;$groupReadAttempt++){
+    $after=0
+    $afterOk=[bool]$zk.GetUserGroup(1,[int]$cmd.userPin,[ref]$after)
+    if($afterOk){break}
+    if($groupReadAttempt -lt 3){Start-Sleep -Milliseconds 200}
+  }
+  Require ($afterOk -and $after -eq $desired) 'GROUP_READBACK_MISMATCH'
   [Console]::WriteLine((@{readBackConfirmed=$true;deviceUid=[int]$cmd.payload.expectedUid;beforeCount=$count;afterCount=$count;beforeGroup=$before;afterGroup=$after;errorCode=$null}|ConvertTo-Json -Compress))
 } catch {
   $code=[string]$_.Exception.Message
