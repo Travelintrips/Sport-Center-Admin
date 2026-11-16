@@ -313,6 +313,15 @@ export async function recoverUnallocatedPaidGymVis(now = new Date()): Promise<nu
         SELECT 1 FROM sport_center.gym_vis_card_reservations r
         WHERE r.booking_id=b.id
       )
+      -- Machine enrollment may change after payment. A now-registered guest
+      -- must go to the existing staff PIN grant recovery, not loop forever in
+      -- VIS allocation or consume one of the 12 recovery slots each minute.
+      AND NOT EXISTS (
+        SELECT 1 FROM sport_center.gym_x904_lan_users u
+        WHERE u.device_serial='TDBD234200545' AND
+          upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=
+          upper(regexp_replace(trim(b.customer_name),'[[:space:]]+',' ','g'))
+      )
     ORDER BY p.confirmed_at,b.id LIMIT 12`);
   let recovered = 0;
   for (const row of pending.rows as Array<{booking_id: number;order_number: string;customer_name: string;customer_phone: string;payment_id: number}>) {

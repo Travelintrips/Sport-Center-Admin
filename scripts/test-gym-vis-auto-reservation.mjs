@@ -23,6 +23,21 @@ test("hard uniqueness constraints prevent double allocations and reused bank ref
  for(const code of ["VIS001","VIS002","VIS003","VIS004","VIS005","VIS006"])assert.ok(migration.includes(code));
 });
 
+test("recovery queue never loops on now-registered paid guest; staff PIN approval remains separate",()=>{
+ const start=service.indexOf("export async function recoverUnallocatedPaidGymVis");
+ const end=service.indexOf("export async function reserveVisAfterAdminPaymentConfirmation",start);
+ const recovery=service.slice(start,end);
+ assert.ok(start>=0 && end>start);
+ assert.match(recovery,/AND NOT EXISTS \([\s\S]*?FROM sport_center\.gym_x904_lan_users u[\s\S]*?regexp_replace\(trim\(b\.customer_name\)/);
+ assert.match(recovery,/WHERE b\.source='gym_public_guest'/);
+ assert.match(recovery,/AND p\.status::text='confirmed'/);
+ assert.doesNotMatch(recovery,/ACTIVATE_USER|SUSPEND_USER/);
+ const bookingRoutes=read("artifacts/api-server/src/routes/bookings.ts");
+ assert.match(bookingRoutes,/router\.post\("\/bookings\/:bookingId\/x904-guest-pin-approve"/);
+ assert.match(bookingRoutes,/identityChecked !== true/);
+ assert.match(bookingRoutes,/officialFundsChecked !== true/);
+});
+
 test("only official verified funds plus confirmed unique payment can reserve a physical card",()=>{
  assert.match(service,/officialFundsChecked !== true/);
  assert.match(service,/pg_advisory_xact_lock\(90400661\)/);
