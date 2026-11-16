@@ -11,7 +11,7 @@ describe("X904 verified nonmember registry booking gate", () => {
       const registry = source.indexOf("FROM sport_center.x904_verified_nonmember_identities", registryCheck);
       const verified = source.indexOf("verification_state='verified' AND revoked_at IS NULL", registry);
       const rejection = source.indexOf('res.status(409).json({ error: "PIN nonmember belum terverifikasi', registry);
-      const bookingInsert = source.indexOf("INSERT INTO sport_center.x904_nonmember_daily_access");
+      const bookingInsert = source.indexOf("INSERT INTO sport_center.x904_nonmember_daily_access", rejection);
       expect(inventory).toBeGreaterThan(-1);
       expect(registryCheck).toBeGreaterThan(inventory);
       expect(registry).toBeGreaterThan(registryCheck);
