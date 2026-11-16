@@ -3266,6 +3266,9 @@ function InlineCheckInSelect({
   const hasStarted = isTimeReached(booking.bookingDate, booking.startTime);
   const hasEnded   = isTimeReached(booking.bookingDate, booking.endTime);
   const isLoading  = isCheckingIn || isCompleting;
+  const minutesWib = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const gymAdmissionDayOpen = isToday && /gym|fitness/i.test(String(booking.facilityName ?? "")) &&
+    minutesWib >= 6 * 60 && minutesWib < 23 * 60;
 
   // Sudah selesai / completed
   if (booking.status === "completed") {
@@ -3298,6 +3301,29 @@ function InlineCheckInSelect({
               <CheckCircle2 size={11} className="text-emerald-600" />
               Tandai Selesai
             </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Gym daily admission: the displayed 1-hour booking slot is an arrival estimate,
+  // not a reason to mark the ticket late before the booked WIB day closes.
+  // This is an admin check-in action only, never a door activation or ACK claim.
+  if (gymAdmissionDayOpen && booking.status === "confirmed") {
+    return (
+      <Select value="" onValueChange={(val) => { if (val === "checkin") onCheckIn(booking.id); }} disabled={isLoading}>
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+          title="GYM berlaku pada tanggal booking selama 06:00–23:00 WIB. Akses pintu tetap memerlukan pembayaran, identitas, dan ACK X904."
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>🏋️ GYM · Hari Ini</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="checkin" className="text-xs">
+            <span className="flex items-center gap-1.5"><LogIn size={11} />Check-in Manual</span>
           </SelectItem>
         </SelectContent>
       </Select>

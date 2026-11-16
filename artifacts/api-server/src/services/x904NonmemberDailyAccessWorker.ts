@@ -121,6 +121,15 @@ export async function recoverPaidPublicGymPin(
  * facility's scheduled start. Accept the stored YYYY-MM-DD / HH:mm shape only.
  * Fail closed on absent/corrupt dates; never open a door early.
  */
+export function x904GymBookingDayClose(bookingDate: unknown): Date | null {
+  const date = String(bookingDate ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const closing = new Date(`${date}T23:00:00+07:00`);
+  if (!Number.isFinite(closing.getTime()) ||
+      new Date(closing.getTime()+7*3600000).toISOString().slice(0,10)!==date) return null;
+  return closing;
+}
+
 export function x904NonmemberScheduledStart(bookingDate: unknown, startTime: unknown): number | null {
   const date = String(bookingDate ?? "").trim();
   const time = String(startTime ?? "").trim();
@@ -381,8 +390,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         // A revoked booking must never initiate activation. Do not skip an
         // already activated entitlement, though: it must still reach the
         // regular SUSPEND_USER path and receive verified device read-back.
-        if ((a.booking_status !== "confirmed" || a.payment_status !== "confirmed") &&
-            a.activated_at == null) return;
+        if ((!['confirmed','completed'].includes(String(a.booking_status)) ||
+             a.payment_status !== "confirmed") && a.activated_at == null) return;
         const handover = await tx.execute(sql`SELECT 1
           FROM sport_center.gym_vis_card_reservations r
           WHERE r.booking_id=${Number(a.booking_id)}
@@ -401,9 +410,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             )
           LIMIT 1`);
         if (handover.rows.length !== 1) return;
-        // A reservation may not be activated after its booking-day closing.
-        if (!a.activated_at && (!a.expires_at ||
-            now.getTime() >= new Date(String(a.expires_at)).getTime())) return;
+        // The initial expires_at is provisional (often confirmed_at + 12h).
+        // A paid Gym visit's 12h clock starts at physical ACTIVATE ACK, not at
+        // payment; later same-day arrival is still eligible until 23:00 WIB.
+        // The booking-date, payment and opening-hour gates below remain mandatory.
       }
       const pin = String(a.user_pin);
       if (testPin !== undefined && pin !== testPin) return;
@@ -412,20 +422,29 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         console.warn("[x904-nonmember] booking schedule invalid; access held", JSON.stringify({accessId:Number(a.access_id)}));
         return;
       }
-      // A verified, fully paid same-day GYM guest PIN is entitled to immediate
-      // activation after admin payment confirmation, even when the displayed
-      // session starts later. Other booking types still wait for their start.
+      // A verified, paid Gym admission uses its booked WIB DATE rather than the
+      // displayed one-hour slot. The slot remains useful for arrival planning,
+      // but a later arrival on that date is not automatically denied.
+      // Other booking types still wait for their scheduled start.
       // The same-day and 06:00–23:00 checks below remain mandatory.
       const immediatePaidGymPin = a.booking_source === "gym_public_guest" &&
-        a.identity_type === "pin" && a.booking_status === "confirmed" &&
+        a.identity_type === "pin" && ["confirmed","completed"].includes(String(a.booking_status)) &&
         a.payment_status === "confirmed" && a.verification_state === "verified" &&
         a.access_state === "pending";
       const immediatePaidGymVis = a.booking_source === "gym_public_guest" &&
-        a.identity_type === "card" && a.booking_status === "confirmed" &&
+        a.identity_type === "card" && ["confirmed","completed"].includes(String(a.booking_status)) &&
+        a.payment_status === "confirmed" && a.verification_state === "verified" &&
+        a.access_state === "pending";
+      const immediatePaidGymAdmin = a.booking_source === "admin" &&
+        ["pin","card"].includes(a.identity_type) && ["confirmed","completed"].includes(String(a.booking_status)) &&
+        a.payment_status === "confirmed" && a.verification_state === "verified" &&
+        a.access_state === "pending";
+      const immediatePaidGymWebCard = a.booking_source === "web" &&
+        a.identity_type === "card" && ["confirmed","completed"].includes(String(a.booking_status)) &&
         a.payment_status === "confirmed" && a.verification_state === "verified" &&
         a.access_state === "pending";
       if (a.activated_at == null && now.getTime() < scheduledStart &&
-          !immediatePaidGymPin && !immediatePaidGymVis) return;
+          !immediatePaidGymPin && !immediatePaidGymVis && !immediatePaidGymAdmin && !immediatePaidGymWebCard) return;
       // A pending booking belongs to its scheduled WIB date. If activation
       // was missed, never activate it after the facility reopens next day.
       // Advance payments for future reservations may activate on that day.
@@ -461,14 +480,18 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       // its effective expiry is the earlier of 12 hours and closing at 23:00
       // on the original activation day; it cannot reopen tomorrow morning.
       const activeStart = a.activated_at ? new Date(String(a.activated_at)) : null;
+      const bookingDayClose = x904GymBookingDayClose(a.booking_date);
+      const storedExpiry = a.expires_at ? new Date(String(a.expires_at)) : null;
       const expiry = activeStart
-        ? x904NonmemberEffectiveExpiry(activeStart, new Date(String(a.expires_at)))
+        ? (["admin","gym_public_guest","web"].includes(String(a.booking_source)) && bookingDayClose && storedExpiry
+            ? new Date(Math.min(bookingDayClose.getTime(), storedExpiry.getTime()))
+            : x904NonmemberEffectiveExpiry(activeStart, storedExpiry))
         : null;
       // A web booking attached to a physical VIS must be confirmed to activate.
       // Cancellation/completion causes the ordinary verified SUSPEND path.
-      const bookingEligible = a.booking_source === "web" && a.identity_type === "card"
-        ? a.booking_status === "confirmed"
-        : a.booking_source !== "gym_public_guest" || ["confirmed","completed"].includes(String(a.booking_status));
+      // `completed` can mean the *displayed one-hour slot* ended; on Gym
+      // it does not revoke an independently verified paid same-day grant.
+      const bookingEligible = ["confirmed","completed"].includes(String(a.booking_status));
       const shouldBeActive = bookingEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
@@ -616,10 +639,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
               }
               await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
                 SET activated_at=COALESCE(activated_at,${ackTime}),
-                    expires_at=LEAST(
-                      COALESCE(activated_at,${ackTime}) + interval '12 hours',
-                      ((COALESCE(activated_at,${ackTime}) AT TIME ZONE 'Asia/Jakarta')::date + time '23:00')
-                        AT TIME ZONE 'Asia/Jakarta'),
+                    expires_at=(${String(a.booking_date)}::date + time '23:00')
+                      AT TIME ZONE 'Asia/Jakarta',
                     access_state='active'
                 WHERE access_id=${Number(a.access_id)} AND verification_state='verified'
                   AND payment_id=${Number(a.payment_id)}`);

@@ -27,6 +27,10 @@ describe("X904 shared verified paid-grant access safety contract", () => {
     expect(source).toContain('"ACTIVATE_USER"');
     expect(source).toContain('"SUSPEND_USER"');
     expect(source).toContain("readBackConfirmed");
-    expect(source).toContain("interval '12 hours'");
+    expect(source).toContain("x904GymBookingDayClose(a.booking_date)");
+    expect(source).toContain("time '23:00'");
+    // Legacy 12h clocks stay valid for historical rows during rollout.
+    const migration=readFileSync("migrations/20261116_x904_gym_day_admission_clock.sql","utf8");
+    expect(migration).toContain("interval '12 hours'");
   });
 });

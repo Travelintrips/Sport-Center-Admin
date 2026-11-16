@@ -168,6 +168,7 @@ suite(
         "20261031_x904_nonmember_daily_access.sql",
         "20261102_x904_nonmember_verified_activation_clock.sql",
         "20261105_x904_nonmember_2300_wib_cutoff.sql",
+        "20261116_x904_gym_day_admission_clock.sql",
         "20261107_x904_review_required_not_live.sql",
         "20261106_x904_guest_pin_payment_review_guard.sql",
       ]) {
@@ -540,10 +541,7 @@ suite(
         });
         const expiry = new Date((await grant(id)).expires_at);
         expect(expiry.getTime()).toBe(
-          Math.min(
-            ackAt.getTime() + 12 * 3600000,
-            Date.parse("2026-11-10T16:00:00Z"),
-          ),
+          Date.parse("2026-11-10T16:00:00Z"),
         );
         await snapshot(new Date(expiry.getTime() + 1000), 1);
         await tick(new Date(expiry.getTime() + 2000));

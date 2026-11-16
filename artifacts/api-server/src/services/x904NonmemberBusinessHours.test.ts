@@ -27,6 +27,16 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     })).toBe("suspend");
   });
 
+  it("Admin Gym badge uses date and opening hours, not one-hour slot",()=> {
+    const page=readFileSync(join(process.cwd(),"../sport-center/src/pages/admin/Bookings.tsx"),"utf8");
+    const section=page.slice(page.indexOf("function InlineCheckInSelect("));
+    expect(section).toContain("const gymAdmissionDayOpen = isToday");
+    expect(section).toContain("minutesWib >= 6 * 60 && minutesWib < 23 * 60");
+    expect(section).toContain("GYM · Hari Ini");
+    expect(section.indexOf("if (gymAdmissionDayOpen && booking.status === \"confirmed\")")).toBeLessThan(section.indexOf("Sudah Lewat"));
+    expect(section).toContain("Akses pintu tetap memerlukan pembayaran, identitas, dan ACK X904");
+  });
+
   it("facility is closed at 23:00 and before 06:00 exactly", () => {
     expect(x904NonmemberOpeningHours(instant("2026-11-05T22:59:59"))).toBe(true);
     expect(x904NonmemberOpeningHours(instant("2026-11-05T23:00:00"))).toBe(false);
@@ -50,7 +60,8 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     expect(source).toContain("x904NonmemberSameWibDate(now, new Date(scheduledStart))");
     expect(source).toContain("AND other.activated_at IS NOT NULL");
     expect(source).toContain("LEAST(other.expires_at");
-    expect(source).toContain("expires_at=LEAST(");
+    expect(source).toContain("expires_at=(${String(a.booking_date)}::date + time '23:00')");
+    expect(source).toContain("x904GymBookingDayClose(a.booking_date)");
     expect(source).toContain("readBackConfirmed");
     expect(source).toContain("afterGroup");
     expect(source).toContain("AUTO_NONMEMBER_GYM_12H");
@@ -63,6 +74,10 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     expect(source).toContain("OR expires_at = activated_at + interval '12 hours'");
     expect(source).toContain("WHERE access_state = 'active' AND activated_at IS NOT NULL");
     expect(source).toContain("time '23:00'");
+    const dayPolicy=readFileSync("migrations/20261116_x904_gym_day_admission_clock.sql","utf8");
+    expect(dayPolicy).toContain("x904_nonmember_business_hours_clock_check");
+    expect(dayPolicy).toContain("activated_at + interval '12 hours'");
+    expect(dayPolicy).toContain("VALIDATE CONSTRAINT");
     expect(source).toContain("VALIDATE CONSTRAINT");
   });
 });

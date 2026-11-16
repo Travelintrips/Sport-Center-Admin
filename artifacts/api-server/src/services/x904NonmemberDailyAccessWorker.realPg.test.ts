@@ -41,6 +41,7 @@ beforeAll(async () => {
   await run(migration);
   await run(activationClockMigration);
   await run(businessHoursMigration);
+  await run(readFileSync("migrations/20261116_x904_gym_day_admission_clock.sql","utf8"));
   await run(liveAccessIndexMigration);
   // Supabase roles are absent from bare PostgreSQL; create only in isolated fixture.
   await run("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF; END $$");
@@ -101,7 +102,7 @@ const ack = async (id: string, at: Date, pin: string, name: string, uid: number,
   await addSnapshot(new Date(at.getTime()+1000),pin,name,group);
 };
 
-test("pending payment holds; confirmed VIS payment activates, retries DEVICE_BUSY once, then suspends after 12h", async () => {
+test("pending payment holds; confirmed VIS activates after ACK, retries DEVICE_BUSY, then suspends at Gym closing", async () => {
   await processX904NonmemberDailyAccess(db as any,new Date());
   expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands")).rows[0].n).toBe(0);
 
@@ -131,9 +132,9 @@ test("pending payment holds; confirmed VIS payment activates, retries DEVICE_BUS
   expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9001")).rows[0].access_state).toBe("active");
   const verifiedClock = (await run("SELECT activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE booking_id=9001")).rows[0];
   expect(new Date(verifiedClock.activated_at).getTime()).toBe(activateAck.getTime());
-  expect(new Date(verifiedClock.expires_at).getTime()-activateAck.getTime()).toBe(12*60*60*1000);
+  expect(new Date(verifiedClock.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
 
-  const expiredAt = new Date(activateAck.getTime()+12*60*60*1000+1000);
+  const expiredAt = new Date("2026-11-06T16:00:01.000Z");
   await addSnapshot(expiredAt,'78','VIS 001',1);
   await processX904NonmemberDailyAccess(db as any,new Date(expiredAt.getTime()+100));
   const suspend = await commandFor("SUSPEND_USER",1);
@@ -415,7 +416,7 @@ test("public booking with verified ordinary X904 PIN: pending payment holds, con
     const active=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(active.access_state).toBe("active");
     expect(new Date(active.activated_at).getTime()).toBe(activatedAt.getTime());
-    expect(new Date(active.expires_at).getTime()-activatedAt.getTime()).toBe(12*60*60*1000);
+    expect(new Date(active.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
 
     const afterExpiry = new Date(new Date(active.expires_at).getTime()+3000);
     await addSnapshot(new Date(afterExpiry.getTime()-1000),pin,name,1);
@@ -652,7 +653,7 @@ test("public PIN review gate: checkout and confirmed payment alone never activat
     const activated=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
     expect(activated.access_state).toBe("active");
     expect(new Date(activated.activated_at).getTime()).toBe(ackAt.getTime());
-    expect(new Date(activated.expires_at).getTime()-ackAt.getTime()).toBe(12*60*60*1000);
+    expect(new Date(activated.expires_at).toISOString()).toBe("2026-11-06T16:00:00.000Z");
 
     // End-to-end completion for the anonymous-booking identity review path:
     // expiry must suspend through the same worker, with a matching X904 ACK,
@@ -1267,7 +1268,7 @@ test.each([
     expect(active.access_state).toBe("active");
     expect(new Date(active.activated_at).getTime()).toBe(activateAt.getTime());
     const expires=new Date(active.expires_at);
-    expect(expires.getTime()).toBe(Math.min(activateAt.getTime()+12*3600000,Date.parse("2026-11-06T16:00:00Z")));
+    expect(expires.toISOString()).toBe("2026-11-06T16:00:00.000Z");
     await addSnapshot(new Date(expires.getTime()+1000),pin,machineName,1);
     await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+2000));
     const suspension=await commandFor("SUSPEND_USER",accessId);
@@ -1298,3 +1299,66 @@ test.each([
   }
 });
 
+
+test.each([
+  { source:"admin", pin:"778", uid:778, bookingId:17778, paymentId:18778, status:"completed" },
+  { source:"gym_public_guest", pin:"779", uid:779, bookingId:17779, paymentId:18779, status:"completed" },
+])("paid same-day Gym $source booking can enter at 19:15 after 17:27–18:27 slot; no duplicate commands", async scenario => {
+  // Disposable local Postgres only. Never issue commands to a physical machine.
+  const at=new Date("2026-11-16T12:15:00Z"); // 19:15 WIB
+  const confirmed=new Date("2026-11-16T00:00:00Z"); // 07:00 WIB
+  const name="CI LATE GYM "+scenario.pin;
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=scenario.pin;
+  try {
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots");
+    await run("INSERT INTO sport_center.gym_x904_lan_users (device_serial,user_pin,device_uid,display_name,device_role) VALUES ('TDBD234200545',$1,$2,$3,0)",[scenario.pin,scenario.uid,name]);
+    await run("INSERT INTO sport_center.x904_verified_nonmember_identities (device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at) VALUES ('TDBD234200545',$1,$2,$3,'verified','ci',now())",[scenario.pin,scenario.uid,name]);
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status,customer_name,total_price) VALUES ($1,'2026-11-16','17:27',$2,$3,$4,30000)",[scenario.bookingId,scenario.source,scenario.status,name]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES ($1,$2,'confirmed',$3,30000,'ci://paid-proof')",[scenario.paymentId,scenario.bookingId,confirmed]);
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state) VALUES ('TDBD234200545','pin',$1,$2,$3,$4,$5,$6,$7,$8,'verified','pending')",["PIN:"+scenario.pin,scenario.pin,scenario.uid,name,scenario.bookingId,scenario.paymentId,confirmed,new Date("2026-11-16T11:00:00Z")]);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[scenario.bookingId])).rows[0].access_id);
+    await addSnapshot(new Date(at.getTime()-1000),scenario.pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,at);
+    const queued=await commandFor("ACTIVATE_USER",accessId);
+    expect(queued?.payload).toMatchObject({accessId,expectedUid:scenario.uid,source:"AUTO_NONMEMBER_GYM_12H"});
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(1);
+    // Queue is not physical access: require real ACK shape + later readback.
+    expect((await run("SELECT access_state,activated_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0]).toMatchObject({access_state:"pending",activated_at:null});
+    const ackTime = new Date(at.getTime()+2000);
+    await ack(queued.command_id,ackTime,scenario.pin,name,scenario.uid,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(at.getTime()+4000));
+    const verified=(await run("SELECT access_state,activated_at,expires_at FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0];
+    expect(verified.access_state).toBe("active");
+    expect(new Date(verified.expires_at).toISOString()).toBe("2026-11-16T16:00:00.000Z"); // 23:00 WIB, not one-hour slot or payment+12h
+    await addSnapshot(new Date("2026-11-16T15:59:00Z"),scenario.pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,new Date("2026-11-16T15:59:30Z"));
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='SUSPEND_USER' AND payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(0);
+    await addSnapshot(new Date("2026-11-16T16:00:30Z"),scenario.pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,new Date("2026-11-16T16:01:00Z"));
+    const suspension=await commandFor("SUSPEND_USER",accessId);
+    expect(suspension?.payload).toMatchObject({accessId,expectedUid:scenario.uid});
+    // Physical suspend still requires worker ACK and subsequent readback.
+  } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
+});
+
+test.each([
+  {pin:"780",bookingDate:"2026-11-16",at:"2026-11-16T16:01:00Z"}, // 23:01 WIB, closed
+  {pin:"781",bookingDate:"2026-11-16",at:"2026-11-16T23:01:00Z"}, // next WIB date
+  {pin:"782",bookingDate:"2026-11-17",at:"2026-11-16T12:15:00Z"}, // future date
+])("paid Gym admission is not activated when date or operating hours are invalid ($pin)",async s=>{
+  const at=new Date(s.at), confirmed=new Date("2026-11-16T00:00:00Z");
+  const pin=s.pin,uid=Number(pin),id=17000+uid,paymentId=18000+uid,name="CI CLOSED GYM "+pin;
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  try {
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots");
+    await run("INSERT INTO sport_center.gym_x904_lan_users (device_serial,user_pin,device_uid,display_name,device_role) VALUES ('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status,customer_name,total_price) VALUES ($1,$2,'17:27','admin','confirmed',$3,30000)",[id,s.bookingDate,name]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES ($1,$2,'confirmed',$3,30000,'ci://paid-proof')",[paymentId,id,confirmed]);
+    await run("INSERT INTO sport_center.x904_nonmember_daily_access (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state) VALUES ('TDBD234200545','pin',$1,$2,$3,$4,$5,$6,$7,$8,'verified','pending')",["PIN:"+pin,pin,uid,name,id,paymentId,confirmed,new Date("2026-11-17T16:00:00Z")]);
+    await addSnapshot(new Date(at.getTime()-1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,at);
+    const count=(await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE user_pin=$1 AND command_type='ACTIVATE_USER'",[pin])).rows[0].n;
+    expect(count).toBe(0);
+  } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
+});
