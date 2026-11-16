@@ -26,6 +26,7 @@ interface BookingStatus {
   visitorCard?: { code: string; state: string } | null;
   gymAccessStatus?: "not_active" | "pending" | "active" | "expired" | "needs_resolution" | null;
   gymAccessExpiresAt?: string | null;
+  gymAccessProblem?: "missing_grant" | "booking_day_closed" | null;
   notes: string | null;
   paymentDeadline: string | null;
   checkedInAt: string | null;
@@ -208,9 +209,9 @@ export default function WaBookingStatus() {
               <div className="flex items-center justify-between gap-3"><span>Akses X904</span><strong className={booking.gymAccessStatus === "active" && paymentConfirmed ? "text-green-700" : "text-slate-700"}>{paymentConfirmed && booking.gymAccessStatus === "active" ? "Aktif — Silakan Scan" : gymAccessDescription}</strong></div>
               {paymentConfirmed && booking.gymAccessStatus === "needs_resolution" && (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900" role="status">
-                  Pembayaran telah diterima, tetapi masa akses PIN untuk tanggal booking sudah berakhir pukul 23.00 WIB tanpa aktivasi.
-                  Silakan hubungi admin Sport Center untuk penjadwalan ulang yang disepakati atau pengembalian dana sesuai ketentuan.
-                  PIN tidak akan diaktifkan otomatis keesokan hari. Jangan membayar kedua kali untuk booking ini.
+                  {booking.gymAccessProblem === "missing_grant"
+                    ? "Pembayaran sudah lunas, tetapi sistem belum berhasil menautkan booking ini ke hak akses GYM. Ini kegagalan proses sistem, bukan kesalahan pengunjung. Jangan membayar atau membuat booking kedua. Hubungi Sport Center untuk penyelesaian akses pada hari yang sama jika masih buka, atau penjadwalan ulang/pengembalian dana bila tanggal kunjungan sudah berakhir."
+                    : "Pembayaran telah diterima, tetapi masa akses tanggal booking sudah berakhir pukul 23.00 WIB tanpa aktivasi. Jangan membayar kedua kali. Hubungi Sport Center untuk penjadwalan ulang yang disepakati atau pengembalian dana sesuai ketentuan."}
                 </p>
               )}
               {paymentConfirmed && booking.gymAccessStatus === "active" && booking.gymAccessExpiresAt && (
@@ -240,8 +241,7 @@ export default function WaBookingStatus() {
         {booking.source === "gym_public_guest" && booking.status === "confirmed" && !booking.visitorCard && (
           <Card className="border-blue-200 bg-blue-50">
             <CardContent className="p-4 text-sm text-blue-900">
-              Pembayaran booking sudah confirmed. Alokasi kartu VIS masih menunggu verifikasi dana resmi atau ketersediaan kartu.
-              Pengunjung tetap dapat menunjukkan nomor booking ini saat tiba.
+              Pembayaran sudah dikonfirmasi. Jika hak akses belum terbentuk, gunakan nomor booking ini untuk penyelesaian tanpa pembayaran kedua. Kartu VIS hanya diberikan bila booking memang menggunakan kartu pengunjung.
             </CardContent>
           </Card>
         )}

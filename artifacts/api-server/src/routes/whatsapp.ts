@@ -1537,6 +1537,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
     // An access becomes scan-ready only after an authenticated command's durable read-back.
     let gymAccessStatus: "not_active" | "pending" | "active" | "expired" | "needs_resolution" = "not_active";
     let gymAccessExpiresAt: string | null = null;
+    let gymAccessProblem: "missing_grant" | "booking_day_closed" | null = null;
     if (booking.source === "gym_public_guest") {
       try {
         const accessRows = await db.execute(sql`
@@ -1554,6 +1555,29 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
           WHERE a.booking_id = ${booking.id}
           ORDER BY a.created_at DESC, a.access_id DESC LIMIT 1
         `);
+        if (accessRows.rows.length === 0 &&
+            ["confirmed","completed"].includes(booking.status) &&
+            payment?.status === "confirmed" &&
+            booking.bookingDate) {
+          // A confirmed payment without a persisted X904 entitlement is a
+          // broken transaction link, NOT a normal pending activation. Give
+          // VIS/PIN recovery a short grace period, then surface the failure.
+          // This status endpoint is read-only: never create a grant, command
+          // or second payment in an unauthenticated request.
+          const confirmedAt = payment.confirmedAt ? new Date(payment.confirmedAt).getTime() : NaN;
+          const oldEnough = !Number.isFinite(confirmedAt) ||
+            Date.now() - confirmedAt >= 2 * 60_000;
+          if (oldEnough) {
+            gymAccessStatus = "needs_resolution";
+            gymAccessProblem = "missing_grant";
+            console.error("[gym-x904] PAID_NO_GRANT", JSON.stringify({
+              bookingId: booking.id, orderNumber: booking.orderNumber,
+              bookingDate: booking.bookingDate, source: booking.source,
+            }));
+          } else {
+            gymAccessStatus = "pending";
+          }
+        }
         if (accessRows.rows.length === 1) {
           const access = accessRows.rows[0] as any;
           const expiresAt = access.expires_at ? new Date(String(access.expires_at)) : null;
@@ -1569,6 +1593,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
             paymentStatus: payment?.status, activatedAt: access.activated_at,
           })) {
             gymAccessStatus = "needs_resolution";
+            gymAccessProblem = "booking_day_closed";
           } else if (access.access_state === "expired" || (expiresAt && !accessNotExpired)) {
             gymAccessStatus = "expired";
           } else if (paymentVerified && access.verification_state === "verified" &&
@@ -1607,6 +1632,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       visitorCard,
       gymAccessStatus: booking.source === "gym_public_guest" ? gymAccessStatus : null,
       gymAccessExpiresAt: booking.source === "gym_public_guest" ? gymAccessExpiresAt : null,
+      gymAccessProblem: booking.source === "gym_public_guest" ? gymAccessProblem : null,
       // Guest notes historically contained PIN requests. Never expose them
       // through the unauthenticated order-status API, even for old bookings.
       notes: booking.source === "gym_public_guest" ? "Identitas X904 ditinjau petugas." : booking.notes,
