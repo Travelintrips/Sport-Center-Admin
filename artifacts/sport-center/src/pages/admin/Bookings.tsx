@@ -6275,25 +6275,55 @@ export default function AdminBookings() {
                                 title={`Invoice Grup ${b.groupRef}`}
                                 className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-700 border border-violet-400 bg-violet-50 hover:bg-violet-100 dark:border-violet-600 dark:bg-violet-900/30 dark:hover:bg-violet-900/50 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap"
                                 onClick={() => {
+                                  // Keep popup creation in the click event (popup blockers). Do not
+                                  // document.write() a fetched document into about:blank: browsers
+                                  // can leave the tab white when its document changes asynchronously.
                                   const win = window.open("about:blank", "_blank");
-                                  if (!win) return;
-                                  fetch(`/api/invoices/group/${b.groupRef}/html`, {
-                                    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
-                                  })
-                                    .then(r => {
-                                      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                                      return r.text();
-                                    })
-                                    .then(html => {
-                                      win.document.open();
-                                      win.document.write(html);
-                                      win.document.close();
-                                      try { win.opener = null; } catch { /* abaikan */ }
-                                    })
-                                    .catch(() => {
-                                      win.document.write("<h2 style='font-family:sans-serif;padding:40px;color:#dc2626'>Gagal memuat invoice. Silakan coba lagi.</h2>");
-                                      win.document.close();
-                                    });
+                                  if (!win) {
+                                    toast({ title: "Invoice grup tidak terbuka", description: "Izinkan pop-up untuk situs Sport Center, lalu coba lagi.", variant: "destructive" });
+                                    return;
+                                  }
+                                  win.document.title = "Memuat invoice grup";
+                                  win.document.body.style.cssText = "font:16px system-ui,sans-serif;padding:36px;color:#334155";
+                                  win.document.body.textContent = "Sedang memuat invoice grup...";
+                                  void (async () => {
+                                    try {
+                                      const token = getToken();
+                                      if (!token) throw new Error("Sesi Admin tidak tersedia. Silakan login ulang.");
+                                      const response = await fetch(`/api/invoices/group/${encodeURIComponent(b.groupRef)}/html`, {
+                                        headers: { Authorization: `Bearer ${token}` },
+                                        cache: "no-store",
+                                      });
+                                      if (!response.ok) {
+                                        throw new Error(response.status === 401 || response.status === 403
+                                          ? "Sesi Admin tidak memiliki akses invoice. Silakan login ulang."
+                                          : response.status === 404
+                                            ? "Data invoice grup tidak ditemukan."
+                                            : `Server invoice gagal (HTTP ${response.status}).`);
+                                      }
+                                      const html = await response.text();
+                                      if (!/<html[\\s>]/i.test(html) || !html.includes("Invoice")) {
+                                        throw new Error("Respons invoice bukan dokumen HTML yang valid.");
+                                      }
+                                      const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+                                      if (win.closed) {
+                                        URL.revokeObjectURL(url);
+                                        return;
+                                      }
+                                      try { win.opener = null; } catch { /* tab can be closed independently */ }
+                                      win.location.replace(url);
+                                    } catch (error) {
+                                      const message = error instanceof Error ? error.message : "Gagal memuat invoice grup.";
+                                      if (!win.closed) {
+                                        try {
+                                          win.document.title = "Invoice grup gagal dibuka";
+                                          win.document.body.style.cssText = "font:16px system-ui,sans-serif;padding:36px;color:#b91c1c";
+                                          win.document.body.textContent = message;
+                                        } catch { /* popup may have been navigated away */ }
+                                      }
+                                      toast({ title: "Invoice grup gagal dibuka", description: message, variant: "destructive" });
+                                    }
+                                  })();
                                 }}
                               >
                                 <FileText size={12} />
