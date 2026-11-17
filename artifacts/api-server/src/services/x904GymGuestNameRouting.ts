@@ -1,7 +1,8 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { x904CurrentGymGuestInSnapshot } from "./x904GymGuestSnapshotPolicy";
 
-export type GymGuestIdentityRoute = "registered" | "expired_member" | "recognized_review" | "visitor_card" | "staff_review";
+export type GymGuestIdentityRoute = "registered" | "expired_member" | "recognized_review" | "visitor_card" | "staff_review" | "unavailable";
 export type GymGuestIdentityMatch = {
   route: GymGuestIdentityRoute;
   userPin: string | null;
@@ -94,6 +95,16 @@ export async function resolveGymGuestName(rawName: string, submittedPin = ""): P
       AND upper(regexp_replace(trim(display_name), '[[:space:]]+', ' ', 'g'))=${name}
       AND verification_state='verified' AND revoked_at IS NULL LIMIT 1`);
   if (approved.rows.length !== 1) return recognized();
+  // A persisted LAN inventory row is not proof the user is still on the
+  // physical X904. Do not accept a paid PIN booking from an obsolete inventory:
+  // the worker would correctly hold it, after the visitor has already paid.
+  // Only a recent authenticated complete snapshot may advertise a PIN as ready.
+  const latest = await db.execute(sql`SELECT observed_at,user_count,users
+    FROM sport_center.gym_x904_access_snapshots
+    WHERE device_serial=${DEVICE} ORDER BY snapshot_id DESC LIMIT 1`);
+  if (!x904CurrentGymGuestInSnapshot(latest.rows[0],pin,name)) {
+    return {route:"unavailable",userPin:null,deviceUid:null,displayName:null};
+  }
   return { route: "registered", userPin: pin, deviceUid: uid, displayName: visibleName,
     inventoryPinMatch: submittedPin ? submittedPin === pin : null };
 }
