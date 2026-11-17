@@ -1550,8 +1550,11 @@ function BookingDetailDrawer({
       return payload;
     },
   });
-  const dailyGymBooking = !membershipPaymentBooking && !membershipUsageBooking && booking.membershipId == null &&
-    (booking.source === "gym_public_guest" || /gym|fitness/i.test(String(booking.facilityName ?? "")));
+  // Match the paid-access endpoint scope; web bookings retain their existing
+  // monitoring labels and ACK checks below.
+  const dailyGymBooking = Number(booking.facilityId) === 6 &&
+    ["admin", "gym_public_guest"].includes(String(booking.source)) &&
+    !membershipPaymentBooking && !membershipUsageBooking && booking.membershipId == null;
   const { data: gymPaidAccess, isError: gymPaidAccessReadFailed } = useQuery({
     queryKey: ["admin-gym-paid-access", Number(booking.id)],
     enabled: dailyGymBooking && Boolean(booking.id),
@@ -1572,7 +1575,7 @@ function BookingDetailDrawer({
     queryKey: ["admin-gym-guest-detail", booking.orderNumber],
     enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
-    refetchInterval: gymPaidAccess?.gymAccess?.action === "verify_pin_identity" ? 5000 : false,
+    refetchInterval: dailyGymBooking && gymPaidAccess?.gymAccess?.action === "verify_pin_identity" ? 5000 : false,
     refetchOnMount: "always",
     queryFn: async () => {
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/detail`, {
@@ -1670,7 +1673,7 @@ function BookingDetailDrawer({
 
   // The server evaluates current identity, grant and acknowledgement together.
   // A cached active grant alone must never clear an identity review outcome.
-  const displayedGymAccess: GymAccessOutcome | null = gymPaidAccessReadFailed
+  const displayedGymAccess: GymAccessOutcome | null = !dailyGymBooking ? null : gymPaidAccessReadFailed
     ? { state: "review_required", code: "status_unavailable", action: "review",
         message: "Status akses Gym terbaru belum dapat diperiksa. Tunggu pemeriksaan berikutnya sebelum menyatakan akses siap digunakan." }
     : gymPaidAccess
@@ -1688,7 +1691,7 @@ function BookingDetailDrawer({
   }).format(new Date()));
   // Reuse the existing staff-only recovery. A fresh exact-name match only
   // makes the verification form available; it never authorizes a PIN.
-  const canVerifyGymPin = canApproveGymPin && booking.source === "gym_public_guest" && !gymVisReservation &&
+  const canVerifyGymPin = dailyGymBooking && canApproveGymPin && booking.source === "gym_public_guest" && !gymVisReservation &&
     Boolean(confirmedGymPayment) && Boolean(gymPinReviewIdentity) &&
     String(booking.bookingDate).slice(0, 10) === currentWibDate && currentWibHour >= 6 && currentWibHour < 23 &&
     displayedGymAccess?.action === "verify_pin_identity";
@@ -2267,7 +2270,7 @@ function BookingDetailDrawer({
                   {gymPinGrant && (
                     <div className="rounded border border-sky-200 bg-white/70 p-2">
                       <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
-                      <div>Verifikasi: {gymPinGrant.verificationState} · Akses: {gymAccessStatusLabel}</div>
+                      <div>Verifikasi: {gymPinGrant.verificationState} · Akses: {dailyGymBooking ? gymAccessStatusLabel : gymPinGrant.accessState}</div>
                       <div>Aktivasi harus dibuktikan dengan ACK/read-back X904.</div>
                     </div>
                   )}
@@ -2284,7 +2287,8 @@ function BookingDetailDrawer({
                   <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
                   <div className="mt-1 text-2xl font-black">{gymVisReservation.cardCode}</div>
                   <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
-                  <div className="mt-2 text-xs font-semibold">{gymAccessReady
+                  <div className="mt-2 text-xs font-semibold">{(dailyGymBooking ? gymAccessReady :
+                    gymVisAccess?.accessState === "active" && gymVisAccess?.latestCommand?.readBackConfirmed)
                     ? "Akses X904 aktif dan ACK telah diverifikasi. Serahkan kartu yang dialokasikan; catat serah-terima fisik secara terpisah."
                     : "Alokasi otomatis bukan bukti pintu aktif. Tunggu ACK dan read-back X904."}</div>
                   {gymVisReservation.state === "reserved" && (
@@ -2310,8 +2314,8 @@ function BookingDetailDrawer({
                     (gymVisReservation.state === "reserved" && (gymVisAccess?.accessState === "active" || gymVisAccess?.returnReady))) && (
                     <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">
                       <div className="font-semibold">
-                        {gymAccessReady ? "Akses aktif — read-back X904 sudah diterima." :
-                          gymPaidAccessReadFailed ? "Status akses terbaru belum tersedia." :
+                        {(dailyGymBooking ? gymAccessReady : gymVisAccess?.accessState === "active") ? "Akses aktif — read-back X904 sudah diterima." :
+                          dailyGymBooking && gymPaidAccessReadFailed ? "Status akses terbaru belum tersedia." :
                           gymVisAccess?.returnReady ? "Akses sudah disuspend — kartu siap dikembalikan ke pool." :
                           gymVisReservation.state === "reserved" ? "VIS sudah dialokasikan; akses dan serah-terima fisik dicatat secara terpisah." :
                           "Kartu sudah diserahkan. Menunggu worker / suspend / ACK dan read-back X904."}
@@ -2319,11 +2323,13 @@ function BookingDetailDrawer({
                       {gymVisAccess && (
                         <div className="grid grid-cols-2 gap-1 text-[11px]">
                           <span>Access ID</span><strong>{gymVisAccess.accessId}</strong>
-                          <span>Status akses</span><strong>{gymAccessStatusLabel}</strong>
+                          <span>Status akses</span><strong>{dailyGymBooking ? gymAccessStatusLabel : gymVisAccess.accessState}</strong>
                           <span>Verifikasi</span><strong>{gymVisAccess.verificationState}</strong>
                           <span>Expiry</span><strong>{gymVisAccess.expiresAt ? new Date(gymVisAccess.expiresAt).toLocaleString("id-ID") : "-"}</strong>
                           <span>Command</span><strong>{gymVisAccess.latestCommand ? `${gymVisAccess.latestCommand.type} / ${gymVisAccess.latestCommand.state}` : "-"}</strong>
-                          <span>ACK / read-back terakhir</span><strong>{gymPaidAccessReadFailed ? "Belum tersedia" : gymVisAccess.latestCommand?.readBackConfirmed ? "Tercatat" : "Menunggu"}</strong>
+                          <span>{dailyGymBooking ? "ACK / read-back terakhir" : "ACK / read-back"}</span><strong>{dailyGymBooking
+                            ? gymPaidAccessReadFailed ? "Belum tersedia" : gymVisAccess.latestCommand?.readBackConfirmed ? "Tercatat" : "Menunggu"
+                            : gymVisAccess.latestCommand?.readBackConfirmed ? "PASS" : "Menunggu"}</strong>
                           <span>Group mesin</span><strong>{gymVisAccess.latestSnapshot?.group ?? "-"}</strong>
                         </div>
                       )}
@@ -2354,7 +2360,7 @@ function BookingDetailDrawer({
   {gymPinGrant && (
     <div className="rounded border border-sky-200 bg-sky-50 p-2 text-sky-900">
       <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
-      <div>Pembayaran: <strong>{gymPinGrant.paymentStatus ?? "-"}</strong> · Verifikasi: <strong>{gymPinGrant.verificationState}</strong> · Akses: <strong>{gymAccessStatusLabel}</strong></div>
+      <div>Pembayaran: <strong>{gymPinGrant.paymentStatus ?? "-"}</strong> · Verifikasi: <strong>{gymPinGrant.verificationState}</strong> · Akses: <strong>{dailyGymBooking ? gymAccessStatusLabel : gymPinGrant.accessState}</strong></div>
       <div className="mt-1">Pengesahan PIN memerlukan pemeriksaan identitas fisik + dana resmi dan tetap menunggu worker serta ACK/read-back X904.</div>
     </div>
   )}
