@@ -66,3 +66,16 @@ export function isX904UsageWithinBookingSession(
   return [start,end,event].every(t=>Number.isFinite(t.getTime())) &&
     event.getTime() >= start.getTime() && event.getTime() < end.getTime();
 }
+
+/** Only for proven X904 paid Gym scan reconciliation, never for courts.
+ * Gym is a shared day-admission facility; the displayed hour is not a gate. */
+export function isX904GymDayUsage(bookingDate: string, deviceTime: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) ||
+      !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(deviceTime) ||
+      !deviceTime.startsWith(bookingDate+" ")) return false;
+  const time = deviceTime.slice(11);
+  const instant = new Date(deviceTime.replace(" ","T")+"+07:00");
+  return Number.isFinite(instant.getTime()) &&
+    new Date(instant.getTime()+7*3600000).toISOString().slice(0,19)===deviceTime.replace(" ","T") &&
+    time >= "06:00:00" && time < "23:00:00";
+}

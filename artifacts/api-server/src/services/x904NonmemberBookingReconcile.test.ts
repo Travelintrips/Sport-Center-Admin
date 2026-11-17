@@ -56,6 +56,26 @@ describe("nonmember X904 scan reconciliation keeps existing booking lifecycle", 
     expect(checkInMock.mock.calls[0][0]).toBe(1809);
     expect(checkInMock.mock.calls[0][2]).toEqual(new Date("2026-11-11T21:30:00+07:00"));
   });
+  test("new paid Gym admission after displayed slot uses verified day-scan path",async()=>{
+    process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED="true";
+    const late={...row,booking_id:1901,booking_date:"2026-11-17",
+      start_time:"17:27",end_time:"18:27",
+      device_time:"2026-11-17 19:10:00",event_id:"verified-x904-new-day"};
+    checkInMock.mockResolvedValue({ok:true,bookingId:1901,alreadyCompleted:false});
+    const store={execute:jest.fn(async()=>({rows:[late]}))};
+    expect(await reconcileX904MissedNonmemberBookingCheckins(store as any,new Date("2026-11-17T12:11:00Z"))).toBe(1);
+    expect(checkInMock).toHaveBeenCalledWith(1901,expect.objectContaining({userRole:"system"}),
+      new Date("2026-11-17T12:10:00Z"),{x904GymScanEventId:"verified-x904-new-day"});
+  });
+  test("new Gym scan outside 06:00-23:00 is not check-in",async()=>{
+    const store={execute:jest.fn(async()=>({rows:[
+      {...row,booking_date:"2026-11-17",device_time:"2026-11-17 23:01:00"},
+      {...row,booking_date:"2026-11-17",device_time:"2026-11-17 05:59:59"},
+      {...row,booking_date:"2026-11-17",device_time:"2026-11-18 19:00:00"},
+    ]}))};
+    expect(await reconcileX904MissedNonmemberBookingCheckins(store as any)).toBe(0);
+    expect(checkInMock).not.toHaveBeenCalled();
+  });
   test("canonical check-in rejection cannot count as successful use", async () => {
     process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = "true";
     checkInMock.mockResolvedValue({ok:false,reason:"Booking sudah check-in"});

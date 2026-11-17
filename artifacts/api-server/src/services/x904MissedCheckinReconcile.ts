@@ -2,7 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { checkInBooking } from "../lib/bookingLifecycle";
-import { isX904UsageWithinBookingSession } from "../lib/bookingLifecycleRules";
+import { isX904UsageWithinBookingSession, isX904GymDayUsage } from "../lib/bookingLifecycleRules";
 
 /**
  * Repair late LAN ingestion or a membership renewal that replaced the current
@@ -107,7 +107,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND (
         (${signedEnabled}::boolean AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
         OR
-        (${lanGuestEnabled}::boolean AND b.source='gym_public_guest' AND b.booking_date>='2026-11-13'
+        (${lanGuestEnabled}::boolean AND ((b.source='gym_public_guest' AND b.booking_date>='2026-11-13') OR (b.source='admin' AND b.booking_date>='2026-11-17'))
           AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
           -- A complete snapshot remains the durable scan evidence. When it
           -- is unchanged, a fresh authenticated VMSC heartbeat can establish
@@ -137,7 +137,7 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
             JOIN sport_center.sport_bookings ob ON ob.id=other.booking_id
             WHERE other.booking_id<>a.booking_id
               AND other.device_serial=a.device_serial AND other.user_pin=a.user_pin
-              AND ob.status='confirmed' AND ob.booking_date=b.booking_date
+              AND ob.status IN ('confirmed','completed') AND ob.booking_date=b.booking_date
               AND ob.start_time<b.end_time AND ob.end_time>b.start_time
           )
         )
@@ -160,14 +160,22 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       AND a.confirmed_at IS NOT NULL
       AND a.access_state IN ('active','expired')
       AND a.activated_at IS NOT NULL AND a.expires_at IS NOT NULL
-      AND b.status='confirmed' AND b.checked_in_at IS NULL
+      AND b.facility_id=6 AND b.status IN ('confirmed','completed') AND b.checked_in_at IS NULL
+      AND (b.status='confirmed' OR b.booking_date>='2026-11-17')
       AND b.booking_date IN ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date::text,
         ((${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta')::date - 1)::text)
       AND l.device_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
-      AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
-      AND l.device_time < (CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
-        THEN to_char(b.booking_date::date + 1,'YYYY-MM-DD') ELSE b.booking_date END
-        || ' ' || left(b.end_time,5) || ':00')
+      AND (
+        (b.booking_date>='2026-11-17'
+          AND l.device_time >= b.booking_date || ' 06:00:00'
+          AND l.device_time < b.booking_date || ' 23:00:00')
+        OR
+        (b.booking_date<'2026-11-17'
+          AND l.device_time >= b.booking_date || ' ' || left(b.start_time,5) || ':00'
+          AND l.device_time < (CASE WHEN left(b.end_time,5) <= left(b.start_time,5)
+            THEN to_char(b.booking_date::date + 1,'YYYY-MM-DD') ELSE b.booking_date END
+            || ' ' || left(b.end_time,5) || ':00'))
+      )
       AND l.device_time >= to_char(a.activated_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
       AND l.device_time < to_char(a.expires_at AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
       AND l.device_time <= to_char(${evaluationTime}::timestamptz AT TIME ZONE 'Asia/Jakarta','YYYY-MM-DD HH24:MI:SS')
@@ -175,16 +183,19 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
   let checkedIn = 0;
   for (const row of rows.rows as any[]) {
     const eventTime = String(row.device_time);
-    if (!isX904UsageWithinBookingSession(
-      String(row.booking_date), String(row.start_time),
-      String(row.end_time), eventTime)) continue;
+    const dayBased = String(row.booking_date)>="2026-11-17";
+    if (dayBased
+      ? !isX904GymDayUsage(String(row.booking_date),eventTime)
+      : !isX904UsageWithinBookingSession(
+          String(row.booking_date),String(row.start_time),
+          String(row.end_time),eventTime)) continue;
     const observed = new Date(eventTime.replace(" ", "T") + "+07:00");
     if (!Number.isFinite(observed.getTime())) continue;
     // checkInBooking validates current status, session, pending reschedule and
     // records an audit entry; the normal scheduler later calls completeBooking.
     const result = await checkInBooking(Number(row.booking_id), {
       userName: `X904 ${row.scan_provenance==="signed_vmsc" ? "signed scan" : "LAN observed scan"} ${String(row.event_id)}`, userRole: "system",
-    }, observed);
+    }, observed, dayBased ? {x904GymScanEventId:String(row.event_id)} : {});
     if (result.ok) checkedIn++;
     else logger.info({ bookingId: row.booking_id, reason: result.reason },
       "[x904] nonmember booking check-in held");
