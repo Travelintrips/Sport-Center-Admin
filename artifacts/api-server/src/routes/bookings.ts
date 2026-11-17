@@ -2,6 +2,7 @@ import { Router } from "express";
 import { resolveX904NonmemberCard } from "../services/x904NonmemberAccessPolicy";
 import { autoReserveVisAfterFundsVerified, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { normalizeX904VisitorName } from "../services/x904VisitorName";
+import { getConfirmedGymAccessOutcome } from "../services/x904PaidGymAccessOutcome";
 import { db, auditLogsTable, bookingsTable, facilitiesTable, blockedSchedulesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
@@ -1611,9 +1612,47 @@ function getRequestRole(req: { headers: { authorization?: string } }): string | 
   return verifyToken(authHeader.slice(7))?.role ?? null;
 }
 
-// Staff-only handoff for a NO-LOGIN ordinary PIN booking. Never accepts a
-// client-selected PIN, UID, or payment assertion. This is a deliberate
-// in-person identity attestation, not automatic approval from a name match.
+// Read-only status for an open/reopened payment drawer. Refreshing this view
+// must never replay financial confirmation or allocate a card.
+router.get("/bookings/:bookingId/x904-paid-access", authMiddleware, async (req, res) => {
+  try {
+    const rawToken = String(req.headers.authorization ?? "");
+    const principal = rawToken.startsWith("Bearer ") ? verifyToken(rawToken.slice(7)) : null;
+    if (!principal?.userId || (!isOperationalBookingRole(principal.role) && principal.role !== "finance")) {
+      res.status(403).json({ error: "Hanya petugas booking atau keuangan yang boleh memeriksa akses pembayaran." }); return;
+    }
+    const actor = await db.execute(sql`SELECT role,account_status FROM sport_center.users WHERE id=${principal.userId}`);
+    if (actor.rows.length !== 1 || actor.rows[0].account_status !== "active" ||
+        actor.rows[0].role !== principal.role) {
+      res.status(401).json({ error: "Sesi petugas sudah berubah." }); return;
+    }
+    const bookingId = Number(req.params.bookingId);
+    if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
+      res.status(400).json({ error: "Booking tidak valid." }); return;
+    }
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan." }); return; }
+    if (Number(booking.facilityId) !== 6 || !["admin", "gym_public_guest"].includes(String(booking.source)) ||
+        booking.membershipId != null || booking.membershipPaymentId != null) {
+      res.json({ paymentConfirmed: false, gymAccess: null }); return;
+    }
+    const payments = await db.select().from(paymentsTable).where(and(
+      eq(paymentsTable.bookingId, bookingId), eq(paymentsTable.status, "confirmed"),
+      sql`COALESCE(${paymentsTable.paymentType}::text,'') <> 'dp'`,
+      sql`${paymentsTable.sourceMembershipPaymentId} IS NULL`,
+    )).orderBy(desc(paymentsTable.id)).limit(1);
+    if (!payments.length) { res.json({ paymentConfirmed: false, gymAccess: null }); return; }
+    // The outcome reader verifies the grant's canonical receipt separately;
+    // a later balance receipt must not replace an existing payment/grant link.
+    res.json({ paymentConfirmed: true, gymAccess: await getConfirmedGymAccessOutcome(booking, payments[0]) });
+  } catch {
+    res.status(503).json({ error: "Status akses belum dapat dibaca. Muat ulang pemeriksaan." });
+  }
+});
+
+// Staff-only handoff for a NO-LOGIN ordinary PIN booking. Expected identity
+// fields bind the review; they never select or authorize a different identity.
+// Access still requires the existing in-person and official-funds attestations.
 router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async (req, res) => {
   try {
     const rawToken = String(req.headers.authorization ?? "");
@@ -1627,6 +1666,24 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
         !/^[A-Z0-9][A-Z0-9 ._/-]{5,79}$/.test(officialBankReference)) {
       res.status(400).json({ error: "Petugas wajib memeriksa identitas fisik, dana resmi, dan mencatat referensi transaksi bank (minimal 6 karakter)." }); return;
     }
+    // Bind an explicit staff review to the identity actually displayed. A
+    // refreshed inventory must not substitute a different PIN/UID/name between
+    // the checked attestation and this request.
+    const hasExpectedIdentity = ["expectedUserPin", "expectedDeviceUid", "expectedDisplayName"]
+      .some(key => req.body?.[key] !== undefined);
+    const expectedPin = String(req.body?.expectedUserPin ?? "");
+    const expectedUid = Number(req.body?.expectedDeviceUid);
+    const normalizeReviewedName = (value: unknown) =>
+      String(value ?? "").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
+    const expectedName = normalizeReviewedName(req.body?.expectedDisplayName);
+    if (hasExpectedIdentity && (!/^[0-9]{1,8}$/.test(expectedPin) ||
+        !Number.isSafeInteger(expectedUid) || expectedUid <= 0 ||
+        !expectedName || expectedName.length > 100)) {
+      res.status(400).json({ error: "Identitas yang diperiksa harus memuat PIN, UID, dan nama lengkap." }); return;
+    }
+    const matchesReviewedIdentity = (pin: unknown, uid: unknown, name: unknown) =>
+      !hasExpectedIdentity || (String(pin) === expectedPin && Number(uid) === expectedUid &&
+        normalizeReviewedName(name) === expectedName);
     const bookingId = Number(req.params.bookingId);
     if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
       res.status(400).json({ error: "Booking tidak valid." }); return;
@@ -1698,6 +1755,8 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
           LIMIT 3`);
         if (candidate.rows.length!==1) return 'pin_identity_review';
         const c=candidate.rows[0] as any;
+        if (!matchesReviewedIdentity(c.user_pin, c.device_uid, c.display_name))
+          return "identity_changed_since_review";
         const pin=String(c.user_pin);
         const uid=Number(c.device_uid);
         if (!/^[0-9]{1,8}$/.test(pin) || !Number.isSafeInteger(uid) || uid<=0 ||
@@ -1757,6 +1816,8 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
         FOR UPDATE OF a,b`);
       if (found.rows.length !== 1) return "not_found";
       const grant = found.rows[0] as any;
+      if (!matchesReviewedIdentity(grant.user_pin, grant.device_uid, grant.verified_name))
+        return "identity_changed_since_review";
       if (grant.source !== "gym_public_guest" ||
           String(grant.booking_date).slice(0, 10) !== currentDate ||
           grant.payment_status !== "confirmed" || !grant.payment_id ||
@@ -1765,6 +1826,20 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
           !Number.isFinite(Number(grant.payable_total)) || Number(grant.payable_total) <= 0 ||
           !Number.isFinite(Number(grant.amount)) || Number(grant.amount) < Number(grant.payable_total)) return "not_ready";
       if (grant.verification_state === "verified" && ["pending","active"].includes(String(grant.access_state))) {
+        if (hasExpectedIdentity) {
+          const stillCurrent = await tx.execute(sql`SELECT 1
+            FROM sport_center.gym_x904_lan_users u
+            JOIN sport_center.x904_verified_nonmember_identities r
+              ON r.device_serial=u.device_serial AND r.user_pin=u.user_pin
+                AND r.device_uid=u.device_uid
+            WHERE u.device_serial='TDBD234200545' AND u.user_pin=${expectedPin}
+              AND u.device_uid=${expectedUid} AND u.device_role=0
+              AND r.verification_state='verified' AND r.revoked_at IS NULL
+              AND upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=${expectedName}
+              AND upper(regexp_replace(trim(r.display_name),'[[:space:]]+',' ','g'))=${expectedName}
+            LIMIT 2`);
+          if (stillCurrent.rows.length !== 1) return "identity_changed_since_review";
+        }
         const previous = await tx.execute(sql`SELECT 1 FROM sport_center.audit_logs
           WHERE action='x904_guest_pin_staff_attestation' AND entity='booking' AND entity_id=${bookingId}
             AND "after"->>'accessId'=${String(grant.access_id)}
@@ -1823,6 +1898,7 @@ router.post("/bookings/:bookingId/x904-guest-pin-approve", authMiddleware, async
     if (outcome !== "approved" && outcome !== "already_approved") {
       res.status(outcome === "actor_changed" ? 401 : outcome === "not_found" ? 404 : 409).json({
         error: outcome === "not_found" ? "Booking PIN tanpa login tidak ditemukan." :
+          outcome === "identity_changed_since_review" ? "Identitas berubah setelah diperiksa. Muat ulang data dan verifikasi kembali sebelum mengesahkan akses." :
           "Verifikasi tidak dapat disahkan: identitas, pembayaran, tanggal, atau status akses tidak memenuhi syarat.",
         code: outcome,
       });

@@ -135,6 +135,7 @@ export default function AdminWaBookings() {
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
   const [pinOwnershipChecked, setPinOwnershipChecked] = useState(false);
+  const [pinAttestedIdentity, setPinAttestedIdentity] = useState<string | null>(null);
   const [pinFundsChecked, setPinFundsChecked] = useState(false);
   const [pinBankReference, setPinBankReference] = useState("");
   const [pinResolutionChoice, setPinResolutionChoice] = useState("");
@@ -174,6 +175,20 @@ export default function AdminWaBookings() {
     enabled: !!selectedOrder,
   });
 
+  const pinReviewIdentity = detail?.x904PinGrant
+    ? { userPin: detail.x904PinGrant.userPin, deviceUid: detail.x904PinGrant.deviceUid, displayName: detail.x904PinGrant.verifiedName }
+    : detail?.x904IdentityMatch?.route === "registered" ? detail.x904IdentityMatch : null;
+  const pinReviewIdentityKey = pinReviewIdentity ? JSON.stringify([
+    selectedOrder, Number(detail?.booking?.id), pinReviewIdentity.userPin, pinReviewIdentity.deviceUid, pinReviewIdentity.displayName,
+  ]) : null;
+  const pinOwnershipAttested = pinOwnershipChecked && pinAttestedIdentity === pinReviewIdentityKey;
+  // Attestations apply only to the PIN, UID and name shown to this operator.
+  useEffect(() => {
+    setPinOwnershipChecked(false);
+    setPinFundsChecked(false);
+    setPinBankReference("");
+  }, [selectedOrder, pinReviewIdentity?.userPin, pinReviewIdentity?.deviceUid, pinReviewIdentity?.displayName]);
+
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["wa-bookings"] });
     if (selectedOrder) qc.invalidateQueries({ queryKey: ["wa-booking-detail", selectedOrder] });
@@ -205,12 +220,20 @@ export default function AdminWaBookings() {
   });
 
   const approveGuestPinMutation = useMutation({
-    mutationFn: (bookingId: number) =>
-      mutate(`/bookings/${bookingId}/x904-guest-pin-approve`, {
-        identityChecked: true,
-        officialFundsChecked: true,
+    mutationFn: (bookingId: number) => {
+      if (!pinReviewIdentity || !pinOwnershipAttested || !pinFundsChecked ||
+          !/^[A-Z0-9][A-Z0-9 ._/-]{5,79}$/.test(pinBankReference.trim().toUpperCase())) {
+        throw new Error("Periksa identitas pengunjung, dana resmi, dan referensi pembayaran sebelum mengesahkan PIN.");
+      }
+      return mutate(`/bookings/${bookingId}/x904-guest-pin-approve`, {
+        identityChecked: pinOwnershipChecked,
+        officialFundsChecked: pinFundsChecked,
         officialBankReference: pinBankReference.trim().toUpperCase(),
-      }),
+        expectedUserPin: String(pinReviewIdentity.userPin),
+        expectedDeviceUid: Number(pinReviewIdentity.deviceUid),
+        expectedDisplayName: String(pinReviewIdentity.displayName),
+      });
+    },
     onSuccess: () => {
       toast({ title: "PIN nonmember disahkan", description: "Aktivasi menunggu worker dan ACK X904. Pastikan dana resmi telah dikonfirmasi." });
       setPinOwnershipChecked(false);
@@ -218,7 +241,12 @@ export default function AdminWaBookings() {
       setPinBankReference("");
       invalidate();
     },
-    onError: (e: any) => toast({ title: "Verifikasi PIN ditolak", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      setPinOwnershipChecked(false);
+      setPinFundsChecked(false);
+      invalidate();
+      toast({ title: "Verifikasi PIN ditolak", description: e.message, variant: "destructive" });
+    },
   });
 
   // Reuses the established audited notes-only path. No payment, date, or X904 mutations.
@@ -556,7 +584,7 @@ export default function AdminWaBookings() {
                     <p>Identitas mesin: <strong>{detail.x904IdentityMatch.displayName}</strong> · PIN {detail.x904IdentityMatch.userPin} · UID {detail.x904IdentityMatch.deviceUid}</p>
                     <p className="text-xs">Hanya pada tanggal booking pukul 06:00–23:00 WIB. Petugas harus memeriksa pemilik PIN secara langsung dan memastikan penerimaan dana resmi.</p>
                     <label className="flex items-start gap-2 text-xs">
-                      <input type="checkbox" checked={pinOwnershipChecked} onChange={e => setPinOwnershipChecked(e.target.checked)} />
+                      <input type="checkbox" checked={pinOwnershipAttested} onChange={e => { setPinOwnershipChecked(e.target.checked); setPinAttestedIdentity(pinReviewIdentityKey); }} />
                       Saya memeriksa identitas pengunjung dan cocok dengan mesin X904.
                     </label>
                     <Input placeholder="Referensi transaksi bank/QRIS resmi" aria-label="Referensi pembayaran untuk pemulihan PIN"
@@ -565,7 +593,7 @@ export default function AdminWaBookings() {
                       <input type="checkbox" checked={pinFundsChecked} onChange={e => setPinFundsChecked(e.target.checked)} />
                       Saya memastikan pembayaran resmi sudah diterima untuk booking ini.
                     </label>
-                    <Button type="button" className="w-full" disabled={!pinOwnershipChecked || !pinFundsChecked ||
+                    <Button type="button" className="w-full" disabled={!pinOwnershipAttested || !pinFundsChecked ||
                       pinBankReference.trim().length < 6 || approveGuestPinMutation.isPending}
                       onClick={() => approveGuestPinMutation.mutate(Number(detail.booking.id))}>
                       {approveGuestPinMutation.isPending ? "Memeriksa..." : "Verifikasi dan Pulihkan Grant Booking"}
@@ -616,8 +644,8 @@ export default function AdminWaBookings() {
                       <>
                         <p className="text-xs text-amber-900">Pemeriksaan nama saja tidak membuktikan pemilik PIN. Periksa identitas fisik pengunjung dan pastikan pembayaran benar-benar confirmed di sistem; bukti upload/OCR saja tidak cukup.</p>
                         <label className="flex items-start gap-2 text-xs">
-                          <input type="checkbox" checked={pinOwnershipChecked}
-                            onChange={e => setPinOwnershipChecked(e.target.checked)} />
+                          <input type="checkbox" checked={pinOwnershipAttested}
+                            onChange={e => { setPinOwnershipChecked(e.target.checked); setPinAttestedIdentity(pinReviewIdentityKey); }} />
                           Saya telah memeriksa langsung identitas pengunjung dan cocok dengan PIN, UID, serta nama mesin X904.
                         </label>
                         <Input placeholder="Referensi resmi transaksi bank / QRIS"
@@ -629,7 +657,7 @@ export default function AdminWaBookings() {
                             onChange={e => setPinFundsChecked(e.target.checked)} />
                           Saya sudah memastikan dana resmi diterima dan cocok dengan transaksi ini, bukan hanya screenshot/OCR.
                         </label>
-                        <Button type="button" className="w-full" disabled={!pinOwnershipChecked || !pinFundsChecked ||
+                        <Button type="button" className="w-full" disabled={!pinOwnershipAttested || !pinFundsChecked ||
                           pinBankReference.trim().length < 6 ||
                           detail.x904PinGrant.paymentStatus !== "confirmed" || approveGuestPinMutation.isPending}
                           onClick={() => approveGuestPinMutation.mutate(Number(detail.booking.id))}>

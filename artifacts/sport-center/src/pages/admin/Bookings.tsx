@@ -1371,6 +1371,49 @@ function WaNotifLogsPanel({ bookingId }: { bookingId: number }) {
 
 /* ─── Booking Detail Drawer ─────────────────────────────────────── */
 
+type GymAccessOutcome = {
+  state: "active" | "pending" | "identity_review_required" | "reservation_pending" | "expired" | "review_required";
+  code?: string;
+  message: string;
+  action: "verify_pin_identity" | "wait" | "review" | "none";
+};
+
+function readGymAccessOutcome(payment: any): GymAccessOutcome | null {
+  const access = payment?.gymAccess;
+  if (access && ["active", "pending", "identity_review_required", "reservation_pending", "expired", "review_required"].includes(access.state) &&
+      ["verify_pin_identity", "wait", "review", "none"].includes(access.action) && typeof access.message === "string") {
+    return access as GymAccessOutcome;
+  }
+  // Older responses still report an allocation hold. Keep it visible; a
+  // missing outcome must never turn this hold into an access-success message.
+  if (payment?.visReservation?.status === "needs_review") {
+    return { state: "review_required", code: payment.visReservation.code, action: "review",
+      message: "Pembayaran sudah dikonfirmasi. Akses Gym masih memerlukan pemeriksaan identitas atau alokasi kartu pada booking ini." };
+  }
+  return null;
+}
+
+async function refreshGymPaidAccess(queryClient: ReturnType<typeof useQueryClient>, bookingId: number, gymAccess: GymAccessOutcome) {
+  const queryKey = ["admin-gym-paid-access", bookingId];
+  // A response from before confirmation must not overwrite its newer outcome.
+  await queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData(queryKey, { paymentConfirmed: true, gymAccess });
+  await queryClient.invalidateQueries({ queryKey });
+}
+
+function withGymPaymentOutcome(booking: any, payment: any): any {
+  const payments = booking.payments ?? (booking.payment ? [booking.payment] : []);
+  return {
+    ...booking,
+    status: booking.status === "completed" ? "completed" : "confirmed",
+    payments: payments.some((item: any) => item.id === payment.id)
+      ? payments.map((item: any) => item.id === payment.id ? { ...item, ...payment } : item)
+      : [...payments, payment],
+    payment: booking.payment?.id === payment.id || !booking.payment ? payment : booking.payment,
+    gymAccess: readGymAccessOutcome(payment),
+  };
+}
+
 function BookingDetailDrawer({
   booking,
   groupBookings = [],
@@ -1378,6 +1421,7 @@ function BookingDetailDrawer({
   onUpdateStatus,
   onSaveAdminNotes,
   onConfirmPayment,
+  onGymPaymentConfirmed,
   onRejectPayment,
   onSyncCompanyInvoicePayment,
   onConfirmMembershipPayment,
@@ -1401,6 +1445,7 @@ function BookingDetailDrawer({
   onUpdateStatus: (status: string, notes?: string) => void;
   onSaveAdminNotes: (notes: string) => void;
   onConfirmPayment: (paymentId: number) => void;
+  onGymPaymentConfirmed: (bookingId: number, payment: any) => Promise<void>;
   onRejectPayment: (paymentId: number) => void;
   onSyncCompanyInvoicePayment: (bookingId: number) => void;
   onConfirmMembershipPayment: (membershipId: number, settlementProviderCode: string) => void;
@@ -1505,10 +1550,32 @@ function BookingDetailDrawer({
       return payload;
     },
   });
+  // Match the paid-access endpoint scope; web bookings retain their existing
+  // monitoring labels and ACK checks below.
+  const dailyGymBooking = Number(booking.facilityId) === 6 &&
+    ["admin", "gym_public_guest"].includes(String(booking.source)) &&
+    !membershipPaymentBooking && !membershipUsageBooking && booking.membershipId == null;
+  const { data: gymPaidAccess, isError: gymPaidAccessReadFailed } = useQuery({
+    queryKey: ["admin-gym-paid-access", Number(booking.id)],
+    enabled: dailyGymBooking && Boolean(booking.id),
+    staleTime: 0,
+    refetchInterval: 5000,
+    refetchOnMount: "always",
+    queryFn: async ({ signal }) => {
+      const response = await fetch(`/api/bookings/${booking.id}/x904-paid-access`, {
+        cache: "no-store", signal,
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      return payload as { paymentConfirmed: boolean; gymAccess: GymAccessOutcome | null };
+    },
+  });
   const { data: gymGuestAdminDetail } = useQuery({
     queryKey: ["admin-gym-guest-detail", booking.orderNumber],
     enabled: (booking.source === "gym_public_guest" || (booking.source === "web" && /gym|fitness/i.test(String(booking.facilityName ?? "")))) && Boolean(booking.orderNumber),
     staleTime: 0,
+    refetchInterval: dailyGymBooking && gymPaidAccess?.gymAccess?.action === "verify_pin_identity" ? 5000 : false,
     refetchOnMount: "always",
     queryFn: async () => {
       const response = await fetch(`/api/admin/wa-bookings/${encodeURIComponent(booking.orderNumber)}/detail`, {
@@ -1579,6 +1646,105 @@ function BookingDetailDrawer({
   const paymentToast = useToast();
   const paymentQueryClient = useQueryClient();
   const confirmedGymPayment = operationalPayments.find((payment: any) => payment?.status === "confirmed") ?? null;
+  const [gymAccessResponse, setGymAccessResponse] = useState<GymAccessOutcome | null>(
+    () => readGymAccessOutcome({ gymAccess: booking.gymAccess }),
+  );
+  const [pinIdentityChecked, setPinIdentityChecked] = useState(false);
+  const [pinAttestedIdentity, setPinAttestedIdentity] = useState<string | null>(null);
+  const [pinFundsChecked, setPinFundsChecked] = useState(false);
+  const [pinBankReference, setPinBankReference] = useState("");
+  const [pinApprovalError, setPinApprovalError] = useState("");
+  const gymPinReviewIdentity = gymGuestAdminDetail?.x904IdentityMatch?.route === "registered"
+    ? gymGuestAdminDetail.x904IdentityMatch
+    : gymPinGrant ? { userPin: gymPinGrant.userPin, deviceUid: gymPinGrant.deviceUid, displayName: gymPinGrant.verifiedName } : null;
+  const pinReviewIdentityKey = gymPinReviewIdentity ? JSON.stringify([
+    Number(booking.id), gymPinReviewIdentity.userPin, gymPinReviewIdentity.deviceUid, gymPinReviewIdentity.displayName,
+  ]) : null;
+  const pinIdentityAttested = pinIdentityChecked && pinAttestedIdentity === pinReviewIdentityKey;
+  useEffect(() => {
+    setGymAccessResponse(readGymAccessOutcome({ gymAccess: booking.gymAccess }));
+  }, [booking.id, booking.gymAccess]);
+  useEffect(() => {
+    setPinIdentityChecked(false);
+    setPinFundsChecked(false);
+    setPinBankReference("");
+    setPinApprovalError("");
+  }, [booking.id, gymPinReviewIdentity?.userPin, gymPinReviewIdentity?.deviceUid, gymPinReviewIdentity?.displayName]);
+
+  // The server evaluates current identity, grant and acknowledgement together.
+  // A cached active grant alone must never clear an identity review outcome.
+  const displayedGymAccess: GymAccessOutcome | null = !dailyGymBooking ? null : gymPaidAccessReadFailed
+    ? { state: "review_required", code: "status_unavailable", action: "review",
+        message: "Status akses Gym terbaru belum dapat diperiksa. Tunggu pemeriksaan berikutnya sebelum menyatakan akses siap digunakan." }
+    : gymPaidAccess
+      ? gymPaidAccess.paymentConfirmed ? readGymAccessOutcome(gymPaidAccess) : null
+      : gymAccessResponse;
+  const gymAccessReady = displayedGymAccess?.state === "active" && !gymPaidAccessReadFailed;
+  const gymAccessStatusLabel = gymPaidAccessReadFailed ? "Belum tersedia" : displayedGymAccess ? {
+    active: "Aktif", pending: "Menunggu aktivasi", identity_review_required: "Perlu verifikasi identitas",
+    reservation_pending: "Menunggu alokasi kartu", expired: "Masa akses berakhir", review_required: "Perlu pemeriksaan",
+  }[displayedGymAccess.state] : "Menunggu pemeriksaan";
+  const canApproveGymPin = ["owner", "admin", "super_admin", "admin_booking", "staff"].includes(getCurrentRole() ?? "");
+  const currentWibDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+  const currentWibHour = Number(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta", hour: "2-digit", hourCycle: "h23",
+  }).format(new Date()));
+  // Reuse the existing staff-only recovery. A fresh exact-name match only
+  // makes the verification form available; it never authorizes a PIN.
+  const canVerifyGymPin = dailyGymBooking && canApproveGymPin && booking.source === "gym_public_guest" && !gymVisReservation &&
+    Boolean(confirmedGymPayment) && Boolean(gymPinReviewIdentity) &&
+    String(booking.bookingDate).slice(0, 10) === currentWibDate && currentWibHour >= 6 && currentWibHour < 23 &&
+    displayedGymAccess?.action === "verify_pin_identity";
+  const pinReferenceValid = /^[A-Z0-9][A-Z0-9 ._/-]{5,79}$/.test(pinBankReference.trim().toUpperCase());
+  const approveGymPinMutation = useMutation({
+    mutationFn: async () => {
+      if (!canVerifyGymPin || !gymPinReviewIdentity || !pinIdentityAttested || !pinFundsChecked || !pinReferenceValid) {
+        throw new Error("Periksa identitas pengunjung, dana resmi, dan isi referensi pembayaran sebelum mengesahkan PIN.");
+      }
+      setPinApprovalError("");
+      const response = await fetch(`/api/bookings/${booking.id}/x904-guest-pin-approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({
+          identityChecked: pinIdentityChecked,
+          officialFundsChecked: pinFundsChecked,
+          officialBankReference: pinBankReference.trim().toUpperCase(),
+          expectedUserPin: String(gymPinReviewIdentity.userPin),
+          expectedDeviceUid: Number(gymPinReviewIdentity.deviceUid),
+          expectedDisplayName: String(gymPinReviewIdentity.displayName),
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success !== true) throw new Error(result.error ?? "Verifikasi PIN belum berhasil.");
+      return result;
+    },
+    onSuccess: async (result: any) => {
+      setPinIdentityChecked(false);
+      setPinFundsChecked(false);
+      setPinBankReference("");
+      const approvedAccess: GymAccessOutcome = {
+        state: result.accessState === "active" ? "active" : "pending",
+        action: result.accessState === "active" ? "none" : "wait",
+        message: result.message ?? "Identitas disahkan. Akses menunggu aktivasi dan konfirmasi X904.",
+      };
+      setGymAccessResponse(approvedAccess);
+      await refreshGymPaidAccess(paymentQueryClient, Number(booking.id), approvedAccess);
+      await Promise.all([
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] }),
+        paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] }),
+        paymentQueryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() }),
+      ]);
+      paymentToast.toast({ title: "Identitas PIN disahkan", description: "Booking dan pembayaran yang sama tetap digunakan. Periksa status aktivasi di bawah." });
+    },
+    onError: (error: any) => {
+      setPinApprovalError(String(error?.message ?? error));
+      setPinIdentityChecked(false);
+      setPinFundsChecked(false);
+      paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] });
+      paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] });
+      paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-paid-access", Number(booking.id)] });
+    },
+  });
   const allocateGymVisMutation = useMutation({
     mutationFn: async () => {
       if (!confirmedGymPayment?.id) throw new Error("Pembayaran confirmed tidak ditemukan");
@@ -1734,6 +1900,19 @@ function BookingDetailDrawer({
         const confirmedData = await confirmed.json();
         if (!confirmed.ok) {
           throw new Error(confirmedData.error ?? "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
+        }
+        const gymAccess = readGymAccessOutcome(confirmedData);
+        if (gymAccess && gymAccess.state !== "active") {
+          setGymAccessResponse(gymAccess);
+          setNewPaymentProof(null);
+          await refreshGymPaidAccess(paymentQueryClient, Number(booking.id), gymAccess);
+          await onGymPaymentConfirmed(Number(booking.id), confirmedData);
+          await Promise.all([
+            paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", booking.orderNumber] }),
+            paymentQueryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", booking.orderNumber] }),
+          ]);
+          paymentToast.toast({ title: "Pembayaran dikonfirmasi — akses belum aktif", description: gymAccess.message });
+          return;
         }
         paymentToast.toast({title:"Pembayaran dikonfirmasi",description:"Bukti tersimpan dan booking telah dikonfirmasi."});
       } else {
@@ -1980,6 +2159,55 @@ function BookingDetailDrawer({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {(displayedGymAccess || canVerifyGymPin) && (
+            <section aria-label="Status pembayaran dan akses Gym"
+              className={`rounded-xl border p-4 text-sm space-y-3 ${displayedGymAccess?.state === "active" ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-amber-300 bg-amber-50 text-amber-950"}`}>
+              <div role="status">
+                <p className="font-bold">{gymPaidAccessReadFailed
+                  ? "Status akses Gym belum tersedia"
+                  : displayedGymAccess?.state === "active"
+                    ? "Pembayaran dikonfirmasi — akses Gym aktif"
+                    : "Pembayaran dikonfirmasi — akses Gym belum aktif"}</p>
+                <p className="mt-1">{displayedGymAccess?.message ??
+                  "Identitas X904 perlu diperiksa agar pembayaran pada booking ini tersambung ke hak akses."}</p>
+              </div>
+              {displayedGymAccess?.action === "verify_pin_identity" && !canApproveGymPin && (
+                <p className="text-xs font-medium">Petugas operasional perlu memeriksa identitas pengunjung dan mengesahkan akses pada booking yang sama.</p>
+              )}
+              {canVerifyGymPin && (
+                <div className="space-y-3 border-t border-amber-200 pt-3">
+                  <p className="font-semibold">Verifikasi identitas dan pulihkan akses booking ini</p>
+                  {gymPinReviewIdentity && (
+                    <p className="text-xs">Identitas yang diperiksa: <strong>{gymPinReviewIdentity.displayName}</strong>
+                      {" · PIN "}{gymPinReviewIdentity.userPin}{" · UID "}{gymPinReviewIdentity.deviceUid}</p>
+                  )}
+                  <label className="flex items-start gap-2 text-xs">
+                    <input type="checkbox" checked={pinIdentityAttested}
+                      onChange={event => { setPinIdentityChecked(event.target.checked); setPinAttestedIdentity(pinReviewIdentityKey); }} />
+                    Saya memeriksa identitas pengunjung secara langsung dan mencocokkannya dengan PIN, UID, serta nama pada mesin.
+                  </label>
+                  <label className="block space-y-1 text-xs">
+                    <span>Referensi pembayaran resmi</span>
+                    <Input value={pinBankReference} maxLength={80}
+                      onChange={event => setPinBankReference(event.target.value.toUpperCase())}
+                      placeholder="Referensi transaksi bank / QRIS"
+                      aria-label="Referensi pembayaran untuk pemulihan akses Gym" />
+                  </label>
+                  <label className="flex items-start gap-2 text-xs">
+                    <input type="checkbox" checked={pinFundsChecked}
+                      onChange={event => setPinFundsChecked(event.target.checked)} />
+                    Saya sudah memastikan dana resmi diterima dan cocok dengan pembayaran booking ini.
+                  </label>
+                  {pinApprovalError && <p role="alert" className="text-xs font-medium text-red-700">{pinApprovalError}</p>}
+                  <Button type="button" disabled={!pinIdentityAttested || !pinFundsChecked || !pinReferenceValid || approveGymPinMutation.isPending}
+                    onClick={() => approveGymPinMutation.mutate()}>
+                    {approveGymPinMutation.isPending ? "Memeriksa identitas..." : "Sahkan identitas untuk booking ini"}
+                  </Button>
+                  <p className="text-xs">Menggunakan booking dan pembayaran yang sama. Setelah identitas disahkan, aktivasi tetap menunggu konfirmasi X904.</p>
+                </div>
+              )}
+            </section>
+          )}
           {/* Status Banner */}
           <div className={`flex items-center gap-3 p-3 rounded-xl border ${cfg.bg} ${cfg.pill}`}>
             <StatusIcon size={16} className={cfg.color} />
@@ -2042,7 +2270,7 @@ function BookingDetailDrawer({
                   {gymPinGrant && (
                     <div className="rounded border border-sky-200 bg-white/70 p-2">
                       <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
-                      <div>Verifikasi: {gymPinGrant.verificationState} · Akses: {gymPinGrant.accessState}</div>
+                      <div>Verifikasi: {gymPinGrant.verificationState} · Akses: {dailyGymBooking ? gymAccessStatusLabel : gymPinGrant.accessState}</div>
                       <div>Aktivasi harus dibuktikan dengan ACK/read-back X904.</div>
                     </div>
                   )}
@@ -2059,7 +2287,8 @@ function BookingDetailDrawer({
                   <div className="mt-2 text-xs">Kartu VIS dialokasikan otomatis</div>
                   <div className="mt-1 text-2xl font-black">{gymVisReservation.cardCode}</div>
                   <div className="mt-1 text-xs">Status kartu: {gymVisReservation.state}. Serahkan hanya kartu ini kepada pengunjung.</div>
-                  <div className="mt-2 text-xs font-semibold">{gymVisAccess?.accessState === "active" && gymVisAccess?.latestCommand?.readBackConfirmed
+                  <div className="mt-2 text-xs font-semibold">{(dailyGymBooking ? gymAccessReady :
+                    gymVisAccess?.accessState === "active" && gymVisAccess?.latestCommand?.readBackConfirmed)
                     ? "Akses X904 aktif dan ACK telah diverifikasi. Serahkan kartu yang dialokasikan; catat serah-terima fisik secara terpisah."
                     : "Alokasi otomatis bukan bukti pintu aktif. Tunggu ACK dan read-back X904."}</div>
                   {gymVisReservation.state === "reserved" && (
@@ -2085,7 +2314,8 @@ function BookingDetailDrawer({
                     (gymVisReservation.state === "reserved" && (gymVisAccess?.accessState === "active" || gymVisAccess?.returnReady))) && (
                     <div className="mt-3 space-y-2 rounded-lg border border-emerald-300 bg-white/60 px-3 py-2 text-xs">
                       <div className="font-semibold">
-                        {gymVisAccess?.accessState === "active" ? "Akses aktif — read-back X904 sudah diterima." :
+                        {(dailyGymBooking ? gymAccessReady : gymVisAccess?.accessState === "active") ? "Akses aktif — read-back X904 sudah diterima." :
+                          dailyGymBooking && gymPaidAccessReadFailed ? "Status akses terbaru belum tersedia." :
                           gymVisAccess?.returnReady ? "Akses sudah disuspend — kartu siap dikembalikan ke pool." :
                           gymVisReservation.state === "reserved" ? "VIS sudah dialokasikan; akses dan serah-terima fisik dicatat secara terpisah." :
                           "Kartu sudah diserahkan. Menunggu worker / suspend / ACK dan read-back X904."}
@@ -2093,11 +2323,13 @@ function BookingDetailDrawer({
                       {gymVisAccess && (
                         <div className="grid grid-cols-2 gap-1 text-[11px]">
                           <span>Access ID</span><strong>{gymVisAccess.accessId}</strong>
-                          <span>Status akses</span><strong>{gymVisAccess.accessState}</strong>
+                          <span>Status akses</span><strong>{dailyGymBooking ? gymAccessStatusLabel : gymVisAccess.accessState}</strong>
                           <span>Verifikasi</span><strong>{gymVisAccess.verificationState}</strong>
                           <span>Expiry</span><strong>{gymVisAccess.expiresAt ? new Date(gymVisAccess.expiresAt).toLocaleString("id-ID") : "-"}</strong>
                           <span>Command</span><strong>{gymVisAccess.latestCommand ? `${gymVisAccess.latestCommand.type} / ${gymVisAccess.latestCommand.state}` : "-"}</strong>
-                          <span>ACK / read-back</span><strong>{gymVisAccess.latestCommand?.readBackConfirmed ? "PASS" : "Menunggu"}</strong>
+                          <span>{dailyGymBooking ? "ACK / read-back terakhir" : "ACK / read-back"}</span><strong>{dailyGymBooking
+                            ? gymPaidAccessReadFailed ? "Belum tersedia" : gymVisAccess.latestCommand?.readBackConfirmed ? "Tercatat" : "Menunggu"
+                            : gymVisAccess.latestCommand?.readBackConfirmed ? "PASS" : "Menunggu"}</strong>
                           <span>Group mesin</span><strong>{gymVisAccess.latestSnapshot?.group ?? "-"}</strong>
                         </div>
                       )}
@@ -2128,7 +2360,7 @@ function BookingDetailDrawer({
   {gymPinGrant && (
     <div className="rounded border border-sky-200 bg-sky-50 p-2 text-sky-900">
       <div><strong>PIN {gymPinGrant.userPin}</strong> · UID {gymPinGrant.deviceUid} · {gymPinGrant.verifiedName}</div>
-      <div>Pembayaran: <strong>{gymPinGrant.paymentStatus ?? "-"}</strong> · Verifikasi: <strong>{gymPinGrant.verificationState}</strong> · Akses: <strong>{gymPinGrant.accessState}</strong></div>
+      <div>Pembayaran: <strong>{gymPinGrant.paymentStatus ?? "-"}</strong> · Verifikasi: <strong>{gymPinGrant.verificationState}</strong> · Akses: <strong>{dailyGymBooking ? gymAccessStatusLabel : gymPinGrant.accessState}</strong></div>
       <div className="mt-1">Pengesahan PIN memerlukan pemeriksaan identitas fisik + dana resmi dan tetap menunggu worker serta ACK/read-back X904.</div>
     </div>
   )}
@@ -4252,12 +4484,27 @@ export default function AdminBookings() {
   const updatePaymentMutation = useUpdatePayment({
     mutation: {
       onSuccess: async (data: any, variables: any) => {
+        const gymAccess = variables.data.status === "confirmed" ? readGymAccessOutcome(data) : null;
+        if (gymAccess) await refreshGymPaidAccess(queryClient, Number(data.bookingId), gymAccess);
         // Konfirmasi payment grup memperbarui semua sibling di server. Tunggu
         // refetch selesai sebelum menutup drawer agar tabel tidak sempat
         // menampilkan tombol verifikasi untuk sesi-sesi yang sudah ikut
         // terkonfirmasi.
         await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
-        await refetchBookings();
+        const refreshed = await refetchBookings();
+        if (gymAccess && gymAccess.state !== "active") {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["admin-gym-guest-detail", selectedBooking?.orderNumber] }),
+            queryClient.invalidateQueries({ queryKey: ["admin-gym-x904-monitoring", selectedBooking?.orderNumber] }),
+          ]);
+          setSelectedBooking((current: any) => {
+            if (!current || Number(current.id) !== Number(data.bookingId)) return current;
+            const latest = (refreshed.data?.items as any[] | undefined)?.find(row => row.id === current.id) ?? current;
+            return withGymPaymentOutcome(latest, data);
+          });
+          toast({ title: "Pembayaran dikonfirmasi — akses belum aktif", description: gymAccess.message });
+          return;
+        }
         toast({
           title: "Pembayaran diperbarui",
           description: variables.data.status === "confirmed" && selectedBooking?.groupRef
@@ -6562,6 +6809,15 @@ export default function AdminBookings() {
           onConfirmPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "confirmed" } })
           }
+          onGymPaymentConfirmed={async (bookingId, payment) => {
+            await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+            const refreshed = await refetchBookings();
+            setSelectedBooking((current: any) => {
+              if (!current || Number(current.id) !== bookingId) return current;
+              const latest = (refreshed.data?.items as any[] | undefined)?.find(row => row.id === bookingId) ?? current;
+              return withGymPaymentOutcome(latest, payment);
+            });
+          }}
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
           }

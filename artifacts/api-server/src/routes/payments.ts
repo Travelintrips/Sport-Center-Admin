@@ -22,6 +22,7 @@ import { isAuthorizedAdminProofUploader } from "../lib/adminPaymentProofReport";
 import { canRecordConfirmedBookingOutstandingPayment } from "../lib/confirmedBookingOutstandingPayment";
 import { reserveVisAfterAdminPaymentConfirmation, VisReservationError } from "../services/x904GymVisitorCardReservations";
 import { wakeX904PaidGymAfterConfirmation } from "../services/x904PaidGymFastWake";
+import { getConfirmedGymAccessOutcome } from "../services/x904PaidGymAccessOutcome";
 import { wakeX904AdminVisAfterPayment } from "../services/x904VisFastWake";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
@@ -61,6 +62,15 @@ import {
 import { readPaymentProofOcr } from "../lib/paymentOcr";
 
 type VisAutoReservation = { status: "reserved" | "needs_review"; cardCode?: string; code?: string };
+
+async function paymentWithGymAccess(
+  booking: any, payment: any, visReservation: VisAutoReservation | null = null,
+) {
+  const gymAccess = await getConfirmedGymAccessOutcome(booking, payment, visReservation);
+  return { ...payment, amount: Number(payment.amount),
+    ...(visReservation ? { visReservation } : {}),
+    ...(gymAccess ? { gymAccess } : {}) };
+}
 /** One admin payment confirmation also reserves a VIS physical card for new Gym guests.
  * Never fail or reverse an already committed payment if cards are unavailable.
  * A held, unverified VIS grant may be created, but no X904 command is issued.
@@ -73,6 +83,14 @@ async function reserveVisitorCardAfterPaymentConfirmation(
       !String(booking.notes ?? "").includes("Kartu VIS001–VIS006 menunggu pilihan") ||
       payment?.paymentType === "dp") return null;
   try {
+    // An explicitly reviewed visitor may already have been recovered to its
+    // canonical PIN on this same payment. A confirmation replay must not try
+    // to allocate VIS again or replace that identity.
+    const recoveredPin = await db.execute(sql`SELECT access_id
+      FROM sport_center.x904_nonmember_daily_access
+      WHERE booking_id=${Number(booking.id)} AND payment_id=${Number(payment.id)}
+        AND device_serial='TDBD234200545' AND identity_type='pin' LIMIT 1`);
+    if (recoveredPin.rows.length) return null;
     const allocated = await reserveVisAfterAdminPaymentConfirmation({
       orderNumber: String(booking.orderNumber),
       paymentId: Number(payment.id),
@@ -1885,7 +1903,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             bookingForRepair, before, getUserFromReq(req).userName || String((req as any).user?.email ?? "ADMIN"),
           )
         : null;
-      res.json({ ...before, amount: Number(before.amount), ...(visReservation ? { visReservation } : {}) });
+      res.json(await paymentWithGymAccess(bookingForRepair, before, visReservation));
       return;
     }
 
@@ -2379,7 +2397,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           return;
         }
         if (status === "confirmed" && current.status === "confirmed") {
-          res.json({ ...current, amount: Number(current.amount) });
+          const visReservation = booking
+            ? await reserveVisitorCardAfterPaymentConfirmation(booking, current,
+                userInfo.userName || String((req as any).user?.email ?? "ADMIN"))
+            : null;
+          res.json(await paymentWithGymAccess(booking, current, visReservation));
           return;
         }
         res.status(409).json({ error: "Pembayaran tidak lagi menunggu konfirmasi" });
@@ -2701,8 +2723,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
       }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[gym-guest] verified payment notice failed"));
     }
-    res.json({ ...payment, amount: Number(payment.amount),
-      ...(visReservation ? { visReservation } : {}) });
+    res.json(await paymentWithGymAccess(booking, payment, visReservation));
   } catch (err: any) {
     req.log.error({ err }, "Update payment error");
     if (res.headersSent) return;
