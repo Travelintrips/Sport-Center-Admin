@@ -939,6 +939,8 @@ router.post("/wa/gym-name-route", async (req, res) => {
           ? "Nama ditemukan di X904. Tiket harian boleh dipesan; petugas memeriksa identitas dan menetapkan akses nonmember secara terpisah."
         : match.route === "visitor_card"
           ? "Nama belum terdaftar di X904. Anda akan diarahkan ke kartu pengunjung VIS; petugas akan menyerahkannya setelah verifikasi."
+        : match.route === "unavailable"
+          ? "Identitas Anda ada di inventaris, tetapi pembacaan mesin belum siap. Booking dan pembayaran belum boleh diproses sampai sinkronisasi selesai."
           : "Nama membutuhkan pemeriksaan petugas. Jangan menggunakan PIN atau kartu milik orang lain.",
     });
   } catch {
@@ -990,8 +992,10 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
       }
     }
     const guestNameRoute = publicGymGuest ? await resolveGymGuestName(bookingCustomerName) : null;
-    if (publicGymGuest && !guestNameRoute) {
-      res.status(503).json({ error: "Verifikasi identitas X904 belum tersedia." }); return;
+    if (publicGymGuest && (!guestNameRoute || guestNameRoute.route === "unavailable")) {
+      // Fail before creating booking/payment. A stale inventory cannot be
+      // treated as successful machine verification for a registered PIN.
+      res.status(503).json({error:"Identitas mesin X904 sedang disinkronkan. Booking dan pembayaran belum dibuat; coba lagi setelah pembacaan mesin berhasil."}); return;
     }
     // A customer who knows the existing machine PIN can self-assert the exact
     // server-resolved PIN/name pair. This is not a payment confirmation;

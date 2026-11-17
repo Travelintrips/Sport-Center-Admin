@@ -250,6 +250,7 @@ export default function WaBookingForm() {
         const result=await response.json();
         if(controller.signal.aborted)return;
         setGuestIdentityRoute(["registered","expired_member","recognized_review","visitor_card","staff_review"].includes(result.route)?result.route:"unavailable");
+        if(result.route==="unavailable") setGuestLookupError("Data mesin X904 belum sinkron. Booking dan pembayaran belum boleh dilakukan. Periksa kembali setelah sinkronisasi selesai.");
       }catch{
         if(!controller.signal.aborted){
           setGuestIdentityRoute("unavailable");
@@ -535,6 +536,10 @@ export default function WaBookingForm() {
     // The server resolves identity and holds any grant for physical staff review.
     if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
+      return;
+    }
+    if (publicGymGuest && guestIdentityRoute === "unavailable") {
+      setError("Identitas mesin belum siap. Booking dan pembayaran belum dibuat; coba lagi setelah data X904 sinkron.");
       return;
     }
     if (publicGymGuest && guestIdentityRoute === "registered" && !selfGymMachinePin.trim()) {

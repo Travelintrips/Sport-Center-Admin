@@ -321,7 +321,11 @@ suite(
       await pool.query("TRUNCATE sport_center.gym_x904_connector_heartbeats");
       await pool.query("UPDATE sport_center.gym_x904_lan_state SET last_complete_at=now(),stored_log_count=0,device_log_count=0,user_count=0");
     });
-    function submit(attach = true, bookingDate = today, customerName = "TEST AUTO SUSPEND", machinePin = "") {
+    async function submit(attach = true, bookingDate = today, customerName = "TEST AUTO SUSPEND", machinePin = "", snapshotReady = true) {
+      // The frontend only accepts booking when the inventory is freshly read.
+      // Clear fixture afterward to exercise separate payment-time and worker
+      // liveness gates independently (including collector interruption).
+      if (snapshotReady) await snapshot(new Date(Date.now()-1000),2);
       let r = request
         .post("/api/wa/booking")
         .field("customerName", customerName)
@@ -338,7 +342,9 @@ suite(
           filename: "isolated.jpeg",
           contentType: "image/jpeg",
         });
-      return r;
+      const result=await r;
+      if(snapshotReady) await pool.query("TRUNCATE sport_center.gym_x904_access_snapshots");
+      return result;
     }
     async function counts() {
       return (
@@ -427,6 +433,21 @@ suite(
           "UPDATE sport_center.x904_verified_nonmember_identities SET display_name='FORBIDDEN' WHERE user_pin='700'",
         ),
       ).rejects.toHaveProperty("code", "42501");
+    });
+    test("registered PIN absent from newest X904 snapshot cannot create a paid booking", async()=>{
+      await pool.query("TRUNCATE sport_center.gym_x904_access_snapshots");
+      const result=await submit(true,today,"TEST AUTO SUSPEND","700",false);
+      expect(result.status).toBe(503);
+      expect(result.body.error).toContain("Booking dan pembayaran belum dibuat");
+      expect(await counts()).toMatchObject({bookings:0,payments:0,grants:0});
+      expect(await commands()).toHaveLength(0);
+    });
+    test("registered PIN in stale X904 snapshot cannot create a paid booking", async()=>{
+      await snapshot(new Date(clock.getTime()-6*60_000),2);
+      const result=await submit(true,today,"TEST AUTO SUSPEND","700",false);
+      expect(result.status).toBe(503);
+      expect(await counts()).toMatchObject({bookings:0,payments:0,grants:0});
+      expect(await commands()).toHaveLength(0);
     });
     test("machine-matched self PIN + canonical paid booking activates without second Admin approval",async()=>{
       const bad=await submit(true,today,"TEST AUTO SUSPEND","701");
