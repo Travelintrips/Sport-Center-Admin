@@ -851,6 +851,46 @@ suite(
         delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
       }
     });
+    test.each([
+      {source:"admin",identity:"pin",pin:"700",uid:343},
+      {source:"gym_public_guest",identity:"pin",pin:"700",uid:343},
+      {source:"admin",identity:"card",pin:"78",uid:338},
+      {source:"gym_public_guest",identity:"card",pin:"78",uid:338},
+    ])("new paid Gym $source $identity: signed 19:10 scan after slot completes check-in exactly once without changing status", async s=>{
+      const {reconcileX904MissedNonmemberBookingCheckins}=await import("../../services/x904MissedCheckinReconcile.js");
+      const {checkInBooking}=await import("../../lib/bookingLifecycle.js");
+      const id=await checkout();
+      const paymentId=await confirm(id);
+      expect((await approve(id)).status).toBe(200);
+      const eventId="ci-gym-day-"+s.source+"-"+s.identity;
+      const scanAt=new Date("2026-11-17T12:10:00Z");
+      const evaluation=new Date("2026-11-17T12:11:00Z");
+      await pool.query("UPDATE sport_center.sport_bookings SET source=$2,booking_date='2026-11-17',start_time='17:27',end_time='18:27',status='completed' WHERE id=$1",[id,s.source]);
+      if(s.identity==="card"){
+        await pool.query("INSERT INTO sport_center.gym_x904_lan_users VALUES ('TDBD234200545','78',338,'VIS 001',0)");
+        await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET identity_type='card',identity_label='VIS001',user_pin='78',device_uid=338,verified_name='VIS 001' WHERE booking_id=$1",[id]);
+        if(s.source==="gym_public_guest"){
+          await pool.query("INSERT INTO sport_center.gym_vis_card_reservations(booking_id,payment_id,device_serial,user_pin,device_uid,card_code,state,collected_at) VALUES($1,$2,'TDBD234200545','78',338,'VIS001','collected','2026-11-17T11:15:00Z')",[id,paymentId]);
+        }
+      }
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='active',activated_at='2026-11-17T10:30:00Z',expires_at='2026-11-17T16:00:00Z' WHERE booking_id=$1",[id]);
+      await pool.query("INSERT INTO sport_center.gym_x904_lan_logs VALUES('TDBD234200545',$1,101,'2026-11-17 19:10:00',$2,100)",[s.pin,eventId]);
+      const raw="00".repeat(26)+"0f"+"00".repeat(4)+"ff"+"00".repeat(8);
+      await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence VALUES('TDBD234200545',100,$1,$2,'trusted_vmsc_ingress','protocol_verified',15,$3)",[s.pin,eventId,raw]);
+      await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES($1,'TDBD234200545',$2,'2026-11-17 19:10:00',255,15)",[eventId,s.pin]);
+      const actor={userName:"X904 signed scan "+eventId,userRole:"system"};
+      expect((await checkInBooking(id,actor,scanAt,{x904GymScanEventId:"forged"})).ok).toBe(false);
+      expect((await checkInBooking(id,{userName:"operator",userRole:"staff"},scanAt)).ok).toBe(false);
+      process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED="true";
+      try{
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(1);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
+        const done=(await pool.query("SELECT status,checked_in_at FROM sport_center.sport_bookings WHERE id=$1",[id])).rows[0];
+        expect(done.status).toBe("completed");
+        expect(done.checked_in_at).toEqual(scanAt);
+        expect((await pool.query("SELECT count(*)::int n FROM sport_center.booking_history WHERE booking_id=$1 AND note LIKE 'Check-in%' ",[id])).rows[0].n).toBe(1);
+      } finally {delete process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;}
+    });
     test("all six VIS preserve witnessed handover before signed booking check-in", async () => {
       const {reconcileX904MissedNonmemberBookingCheckins}=await import("../../services/x904MissedCheckinReconcile.js");
       const id=await checkout();
