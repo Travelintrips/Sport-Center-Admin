@@ -150,7 +150,7 @@ suite(
       CREATE TABLE sport_center.gym_x904_connector_heartbeats(device_serial text,connector_id text,last_seen timestamptz,reported_logs int,reported_users int,read_authenticated boolean);
       CREATE TABLE sport_center.gym_x904_verification_evidence(device_serial text,event_index int,user_pin text,source_event_id text,capture_source text,evidence_status text,verification_code int,raw_hex text);
       CREATE TABLE sport_center.gym_x904_raw_events(event_id text,device_serial text,user_pin text,device_time text,attendance_status int,verification_type int);
-      CREATE TABLE sport_center.gym_vis_card_reservations(booking_id int,payment_id int,device_serial text,user_pin text,device_uid int,card_code text,state text,collected_at timestamptz,funds_verified_at timestamptz,funds_reference text);
+      CREATE TABLE sport_center.gym_vis_card_reservations(booking_id int,payment_id int,device_serial text,user_pin text,device_uid int,card_code text,state text,collected_at timestamptz,funds_verified_at timestamptz,funds_reference text,reserved_at timestamptz);
       CREATE TABLE sport_center.gym_x904_lan_users(device_serial text,user_pin text,device_uid int,display_name text,device_role int);
       INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','700',343,'TEST AUTO SUSPEND',0);
       CREATE TABLE sport_center.gym_x904_member_mapping(membership_id int,user_pin text,device_serial text,status text);
@@ -1028,6 +1028,210 @@ suite(
       expect(await commands()).toHaveLength(1);
       expect((await commands())[0].command_type).toBe("ACTIVATE_USER");
       expect((await grant(id)).access_state).toBe("pending");
+    });
+
+
+    // Execute the real audit query as the non-bypass application role inside
+    // a PostgreSQL READ ONLY transaction. Fixtures below never contact X904.
+    async function paidPendingForAudit() {
+      const id = await checkout();
+      const paymentId = await confirm(id);
+      expect((await approve(id)).status).toBe(200);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET created_at=$1 WHERE booking_id=$2", [clock, id]);
+      await pool.query(`UPDATE sport_center.audit_logs SET created_at=$1
+        WHERE entity='booking' AND entity_id=$2
+          AND action IN ('x904_guest_pin_staff_attestation','x904_guest_pin_payment_auto_authorized','x904_guest_pin_payment_auto_recovered')`, [clock, id]);
+      return { id, paymentId, access: await grant(id) };
+    }
+    async function auditAt(at: Date) {
+      const { auditPaidGymEntitlementConsistency } = await import("../../services/x904PaidGymConsistencyAudit.js");
+      const client = await appPool.connect();
+      const entries: string[] = [];
+      try {
+        await client.query("BEGIN READ ONLY");
+        expect((await client.query("SHOW transaction_read_only")).rows[0].transaction_read_only).toBe("on");
+        const store = { execute: async (query: SQL) => {
+          const rendered = dialect.sqlToQuery(query);
+          return client.query(rendered.sql, rendered.params);
+        }};
+        const count = await auditPaidGymEntitlementConsistency(store as any, at, entry => entries.push(entry));
+        return { count, entries };
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    }
+
+    test("read-only watchdog detects name drift that leaves a paid grant pending without commands", async () => {
+      const { id } = await paidPendingForAudit();
+      await snapshot(clock, 2);
+      await pool.query(`UPDATE sport_center.gym_x904_access_snapshots
+        SET users=jsonb_set(users,'{0,name}','"TEST RENAMED IDENTITY"'::jsonb)`);
+      await tick(new Date(clock.getTime() + 60_000));
+      expect(await grant(id)).toMatchObject({ verification_state: "verified", access_state: "pending", activated_at: null });
+      expect(await commands()).toHaveLength(0);
+      const before = await counts();
+      expect((await auditAt(new Date(clock.getTime() + 4 * 60_000))).count).toBe(0);
+      const overdue = await auditAt(new Date(clock.getTime() + 6 * 60_000));
+      expect(overdue.count).toBe(1);
+      expect(overdue.entries).toHaveLength(1);
+      expect(overdue.entries[0]).toContain('"issue":"PAID_PENDING_GRANT"');
+      expect(overdue.entries[0]).not.toMatch(/TEST RENAMED|TEST AUTO|628111|proof|user_pin|device_uid/);
+      expect(await auditAt(new Date(clock.getTime() + 7 * 60_000))).toEqual({ count: 1, entries: [] });
+      expect(await counts()).toEqual(before);
+      expect(await commands()).toHaveLength(0);
+    });
+
+    test.each(["queued", "claimed", "failed", "completed"])(
+      "read-only watchdog includes a stalled %s command without an activated grant",
+      async state => {
+        const { access } = await paidPendingForAudit();
+        await pool.query(`INSERT INTO sport_center.x904_user_commands
+          (device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,result)
+          VALUES('TDBD234200545','ACTIVATE_USER','700',$1,301,$2,$3,$4)`,
+          [JSON.stringify({ source: "AUTO_NONMEMBER_GYM_12H", accessId: access.access_id }),
+           "CI-AUDIT-" + access.access_id, state,
+           JSON.stringify({ readBackConfirmed: false, errorCode: "GROUP_READ_FAILED" })]);
+        const before = await commands();
+        expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(1);
+        expect(await commands()).toEqual(before);
+      },
+    );
+
+    test("read-only watchdog ignores verified activation after matching ACK and fresh snapshot", async () => {
+      const { id } = await paidPendingForAudit();
+      await snapshot(new Date(clock.getTime() - 1000), 2);
+      await tick(clock);
+      const command = (await commands())[0];
+      expect(command.command_type).toBe("ACTIVATE_USER");
+      await pool.query(`UPDATE sport_center.x904_user_commands
+        SET state='completed',completed_at=$1,result='{"readBackConfirmed":true,"deviceUid":343,"afterGroup":1}'::jsonb
+        WHERE command_id=$2`, [new Date(clock.getTime() + 1000), command.command_id]);
+      await snapshot(new Date(clock.getTime() + 2000), 1);
+      await tick(new Date(clock.getTime() + 3000));
+      expect((await grant(id)).access_state).toBe("active");
+      expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(0);
+    });
+
+    test.each(["membership_id", "membership_payment_id", "source_membership_payment_id"])(
+      "read-only watchdog excludes a membership payment identified by %s",
+      async column => {
+        const { id, paymentId } = await paidPendingForAudit();
+        if (column === "source_membership_payment_id") {
+          await pool.query("UPDATE sport_center.sport_payments SET source_membership_payment_id=901 WHERE id=$1", [paymentId]);
+        } else {
+          await pool.query(`UPDATE sport_center.sport_bookings SET ${column}=901 WHERE id=$1`, [id]);
+        }
+        // Membership payments never require a daily nonmember grant.
+        await pool.query("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1", [id]);
+        expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(0);
+      },
+    );
+
+    test("read-only watchdog preserves missing/held grant detection", async () => {
+      const { id } = await paidPendingForAudit();
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='review_required' WHERE booking_id=$1", [id]);
+      const held = await auditAt(new Date(clock.getTime() + 3 * 60_000));
+      expect(held.count).toBe(1);
+      expect(held.entries[0]).toContain("PAID_HELD_GRANT");
+      await pool.query("DELETE FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1", [id]);
+      const missing = await auditAt(new Date(clock.getTime() + 3 * 60_000));
+      expect(missing.count).toBe(1);
+      expect(missing.entries[0]).toContain("PAID_NO_GRANT");
+    });
+
+    test("read-only watchdog gives advance payments a grace period after 06:00 WIB", async () => {
+      const { id, paymentId } = await paidPendingForAudit();
+      await pool.query("UPDATE sport_center.sport_payments SET confirmed_at='2026-11-09T03:00:00Z' WHERE id=$1", [paymentId]);
+      await pool.query(`UPDATE sport_center.x904_nonmember_daily_access
+        SET created_at='2026-11-09T03:00:00Z',verification_state='verified',access_state='pending'
+        WHERE booking_id=$1`, [id]);
+      expect((await auditAt(new Date("2026-11-09T22:59:00Z"))).count).toBe(0);
+      expect((await auditAt(new Date("2026-11-09T23:04:00Z"))).count).toBe(0);
+      expect((await auditAt(new Date("2026-11-09T23:06:00Z"))).count).toBe(1);
+    });
+
+    test("read-only watchdog ignores future dates, legacy web handover, and closing time", async () => {
+      const { id } = await paidPendingForAudit();
+      await pool.query("UPDATE sport_center.sport_bookings SET booking_date='2026-11-11' WHERE id=$1", [id]);
+      expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(0);
+      await pool.query("UPDATE sport_center.sport_bookings SET booking_date=$1,source='web' WHERE id=$2", [today, id]);
+      expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(0);
+      await pool.query("UPDATE sport_center.sport_bookings SET source='gym_public_guest' WHERE id=$1", [id]);
+      expect((await auditAt(new Date("2026-11-10T16:01:00Z"))).count).toBe(0);
+    });
+
+    test("read-only watchdog waits for a verified newly created grant before timing activation", async () => {
+      const { id } = await paidPendingForAudit();
+      const overdue = new Date(clock.getTime() + 6 * 60_000);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET verification_state='review_required' WHERE booking_id=$1", [id]);
+      expect((await auditAt(overdue)).count).toBe(0);
+      await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET verification_state='verified',created_at=$1 WHERE booking_id=$2", [new Date(clock.getTime() + 4 * 60_000), id]);
+      expect((await auditAt(overdue)).count).toBe(0);
+      expect((await auditAt(new Date(clock.getTime() + 10 * 60_000))).count).toBe(1);
+    });
+
+    test("read-only watchdog starts PIN grace after the matching staff attestation or recovery", async () => {
+      const { id, access, paymentId } = await paidPendingForAudit();
+      for (const action of ["x904_guest_pin_staff_attestation", "x904_guest_pin_payment_auto_authorized", "x904_guest_pin_payment_auto_recovered"]) {
+        await pool.query(`DELETE FROM sport_center.audit_logs WHERE entity='booking' AND entity_id=$1
+          AND action IN ('x904_guest_pin_staff_attestation','x904_guest_pin_payment_auto_authorized','x904_guest_pin_payment_auto_recovered')`, [id]);
+        await pool.query(`INSERT INTO sport_center.audit_logs(action,entity,entity_id,"after",created_at)
+          VALUES($1,'booking',$2,$3,$4)`, [action, id,
+          JSON.stringify({ accessId: access.access_id, paymentId, accessState: "pending" }),
+          new Date(clock.getTime() + 30 * 60_000)]);
+        expect((await auditAt(new Date(clock.getTime() + 31 * 60_000))).count).toBe(0);
+        expect((await auditAt(new Date(clock.getTime() + 36 * 60_000))).count).toBe(1);
+      }
+    });
+
+    test("read-only watchdog does not reset PIN grace for unrelated or future audit records", async () => {
+      const { id, access, paymentId } = await paidPendingForAudit();
+      const cases = [
+        { accessId: Number(access.access_id) + 1, paymentId, minutes: 30 },
+        { accessId: access.access_id, paymentId: paymentId + 1, minutes: 30 },
+        { accessId: access.access_id, paymentId, minutes: 60 },
+      ];
+      for (const row of cases) {
+        await pool.query(`INSERT INTO sport_center.audit_logs(action,entity,entity_id,"after",created_at)
+          VALUES('x904_guest_pin_payment_auto_recovered','booking',$1,$2,$3)`, [id,
+          JSON.stringify({ accessId: row.accessId, paymentId: row.paymentId, accessState: "pending" }),
+          new Date(clock.getTime() + row.minutes * 60_000)]);
+      }
+      expect((await auditAt(new Date(clock.getTime() + 31 * 60_000))).count).toBe(1);
+    });
+
+    test("read-only watchdog includes Admin PIN and card pending grants", async () => {
+      const { id } = await paidPendingForAudit();
+      await pool.query("UPDATE sport_center.sport_bookings SET source='admin' WHERE id=$1", [id]);
+      expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(1);
+      await pool.query(`UPDATE sport_center.x904_nonmember_daily_access
+        SET identity_type='card',identity_label='VIS001',user_pin='78',device_uid=338,verified_name='VIS 001'
+        WHERE booking_id=$1`, [id]);
+      expect((await auditAt(new Date(clock.getTime() + 6 * 60_000))).count).toBe(1);
+    });
+
+    test("read-only watchdog includes ready public VIS without claiming handover and ignores unmatched reservations", async () => {
+      const { id, paymentId } = await paidPendingForAudit();
+      await pool.query("UPDATE sport_center.sport_bookings SET notes='Kartu VIS001–VIS006 menunggu pilihan' WHERE id=$1", [id]);
+      await pool.query(`UPDATE sport_center.x904_nonmember_daily_access
+        SET identity_type='card',identity_label='VIS001',user_pin='78',device_uid=338,verified_name='VIS 001'
+        WHERE booking_id=$1`, [id]);
+      const overdue = new Date(clock.getTime() + 6 * 60_000);
+      expect((await auditAt(overdue)).count).toBe(0);
+      await pool.query(`INSERT INTO sport_center.gym_vis_card_reservations
+        (booking_id,payment_id,device_serial,user_pin,device_uid,card_code,state,collected_at,funds_verified_at,reserved_at)
+        VALUES($1,$2,'TDBD234200545','90',338,'VIS001','reserved',NULL,$3,$3)`, [id, paymentId, clock]);
+      expect((await auditAt(overdue)).count).toBe(0);
+      await pool.query("UPDATE sport_center.gym_vis_card_reservations SET user_pin='78' WHERE booking_id=$1", [id]);
+      const before = (await pool.query("SELECT * FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1", [id])).rows;
+      expect((await auditAt(overdue)).count).toBe(1);
+      expect((await pool.query("SELECT * FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1", [id])).rows).toEqual(before);
+      expect(before[0]).toMatchObject({ state: "reserved", collected_at: null });
+      await pool.query("UPDATE sport_center.gym_vis_card_reservations SET reserved_at=$1 WHERE booking_id=$2", [new Date(clock.getTime() + 4 * 60_000), id]);
+      expect((await auditAt(overdue)).count).toBe(0);
+      await pool.query("UPDATE sport_center.gym_vis_card_reservations SET state='collected',collected_at=$1 WHERE booking_id=$2", [new Date(clock.getTime() + 5 * 60_000), id]);
+      expect((await auditAt(new Date(clock.getTime() + 11 * 60_000))).count).toBe(1);
     });
 
     test("real PostgreSQL RLS allows only matching signed X904 evidence writes", async()=>{
