@@ -937,6 +937,8 @@ router.post("/wa/gym-name-route", async (req, res) => {
           ? "Membership lama sudah berakhir. Anda boleh memesan tiket Gym harian tanpa memperpanjang; akses tetap diperiksa petugas dan tidak memakai hak akses membership lama."
         : match.route === "recognized_review"
           ? "Nama ditemukan di X904. Tiket harian boleh dipesan; petugas memeriksa identitas dan menetapkan akses nonmember secara terpisah."
+        : match.route === "name_mismatch"
+          ? "Nama yang dimasukkan mirip dengan identitas X904 yang ada, tetapi tidak persis sama. Pastikan nama sesuai data mesin sebelum membayar. Booking belum dibuat."
         : match.route === "visitor_card"
           ? "Nama belum terdaftar di X904. Anda akan diarahkan ke kartu pengunjung VIS; petugas akan menyerahkannya setelah verifikasi."
         : match.route === "unavailable"
@@ -992,6 +994,9 @@ router.post("/wa/booking", uploadProof.single("proof"), async (req, res) => {
       }
     }
     const guestNameRoute = publicGymGuest ? await resolveGymGuestName(bookingCustomerName) : null;
+    if (publicGymGuest && guestNameRoute?.route === "name_mismatch") {
+      res.status(409).json({error:"Nama mirip dengan identitas mesin terdaftar tetapi belum cocok persis. Gunakan nama yang sesuai data X904 sebelum booking dan pembayaran; belum ada transaksi dibuat."}); return;
+    }
     if (publicGymGuest && (!guestNameRoute || guestNameRoute.route === "unavailable")) {
       // Fail before creating booking/payment. A stale inventory cannot be
       // treated as successful machine verification for a registered PIN.

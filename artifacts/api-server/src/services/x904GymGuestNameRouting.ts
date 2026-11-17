@@ -2,7 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { x904CurrentGymGuestInSnapshot } from "./x904GymGuestSnapshotPolicy";
 
-export type GymGuestIdentityRoute = "registered" | "expired_member" | "recognized_review" | "visitor_card" | "staff_review" | "unavailable";
+export type GymGuestIdentityRoute = "registered" | "expired_member" | "recognized_review" | "visitor_card" | "staff_review" | "unavailable" | "name_mismatch";
 export type GymGuestIdentityMatch = {
   route: GymGuestIdentityRoute;
   userPin: string | null;
@@ -42,6 +42,26 @@ export async function resolveGymGuestName(rawName: string, submittedPin = ""): P
       AND upper(regexp_replace(trim(display_name), '[[:space:]]+', ' ', 'g'))=${name}
     LIMIT 3`);
   if (!matched.rows.length) {
+    // SC-1793 regression: the customer entered a longer name than the X904
+    // inventory had *at checkout*. The inventory was renamed moments later;
+    // the already-paid VIS fallback then had no eligible PIN or card grant.
+    // Flag only a whole-word prefix involving at least two complete name
+    // tokens. Never infer an identity or grant from the partial match.
+    if (name.split(" ").length >= 2) {
+      const potentialRename = await db.execute(sql`SELECT 1
+        FROM sport_center.gym_x904_lan_users u
+        WHERE u.device_serial=${DEVICE} AND u.device_role=0
+          AND array_length(regexp_split_to_array(
+            upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g')), ' '),1)>=2
+          AND (
+            ${name} LIKE upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g')) || ' %'
+            OR upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g')) LIKE ${name} || ' %'
+          )
+        LIMIT 1`);
+      if (potentialRename.rows.length) {
+        return { route:"name_mismatch",userPin:null,deviceUid:null,displayName:null };
+      }
+    }
     return { route: "visitor_card", userPin: null, deviceUid: null, displayName: null };
   }
 
