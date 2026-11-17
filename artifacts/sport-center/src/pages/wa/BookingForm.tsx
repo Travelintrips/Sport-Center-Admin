@@ -173,7 +173,7 @@ export default function WaBookingForm() {
   const [x904VerifiedName, setX904VerifiedName] = useState("");
   const [x904VerificationError, setX904VerificationError] = useState("");
   const [x904Verifying, setX904Verifying] = useState(false);
-  const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "expired_member" | "recognized_review" | "visitor_card" | "staff_review" | "unavailable">("idle");
+  const [guestIdentityRoute, setGuestIdentityRoute] = useState<"idle" | "checking" | "registered" | "expired_member" | "recognized_review" | "visitor_card" | "staff_review" | "unavailable" | "name_mismatch">("idle");
   const [guestLookupError, setGuestLookupError] = useState("");
   const guestLookupAbort = useRef<AbortController | null>(null);
 
@@ -249,8 +249,9 @@ export default function WaBookingForm() {
         }
         const result=await response.json();
         if(controller.signal.aborted)return;
-        setGuestIdentityRoute(["registered","expired_member","recognized_review","visitor_card","staff_review"].includes(result.route)?result.route:"unavailable");
+        setGuestIdentityRoute(["registered","expired_member","recognized_review","visitor_card","staff_review","name_mismatch"].includes(result.route)?result.route:"unavailable");
         if(result.route==="unavailable") setGuestLookupError("Data mesin X904 belum sinkron. Booking dan pembayaran belum boleh dilakukan. Periksa kembali setelah sinkronisasi selesai.");
+        if(result.route==="name_mismatch") setGuestLookupError("Nama mirip dengan identitas mesin terdaftar tetapi belum persis sama. Periksa nama yang digunakan di X904 sebelum booking atau membayar.");
       }catch{
         if(!controller.signal.aborted){
           setGuestIdentityRoute("unavailable");
@@ -536,6 +537,10 @@ export default function WaBookingForm() {
     // The server resolves identity and holds any grant for physical staff review.
     if (dedicatedNonmember && !publicGymGuest && (!x904VerifiedName || x904Verifying)) {
       setError("Verifikasi PIN/kartu X904 harus berhasil sebelum booking.");
+      return;
+    }
+    if (publicGymGuest && guestIdentityRoute === "name_mismatch") {
+      setError("Nama belum sama dengan data X904. Periksa nama mesin terlebih dahulu; booking dan pembayaran belum dibuat.");
       return;
     }
     if (publicGymGuest && guestIdentityRoute === "unavailable") {

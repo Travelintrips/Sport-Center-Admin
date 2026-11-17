@@ -434,6 +434,18 @@ suite(
         ),
       ).rejects.toHaveProperty("code", "42501");
     });
+    test.each([
+      "TEST AUTO SUSPEND AULIA",
+      "TEST AUTO",
+    ])("near-matching machine name %s cannot create a paid booking or silently use VIS",async enteredName=>{
+      // Reproduce SC-1793's name-change timing: the user types a longer or
+      // shorter name before the machine inventory has been renamed.
+      const result=await submit(true,today,enteredName);
+      expect(result.status).toBe(409);
+      expect(String(result.body.error)).toContain("Nama mirip");
+      expect(await counts()).toMatchObject({bookings:0,payments:0,grants:0});
+      expect(await commands()).toHaveLength(0);
+    });
     test("registered PIN absent from newest X904 snapshot cannot create a paid booking", async()=>{
       await pool.query("TRUNCATE sport_center.gym_x904_access_snapshots");
       const result=await submit(true,today,"TEST AUTO SUSPEND","700",false);
