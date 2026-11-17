@@ -2,6 +2,7 @@ import {
   jest,
   beforeAll,
   afterAll,
+  afterEach,
   beforeEach,
   describe,
   test,
@@ -163,7 +164,8 @@ suite(
       INSERT INTO sport_center.users(id,name,role,account_status,registration_source) VALUES
         (301,'X904 AUTOMATION SERVICE','staff','inactive','system_x904_automation'),
         (302,'TEST OPERATOR','staff','active','test'),(303,'TEST FINANCE','finance','active','test'),
-        (304,'TEST DISABLED','staff','inactive','test'),(305,'TEST DEMOTED','customer','active','test');`);
+        (304,'TEST DISABLED','staff','inactive','test'),(305,'TEST DEMOTED','customer','active','test'),
+        (306,'TEST BOOKING ADMIN','admin','active','test');`);
       for (const file of [
         "20261031_x904_nonmember_daily_access.sql",
         "20261102_x904_nonmember_verified_activation_clock.sql",
@@ -293,11 +295,17 @@ suite(
       const { default: router } = await import("../whatsapp.js");
       const app = express();
       app.use(express.json());
+      app.use((req: any, _res: any, next: any) => {
+        req.log = { info: () => undefined, warn: () => undefined, error: (...details: unknown[]) => console.error("[isolated route error]", ...details) };
+        next();
+      });
       app.use("/api", router);
       const { default: payments } = await import("../payments.js");
       app.use("/api", payments);
       const { default: bookings } = await import("../bookings.js");
       app.use("/api", bookings);
+      const { default: waBookingsAdmin } = await import("../waBookingsAdmin.js");
+      app.use("/api", waBookingsAdmin);
       const { createToken } = await import("../../lib/auth.js");
       token = createToken(302, "staff");
       adminToken = createToken(303, "finance");
@@ -1232,6 +1240,347 @@ suite(
       expect((await auditAt(overdue)).count).toBe(0);
       await pool.query("UPDATE sport_center.gym_vis_card_reservations SET state='collected',collected_at=$1 WHERE booking_id=$2", [new Date(clock.getTime() + 5 * 60_000), id]);
       expect((await auditAt(new Date(clock.getTime() + 11 * 60_000))).count).toBe(1);
+    });
+
+
+    describe("four entry points use the complete real booking/payment/access lifecycle", () => {
+      type MatrixIdentity = { source: "admin" | "gym_public_guest"; identity: "pin" | "card"; pin: string; uid: number; name: string };
+      const variants: MatrixIdentity[] = [
+        { source: "admin", identity: "pin", pin: "700", uid: 343, name: "TEST AUTO SUSPEND" },
+        { source: "admin", identity: "card", pin: "78", uid: 338, name: "VIS 001" },
+        { source: "gym_public_guest", identity: "pin", pin: "700", uid: 343, name: "TEST AUTO SUSPEND" },
+        { source: "gym_public_guest", identity: "card", pin: "78", uid: 338, name: "VIS 001" },
+      ];
+      let matrixDay = "";
+      let matrixStart: Date;
+      let oldOnlyPin: string | undefined;
+      let oldFastWake: string | undefined;
+      let oldCheckin: string | undefined;
+      let previousTokens: { staff: string; finance: string };
+      let matrixAdminToken = "";
+      beforeAll(async () => {
+        // Previous focused tests intentionally use permissive/inconsistent VIS
+        // fixtures. These new full-route cases use the actual existing schema,
+        // constraints and application-role RLS instead of weakening those cases.
+        // Canonical VIS SQL also reads this existing bank-reference column,
+        // which the abbreviated Drizzle checkout fixture does not declare.
+        await pool.query("ALTER TABLE sport_center.sport_payments ADD COLUMN reference_number text");
+        await pool.query("ALTER TABLE sport_center.x904_nonmember_daily_access ADD COLUMN visitor_name text");
+        await pool.query("ALTER TABLE sport_center.gym_vis_card_reservations RENAME TO gym_vis_card_reservations_focused_fixture");
+        await pool.query(readFileSync("migrations/20261106_gym_vis_card_reservations.sql", "utf8"));
+        // Install the historical baseline before its later additive PIN policies;
+        // keep the baseline's exact policy-hash guard intact.
+        for (const name of ["x904_nonmember_app_public_pin_review_insert", "x904_nonmember_app_paid_guest_pin_recovery_insert", "x904_nonmember_app_self_pin_insert"]) {
+          await pool.query(`DROP POLICY ${ident(name)} ON sport_center.x904_nonmember_daily_access`);
+        }
+        await pool.query(readFileSync("migrations/20261107_gym_vis_app_role_rls.sql", "utf8"));
+        for (const file of ["20261109_x904_public_pin_review_insert_rls.sql", "20261116_x904_paid_guest_pin_recovery_rls.sql", "20261116_x904_self_pin_insert_rls.sql"]) {
+          await pool.query(readFileSync("migrations/" + file, "utf8"));
+        }
+        const { rows } = await pool.query("SELECT ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)::text AS day");
+        matrixDay = String(rows[0].day) < "2026-11-18" ? "2026-11-18" : String(rows[0].day);
+        // Fake application time stays on a future disposable booking day; real
+        // PostgreSQL now() defaults precede simulated device/scan evidence.
+        // This does not change a production clock or rewrite business rows.
+        matrixStart = new Date(matrixDay + "T08:00:00+07:00");
+        oldOnlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+        oldFastWake = process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+        oldCheckin = process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED;
+        previousTokens = { staff: token, finance: adminToken };
+      });
+      beforeEach(async () => {
+        jest.setSystemTime(matrixStart);
+        const { createToken } = await import("../../lib/auth.js");
+        token = createToken(302, "staff");
+        adminToken = createToken(303, "finance");
+        matrixAdminToken = createToken(306, "admin");
+        delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+        process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = "false";
+        process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = "true";
+        await pool.query(`TRUNCATE sport_center.gym_x904_lan_logs,
+          sport_center.gym_x904_verification_evidence,sport_center.gym_x904_raw_events,
+          sport_center.gym_x904_lan_users;
+          INSERT INTO sport_center.gym_x904_lan_users VALUES
+            ('TDBD234200545','700',343,'TEST AUTO SUSPEND',0),
+            ('TDBD234200545','78',338,'VIS 001',0)`);
+        await matrixSnapshot(new Date(matrixStart.getTime() - 1000));
+      });
+      afterEach(() => {
+        if (previousTokens) { token = previousTokens.staff; adminToken = previousTokens.finance; }
+        for (const [key, value] of [
+          ["GYM_X904_NONMEMBER_ONLY_PIN", oldOnlyPin],
+          ["GYM_X904_PAID_GYM_FAST_WAKE_ENABLED", oldFastWake],
+          ["GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED", oldCheckin],
+        ] as const) {
+          if (value === undefined) delete process.env[key]; else process.env[key] = value;
+        }
+      });
+      afterAll(async () => {
+        await pool.query("DROP TABLE sport_center.gym_vis_card_reservations");
+        await pool.query("ALTER TABLE sport_center.gym_vis_card_reservations_focused_fixture RENAME TO gym_vis_card_reservations");
+      });
+      async function matrixSnapshot(at: Date, activePin = "", group = 2, nameOverride?: string) {
+        const { rows } = await pool.query("SELECT user_pin,display_name,device_role FROM sport_center.gym_x904_lan_users ORDER BY user_pin");
+        const users = rows.map(row => ({
+          pin: String(row.user_pin), name: String(row.user_pin) === activePin && nameOverride ? nameOverride : row.display_name,
+          role: Number(row.device_role), group: String(row.user_pin) === activePin ? group : 2, enabled: true,
+        }));
+        await pool.query("INSERT INTO sport_center.gym_x904_access_snapshots(device_serial,observed_at,user_count,users) VALUES('TDBD234200545',$1,$2,$3)", [at, users.length, JSON.stringify(users)]);
+      }
+      async function matrixBooking(id: number) {
+        return (await pool.query("SELECT * FROM sport_center.sport_bookings WHERE id=$1", [id])).rows[0];
+      }
+      async function matrixConfirm(id: number) {
+        const p = await payment(id);
+        const response = await request.patch("/api/payments/" + p.id)
+          .set("Authorization", "Bearer " + adminToken).send({ status: "confirmed" });
+        expect({ status: response.status, error: response.body.error }).toEqual({ status: 200, error: undefined });
+        return response;
+      }
+      async function matrixReadAccess(id: number) {
+        const before = await counts();
+        const beforeCommands = await commands();
+        const response = await request.get(`/api/bookings/${id}/x904-paid-access`)
+          .set("Authorization", "Bearer " + adminToken);
+        expect({ status: response.status, error: response.body.error }).toEqual({ status: 200, error: undefined });
+        expect(await counts()).toEqual(before);
+        expect(await commands()).toEqual(beforeCommands);
+        return response.body;
+      }
+      async function matrixCheckout(s: MatrixIdentity) {
+        let response: any;
+        if (s.source === "admin") {
+          response = await request.post("/api/bookings").set("Authorization", "Bearer " + matrixAdminToken).send({
+            customerName: s.identity === "pin" ? s.name : "MATRIX ADMIN VIS GUEST",
+            customerPhone: "628111222333", customerId: null, facilityId: 6,
+            bookingDate: matrixDay, startTime: "08:00", durationHours: 1, numberOfPeople: 1,
+            source: "admin", payerType: "personal", adminPaymentChoice: "unpaid",
+            x904IdentityType: s.identity, x904IdentityValue: s.identity === "pin" ? s.pin : "VIS001",
+            ...(s.identity === "card" ? { x904VisitorName: "MATRIX ADMIN VIS GUEST" } : {}),
+          });
+          expect({ status: response.status, error: response.body.error }).toEqual({ status: 201, error: undefined });
+          const uploaded = await request.post("/api/payments").set("Authorization", "Bearer " + adminToken).send({
+            bookingId: response.body.id, amount: 30000, proofUrl: "https://isolated.invalid/payment-proof.jpeg",
+            paymentMethod: "QRIS", paymentProvider: "mandiri_direct",
+          });
+          expect({ status: uploaded.status, error: uploaded.body.error }).toEqual({ status: 201, error: undefined });
+        } else {
+          response = await submit(true, matrixDay,
+            s.identity === "pin" ? s.name : "MATRIX PUBLIC VIS GUEST",
+            s.identity === "pin" ? s.pin : "", false);
+          expect({ status: response.status, error: response.body.error }).toEqual({ status: 201, error: undefined });
+        }
+        const id = Number(response.body.id);
+        expect(await matrixBooking(id)).toMatchObject({ source: s.source, booking_date: matrixDay });
+        await tick(matrixStart);
+        expect(await commands()).toHaveLength(0); // Receipt/OCR is not confirmed money.
+        await matrixConfirm(id);
+        return id;
+      }
+      async function matrixLifecycle(id: number, s: MatrixIdentity, replayConfirmation = false) {
+        const pay = await payment(id);
+        const original = await grant(id);
+        expect(original).toMatchObject({
+          identity_type: s.identity, user_pin: s.pin, device_uid: s.uid,
+          verified_name: s.name, payment_id: pay.id, verification_state: "verified", access_state: "pending",
+        });
+        expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 1 });
+        expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "pending", action: "wait" } });
+        if (replayConfirmation) {
+          for (let i = 0; i < 2; i++) {
+            const replay = await matrixConfirm(id);
+            expect(replay.body.gymAccess).toMatchObject({ state: "pending", action: "wait" });
+            expect(replay.body.visCard?.state).not.toBe("needs_review");
+            expect((await grant(id)).access_id).toBe(original.access_id);
+          }
+        }
+        await matrixSnapshot(new Date(matrixStart.getTime() + 1000));
+        await tick(new Date(matrixStart.getTime() + 2000));
+        await tick(new Date(matrixStart.getTime() + 2000));
+        const [activate] = await commands();
+        expect(await commands()).toHaveLength(1);
+        expect(activate).toMatchObject({ user_pin: s.pin, command_type: "ACTIVATE_USER", state: "queued" });
+        expect(activate.payload).toMatchObject({ accessId: Number(original.access_id), expectedUid: s.uid });
+        expect((await grant(id)).access_state).toBe("pending");
+        const ackAt = new Date(matrixStart.getTime() + 10_000);
+        // External device boundary only: emulate its completed ACK and later
+        // full snapshot; never set access_state/activated_at in test SQL.
+        await pool.query("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$2,result=$3 WHERE command_id=$1",
+          [activate.command_id, ackAt, JSON.stringify({ readBackConfirmed: true, deviceUid: replayConfirmation ? 999 : s.uid, afterGroup: 1 })]);
+        await tick(new Date(ackAt.getTime() + 1000));
+        expect((await grant(id)).access_state).not.toBe("active");
+        await matrixSnapshot(new Date(ackAt.getTime() + 2000), s.pin, 1);
+        await tick(new Date(ackAt.getTime() + 3000));
+        if (replayConfirmation) {
+          expect((await grant(id)).access_state).not.toBe("active");
+          expect(await commands()).toHaveLength(1);
+          // Repair only the simulated device ACK, never the application grant.
+          await pool.query("UPDATE sport_center.x904_user_commands SET result=$2 WHERE command_id=$1",
+            [activate.command_id, JSON.stringify({ readBackConfirmed: true, deviceUid: s.uid, afterGroup: 1 })]);
+          await tick(new Date(ackAt.getTime() + 4000));
+        }
+        jest.setSystemTime(new Date(ackAt.getTime() + 5000));
+        expect(await grant(id)).toMatchObject({ access_state: "active", activated_at: ackAt });
+        expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "active", action: "none" } });
+        if (replayConfirmation) {
+          for (let i = 0; i < 2; i++) {
+            const replay = await matrixConfirm(id);
+            expect(replay.body.gymAccess).toMatchObject({ state: "active", action: "none" });
+            expect(replay.body.visCard?.state).not.toBe("needs_review");
+          }
+        }
+        if (s.source === "gym_public_guest" && s.identity === "card") {
+          const reservation = (await pool.query("SELECT * FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1", [id])).rows[0];
+          expect(reservation).toMatchObject({ state: "reserved", collected_at: null, payment_id: pay.id, user_pin: s.pin });
+          const booked = await matrixBooking(id);
+          const handover = await request.post(`/api/admin/wa-bookings/${booked.order_number}/collect-vis`)
+            .set("Authorization", "Bearer " + matrixAdminToken).send({ physicalCardHandedOver: true });
+          expect({ status: handover.status, error: handover.body.error }).toEqual({ status: 200, error: undefined });
+          expect(handover.body).toMatchObject({ state: "collected", cardCode: "VIS001" });
+        }
+        const { completeBooking } = await import("../../lib/bookingLifecycle.js");
+        let completedAt = new Date(matrixDay + "T09:01:00+07:00");
+        // The existing Admin Gym route stores openTime plus one hour;
+        // public checkout stores its requested 08:00–09:00 display slot.
+        expect((await matrixBooking(id)).end_time).toBe(s.source === "admin" ? "07:00" : "09:00");
+        jest.setSystemTime(completedAt);
+        const earlyCompletion = await completeBooking(id, { userName: "isolated scheduler", userRole: "system" }, completedAt);
+        if (s.source === "admin") {
+          // The existing automatic close without attendance is public-Gym only.
+          // Admin keeps its confirmed state until a real scan (or an explicit
+          // reason); do not fabricate attendance or relax that policy here.
+          expect(earlyCompletion).toEqual({ ok: false, reason: "Booking belum check-in. Gunakan Selesaikan tanpa check-in dengan alasan minimal 12 karakter." });
+          expect(await matrixBooking(id)).toMatchObject({ status: "confirmed", checked_in_at: null, completed_at: null });
+        } else {
+          expect(earlyCompletion).toMatchObject({ ok: true, alreadyCompleted: false, withoutCheckin: true });
+          expect(await completeBooking(id, { userName: "isolated scheduler", userRole: "system" }, completedAt))
+            .toMatchObject({ ok: true, alreadyCompleted: true });
+        }
+        const { reconcileX904MissedNonmemberBookingCheckins } = await import("../../services/x904MissedCheckinReconcile.js");
+        const scanAt = new Date(matrixDay + "T19:10:00+07:00");
+        const evaluation = new Date(scanAt.getTime() + 60_000);
+        jest.setSystemTime(evaluation);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
+        const eventIndex = 700;
+        const eventId = "full-route-" + s.source + "-" + s.identity + "-" + id;
+        const deviceTime = matrixDay + " 19:10:00";
+        const raw = Buffer.alloc(40); raw.writeUInt16LE(eventIndex + 1, 0); raw.write(s.pin, 2, "ascii");
+        raw[26] = 15; raw[31] = 255;
+        await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545',$1,$2,$3,$4,$5,$6)",
+          [s.pin, eventIndex + 1, deviceTime, eventId, eventIndex, evaluation]);
+        await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence(device_serial,event_index,user_pin,source_event_id,capture_source,evidence_status,verification_code,raw_hex) VALUES('TDBD234200545',$1,$2,$3,'trusted_vmsc_ingress','protocol_verified',15,$4)",
+          [eventIndex, s.pin, eventId, raw.toString("hex")]);
+        await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES($1,'TDBD234200545',$2,$3,255,15)", [eventId, s.pin, deviceTime]);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(1);
+        expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
+        expect(await matrixBooking(id)).toMatchObject({ source: s.source, status: s.source === "admin" ? "confirmed" : "completed", checked_in_at: scanAt, completed_at: s.source === "admin" ? null : completedAt });
+        if (s.source === "admin") {
+          completedAt = evaluation;
+          expect(await completeBooking(id, { userName: "isolated scheduler", userRole: "system" }, completedAt))
+            .toMatchObject({ ok: true, alreadyCompleted: false, withoutCheckin: false });
+          expect(await completeBooking(id, { userName: "isolated scheduler", userRole: "system" }, completedAt))
+            .toMatchObject({ ok: true, alreadyCompleted: true });
+        }
+        expect(await matrixBooking(id)).toMatchObject({ source: s.source, status: "completed", checked_in_at: scanAt, completed_at: completedAt });
+        expect((await pool.query("SELECT count(*)::int n FROM sport_center.booking_history WHERE booking_id=$1 AND note LIKE 'Check-in%'", [id])).rows[0].n).toBe(1);
+        expect((await pool.query("SELECT count(*)::int n FROM sport_center.booking_history WHERE booking_id=$1 AND to_status='completed' AND note NOT LIKE 'Check-in%'", [id])).rows[0].n).toBe(1);
+        const expiry = new Date(matrixDay + "T23:00:00+07:00");
+        expect(new Date((await grant(id)).expires_at)).toEqual(expiry);
+        await matrixSnapshot(new Date(expiry.getTime() + 1000), s.pin, 1);
+        await tick(new Date(expiry.getTime() + 2000));
+        await tick(new Date(expiry.getTime() + 2000));
+        const all = await commands();
+        expect(all).toHaveLength(2);
+        const suspend = all.find((command: any) => command.command_type === "SUSPEND_USER");
+        expect(suspend).toBeDefined();
+        expect(suspend.payload).toMatchObject({ accessId: Number(original.access_id), expectedUid: s.uid });
+        await pool.query("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$2,result=$3 WHERE command_id=$1",
+          [suspend.command_id, new Date(expiry.getTime() + 3000), JSON.stringify({ readBackConfirmed: true, deviceUid: s.uid, afterGroup: 2 })]);
+        await matrixSnapshot(new Date(expiry.getTime() + 4000), s.pin, 2);
+        await tick(new Date(expiry.getTime() + 5000));
+        await tick(new Date(expiry.getTime() + 6000));
+        expect(await grant(id)).toMatchObject({ access_id: original.access_id, access_state: "expired", payment_id: pay.id, identity_type: s.identity, user_pin: s.pin, device_uid: s.uid });
+        expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 1 });
+        expect(await commands()).toHaveLength(2);
+        jest.setSystemTime(new Date(expiry.getTime() + 6000));
+        expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "expired", action: "none" } });
+      }
+      test.each(variants)("full real route $source $identity: booking to payment, ACK, daily check-in and expiry without rewriting grant state", async s => {
+        const id = await matrixCheckout(s);
+        await matrixLifecycle(id, s);
+      });
+      test("mid-process newly registered public VIS guest retains payment and recovers through existing staff PIN approval", async () => {
+        const visitor = "MATRIX NEWLY REGISTERED VISITOR";
+        const response = await submit(true, matrixDay, visitor, "", false);
+        expect(response.status).toBe(201);
+        const id = Number(response.body.id);
+        expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 0 });
+        // An independent on-device enrollment and approved registry appears
+        // after real checkout. No booking/payment/grant identity is rewritten.
+        await pool.query("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','701',344,$1,0)", [visitor]);
+        await pool.query("INSERT INTO sport_center.x904_verified_nonmember_identities(device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at) VALUES('TDBD234200545','701',344,$1,'verified','isolated-enrollment-fixture',now())", [visitor]);
+        await matrixSnapshot(new Date(matrixStart.getTime() - 500));
+        const confirmed = await matrixConfirm(id);
+        expect(confirmed.body.gymAccess).toMatchObject({ state: "identity_review_required", action: "verify_pin_identity" });
+        expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "identity_review_required", action: "verify_pin_identity" } });
+        const { createToken } = await import("../../lib/auth.js");
+        expect((await request.get(`/api/bookings/${id}/x904-paid-access`)).status).toBe(401);
+        for (const [actorId, role, expectedStatus] of [[305, "customer", 403], [304, "staff", 401], [305, "staff", 401]] as const) {
+          const denied = await request.get(`/api/bookings/${id}/x904-paid-access`)
+            .set("Authorization", "Bearer " + createToken(actorId, role));
+          expect(denied.status).toBe(expectedStatus);
+        }
+        const originalPayment = await payment(id);
+        expect(originalPayment.status).toBe("confirmed");
+        expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 0 });
+        expect(await commands()).toHaveLength(0);
+        await matrixSnapshot(new Date(matrixStart.getTime() - 200), "701", 2, "WRONG SNAPSHOT PERSON");
+        expect((await approve(id)).status).toBe(409);
+        expect(await grant(id)).toBeUndefined();
+        expect(await commands()).toHaveLength(0);
+        await matrixSnapshot(new Date(matrixStart.getTime() - 100));
+        const expectedIdentity = { expectedUserPin: "701", expectedDeviceUid: 344, expectedDisplayName: visitor };
+        // Finance may read the result of its payment confirmation, but its
+        // authority never becomes permission to attest a customer's PIN.
+        const financeApproval = await request.post(`/api/bookings/${id}/x904-guest-pin-approve`)
+          .set("Authorization", "Bearer " + adminToken).send({ ...attest, ...expectedIdentity });
+        expect(financeApproval.status).toBe(403);
+        expect(await grant(id)).toBeUndefined();
+        const attestIdentity = (expected: Record<string, unknown>) => request
+          .post(`/api/bookings/${id}/x904-guest-pin-approve`)
+          .set("Authorization", "Bearer " + token).send({ ...attest, ...expected });
+        expect((await attestIdentity({ expectedUserPin: "701" })).status).toBe(400);
+        for (const stale of [
+          { ...expectedIdentity, expectedUserPin: "702" },
+          { ...expectedIdentity, expectedDeviceUid: 999 },
+          { ...expectedIdentity, expectedDisplayName: "STALE DISPLAYED IDENTITY" },
+        ]) {
+          const denied = await attestIdentity(stale);
+          expect(denied.status).toBe(409);
+          expect(denied.body.code).toBe("identity_changed_since_review");
+          expect(await grant(id)).toBeUndefined();
+          expect(await commands()).toHaveLength(0);
+        }
+        expect((await attestIdentity(expectedIdentity)).status).toBe(200);
+        const approvedGrant = await grant(id);
+        // A later independent device inventory change must invalidate the
+        // old review even when its grant/audit already exists.
+        await pool.query("UPDATE sport_center.gym_x904_lan_users SET device_uid=999 WHERE user_pin='701'");
+        const staleReplay = await attestIdentity(expectedIdentity);
+        expect(staleReplay.status).toBe(409);
+        expect(staleReplay.body.code).toBe("identity_changed_since_review");
+        expect(await grant(id)).toEqual(approvedGrant);
+        expect(await commands()).toHaveLength(0);
+        expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "identity_review_required", action: "review" } });
+        expect((await matrixConfirm(id)).body.gymAccess).toMatchObject({ state: "identity_review_required", action: "review" });
+        expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 1 });
+        await pool.query("UPDATE sport_center.gym_x904_lan_users SET device_uid=344 WHERE user_pin='701'");
+        await matrixSnapshot(new Date(matrixStart.getTime() - 100));
+        expect((await attestIdentity(expectedIdentity)).status).toBe(200);
+        expect((await payment(id)).id).toBe(originalPayment.id);
+        const identity: MatrixIdentity = { source: "gym_public_guest", identity: "pin", pin: "701", uid: 344, name: visitor };
+        await matrixLifecycle(id, identity, true);
+      });
     });
 
     test("real PostgreSQL RLS allows only matching signed X904 evidence writes", async()=>{
