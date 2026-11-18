@@ -466,6 +466,14 @@ export function detectIntent(msg: string): AiIntent {
   // Promo / discount
   if (/\b(promo|diskon|voucher|kode promo|potongan|cashback|promo apa|ada diskon|ada promo|kupon|coupon|hemat|gratis|promo hari ini|diskon berapa)\b/.test(lower)) return "promo_inquiry";
 
+  // Casual inquiries about people playing are schedule questions, not booking
+  // commitments. Keep these on the AI's DB-grounded availability path; do not
+  // start the structured booking flow or claim any players are confirmed.
+  if (
+    /\b(?:ada|apakah|udah|sudah)\s+(?:(?:orang|yang|teman|tim|grup)\s+)*(?:main|bermain|latihan|sparring)\s+(?:basket|basketball|bola basket|badminton|futsal|voli|volley|tenis)\b/.test(lower) ||
+    /\b(?:ada\s+yang|siapa(?:\s+aja)?|rame\s+gak|ramai\s+gak)\b.*\b(?:main|bermain|latihan)\b.*\b(?:basket|basketball|bola basket|badminton|futsal|voli|volley|tenis)\b/.test(lower)
+  ) return "availability_check";
+
   // Availability check — accept cek/check/chek and natural slot/schedule wording.
   if (
     /\b(slot|jadwal|kosong|tersedia|available|ketersediaan|ada slot|jam berapa bisa|kapan bisa|masih ada|masih bisa|ada yang kosong|sudah penuh|penuh gak|penuh ga|cek slot|check slot|chek slot|cek ketersediaan|check ketersediaan|chek ketersediaan|lihat slot|pilih jam|jam mana|hari mana)\b/.test(lower) ||
