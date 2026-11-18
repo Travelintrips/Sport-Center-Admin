@@ -19,6 +19,25 @@ describe("Mina Gym & Membership intent routing", () => {
     expect(detectIntent(message)).toBe(expectedIntent);
   });
 
+  it.each([
+    "Nanti sore ada yang main basket min?",
+    "Ada yang main basket nanti sore?",
+    "Besok ada yang main futsal?",
+    "Hari ini ada yang main badminton?",
+    "Sore ini ada orang main voli?",
+    "Ada tim latihan basket malam ini?",
+  ])("recognizes casual playing inquiries as schedule questions: %s", (message) => {
+    expect(detectIntent(message)).toBe("availability_check");
+  });
+
+  it.each([
+    "Saya mau main basket besok",
+    "Mau booking lapangan basket",
+    "Booking basket sekarang",
+  ])("keeps explicit booking intent unchanged: %s", (message) => {
+    expect(detectIntent(message)).toBe("booking_intent");
+  });
+
   it("builds a deterministic web booking URL with the canonical parameters", () => {
     expect(
       buildCanonicalBookingUrl("https://sport-center.replit.dev/", {
