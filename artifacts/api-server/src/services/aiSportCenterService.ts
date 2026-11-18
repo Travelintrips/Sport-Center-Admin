@@ -466,13 +466,21 @@ export function detectIntent(msg: string): AiIntent {
   // Promo / discount
   if (/\b(promo|diskon|voucher|kode promo|potongan|cashback|promo apa|ada diskon|ada promo|kupon|coupon|hemat|gratis|promo hari ini|diskon berapa)\b/.test(lower)) return "promo_inquiry";
 
-  // Casual inquiries about people playing are schedule questions, not booking
-  // commitments. Keep these on the AI's DB-grounded availability path; do not
-  // start the structured booking flow or claim any players are confirmed.
-  if (
-    /\b(?:ada|apakah|udah|sudah)\s+(?:(?:orang|yang|teman|tim|grup)\s+)*(?:main|bermain|latihan|sparring)\s+(?:basket|basketball|bola basket|badminton|futsal|voli|volley|tenis)\b/.test(lower) ||
-    /\b(?:ada\s+yang|siapa(?:\s+aja)?|rame\s+gak|ramai\s+gak)\b.*\b(?:main|bermain|latihan)\b.*\b(?:basket|basketball|bola basket|badminton|futsal|voli|volley|tenis)\b/.test(lower)
-  ) return "availability_check";
+  // Treat casual questions about people playing or an occupied court as schedule
+  // inquiries, irrespective of Indonesian word order ("ada yang main basket"
+  // or "basket ada yg main"). This is informational, never a booking action.
+  const conversational = lower
+    .replace(/\byg\b/g, "yang")
+    .replace(/\b(?:ga|gak|gk|ngga|nggak)\b/g, "tidak")
+    .replace(/\b(?:ntar|entar)\b/g, "nanti");
+  const mentionsSport = /\b(?:basket(?:ball)?|bola\s+basket|badminton|bulu\s*tangkis|futsal|voli|volley|volleyball|tenis|tennis|biliar|billiard)\b/.test(conversational);
+  const asksAboutPlayers = /\b(?:ada|siapa|rame|ramai)\b/.test(conversational) &&
+    /\b(?:main|maen|bermain|latihan|sparring)\b/.test(conversational);
+  const asksAboutCourtUse = /\b(?:dipakai|terpakai|kepakai|rame|ramai)\b/.test(conversational);
+  const explicitlyWantsToBook = /\b(?:booking|boking|book|pesan|reservasi|sewa|mau\s+main|ingin\s+main|pengen\s+main)\b/.test(conversational);
+  if (mentionsSport && !explicitlyWantsToBook && (asksAboutPlayers || asksAboutCourtUse)) {
+    return "availability_check";
+  }
 
   // Availability check — accept cek/check/chek and natural slot/schedule wording.
   if (
