@@ -57,7 +57,7 @@ describe("Mina Gym & Membership intent routing", () => {
     ["Harga basket berapa?", "price_inquiry"],
     ["Ada promo basket?", "promo_inquiry"],
     ["Jam buka lapangan basket?", "operating_hours"],
-    ["Basket itu fasilitas apa?", "general_question"],
+    ["Basket itu fasilitas apa?", "facility_info"],
   ] as const)("does not turn unrelated sports questions into schedule checks: %s", (message, expected) => {
     expect(detectIntent(message)).toBe(expected);
   });
