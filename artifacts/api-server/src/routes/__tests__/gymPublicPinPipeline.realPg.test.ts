@@ -165,7 +165,8 @@ suite(
         (301,'X904 AUTOMATION SERVICE','staff','inactive','system_x904_automation'),
         (302,'TEST OPERATOR','staff','active','test'),(303,'TEST FINANCE','finance','active','test'),
         (304,'TEST DISABLED','staff','inactive','test'),(305,'TEST DEMOTED','customer','active','test'),
-        (306,'TEST BOOKING ADMIN','admin','active','test');`);
+        (306,'TEST BOOKING ADMIN','admin','active','test'),
+        (307,'TEST FIELD BOOKING ADMIN','admin_booking','active','test');`);
       for (const file of [
         "20261031_x904_nonmember_daily_access.sql",
         "20261102_x904_nonmember_verified_activation_clock.sql",
@@ -1509,6 +1510,14 @@ suite(
         jest.setSystemTime(new Date(expiry.getTime() + 6000));
         expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "expired", action: "none" } });
       }
+      test.each([variants[0], variants[1]])("field booking admin: $identity booking, one paid confirmation and complete guarded X904 lifecycle", async s => {
+        const { createToken } = await import("../../lib/auth.js");
+        const fieldAdminToken = createToken(307, "admin_booking");
+        matrixAdminToken = fieldAdminToken;
+        adminToken = fieldAdminToken;
+        const id = await matrixCheckout(s);
+        await matrixLifecycle(id, s);
+      });
       test("two adjacent admin PIN/VIS paid confirmations wake two distinct X904 activation commands without timer or duplicate grant", async () => {
         delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
         const adminPin = variants[0];
