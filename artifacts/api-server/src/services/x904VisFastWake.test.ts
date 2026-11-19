@@ -19,16 +19,16 @@ describe("VIS001–VIS006 fast wake uses verified, committed access only", () =>
     expect(wake).toHaveBeenCalledTimes(1);
     expect(wake).toHaveBeenCalledWith(true);
   });
-  test("admin card wake does not read database when feature is off", async () => {
-    delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+  test("admin card wake does not read database when explicitly disabled", async () => {
+    process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED="false";
     const store={execute:jest.fn(async()=>({rows:[{exists:true}]}))};
     const wake=jest.fn((value:boolean)=>value);
     expect(await wakeX904AdminVisAfterPayment(1,2,store as any,wake)).toBe(false);
     expect(store.execute).not.toHaveBeenCalled();
     expect(wake).not.toHaveBeenCalled();
   });
-  test("legacy admin VIS selector explicitly covers all six cards with confirmed payment", async () => {
-    process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED="true";
+  test("legacy admin VIS selector covers all six cards with confirmed payment by default", async () => {
+    delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
     let rendered="";
     const dialect=new PgDialect();
     const store={execute:jest.fn(async (statement:any)=>{
@@ -51,8 +51,8 @@ describe("VIS001–VIS006 fast wake uses verified, committed access only", () =>
     expect(await wakeX904AdminVisAfterPayment(1,0,store as any)).toBe(false);
     expect(store.execute).not.toHaveBeenCalled();
   });
-  test("verified pending card match triggers one wake, absent match triggers none", async () => {
-    process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED="true";
+  test("verified pending admin card match triggers one wake by default, absent match none", async () => {
+    delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
     const store={execute:jest.fn(async()=>({rows:[{exists:true}]}))};
     const wake=jest.fn((value:boolean)=>value);
     expect(await wakeX904AdminVisAfterPayment(100,200,store as any,wake)).toBe(true);
