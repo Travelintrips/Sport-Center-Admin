@@ -10,6 +10,8 @@ const DEVICE = "TDBD234200545";
 const FRESH_SNAPSHOT_MS = 5 * 60_000;
 const RETRY_DELAY_MS = 60_000;
 const MAX_ATTEMPTS = 3;
+// Only suspend gets more bounded DEVICE_BUSY retries. Activation remains at 3.
+const MAX_SUSPEND_ATTEMPTS = 6;
 
 export function startX904NonmemberAccessWorker(): void {
   const enabled = process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true";
@@ -505,6 +507,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           Number.isFinite(expiry.getTime()) && now.getTime() < expiry.getTime()));
       const targetGroup = shouldBeActive ? 1 : 2;
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
+      const maxCommandAttempts = commandType === "SUSPEND_USER" ? MAX_SUSPEND_ATTEMPTS : MAX_ATTEMPTS;
       // A cancelled payment without verified activation must never suspend a
       // pre-existing Group 1 user (including a member sharing this PIN).
       if (!shouldBeActive && a.activated_at == null) {
@@ -663,7 +666,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           const errorCode = String((last.result as any)?.errorCode ?? "");
           const attempts = Number((last as any).attempts ?? 1);
           if (errorCode !== "DEVICE_BUSY" || (last.result as any)?.readBackConfirmed !== false ||
-              !last.completed_at || attempts >= MAX_ATTEMPTS ||
+              !last.completed_at || attempts >= maxCommandAttempts ||
               now.getTime() - new Date(String(last.completed_at)).getTime() < RETRY_DELAY_MS ||
               observedAt.getTime() <= new Date(String(last.completed_at)).getTime()) {
             await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
@@ -709,7 +712,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         WHERE device_serial=${DEVICE} AND command_type=${commandType}
           AND payload->>'source'='AUTO_NONMEMBER_GYM_12H'
           AND payload->>'accessId'=${String(a.access_id)}`)).rows[0]?.n ?? 0);
-      if (priorCount >= MAX_ATTEMPTS) {
+      if (priorCount >= maxCommandAttempts) {
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required' WHERE access_id=${Number(a.access_id)}`);
         return;
