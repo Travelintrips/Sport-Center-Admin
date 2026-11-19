@@ -27,7 +27,10 @@ export async function wakeX904AdminVisAfterPayment(
   store: VisReadStore = db,
   wake: (eligible: boolean) => boolean = wakeX904PaidGymAfterConfirmation,
 ): Promise<boolean> {
-  if (process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED !== "true" ||
+  // Mirror the paid-Gym post-commit wake default: enabled unless explicitly
+  // disabled. Admin VIS still requires verified, pending grant and confirmed
+  // payment; this does not bypass the existing machine ACK worker.
+  if (process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED === "false" ||
       !Number.isSafeInteger(bookingId) || bookingId <= 0 ||
       !Number.isSafeInteger(paymentId) || paymentId <= 0) return false;
   const found = await store.execute(sql`
