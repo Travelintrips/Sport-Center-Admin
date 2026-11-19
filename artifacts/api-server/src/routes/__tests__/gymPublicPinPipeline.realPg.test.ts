@@ -165,7 +165,8 @@ suite(
         (301,'X904 AUTOMATION SERVICE','staff','inactive','system_x904_automation'),
         (302,'TEST OPERATOR','staff','active','test'),(303,'TEST FINANCE','finance','active','test'),
         (304,'TEST DISABLED','staff','inactive','test'),(305,'TEST DEMOTED','customer','active','test'),
-        (306,'TEST BOOKING ADMIN','admin','active','test');`);
+        (306,'TEST BOOKING ADMIN','admin','active','test'),
+        (307,'TEST FIELD BOOKING ADMIN','admin_booking','active','test');`);
       for (const file of [
         "20261031_x904_nonmember_daily_access.sql",
         "20261102_x904_nonmember_verified_activation_clock.sql",
@@ -799,7 +800,8 @@ suite(
       try {
         const id = await checkout();
         await snapshot(new Date(clock.getTime() - 1000), 2);
-        process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = "true";
+        delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+        const wakeStart = performance.now();
         await confirm(id);
         // No test call to tick(): the committed payment calls the same existing
         // worker asynchronously. Never fake device ACK or grant active here.
@@ -809,6 +811,9 @@ suite(
           if (queued.length) break;
           await new Promise(resolve => setTimeout(resolve, 30));
         }
+        const wakeLatencyMs = performance.now() - wakeStart;
+        console.info("ISOLATED_POSTCOMMIT_WAKE_MS", Math.round(wakeLatencyMs));
+        expect(wakeLatencyMs).toBeLessThan(5000);
         expect(queued).toHaveLength(1);
         expect(queued[0]).toMatchObject({
           user_pin: "700", command_type: "ACTIVATE_USER", state: "queued",
@@ -1347,7 +1352,7 @@ suite(
         expect(await commands()).toEqual(beforeCommands);
         return response.body;
       }
-      async function matrixCheckout(s: MatrixIdentity) {
+      async function matrixCheckout(s: MatrixIdentity, confirmPayment = true) {
         let response: any;
         if (s.source === "admin") {
           response = await request.post("/api/bookings").set("Authorization", "Bearer " + matrixAdminToken).send({
@@ -1374,7 +1379,7 @@ suite(
         expect(await matrixBooking(id)).toMatchObject({ source: s.source, booking_date: matrixDay });
         await tick(matrixStart);
         expect(await commands()).toHaveLength(0); // Receipt/OCR is not confirmed money.
-        await matrixConfirm(id);
+        if (confirmPayment) await matrixConfirm(id);
         return id;
       }
       async function matrixLifecycle(id: number, s: MatrixIdentity, replayConfirmation = false) {
@@ -1505,6 +1510,41 @@ suite(
         jest.setSystemTime(new Date(expiry.getTime() + 6000));
         expect(await matrixReadAccess(id)).toMatchObject({ paymentConfirmed: true, gymAccess: { state: "expired", action: "none" } });
       }
+      test.each([variants[0], variants[1]])("field booking admin: $identity booking, one paid confirmation and complete guarded X904 lifecycle", async s => {
+        const { createToken } = await import("../../lib/auth.js");
+        const fieldAdminToken = createToken(307, "admin_booking");
+        matrixAdminToken = fieldAdminToken;
+        adminToken = fieldAdminToken;
+        const id = await matrixCheckout(s);
+        await matrixLifecycle(id, s);
+      });
+      test("two adjacent admin PIN/VIS paid confirmations wake two distinct X904 activation commands without timer or duplicate grant", async () => {
+        delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+        const adminPin = variants[0];
+        const adminCard = variants[1];
+        const pinBookingId = await matrixCheckout(adminPin, false);
+        const cardBookingId = await matrixCheckout(adminCard, false);
+        expect(await counts()).toEqual({ bookings: 2, payments: 2, grants: 2 });
+        await matrixSnapshot(new Date(matrixStart.getTime() - 1000));
+        const started = performance.now();
+        await Promise.all([matrixConfirm(pinBookingId), matrixConfirm(cardBookingId)]);
+        let queued: any[] = [];
+        for (let i = 0; i < 120; i++) {
+          queued = (await commands()).filter((c: any) => c.command_type === "ACTIVATE_USER");
+          if (queued.length >= 2) break;
+          await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        const elapsed = performance.now() - started;
+        console.info("ISOLATED_TWO_BOOKINGS_WAKE_MS", Math.round(elapsed));
+        expect(elapsed).toBeLessThan(5000);
+        expect(queued).toHaveLength(2);
+        expect(new Set(queued.map((c: any) => c.user_pin))).toEqual(new Set([adminPin.pin, adminCard.pin]));
+        expect(new Set(queued.map((c: any) => Number(c.payload.expectedUid)))).toEqual(new Set([adminPin.uid, adminCard.uid]));
+        expect(new Set(queued.map((c: any) => Number(c.payload.accessId))).size).toBe(2);
+        expect(await grant(pinBookingId)).toMatchObject({ access_state: "pending", verification_state: "verified" });
+        expect(await grant(cardBookingId)).toMatchObject({ access_state: "pending", verification_state: "verified" });
+        expect(await counts()).toEqual({ bookings: 2, payments: 2, grants: 2 });
+      });
       test.each(variants)("full real route $source $identity: booking to payment, ACK, daily check-in and expiry without rewriting grant state", async s => {
         const id = await matrixCheckout(s);
         await matrixLifecycle(id, s);
