@@ -37,15 +37,7 @@ export async function wakeX904AdminVisAfterPayment(
     WHERE a.booking_id=${bookingId} AND a.payment_id=${paymentId}
       AND a.device_serial='TDBD234200545'
       AND ((a.identity_type='card' AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006'))
-        OR (a.identity_type='pin' AND a.user_pin ~ '^[0-9]+
-      AND a.verification_state='verified' AND a.access_state='pending'
-      AND a.activated_at IS NULL
-      AND b.source='admin' AND b.status='confirmed'
-      AND p.status='confirmed' AND p.confirmed_at IS NOT NULL
-    LIMIT 1`);
-  return found.rows.length === 1 ? wake(true) : false;
-}
- AND length(a.user_pin) BETWEEN 1 AND 8))
+        OR (a.identity_type='pin' AND a.user_pin ~ '^[0-9]+$' AND length(a.user_pin) BETWEEN 1 AND 8))
       AND a.verification_state='verified' AND a.access_state='pending'
       AND a.activated_at IS NULL
       AND b.source='admin' AND b.status='confirmed'
