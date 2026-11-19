@@ -19,7 +19,10 @@ export function wakeX904PaidGymAfterConfirmation(
     await processX904NonmemberDailyAccess();
   },
 ): boolean {
-  if (process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED !== "true" ||
+  // Enable the already-tested post-commit wake by default for eligible paid Gym
+  // confirmations; explicit false remains an immediate operational kill switch.
+  // The normal 60-second worker and all physical ACK/read-back checks are intact.
+  if (process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED === "false" ||
       !eligibleCommittedPayment) return false;
   if (running) {
     // Coalesce concurrent confirmations. Avoid losing a second paid guest when
