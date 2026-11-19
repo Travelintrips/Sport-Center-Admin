@@ -1,6 +1,7 @@
 import { db } from "@workspace/db";
 import { recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
 import { auditPaidGymEntitlementConsistency } from "./x904PaidGymConsistencyAudit";
+import { processPaidVisRecoveryCycle } from "./x904PaidVisRecoveryCycle";
 import { sql } from "drizzle-orm";
 import { isX904AutoSuspendExempt, x904NonmemberOpeningHours, x904NonmemberEffectiveExpiry, x904NonmemberSameWibDate } from "./x904NonmemberAccessPolicy";
 import { x904AutomaticCommandKey } from "./x904AutomationDecision";
@@ -32,11 +33,12 @@ export function startX904NonmemberAccessWorker(): void {
     if (running) return;
     running = true;
     try {
-      // Paid grants must not be held behind VIS inventory recovery.
-      await processX904NonmemberDailyAccess();
-      await recoverUnallocatedPaidGymVis().catch(error =>
-        console.warn("[gym-vis] recovery query unavailable; paid-access worker already ran",
-          error instanceof Error ? error.message : String(error)));
+      // Always process existing grants before recovery; if a new paid VIS was
+      // allocated, give it one additional guarded pass in this same tick.
+      await processPaidVisRecoveryCycle(
+        () => processX904NonmemberDailyAccess(),
+        () => recoverUnallocatedPaidGymVis(),
+      );
       await auditPaidGymEntitlementConsistency(db).catch(error =>
         console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
           error instanceof Error ? error.message : String(error)));
