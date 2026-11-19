@@ -17,9 +17,9 @@ export function wakeX904CollectedVisAfterHandover(
   return wake(true);
 }
 
-/** Existing Admin and Admin Lapangan paid GYM grants use either a verified
- * machine PIN or VIS card. This post-commit nudge is read-only; the shared
- * worker still owns device identity, membership, eligibility and ACK checks.
+/** Existing admin VIS grants may already be verified without the newer
+ * reservation/handover workflow. Wake only if a newly confirmed payment is
+ * tied to a verified, pending VIS card grant. No grant/booking writes here.
  */
 export async function wakeX904AdminVisAfterPayment(
   bookingId: number,
@@ -27,9 +27,6 @@ export async function wakeX904AdminVisAfterPayment(
   store: VisReadStore = db,
   wake: (eligible: boolean) => boolean = wakeX904PaidGymAfterConfirmation,
 ): Promise<boolean> {
-  // Mirror the paid-Gym post-commit wake default: enabled unless explicitly
-  // disabled. Admin PIN/VIS still requires a verified, pending grant and
-  // confirmed payment; this does not bypass the existing machine ACK worker.
   if (process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED === "false" ||
       !Number.isSafeInteger(bookingId) || bookingId <= 0 ||
       !Number.isSafeInteger(paymentId) || paymentId <= 0) return false;
@@ -39,9 +36,8 @@ export async function wakeX904AdminVisAfterPayment(
     JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
     WHERE a.booking_id=${bookingId} AND a.payment_id=${paymentId}
       AND a.device_serial='TDBD234200545'
-      AND ((a.identity_type='card'
-            AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006'))
-           OR (a.identity_type='pin' AND a.user_pin ~ '^[0-9]{1,8}
+      AND ((a.identity_type='card' AND a.identity_label IN ('VIS001','VIS002','VIS003','VIS004','VIS005','VIS006'))
+        OR (a.identity_type='pin' AND a.user_pin ~ '^[0-9]+
       AND a.verification_state='verified' AND a.access_state='pending'
       AND a.activated_at IS NULL
       AND b.source='admin' AND b.status='confirmed'
@@ -49,7 +45,7 @@ export async function wakeX904AdminVisAfterPayment(
     LIMIT 1`);
   return found.rows.length === 1 ? wake(true) : false;
 }
-))
+ AND length(a.user_pin) BETWEEN 1 AND 8))
       AND a.verification_state='verified' AND a.access_state='pending'
       AND a.activated_at IS NULL
       AND b.source='admin' AND b.status='confirmed'
