@@ -799,7 +799,8 @@ suite(
       try {
         const id = await checkout();
         await snapshot(new Date(clock.getTime() - 1000), 2);
-        process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = "true";
+        delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+        const wakeStart = performance.now();
         await confirm(id);
         // No test call to tick(): the committed payment calls the same existing
         // worker asynchronously. Never fake device ACK or grant active here.
@@ -809,6 +810,9 @@ suite(
           if (queued.length) break;
           await new Promise(resolve => setTimeout(resolve, 30));
         }
+        const wakeLatencyMs = performance.now() - wakeStart;
+        console.info("ISOLATED_POSTCOMMIT_WAKE_MS", Math.round(wakeLatencyMs));
+        expect(wakeLatencyMs).toBeLessThan(5000);
         expect(queued).toHaveLength(1);
         expect(queued[0]).toMatchObject({
           user_pin: "700", command_type: "ACTIVATE_USER", state: "queued",
