@@ -39,6 +39,32 @@ describe("VIS001–VIS006 fast wake uses verified, committed access only", () =>
     for(const card of ["VIS001","VIS002","VIS003","VIS004","VIS005","VIS006"]) {
       expect(rendered).toContain("'"+card+"'");
     }
+    expect(rendered).toContain("a.identity_type='pin'");
+    expect(rendered).toContain("a.user_pin ~ '^[0-9]{1,8}
+    expect(rendered).toContain("a.access_state='pending'");
+    expect(rendered).toContain("p.status='confirmed'");
+    expect(rendered).toContain("b.status='confirmed'");
+  });
+  test("invalid payment and booking IDs cannot wake a card", async () => {
+    process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED="true";
+    const store={execute:jest.fn(async()=>({rows:[{exists:true}]}))};
+    expect(await wakeX904AdminVisAfterPayment(-1,2,store as any)).toBe(false);
+    expect(await wakeX904AdminVisAfterPayment(1,0,store as any)).toBe(false);
+    expect(store.execute).not.toHaveBeenCalled();
+  });
+  test("verified pending admin card match triggers one wake by default, absent match none", async () => {
+    delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+    const store={execute:jest.fn(async()=>({rows:[{exists:true}]}))};
+    const wake=jest.fn((value:boolean)=>value);
+    expect(await wakeX904AdminVisAfterPayment(100,200,store as any,wake)).toBe(true);
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(store.execute).toHaveBeenCalledTimes(1);
+    store.execute.mockImplementationOnce(async()=>({rows:[]}));
+    expect(await wakeX904AdminVisAfterPayment(100,201,store as any,wake)).toBe(false);
+    expect(wake).toHaveBeenCalledTimes(1);
+  });
+});
+");
     expect(rendered).toContain("a.verification_state='verified'");
     expect(rendered).toContain("a.access_state='pending'");
     expect(rendered).toContain("p.status='confirmed'");
