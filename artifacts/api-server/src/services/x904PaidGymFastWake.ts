@@ -33,15 +33,24 @@ export function wakeX904PaidGymAfterConfirmation(
   running = true;
   void Promise.resolve().then(async () => {
     try {
-      // At most one follow-up cycle to avoid a noisy request storm.
-      await run();
+      // A failed first cycle must not drop a second confirmed payment that
+      // arrived while it was running. Each cycle stays inside the existing
+      // guarded worker; no direct grant or X904 command writes occur here.
+      try {
+        await run();
+      } catch (error) {
+        console.error("[x904-paid-gym-fast-wake] worker wake failed; 60s scheduler remains fallback",
+          error instanceof Error ? error.message : String(error));
+      }
       if (rerunRequested) {
         rerunRequested = false;
-        await run();
+        try {
+          await run();
+        } catch (error) {
+          console.error("[x904-paid-gym-fast-wake] coalesced wake failed; 60s scheduler remains fallback",
+            error instanceof Error ? error.message : String(error));
+        }
       }
-    } catch (error) {
-      console.error("[x904-paid-gym-fast-wake] worker wake failed; 60s scheduler remains fallback",
-        error instanceof Error ? error.message : String(error));
     } finally {
       running = false;
       rerunRequested = false;
