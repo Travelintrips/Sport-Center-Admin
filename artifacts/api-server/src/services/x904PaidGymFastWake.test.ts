@@ -9,15 +9,22 @@ const flush = async () => {
   await new Promise<void>(resolve => setImmediate(resolve));
 };
 
-describe("paid Gym wake is optional and does not touch existing periodic X904 worker", () => {
+describe("paid Gym post-commit wake with opt-out and intact periodic fallback", () => {
   const saved = process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
   afterEach(async () => {
     if (saved === undefined) delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
     else process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = saved;
     await flush();
   });
-  test("disabled by default: no extra worker run", async () => {
+  test("eligible committed payment wakes worker by default", async () => {
     delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+    const run = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    expect(wakeX904PaidGymAfterConfirmation(true, run)).toBe(true);
+    await flush();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+  test("explicit false disables wake without affecting periodic worker", async () => {
+    process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = "false";
     const run = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
     expect(wakeX904PaidGymAfterConfirmation(true, run)).toBe(false);
     await flush();
