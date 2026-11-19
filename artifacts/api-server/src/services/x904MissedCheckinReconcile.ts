@@ -77,8 +77,9 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       ON vis.booking_id=a.booking_id AND vis.payment_id=a.payment_id
       AND vis.device_serial=a.device_serial AND vis.user_pin=a.user_pin
       AND vis.device_uid=a.device_uid AND vis.card_code=a.identity_label
-      AND vis.collected_at IS NOT NULL
-      AND vis.state IN ('collected','returned')
+      AND ((vis.state IN ('collected','returned') AND vis.collected_at IS NOT NULL)
+        OR (vis.state='reserved' AND vis.collected_at IS NULL
+          AND vis.funds_verified_at IS NOT NULL))
     JOIN sport_center.gym_x904_lan_users u
       ON u.device_serial=a.device_serial AND u.user_pin=a.user_pin
       AND u.device_uid=a.device_uid AND u.device_role=0
@@ -152,8 +153,21 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
             OR
             (b.source IN ('gym_public_guest','web')
               AND vis.booking_id IS NOT NULL
-              AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
-                'YYYY-MM-DD HH24:MI:SS'))
+              AND (
+                -- Keep staff-witnessed handover as the standard route.
+                (vis.state IN ('collected','returned') AND vis.collected_at IS NOT NULL
+                  AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
+                    'YYYY-MM-DD HH24:MI:SS'))
+                OR
+                -- For new paid public VIS, a *protocol-verified* physical
+                -- scan proves possession of the reserved card for attendance.
+                -- Never invent a staff handover or accept unsigned LAN logs.
+                (b.source='gym_public_guest' AND b.booking_date>='2026-11-19'
+                  AND vis.state='reserved' AND vis.collected_at IS NULL
+                  AND vis.funds_verified_at IS NOT NULL
+                  AND ${signedEnabled}::boolean
+                  AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+              ))
           )
         )
       )
