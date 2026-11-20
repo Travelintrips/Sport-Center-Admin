@@ -106,7 +106,12 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
       AND (
-        (${signedEnabled}::boolean AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+        (( ${signedEnabled}::boolean
+           OR (${lanGuestEnabled}::boolean
+             AND b.source='gym_public_guest' AND b.booking_date>='2026-11-19'
+             AND a.identity_type='card' AND vis.state='reserved'
+             AND vis.collected_at IS NULL AND vis.funds_verified_at IS NOT NULL))
+          AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
         OR
         (${lanGuestEnabled}::boolean AND ((b.source='gym_public_guest' AND b.booking_date>='2026-11-13') OR (b.source='admin' AND b.booking_date>='2026-11-17'))
           AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
@@ -165,7 +170,10 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
                 (b.source='gym_public_guest' AND b.booking_date>='2026-11-19'
                   AND vis.state='reserved' AND vis.collected_at IS NULL
                   AND vis.funds_verified_at IS NOT NULL
-                  AND ${signedEnabled}::boolean
+                  -- Respect both existing switches: this verified scan may
+                  -- follow either signed or authenticated-LAN check-in mode.
+                  -- Both OFF still denies all automatic reconciliation.
+                  AND ${signedEnabled || lanGuestEnabled}::boolean
                   AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
               ))
           )

@@ -1486,6 +1486,13 @@ suite(
         await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence(device_serial,event_index,user_pin,source_event_id,capture_source,evidence_status,verification_code,raw_hex) VALUES('TDBD234200545',$1,$2,$3,'trusted_vmsc_ingress','protocol_verified',15,$4)",
           [eventIndex, s.pin, eventId, raw.toString("hex")]);
         await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES($1,'TDBD234200545',$2,$3,255,15)", [eventId, s.pin, deviceTime]);
+        if (signedReservedCard) {
+          // Both explicit check-in switches OFF must reject even a valid signed
+          // card scan. Restore the default LAN switch before the success path.
+          process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED = "false";
+          expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
+          delete process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
+        }
         expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(1);
         expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
         expect(await matrixBooking(id)).toMatchObject({ source: s.source, status: s.source === "admin" ? "confirmed" : "completed", checked_in_at: scanAt, completed_at: s.source === "admin" ? null : completedAt });
@@ -1555,9 +1562,13 @@ suite(
         expect(await grant(cardBookingId)).toMatchObject({ access_state: "pending", verification_state: "verified" });
         expect(await counts()).toEqual({ bookings: 2, payments: 2, grants: 2 });
       });
-      test("future public VIS signed scan can check in reserved paid card without faking staff handover", async () => {
+      test("future public VIS signed scan works with default LAN check-in enabled and signed-only flag OFF", async () => {
         const publicCard = variants.find(s => s.source === "gym_public_guest" && s.identity === "card")!;
         const id = await matrixCheckout(publicCard);
+        // This is the actual DEV default: no separate signed-only flag, while
+        // the normal authenticated LAN check-in path remains on by default.
+        process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = "false";
+        delete process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
         await matrixLifecycle(id, publicCard, false, true);
         const reservation = (await pool.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[id])).rows[0];
         expect(reservation).toMatchObject({ state: "reserved", collected_at: null });
