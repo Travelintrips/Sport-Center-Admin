@@ -1275,7 +1275,7 @@ suite(
           await pool.query(`DROP POLICY ${ident(name)} ON sport_center.x904_nonmember_daily_access`);
         }
         await pool.query(readFileSync("migrations/20261107_gym_vis_app_role_rls.sql", "utf8"));
-        for (const file of ["20261109_x904_public_pin_review_insert_rls.sql", "20261116_x904_paid_guest_pin_recovery_rls.sql", "20261116_x904_self_pin_insert_rls.sql"]) {
+        for (const file of ["20261109_x904_public_pin_review_insert_rls.sql", "20261116_x904_paid_guest_pin_recovery_rls.sql", "20261116_x904_self_pin_insert_rls.sql", "20261120_x904_post_enrollment_approved_pin_rls.sql"]) {
           await pool.query(readFileSync("migrations/" + file, "utf8"));
         }
         const { rows } = await pool.query("SELECT ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)::text AS day");
