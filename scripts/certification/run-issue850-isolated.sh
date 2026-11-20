@@ -16,7 +16,12 @@ for attempt in $(seq 1 45); do
   sleep 1
 done
 [[ "$ready" == 1 ]] || { echo "POSTGRES_FIXTURE_NOT_READY"; exit 1; }
-docker exec -u postgres "$name" createdb -U postgres cert_source
+created=0
+for attempt in $(seq 1 45); do
+  if docker exec -u postgres "$name" createdb -U postgres cert_source >/dev/null 2>&1; then created=1; break; fi
+  sleep 1
+done
+[[ "$created" == 1 ]] || { echo "POSTGRES_NOT_ACCEPTING_DATABASE_CREATION"; exit 1; }
 docker exec -i -u postgres "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d cert_source < "$SQL" >/dev/null
 query() {
   docker exec -u postgres "$name" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d "$1" -c "$2"
