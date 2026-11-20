@@ -52,8 +52,8 @@ docker exec -u postgres "$name" sh -c 'pg_dump -U postgres -d cert_source --form
 docker exec -u postgres "$name" createdb -U postgres cert_restored
 docker exec -u postgres "$name" pg_restore -U postgres -d cert_restored --no-owner /tmp/cert_source.dump
 for table in bookings payments devices device_commands journal; do
-  source_sum="$(query cert_source "SELECT coalesce(md5(string_agg(row_to_json(t)::text,'|' ORDER BY id)), '') FROM cert_multisite.$table t")"
-  restored_sum="$(query cert_restored "SELECT coalesce(md5(string_agg(row_to_json(t)::text,'|' ORDER BY id)), '') FROM cert_multisite.$table t")"
+  source_sum="$(query cert_source "SELECT coalesce(md5(string_agg(row_to_json(t)::text,'|' ORDER BY row_to_json(t)::text)), '') FROM cert_multisite.$table t")"
+  restored_sum="$(query cert_restored "SELECT coalesce(md5(string_agg(row_to_json(t)::text,'|' ORDER BY row_to_json(t)::text)), '') FROM cert_multisite.$table t")"
   assert_eq "$restored_sum" "$source_sum" "restore_checksum_$table"
 done
 assert_eq "$(query cert_restored 'SET ROLE cert_operator_b; SELECT count(*) FROM cert_multisite.bookings')" 1 "restored_RLS_B"
