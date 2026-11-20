@@ -3502,12 +3502,23 @@ function InlineCheckInSelect({
   const gymAdmissionDayOpen = isToday && /gym|fitness/i.test(String(booking.facilityName ?? "")) &&
     minutesWib >= 6 * 60 && minutesWib < 23 * 60;
 
-  // Sudah selesai / completed
+  // Completed is an administrative lifecycle state; only checkedInAt proves
+  // attendance. Never imply an X904 scan from a completed booking alone.
   if (booking.status === "completed") {
+    if (!booking.checkedInAt) {
+      return (
+        <span
+          className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800"
+          title="Selesai administratif tanpa bukti check-in; bukan bukti scan X904 atau kehadiran">
+          <AlertTriangle size={11} />
+          Selesai tanpa check-in
+        </span>
+      );
+    }
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
         <CheckCircle2 size={11} />
-        Selesai
+        Selesai · Check-in tercatat
       </span>
     );
   }
