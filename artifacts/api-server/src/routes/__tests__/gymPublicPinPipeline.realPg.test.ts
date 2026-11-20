@@ -1317,6 +1317,9 @@ suite(
         }
       });
       afterAll(async () => {
+        // This isolated RLS INSERT policy references the canonical VIS table.
+        // Remove only the test-installed policy before restoring focused fixtures.
+        await pool.query("DROP POLICY IF EXISTS x904_nonmember_app_post_enrollment_paid_pin_insert ON sport_center.x904_nonmember_daily_access");
         await pool.query("DROP TABLE sport_center.gym_vis_card_reservations");
         await pool.query("ALTER TABLE sport_center.gym_vis_card_reservations_focused_fixture RENAME TO gym_vis_card_reservations");
       });
