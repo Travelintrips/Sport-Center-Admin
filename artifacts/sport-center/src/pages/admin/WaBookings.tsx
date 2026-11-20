@@ -690,7 +690,8 @@ export default function AdminWaBookings() {
                   </div>
                 )}
                 {detail.booking.source === "gym_public_guest" &&
-                  detail.visCardReservation?.state === "reserved" && (
+                  detail.visCardReservation?.state === "reserved" &&
+                  !["completed", "cancelled", "refunded", "expired", "rejected"].includes(detail.booking.status) && (
                   <section className="space-y-2 rounded-xl border border-blue-200 bg-white p-4 text-sm">
                     <p className="font-bold">Serah-terima kartu VIS</p>
                     <p className="text-xs">Hanya petugas yang melihat kartu fisik diserahkan kepada pengunjung boleh mencatat pengambilan.</p>
