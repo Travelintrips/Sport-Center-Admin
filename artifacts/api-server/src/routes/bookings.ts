@@ -1348,7 +1348,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         if (["unbilled", "billed", "paid"].includes(normalizedBilling) &&
             (booking.payerType !== "company" || booking.billingStatus !== normalizedBilling)) return false;
 
-        if (normalizedStatus !== "all" && booking.status !== normalizedStatus) return false;
+        if (normalizedStatus === "needs_verification") {
+          if (booking.status !== "waiting_confirmation" && booking.status !== "paid") return false;
+        } else if (normalizedStatus !== "all" && booking.status !== normalizedStatus) return false;
 
         const paymentRows = [
           booking.payment,
