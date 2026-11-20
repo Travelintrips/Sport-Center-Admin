@@ -122,7 +122,7 @@ export async function recoverPaidGymPostEnrollment(
         VALUES (${actor},'X904 AUTOMATION SERVICE','staff',
           'x904_guest_pin_post_enrollment_auto_recovered','booking',${bookingId},
           '{"verificationState":"pending","accessState":"pending"}'::jsonb,
-          ${JSON.stringify({accessId,bookingId,paymentId,basis:"existing_staff_approved_payment_verified_registry_fresh_group2"})}::jsonb)
+          ${JSON.stringify({accessId,bookingId,paymentId,accessState:"pending",basis:"existing_staff_approved_payment_verified_registry_fresh_group2"})}::jsonb)
       `);
       authorized++;
     }
