@@ -77,8 +77,9 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
       ON vis.booking_id=a.booking_id AND vis.payment_id=a.payment_id
       AND vis.device_serial=a.device_serial AND vis.user_pin=a.user_pin
       AND vis.device_uid=a.device_uid AND vis.card_code=a.identity_label
-      AND vis.collected_at IS NOT NULL
-      AND vis.state IN ('collected','returned')
+      AND ((vis.state IN ('collected','returned') AND vis.collected_at IS NOT NULL)
+        OR (vis.state='reserved' AND vis.collected_at IS NULL
+          AND vis.funds_verified_at IS NOT NULL))
     JOIN sport_center.gym_x904_lan_users u
       ON u.device_serial=a.device_serial AND u.user_pin=a.user_pin
       AND u.device_uid=a.device_uid AND u.device_role=0
@@ -105,7 +106,12 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
     WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
       AND (l.device_uid=a.device_uid OR l.device_uid=l.event_index+1)
       AND (
-        (${signedEnabled}::boolean AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+        (( ${signedEnabled}::boolean
+           OR (${lanGuestEnabled}::boolean
+             AND b.source='gym_public_guest' AND b.booking_date>='2026-11-19'
+             AND a.identity_type='card' AND vis.state='reserved'
+             AND vis.collected_at IS NULL AND vis.funds_verified_at IS NOT NULL))
+          AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
         OR
         (${lanGuestEnabled}::boolean AND ((b.source='gym_public_guest' AND b.booking_date>='2026-11-13') OR (b.source='admin' AND b.booking_date>='2026-11-17'))
           AND l.received_at>='2026-11-12T17:00:00Z'::timestamptz
@@ -152,8 +158,24 @@ export async function reconcileX904MissedNonmemberBookingCheckins(
             OR
             (b.source IN ('gym_public_guest','web')
               AND vis.booking_id IS NOT NULL
-              AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
-                'YYYY-MM-DD HH24:MI:SS'))
+              AND (
+                -- Keep staff-witnessed handover as the standard route.
+                (vis.state IN ('collected','returned') AND vis.collected_at IS NOT NULL
+                  AND l.device_time >= to_char(vis.collected_at AT TIME ZONE 'Asia/Jakarta',
+                    'YYYY-MM-DD HH24:MI:SS'))
+                OR
+                -- For new paid public VIS, a *protocol-verified* physical
+                -- scan proves possession of the reserved card for attendance.
+                -- Never invent a staff handover or accept unsigned LAN logs.
+                (b.source='gym_public_guest' AND b.booking_date>='2026-11-19'
+                  AND vis.state='reserved' AND vis.collected_at IS NULL
+                  AND vis.funds_verified_at IS NOT NULL
+                  -- Respect both existing switches: this verified scan may
+                  -- follow either signed or authenticated-LAN check-in mode.
+                  -- Both OFF still denies all automatic reconciliation.
+                  AND ${signedEnabled || lanGuestEnabled}::boolean
+                  AND e.evidence_status='protocol_verified' AND r.event_id IS NOT NULL)
+              ))
           )
         )
       )

@@ -1382,7 +1382,7 @@ suite(
         if (confirmPayment) await matrixConfirm(id);
         return id;
       }
-      async function matrixLifecycle(id: number, s: MatrixIdentity, replayConfirmation = false) {
+      async function matrixLifecycle(id: number, s: MatrixIdentity, replayConfirmation = false, signedReservedCard = false) {
         const pay = await payment(id);
         const original = await grant(id);
         expect(original).toMatchObject({
@@ -1437,11 +1437,13 @@ suite(
         if (s.source === "gym_public_guest" && s.identity === "card") {
           const reservation = (await pool.query("SELECT * FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1", [id])).rows[0];
           expect(reservation).toMatchObject({ state: "reserved", collected_at: null, payment_id: pay.id, user_pin: s.pin });
-          const booked = await matrixBooking(id);
-          const handover = await request.post(`/api/admin/wa-bookings/${booked.order_number}/collect-vis`)
-            .set("Authorization", "Bearer " + matrixAdminToken).send({ physicalCardHandedOver: true });
-          expect({ status: handover.status, error: handover.body.error }).toEqual({ status: 200, error: undefined });
-          expect(handover.body).toMatchObject({ state: "collected", cardCode: "VIS001" });
+          if (!signedReservedCard) {
+            const booked = await matrixBooking(id);
+            const handover = await request.post(`/api/admin/wa-bookings/${booked.order_number}/collect-vis`)
+              .set("Authorization", "Bearer " + matrixAdminToken).send({ physicalCardHandedOver: true });
+            expect({ status: handover.status, error: handover.body.error }).toEqual({ status: 200, error: undefined });
+            expect(handover.body).toMatchObject({ state: "collected", cardCode: "VIS001" });
+          }
         }
         const { completeBooking } = await import("../../lib/bookingLifecycle.js");
         let completedAt = new Date(matrixDay + "T09:01:00+07:00");
@@ -1466,6 +1468,14 @@ suite(
         const evaluation = new Date(scanAt.getTime() + 60_000);
         jest.setSystemTime(evaluation);
         expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
+        if (signedReservedCard) {
+          // A real-shaped LAN observation alone is not proof of a reserved
+          // visitor card. It cannot bypass the staff handover or signed scan.
+          await pool.query("INSERT INTO sport_center.gym_x904_lan_logs(device_serial,user_pin,device_uid,device_time,event_id,event_index,received_at) VALUES('TDBD234200545',$1,700,$2,$3,699,$4)",
+            [s.pin,matrixDay + " 19:08:00","f".repeat(64),evaluation]);
+          expect(await reconcileX904MissedNonmemberBookingCheckins(db,evaluation)).toBe(0);
+          expect((await matrixBooking(id)).checked_in_at).toBeNull();
+        }
         const eventIndex = 700;
         const eventId = "full-route-" + s.source + "-" + s.identity + "-" + id;
         const deviceTime = matrixDay + " 19:10:00";
@@ -1476,6 +1486,13 @@ suite(
         await pool.query("INSERT INTO sport_center.gym_x904_verification_evidence(device_serial,event_index,user_pin,source_event_id,capture_source,evidence_status,verification_code,raw_hex) VALUES('TDBD234200545',$1,$2,$3,'trusted_vmsc_ingress','protocol_verified',15,$4)",
           [eventIndex, s.pin, eventId, raw.toString("hex")]);
         await pool.query("INSERT INTO sport_center.gym_x904_raw_events VALUES($1,'TDBD234200545',$2,$3,255,15)", [eventId, s.pin, deviceTime]);
+        if (signedReservedCard) {
+          // Both explicit check-in switches OFF must reject even a valid signed
+          // card scan. Restore the default LAN switch before the success path.
+          process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED = "false";
+          expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
+          delete process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
+        }
         expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(1);
         expect(await reconcileX904MissedNonmemberBookingCheckins(db, evaluation)).toBe(0);
         expect(await matrixBooking(id)).toMatchObject({ source: s.source, status: s.source === "admin" ? "confirmed" : "completed", checked_in_at: scanAt, completed_at: s.source === "admin" ? null : completedAt });
@@ -1544,6 +1561,18 @@ suite(
         expect(await grant(pinBookingId)).toMatchObject({ access_state: "pending", verification_state: "verified" });
         expect(await grant(cardBookingId)).toMatchObject({ access_state: "pending", verification_state: "verified" });
         expect(await counts()).toEqual({ bookings: 2, payments: 2, grants: 2 });
+      });
+      test("future public VIS signed scan works with default LAN check-in enabled and signed-only flag OFF", async () => {
+        const publicCard = variants.find(s => s.source === "gym_public_guest" && s.identity === "card")!;
+        const id = await matrixCheckout(publicCard);
+        // This is the actual DEV default: no separate signed-only flag, while
+        // the normal authenticated LAN check-in path remains on by default.
+        process.env.GYM_X904_NONMEMBER_BOOKING_CHECKIN_ENABLED = "false";
+        delete process.env.GYM_X904_PAID_GUEST_LAN_CHECKIN_ENABLED;
+        await matrixLifecycle(id, publicCard, false, true);
+        const reservation = (await pool.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[id])).rows[0];
+        expect(reservation).toMatchObject({ state: "reserved", collected_at: null });
+        expect((await matrixBooking(id)).checked_in_at).not.toBeNull();
       });
       test.each(variants)("full real route $source $identity: booking to payment, ACK, daily check-in and expiry without rewriting grant state", async s => {
         const id = await matrixCheckout(s);

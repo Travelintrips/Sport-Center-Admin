@@ -2,6 +2,8 @@ import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { pool as appDatabasePool } from "@workspace/db";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { processX904NonmemberDailyAccess, recoverPaidPublicGymPin } from "./x904NonmemberDailyAccessWorker";
 import { processX904NewOrdinaryUserDefaultSuspend } from "./x904NewOrdinaryUserDefaultSuspend";
 import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
@@ -1360,5 +1362,89 @@ test.each([
     await processX904NonmemberDailyAccess(db as any,at);
     const count=(await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE user_pin=$1 AND command_type='ACTIVATE_USER'",[pin])).rows[0].n;
     expect(count).toBe(0);
+  } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
+});
+
+
+test("SC-1764 regression: fourth bounded DEVICE_BUSY suspend retry after three failed commands, never reactivates or duplicates payment", async () => {
+  // All rows are synthetic, isolated PostgreSQL; no connection to X904 PROD.
+  const pin="8981", uid=8981, name="CI BUSY SUSPEND", bookingId=19881, paymentId=20881;
+  const confirmed=new Date("2026-11-06T09:00:00Z"), activation=new Date("2026-11-06T10:00:00Z");
+  const expiry=new Date("2026-11-06T16:00:00Z");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  try {
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots");
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES ('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status,customer_name,total_price) VALUES($1,'2026-11-06','17:00','admin','confirmed',$2,30000)",[bookingId,name]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed',$3,30000,'ci://verified-proof')",[paymentId,bookingId,confirmed]);
+    await run(`INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,activated_at,expires_at,verification_state,access_state)
+      VALUES('TDBD234200545','pin',$1,$2,$3,$4,$5,$6,$7,$8,$9,'verified','active')`,["PIN:"+pin,pin,uid,name,bookingId,paymentId,confirmed,activation,expiry]);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].access_id);
+    // Historical activation had a verified physical ACK. No fake active state
+    // can be inferred solely from the existence of a Group 1 snapshot.
+    await run(`INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,result,completed_at)
+      VALUES('TDBD234200545','ACTIVATE_USER',$1,$2::jsonb,301,'CI-8981-ACT','completed',$3::jsonb,$4)`,
+      [pin,JSON.stringify({source:"AUTO_NONMEMBER_GYM_12H",accessId,expectedUid:uid}),JSON.stringify({readBackConfirmed:true,deviceUid:uid,afterGroup:1}),activation]);
+    for(let attempt=1;attempt<=3;attempt++) {
+      const failedAt=new Date(expiry.getTime()+attempt*70_000);
+      await run(`INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,attempts,state,result,created_at,completed_at)
+        VALUES('TDBD234200545','SUSPEND_USER',$1,$2::jsonb,301,$3,1,'failed',$4::jsonb,$5,$6)`,
+        [pin,JSON.stringify({source:"AUTO_NONMEMBER_GYM_12H",accessId,expectedUid:uid,attempt}),"CI-8981-SUSP-"+attempt,JSON.stringify({readBackConfirmed:false,errorCode:"DEVICE_BUSY"}),new Date(failedAt.getTime()-1000),failedAt]);
+    }
+    const at=new Date(expiry.getTime()+5*60_000);
+    await addSnapshot(new Date(at.getTime()-1000),pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,at);
+    const fourth=await commandFor("SUSPEND_USER",accessId);
+    expect(fourth?.payload).toMatchObject({accessId,expectedUid:uid,attempt:4});
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='SUSPEND_USER' AND payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(4);
+    await processX904NonmemberDailyAccess(db as any,at);
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE command_type='SUSPEND_USER' AND payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(4);
+    const ackAt=new Date(at.getTime()+1000);
+    await ack(String(fourth.command_id),ackAt,pin,name,uid,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(ackAt.getTime()+3000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("expired");
+    expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=$1",[bookingId])).rows[0].n).toBe(1);
+  } finally { delete process.env.GYM_X904_NONMEMBER_ONLY_PIN; }
+});
+
+
+test("independent disposable X904 executor can ACK activation and after-process-restart suspend without grant or payment replay",async () => {
+  // Two separate Node processes simulate the actual executor lifecycle.
+  // Neither can address a physical device or a non-loopback database.
+  const pin="8982",uid=8982,name="CI SEPARATE EXECUTOR",bookingId=19882,paymentId=20882;
+  const bookingAt=new Date("2026-11-06T01:00:00Z");
+  process.env.GYM_X904_NONMEMBER_ONLY_PIN=pin;
+  const mock=fileURLToPath(new URL("./x904MockExecutor.isolated.mjs",import.meta.url));
+  const launch=(kind:"ACTIVATE_USER"|"SUSPEND_USER",accessId:number,at:Date,group:number) =>
+    execFileSync(process.execPath,[mock,kind,String(accessId),at.toISOString(),pin,name,String(uid),String(group)],{
+      cwd:process.cwd(),env:{...process.env,NODE_ENV:"test"},timeout:10000,encoding:"utf8",
+    });
+  try {
+    await run("DELETE FROM sport_center.gym_x904_access_snapshots");
+    await run("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545',$1,$2,$3,0)",[pin,uid,name]);
+    await run("INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status,customer_name,total_price) VALUES($1,'2026-11-06','08:00','admin','confirmed',$2,30000)",[bookingId,name]);
+    await run("INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at,amount,proof_url) VALUES($1,$2,'confirmed',$3,30000,'ci://local-only')",[paymentId,bookingId,bookingAt]);
+    await run(`INSERT INTO sport_center.x904_nonmember_daily_access(device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state)
+      VALUES('TDBD234200545','pin',$1,$2,$3,$4,$5,$6,$7,'2026-11-06T13:00:00Z','verified','pending')`,["PIN:"+pin,pin,uid,name,bookingId,paymentId,bookingAt]);
+    const accessId=Number((await run("SELECT access_id FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[bookingId])).rows[0].access_id);
+    await addSnapshot(new Date(bookingAt.getTime()-1000),pin,name,2);
+    await processX904NonmemberDailyAccess(db as any,new Date(bookingAt.getTime()+100));
+    expect(await commandFor("ACTIVATE_USER",accessId)).toBeTruthy();
+    const activatedAt=new Date(bookingAt.getTime()+2000);
+    expect(launch("ACTIVATE_USER",accessId,activatedAt,1)).toContain("MOCK_EXECUTOR_ACK_OK");
+    await processX904NonmemberDailyAccess(db as any,new Date(activatedAt.getTime()+3000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("active");
+    const expires=new Date("2026-11-06T16:00:00Z");
+    await addSnapshot(new Date(expires.getTime()+1000),pin,name,1);
+    await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+2000));
+    expect(await commandFor("SUSPEND_USER",accessId)).toBeTruthy();
+    // Launch a NEW executor process. No state from the activation worker lives
+    // in memory; the only persisted truth is the isolated database.
+    const suspendedAt=new Date(expires.getTime()+3000);
+    expect(launch("SUSPEND_USER",accessId,suspendedAt,2)).toContain("MOCK_EXECUTOR_ACK_OK");
+    await processX904NonmemberDailyAccess(db as any,new Date(suspendedAt.getTime()+3000));
+    expect((await run("SELECT access_state FROM sport_center.x904_nonmember_daily_access WHERE access_id=$1",[accessId])).rows[0].access_state).toBe("expired");
+    expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=$1",[bookingId])).rows[0].n).toBe(1);
+    expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(2);
   } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
 });

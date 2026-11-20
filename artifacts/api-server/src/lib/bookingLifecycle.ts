@@ -218,6 +218,27 @@ export async function checkInBooking(
                 AND v.collected_at IS NOT NULL
                 AND l.device_time>=to_char(v.collected_at AT TIME ZONE 'Asia/Jakarta',
                   'YYYY-MM-DD HH24:MI:SS'))
+            OR (${booking.source === "gym_public_guest" && booking.bookingDate >= "2026-11-19"}
+              AND EXISTS (SELECT 1 FROM sport_center.gym_vis_card_reservations v
+                JOIN sport_center.gym_x904_verification_evidence e
+                  ON e.device_serial=l.device_serial AND e.event_index=l.event_index
+                  AND e.user_pin=l.user_pin AND e.source_event_id=l.event_id
+                JOIN sport_center.gym_x904_raw_events r
+                  ON r.event_id=l.event_id AND r.device_serial=l.device_serial
+                  AND r.user_pin=l.user_pin AND r.device_time=l.device_time
+                WHERE v.booking_id=a.booking_id AND v.payment_id=a.payment_id
+                  AND v.user_pin=a.user_pin AND v.device_uid=a.device_uid
+                  AND v.card_code=a.identity_label
+                  AND v.state='reserved' AND v.collected_at IS NULL
+                  AND v.funds_verified_at IS NOT NULL
+                  AND e.capture_source='trusted_vmsc_ingress'
+                  AND e.evidence_status='protocol_verified'
+                  AND e.verification_code IN (1,4,15)
+                  AND e.raw_hex ~ '^[0-9a-f]{80}$'
+                  AND get_byte(decode(substr(e.raw_hex,53,2),'hex'),0)=e.verification_code
+                  AND get_byte(decode(substr(e.raw_hex,63,2),'hex'),0) IN (0,255)
+                  AND r.attendance_status=get_byte(decode(substr(e.raw_hex,63,2),'hex'),0)
+                  AND r.verification_type=e.verification_code))
           )
         LIMIT 2`);
       if (evidence.rows.length!==1)
