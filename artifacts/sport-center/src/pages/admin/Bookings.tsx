@@ -1111,7 +1111,7 @@ function SummaryStats({
     {
       label: "Perlu Verifikasi",
       value: counts?.verification ?? verificationKeys.size,
-      filter: "waiting_confirmation",
+      filter: "needs_verification",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
       bg: "bg-amber-50 dark:bg-amber-900/20",
@@ -4835,7 +4835,9 @@ export default function AdminBookings() {
 
       // This filter describes booking workflow only. Payment review states
       // belong exclusively to the separate payment filter.
-      if (statusFilter !== "all" && b.status !== statusFilter) return false;
+      if (statusFilter === "needs_verification") {
+        if (b.status !== "waiting_confirmation" && b.status !== "paid") return false;
+      } else if (statusFilter !== "all" && b.status !== statusFilter) return false;
       const isSettled = bookingHasPaymentFlag(b, "isSettled");
       const isBankReconciled = bookingHasPaymentFlag(b, "isBankReconciled");
       const isSettledOutsideBankReconciliation = bookingHasPaymentFlag(
