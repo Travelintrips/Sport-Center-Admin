@@ -20,6 +20,8 @@ jobs:
       - name: Synthetic operator A/B, device A/B, replay and dump/restore
         shell: bash
         run: bash scripts/certification/run-issue850-isolated.sh
+      - name: Dedicated installation security preflight regression
+        run: node --test scripts/certification/managed-install-preflight.test.mjs
       - name: Fail-closed source readiness report (not a release approval)
         shell: bash
         run: |
