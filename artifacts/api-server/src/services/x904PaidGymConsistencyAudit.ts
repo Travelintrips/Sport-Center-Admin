@@ -53,7 +53,8 @@ export async function auditPaidGymEntitlementConsistency(
       WHERE a.identity_type='pin' AND l.entity='booking' AND l.entity_id=b.id
         AND l.action IN ('x904_guest_pin_staff_attestation',
                          'x904_guest_pin_payment_auto_authorized',
-                         'x904_guest_pin_payment_auto_recovered')
+                         'x904_guest_pin_payment_auto_recovered',
+                         'x904_guest_pin_post_enrollment_auto_recovered')
         AND l."after"->>'accessId'=a.access_id::text
         AND l."after"->>'paymentId'=p.id::text
         AND l."after"->>'accessState'='pending'
