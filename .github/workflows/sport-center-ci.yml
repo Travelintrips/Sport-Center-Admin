@@ -106,31 +106,22 @@ jobs:
             --trace-deprecation \
             -e "require('google-auth-library'); console.log('google auth loaded')"
 
-      - name: Verify DEV database target and pooler credentials format
-        env:
-          EXPECTED_DEV_PROJECT_REF: xssrfshdrtdfupgqwfdw
+      - name: Verify DEV database project and transaction pooler scope
         run: |
-          node <<'NODE'
-          const input = process.env.SUPABASE_DATABASE_URL_DEV || "";
-          let url;
-          try { url = new URL(input); } catch {
-            console.error("::error::SUPABASE_DATABASE_URL_DEV is missing or is not a valid URL");
+          node --input-type=module <<'NODE'
+          import { normalizeCstDevTransactionPooler } from "./artifacts/api-server/scripts/cst-dev-connection.mjs";
+          try {
+            // Accept either dedicated or shared CST-DEV URI, but connect ONLY
+            // through the pinned, verified shared transaction pooler (IPv4).
+            // Never print the URI, username, or password.
+            const result = normalizeCstDevTransactionPooler(process.env.SUPABASE_DATABASE_URL_DEV || "");
+            console.log("CST_DEV_TRANSACTION_POOLER_SCOPE_PASS source=" + result.source);
+          } catch {
+            console.error("::error::CST-DEV connection URI is invalid, wrong-project, or missing a password");
             process.exit(1);
           }
-          const host = url.hostname;
-          const user = decodeURIComponent(url.username);
-          const ref = process.env.EXPECTED_DEV_PROJECT_REF;
-          const expected = "postgres." + ref;
-          const hostOK = host.endsWith(".pooler.supabase.com");
-          const userOK = user === expected;
-          const portOK = url.port === "5432" || url.port === "6543";
-          if (!hostOK || !userOK || !portOK || !url.password) {
-            console.error("::error::Invalid DEV database URL target / pooler user / port / missing password. Use CST-DEV pooler URL with username postgres.<DEV_PROJECT_REF>. No database secret has been printed.");
-            console.log("Check only: pooler_host=" + hostOK + " dev_pooler_user=" + userOK + " port_valid=" + portOK + " password_present=" + Boolean(url.password));
-            process.exit(1);
-          }
-          console.log("DEV database URL structure PASS (actual PostgreSQL authentication is checked by tests).");
           NODE
+          node --test artifacts/api-server/scripts/cst-dev-connection.test.mjs
 
       - name: Verify real DEV Gym X904 RLS checkout policy parity (read-only)
         run: pnpm --filter @workspace/api-server exec node scripts/verify-dev-x904-checkout-rls.mjs
