@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { processX904NonmemberDailyAccess, recoverPaidPublicGymPin } from "./x904NonmemberDailyAccessWorker";
 import { processX904NewOrdinaryUserDefaultSuspend } from "./x904NewOrdinaryUserDefaultSuspend";
 import { autoReserveVisAfterFundsVerified, collectReservedVisCard, returnVerifiedVisCard, recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
+import { releaseExpiredUnusedVisReservations } from "./x904VisUnusedReservationCleanup";
 
 // All paid access scenarios use 08:00 WIB on 2026-11-06 as a stable
 // simulated confirmation time. A wall-clock now() fixture would unpredictably
@@ -1447,4 +1448,64 @@ test("independent disposable X904 executor can ACK activation and after-process-
     expect((await run("SELECT count(*)::int n FROM sport_center.sport_payments WHERE booking_id=$1",[bookingId])).rows[0].n).toBe(1);
     expect((await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE payload->>'accessId'=$1",[String(accessId)])).rows[0].n).toBe(2);
   } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
+});
+
+test("expired UNUSED VIS frees its reservation only with fresh Group 2, no activation or scan; physical custody never fabricated", async () => {
+  await run(`CREATE TABLE IF NOT EXISTS sport_center.gym_x904_connector_heartbeats(
+    device_serial text PRIMARY KEY,connector_id text,last_seen timestamptz,
+    reported_users integer,reported_logs integer,read_authenticated boolean
+  )`);
+  await run(`CREATE TABLE IF NOT EXISTS sport_center.gym_x904_lan_logs(
+    event_id text PRIMARY KEY,user_pin text,received_at timestamptz
+  )`);
+  // This disposable isolated DB shares a VIS005 row with an earlier test.
+  // Clear that synthetic fixture only; no actual customer or PROD rows exist.
+  await run("DELETE FROM sport_center.gym_vis_card_reservations WHERE card_code='VIS005'");
+  await run("DELETE FROM sport_center.x904_user_commands WHERE user_pin='11'");
+  await run("DELETE FROM sport_center.x904_nonmember_daily_access WHERE user_pin='11'");
+  // Previous tests use deliberately future-dated snapshots. Reset synthetic
+  // snapshots so the new complete NOW() snapshot is truly the newest.
+  await run("DELETE FROM sport_center.gym_x904_access_snapshots");
+
+  await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
+    VALUES('TDBD234200545','11',11,'VIS 005',0)`);
+  await run(`INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status,order_number)
+    VALUES(9891,'2026-11-13','18:00','gym_public_guest','completed','SC-QA-UNUSED-9891')`);
+  await run(`INSERT INTO sport_center.sport_payments(id,booking_id,status,confirmed_at)
+    VALUES(9991,9891,'confirmed','2026-11-13T10:00:00Z')`);
+  await run(`INSERT INTO sport_center.x904_nonmember_daily_access
+    (device_serial,identity_type,identity_label,user_pin,device_uid,verified_name,
+     booking_id,payment_id,confirmed_at,expires_at,verification_state,access_state)
+    VALUES('TDBD234200545','card','VIS005','11',11,'VIS 005',9891,9991,
+           '2026-11-13T10:00:00Z','2026-11-13T16:00:00Z','verified','expired')`);
+  await run(`INSERT INTO sport_center.gym_vis_card_reservations
+    (booking_id,payment_id,card_code,user_pin,device_uid,state,funds_reference,
+     funds_verified_by,reserved_at)
+    VALUES(9891,9991,'VIS005','11',11,'reserved','CI-UNUSED-9891',
+           'CI',now()-interval '4 minutes')`);
+  await run(`INSERT INTO sport_center.gym_x904_connector_heartbeats
+    (device_serial,connector_id,last_seen,reported_users,reported_logs,read_authenticated)
+    VALUES('TDBD234200545','VMSC',now(),1,0,true)
+    ON CONFLICT(device_serial) DO UPDATE SET last_seen=now(),read_authenticated=true`);
+  await addSnapshot(new Date(),'11','VIS 005',2);
+  expect(await releaseExpiredUnusedVisReservations(db as any)).toBe(1);
+  expect((await run("SELECT state,collected_at,returned_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=9891")).rows[0])
+    .toMatchObject({state:"cancelled",collected_at:null,returned_at:null});
+  expect((await run("SELECT status FROM sport_center.sport_payments WHERE id=9991")).rows[0].status).toBe("confirmed");
+  expect((await run("SELECT count(*)::int AS n FROM sport_center.audit_logs WHERE action='gym_vis_unused_expired_reservation_auto_released' AND entity_id=9891")).rows[0].n).toBe(1);
+  expect(await releaseExpiredUnusedVisReservations(db as any)).toBe(0);
+
+  // An activated card must NEVER be automatically returned, even if a staff
+  // forgot to record collection. This is the historical SC-1779 shape.
+  await run("UPDATE sport_center.gym_vis_card_reservations SET state='reserved' WHERE booking_id=9891");
+  await run("UPDATE sport_center.x904_nonmember_daily_access SET activated_at='2026-11-13T11:00:00Z' WHERE booking_id=9891");
+  expect(await releaseExpiredUnusedVisReservations(db as any)).toBe(0);
+  expect((await run("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=9891")).rows[0].state).toBe("reserved");
+
+  // Even without an activation record, any post-reservation physical scan
+  // prevents automatic release of a potentially lent card.
+  await run("UPDATE sport_center.x904_nonmember_daily_access SET activated_at=NULL WHERE booking_id=9891");
+  await run("INSERT INTO sport_center.gym_x904_lan_logs(event_id,user_pin,received_at) VALUES('CI-SCAN-UNUSED-9891','11',now())");
+  expect(await releaseExpiredUnusedVisReservations(db as any)).toBe(0);
+  expect((await run("SELECT state FROM sport_center.gym_vis_card_reservations WHERE booking_id=9891")).rows[0].state).toBe("reserved");
 });
