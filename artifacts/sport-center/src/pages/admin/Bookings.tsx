@@ -2223,7 +2223,11 @@ function BookingDetailDrawer({
                 {(booking.status === "completed" || booking.status === "confirmed") && (
                   booking.payerType === "company"
                     ? "Booking perusahaan — dikonfirmasi otomatis, masuk tagihan bulanan"
-                    : "Pembayaran sudah diverifikasi, booking aktif"
+                    : dailyGymBooking
+                      ? (gymAccessReady
+                        ? "Pembayaran terverifikasi; akses Gym aktif dengan ACK X904"
+                        : "Pembayaran terverifikasi; akses Gym BELUM aktif — tunggu aktivasi dan ACK X904")
+                      : "Pembayaran sudah diverifikasi, booking dikonfirmasi"
                 )}
                 {booking.status === "cancelled" && "Booking telah dibatalkan"}
                 {booking.status === "refunded" && "Dana telah dikembalikan ke customer"}
