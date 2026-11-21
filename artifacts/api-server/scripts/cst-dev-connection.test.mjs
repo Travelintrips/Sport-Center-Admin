@@ -35,3 +35,10 @@ test("normalization is pure and preserves URL-encoded password bytes", () => {
   assert.equal(new URL(normalizeCstDevTransactionPooler(value).connectionString).password,"PAS%40S%3AWORD");
   assert.ok(value.includes("db."));
 });
+
+test("Supabase password placeholders are not usable database passwords", () => {
+  for (const placeholder of ["[YOUR-DATABASE-PASSWORD]", "[YOUR-PASSWORD]", "YOUR_PASSWORD"]) {
+    const v=dedicated.replace(secret,encodeURIComponent(placeholder));
+    assert.throws(()=>normalizeCstDevTransactionPooler(v),/CST_DEV_PASSWORD_PLACEHOLDER_NOT_REPLACED/);
+  }
+});
