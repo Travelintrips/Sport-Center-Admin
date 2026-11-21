@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
+import { releaseExpiredUnusedVisReservations } from "./x904VisUnusedReservationCleanup";
 import { auditPaidGymEntitlementConsistency } from "./x904PaidGymConsistencyAudit";
 import { processPaidVisRecoveryCycle } from "./x904PaidVisRecoveryCycle";
 import { sql } from "drizzle-orm";
@@ -87,6 +88,11 @@ export function startX904NonmemberAccessWorker(): void {
         );
         await auditPaidGymEntitlementConsistency(db).catch(error =>
           console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
+            error instanceof Error ? error.message : String(error)));
+        // 23:00 WIB: close only demonstrably UNUSED, never activated VIS
+        // reservations; any scan/ACK or collected card remains held.
+        await releaseExpiredUnusedVisReservations().catch(error =>
+          console.warn("[gym-vis] unused reservation cleanup deferred",
             error instanceof Error ? error.message : String(error)));
       } else {
         // Fast lane only when an eligible, verified paid grant is pending.
