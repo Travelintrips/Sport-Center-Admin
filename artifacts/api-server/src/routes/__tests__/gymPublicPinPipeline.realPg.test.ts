@@ -1601,6 +1601,18 @@ suite(
         expect(denied.status).toBe(409);
         expect(await grant(id)).toMatchObject({access_state:"review_required",activated_at:null});
         await matrixSnapshot(new Date(realNow.getTime()-1000));
+        // Even an old completed command for THIS grant makes automatic
+        // recovery unsafe; no replay of an unknown device transition.
+        const heldGrant=await grant(id);
+        await pool.query(
+          "INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,created_at) VALUES('TDBD234200545','ACTIVATE_USER','78',$1,301,$2,'completed',$3)",
+          [JSON.stringify({source:"AUTO_NONMEMBER_GYM_12H",accessId:Number(heldGrant.access_id),expectedUid:338}),
+           "SC1801-UNATTRIBUTED-COMMAND-"+String(id),new Date(realNow.getTime()-3000)]);
+        const commandDenied=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
+          .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
+        expect(commandDenied.status).toBe(409);
+        expect(await grant(id)).toMatchObject({access_state:"review_required",activated_at:null});
+        await pool.query("DELETE FROM sport_center.x904_user_commands WHERE idempotency_key=$1",["SC1801-UNATTRIBUTED-COMMAND-"+String(id)]);
         const accepted=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
           .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
         expect({status:accepted.status,error:accepted.body.error}).toEqual({status:200,error:undefined});
