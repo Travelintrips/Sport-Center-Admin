@@ -14,6 +14,40 @@ const MAX_ATTEMPTS = 3;
 // Only suspend gets more bounded DEVICE_BUSY retries. Activation remains at 3.
 const MAX_SUSPEND_ATTEMPTS = 6;
 
+let nonmemberWorkerStarted = false;
+let nonmemberWorkerLastCycleAt: string | null = null;
+let nonmemberWorkerLastSuccessfulCycleAt: string | null = null;
+let nonmemberWorkerLastCycleFailed = false;
+
+// Operational diagnostics only. A completed tick is NOT X904 activation/ACK.
+// No secrets, password, or machine mutation are returned by this getter.
+export function getX904NonmemberWorkerReadiness() {
+  const enabled = process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true";
+  const manualAccessEnabled = process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true";
+  const userWriteEnabled = process.env.GYM_X904_USER_WRITE_ENABLED === "true";
+  const onlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+  const pinScopeValid = onlyPin === undefined || /^[0-9]{1,8}$/.test(onlyPin);
+  const actor = Number(process.env.GYM_X904_AUTOMATIC_REQUESTED_BY);
+  const actorConfigured = Number.isSafeInteger(actor) && actor > 0;
+  const scope = onlyPin === undefined ? "all_verified_paid_nonmembers" : "single_pin_test";
+  const reasons: string[] = [];
+  if (!enabled) reasons.push("NONMEMBER_WORKER_DISABLED");
+  if (!manualAccessEnabled) reasons.push("MANUAL_ACCESS_GATE_DISABLED");
+  if (!userWriteEnabled) reasons.push("X904_USER_WRITE_GATE_DISABLED");
+  if (!actorConfigured) reasons.push("AUTOMATION_ACTOR_NOT_CONFIGURED");
+  if (!pinScopeValid) reasons.push("PIN_SCOPE_INVALID");
+  if (onlyPin !== undefined && onlyPin !== "90") reasons.push("VIS002_EXCLUDED_BY_TEST_PIN_SCOPE");
+  if (enabled && !nonmemberWorkerStarted) reasons.push("WORKER_NOT_STARTED");
+  if (enabled && nonmemberWorkerStarted && !nonmemberWorkerLastCycleAt) reasons.push("WORKER_HAS_NOT_TICKED");
+  if (nonmemberWorkerLastCycleAt && Date.now() - Date.parse(nonmemberWorkerLastCycleAt) > 180000) reasons.push("WORKER_TICK_STALE");
+  if (nonmemberWorkerLastCycleFailed) reasons.push("WORKER_LAST_CYCLE_FAILED");
+  return { configured: enabled && manualAccessEnabled && userWriteEnabled && actorConfigured && pinScopeValid,
+    scope, vis002Included: onlyPin === undefined || onlyPin === "90",
+    workerStarted: nonmemberWorkerStarted, lastCycleAt: nonmemberWorkerLastCycleAt,
+    lastSuccessfulCycleAt: nonmemberWorkerLastSuccessfulCycleAt,
+    reasons, readyForVis002Processing: reasons.length === 0 };
+}
+
 export function startX904NonmemberAccessWorker(): void {
   const enabled = process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED === "true";
   const onlyPin = process.env.GYM_X904_NONMEMBER_ONLY_PIN;
@@ -28,31 +62,61 @@ export function startX904NonmemberAccessWorker(): void {
     manualAccessEnabled: process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true",
     userWriteEnabled: process.env.GYM_X904_USER_WRITE_ENABLED === "true",
     intervalMs: 60000,
+    verifiedPaidGrantRecheckMs: 15000,
   }));
   if (!enabled || !validPin || !validActor) return;
+  nonmemberWorkerStarted = true;
   let running = false;
-  const tick = async () => {
+  let fullCycleRequested = false;
+  const tick = async (fullCycle: boolean) => {
+    if (fullCycle) fullCycleRequested = true;
     if (running) return;
     running = true;
+    nonmemberWorkerLastCycleAt = new Date().toISOString();
+    nonmemberWorkerLastCycleFailed = false;
     try {
-      // Always process existing grants before recovery; if a new paid VIS was
-      // allocated, give it one additional guarded pass in this same tick.
-      await processPaidVisRecoveryCycle(
-        () => processX904NonmemberDailyAccess(),
-        () => recoverUnallocatedPaidGymVis(),
-      );
-      await auditPaidGymEntitlementConsistency(db).catch(error =>
-        console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
-          error instanceof Error ? error.message : String(error)));
+      // The 15s fast lane runs ONLY the existing, fully guarded paid access
+      // processor. It never sends physical commands or fabricates ACK.
+      // The original 60s recovery/audit cycle remains intact and cannot be
+      // starved by fast-lane contention.
+      if (fullCycleRequested) {
+        fullCycleRequested = false;
+        await processPaidVisRecoveryCycle(
+          () => processX904NonmemberDailyAccess(),
+          () => recoverUnallocatedPaidGymVis(),
+        );
+        await auditPaidGymEntitlementConsistency(db).catch(error =>
+          console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
+            error instanceof Error ? error.message : String(error)));
+      } else {
+        // Fast lane only when an eligible, verified paid grant is pending.
+        // Do not multiply full-table recovery scans or suspend operations
+        // during idle periods; the original 60s cycle owns those.
+        const pending=await db.execute(sql`SELECT 1
+          FROM sport_center.x904_nonmember_daily_access a
+          JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+          JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
+          WHERE a.device_serial=${DEVICE} AND a.access_state='pending'
+            AND a.verification_state='verified' AND a.activated_at IS NULL
+            AND p.status::text='confirmed'
+            AND b.status::text IN ('confirmed','completed')
+            AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date
+          LIMIT 1`);
+        if(pending.rows.length) await processX904NonmemberDailyAccess();
+      }
+      nonmemberWorkerLastSuccessfulCycleAt = new Date().toISOString();
     }
     catch (error) {
+      nonmemberWorkerLastCycleFailed = true;
       console.error("[x904-nonmember] worker cycle failed",
         error instanceof Error ? error.message : String(error));
     } finally { running = false; }
   };
-  void tick();
-  const timer = setInterval(() => void tick(), 60_000);
-  timer.unref();
+  void tick(true);
+  const mainTimer = setInterval(() => void tick(true), 60_000);
+  mainTimer.unref();
+  const paidFastTimer = setInterval(() => void tick(false), 15_000);
+  paidFastTimer.unref();
 }
 
 
