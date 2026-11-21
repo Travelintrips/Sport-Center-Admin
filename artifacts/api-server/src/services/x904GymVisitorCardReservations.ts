@@ -411,7 +411,7 @@ export async function collectReservedVisCard(input: {
         throw new VisReservationError(409,"vis_payment_or_booking_changed",
           "Booking atau pembayaran sudah tidak terkonfirmasi. Jangan serahkan kartu VIS.");
       }
-      const linkedGrant = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
+      let linkedGrant = await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
         SET verification_state='verified'
         WHERE device_serial='TDBD234200545'
           AND booking_id=${Number(row.booking_id)}
@@ -424,6 +424,94 @@ export async function collectReservedVisCard(input: {
           AND access_state IN ('pending','active')
           AND expires_at>now()
         RETURNING access_id`);
+      // A verified, already-paid VIS may be held in review before any command
+      // has been queued. The historical app could not recover it on the SAME
+      // witnessed handover even when the device still reported Group 2. Reuse
+      // the original payment, booking, card and grant: never fabricate an ACK.
+      // Review cases with any command, uncertain identity, stale inventory,
+      // overlapping entitlement or missing approval stay blocked.
+      if (linkedGrant.rows.length === 0) {
+        linkedGrant = await tx.execute(sql`
+          UPDATE sport_center.x904_nonmember_daily_access a
+          SET access_state='pending'
+          FROM sport_center.sport_bookings b,
+               sport_center.sport_payments p,
+               sport_center.gym_vis_card_reservations r,
+               sport_center.gym_x904_lan_users u,
+               (SELECT observed_at,user_count,users FROM sport_center.gym_x904_access_snapshots
+                WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1) snap
+          WHERE a.booking_id=b.id AND a.payment_id=p.id AND p.booking_id=b.id
+            AND r.booking_id=b.id AND r.payment_id=p.id
+            AND r.device_serial=a.device_serial AND r.card_code=a.identity_label
+            AND r.user_pin=a.user_pin AND r.device_uid=a.device_uid
+            AND u.device_serial=a.device_serial AND u.user_pin=a.user_pin
+            AND u.device_uid=a.device_uid AND u.device_role=0
+            AND a.device_serial='TDBD234200545'
+            AND a.booking_id=${Number(row.booking_id)}
+            AND a.payment_id=${Number(row.payment_id)}
+            AND a.identity_type='card'
+            AND a.identity_label=${String(row.card_code)}
+            AND a.user_pin=${String(row.user_pin)}
+            AND a.device_uid=${Number(row.device_uid)}
+            AND a.verification_state='verified'
+            AND a.access_state='review_required' AND a.activated_at IS NULL
+            AND a.confirmed_at=p.confirmed_at AND a.expires_at>now()
+            AND b.source='gym_public_guest' AND b.facility_id=6
+            AND b.status::text='confirmed'
+            AND b.booking_date::date=(now() AT TIME ZONE 'Asia/Jakarta')::date
+            AND p.status::text='confirmed' AND p.confirmed_at IS NOT NULL
+            AND p.amount>=COALESCE(b.grand_total,b.total_price)
+            AND COALESCE(b.grand_total,b.total_price)>0
+            AND p.payment_type::text='full_payment'
+            AND NULLIF(btrim(p.proof_url),'') IS NOT NULL
+            AND r.state='reserved' AND r.collected_at IS NULL
+            AND r.funds_verified_at IS NOT NULL
+            AND r.funds_reference=('ADMINPAY-' || p.id::text)
+            AND ((r.card_code='VIS001' AND r.user_pin='78' AND r.device_uid=338)
+              OR (r.card_code='VIS002' AND r.user_pin='90' AND r.device_uid=339)
+              OR (r.card_code='VIS003' AND r.user_pin='13' AND r.device_uid=13)
+              OR (r.card_code='VIS004' AND r.user_pin='17' AND r.device_uid=17)
+              OR (r.card_code='VIS005' AND r.user_pin='11' AND r.device_uid=11)
+              OR (r.card_code='VIS006' AND r.user_pin='15' AND r.device_uid=15))
+            AND regexp_replace(upper(u.display_name),'[[:space:]]+','','g') =
+                regexp_replace(upper(a.verified_name),'[[:space:]]+','','g')
+            AND snap.observed_at<=now()
+            AND snap.observed_at>=now()-interval '5 minutes'
+            AND jsonb_typeof(snap.users)='array'
+            AND jsonb_array_length(snap.users)=snap.user_count
+            AND (SELECT count(*) FROM jsonb_array_elements(snap.users) su
+                 WHERE su->>'pin'=a.user_pin AND su->>'role'='0'
+                   AND su->>'group'='2' AND su->>'enabled'='true'
+                   AND regexp_replace(upper(su->>'name'),'[[:space:]]+','','g') =
+                       regexp_replace(upper(a.verified_name),'[[:space:]]+','','g'))=1
+            AND EXISTS (
+              SELECT 1 FROM sport_center.audit_logs al
+              WHERE al.entity='payment' AND al.entity_id=p.id
+                AND al.action='FINAL_PAYMENT_APPROVED')
+            AND NOT EXISTS (
+              SELECT 1 FROM sport_center.gym_x904_member_mapping m
+              WHERE m.device_serial=a.device_serial AND m.user_pin=a.user_pin)
+            AND NOT EXISTS (
+              SELECT 1 FROM sport_center.x904_user_commands c
+              WHERE c.device_serial=a.device_serial AND
+                (c.payload->>'accessId'=a.access_id::text OR
+                 (c.user_pin=a.user_pin AND c.state IN ('queued','claimed'))))
+            AND NOT EXISTS (
+              SELECT 1 FROM sport_center.x904_nonmember_daily_access other
+              WHERE other.device_serial=a.device_serial
+                AND other.user_pin=a.user_pin AND other.access_id<>a.access_id
+                AND other.access_state IN ('pending','active','review_required'))
+          RETURNING a.access_id`);
+        if (linkedGrant.rows.length === 1) {
+          await tx.execute(sql`INSERT INTO sport_center.audit_logs
+            (action,entity,entity_id,"before","after",user_name,user_role)
+            VALUES ('gym_vis_reviewed_grant_revalidated','booking',
+              ${Number(row.booking_id)},
+              '{"accessState":"review_required"}'::jsonb,
+              ${JSON.stringify({accessState:"pending",paymentId:Number(row.payment_id),basis:"witnessed_handover_fresh_group2_no_commands"})}::jsonb,
+              ${input.collectedBy},'staff')`);
+        }
+      }
       if (linkedGrant.rows.length !== 1) {
         throw new VisReservationError(409, "vis_grant_not_ready",
           "Hak akses belum siap; serah-terima kartu tidak diproses.");
