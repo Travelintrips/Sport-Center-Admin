@@ -25,6 +25,8 @@ describe("Gym VIS worker release readiness is not inferred from passing unit tes
     expect(router).toContain('router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware');
     expect(router).toContain('const nonmemberWorkerReadiness=allowed?getX904NonmemberWorkerReadiness():null;');
     expect(router).toContain("COLLECTED_PAID_VIS_STALLED_WITHOUT_ACTIVATE_COMMAND");
+    expect(router).toContain("X904_GROUP1_ACK_VERIFIED_BUT_GRANT_STILL_PENDING");
+    expect(router).toContain("s.observed_at>c.completed_at");
     expect(router).toContain("r.state=\'collected\'");
     expect(router).toContain("c.payload->>\'accessId\'=a.access_id::text");
     expect(router).toContain("r.collected_at <= now()-interval '90 seconds'");
