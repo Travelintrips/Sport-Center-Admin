@@ -19,7 +19,10 @@ describe("Gym VIS worker release readiness is not inferred from passing unit tes
   });
   test("only authenticated Owner/Super Admin sees worker readiness, never secrets",()=>{
     expect(router).toContain('router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware');
-    expect(router).toContain('nonmemberWorkerReadiness:allowed?getX904NonmemberWorkerReadiness():null');
+    expect(router).toContain('const nonmemberWorkerReadiness=allowed?getX904NonmemberWorkerReadiness():null;');
+    expect(router).toContain("COLLECTED_PAID_VIS_STALLED_WITHOUT_ACTIVATE_COMMAND");
+    expect(router).toContain("r.state=\'collected\'");
+    expect(router).toContain("c.payload->>\'accessId\'=a.access_id::text");
     expect(worker).not.toContain("console.log(process.env");
   });
   test("dashboard never asserts auto suspend disabled without looking at runtime",()=>{
