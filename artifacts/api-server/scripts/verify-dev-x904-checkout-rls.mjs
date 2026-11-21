@@ -42,7 +42,10 @@ try {
       } catch (err) {
         const diagnostic = [String(err?.code ?? ""), String(err?.message ?? ""), String(err)]
           .join(" ").toUpperCase();
-        const transient = ["ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"]
+        // Session pool exhaustion is a routing-capacity failure, not invalid
+        // credentials. Fall back to this same DEV project's transaction pooler.
+        const transient = ["ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN",
+          "EMAXCONNSESSION", "53300", "MAX CLIENTS REACHED IN SESSION MODE"]
           .some(code => diagnostic.includes(code));
         await client?.end().catch(() => {});
         if (!transient) throw err;
