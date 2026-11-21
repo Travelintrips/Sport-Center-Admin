@@ -116,8 +116,12 @@ jobs:
             // Never print the URI, username, or password.
             const result = normalizeCstDevTransactionPooler(process.env.SUPABASE_DATABASE_URL_DEV || "");
             console.log("CST_DEV_TRANSACTION_POOLER_SCOPE_PASS source=" + result.source);
-          } catch {
-            console.error("::error::CST-DEV connection URI is invalid, wrong-project, or missing a password");
+          } catch (error) {
+            if (error?.message === "CST_DEV_PASSWORD_PLACEHOLDER_NOT_REPLACED") {
+              console.error("::error::CST-DEV URI still contains the Supabase password placeholder. Replace it with the existing database password in GitHub Actions Secrets; do not reset or print credentials.");
+            } else {
+              console.error("::error::CST-DEV connection URI is invalid, wrong-project, or missing a password");
+            }
             process.exit(1);
           }
           NODE
