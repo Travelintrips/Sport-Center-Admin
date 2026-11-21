@@ -15,7 +15,7 @@ export function normalizeCstDevTransactionPooler(raw) {
   // A copied Supabase Connect URI contains a placeholder until an operator
   // supplies the existing database password. Refuse it before network access.
   const passwordText = decodeURIComponent(uri.password);
-  if (/YOUR[-_ ]?(?:DATABASE[-_ ]?)?PASSWORD|YOUR_PASSWORD|\\[.*PASSWORD.*\\]/i.test(passwordText)) {
+  if (/YOUR[-_ ]?(?:DATABASE[-_ ]?)?PASSWORD|YOUR_PASSWORD|\[.*PASSWORD.*\]/i.test(passwordText)) {
     throw new Error("CST_DEV_PASSWORD_PLACEHOLDER_NOT_REPLACED");
   }
   const validProtocol = ["postgresql:", "postgres:"].includes(uri.protocol);
