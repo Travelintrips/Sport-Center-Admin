@@ -9,6 +9,7 @@ import { startBookingSheetsPaymentEventWorker } from "./lib/bookingSheetsPayment
 import { startX904AutomaticCommandWorker } from "./services/x904AutomaticCommandWorker";
 import { startX904NonmemberAccessWorker } from "./services/x904NonmemberDailyAccessWorker";
 import { startX904NewOrdinaryUserDefaultSuspend } from "./services/x904NewOrdinaryUserDefaultSuspend";
+import { startX904GuestBookingLifecycle } from "./services/x904GuestBookingLifecycle";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
@@ -1366,6 +1367,7 @@ export async function initializeRuntime(): Promise<void> {
     // Separate paid nonmember 12-hour access worker; inert unless explicitly enabled.
     startX904NonmemberAccessWorker();
     startX904NewOrdinaryUserDefaultSuspend();
+    startX904GuestBookingLifecycle();
   }
   startBookingSheetsPaymentEventWorker();
 }
