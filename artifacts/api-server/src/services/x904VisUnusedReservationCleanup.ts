@@ -40,7 +40,7 @@ export async function releaseExpiredUnusedVisReservations(store: Store = db): Pr
       WHERE r.device_serial='TDBD234200545'
         AND r.state='reserved' AND r.collected_at IS NULL
         AND r.returned_at IS NULL
-        AND b.booking_date::date<(now() AT TIME ZONE 'Asia/Jakarta')::date
+        AND ((b.booking_date::date + time '23:00') AT TIME ZONE 'Asia/Jakarta')<=now()
         AND a.access_state='expired' AND a.activated_at IS NULL
         AND s.observed_at>r.reserved_at
         AND s.observed_at>=now()-interval '5 minutes'
