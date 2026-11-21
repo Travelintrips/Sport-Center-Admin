@@ -676,6 +676,31 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,async(req
         nonmemberWorkerReadiness.reasons.push("COLLECTED_PAID_VIS_STALLED_WITHOUT_ACTIVATE_COMMAND");
         nonmemberWorkerReadiness.readyForVis002Processing=false;
       }
+      const staleAck=await db.execute(sql`SELECT count(DISTINCT a.access_id)::int AS count
+        FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.x904_user_commands c
+          ON c.device_serial=a.device_serial AND c.user_pin=a.user_pin
+          AND c.payload->>'accessId'=a.access_id::text
+          AND c.command_type='ACTIVATE_USER' AND c.state='completed'
+          AND c.result->>'readBackConfirmed'='true'
+          AND c.result->>'afterGroup'='1'
+          AND c.result->>'deviceUid'=a.device_uid::text
+        JOIN LATERAL (
+          SELECT observed_at,users FROM sport_center.gym_x904_access_snapshots
+          WHERE device_serial=a.device_serial
+          ORDER BY observed_at DESC,snapshot_id DESC LIMIT 1
+        ) s ON true
+        WHERE a.device_serial='TDBD234200545'
+          AND a.verification_state='verified' AND a.access_state='pending'
+          AND a.activated_at IS NULL AND c.completed_at < now()-interval '2 minutes'
+          AND s.observed_at>c.completed_at
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements(s.users) u
+            WHERE u->>'pin'=a.user_pin AND u->>'group'='1'
+              AND u->>'enabled'='true' AND u->>'role'='0')`);
+      if(Number(staleAck.rows[0]?.count??0)>0){
+        nonmemberWorkerReadiness.reasons.push("X904_GROUP1_ACK_VERIFIED_BUT_GRANT_STILL_PENDING");
+        nonmemberWorkerReadiness.readyForVis002Processing=false;
+      }
     } catch {
       nonmemberWorkerReadiness.reasons.push("WORKER_PENDING_GRANT_DIAGNOSTIC_UNAVAILABLE");
       nonmemberWorkerReadiness.readyForVis002Processing=false;
