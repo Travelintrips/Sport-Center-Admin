@@ -71,7 +71,7 @@ export default function GymX904() {
       const response=await fetch(`${API}/admin/gym-x904/user-command/capabilities`,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});
       if(!response.ok)throw new Error("Hak kontrol X904 tidak tersedia");
       return response.json();
-    },enabled:tab==="users",retry:false,staleTime:30000
+    },enabled:tab==="users",retry:false,staleTime:15000,refetchInterval:15000
   });
   const {data:verifiedAccess,refetch:refetchVerifiedAccess}=useQuery<{source:string;users:Array<{user_pin:string;device_uid:number;device_group:number;completed_at:string}>}>({
     queryKey:["gym-x904-manual-access-status"],
