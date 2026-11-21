@@ -1361,7 +1361,9 @@ export async function initializeRuntime(): Promise<void> {
     if (process.env.SPORT_CENTER_SCHEDULER_ENABLED !== "false") {
       startScheduler();
     }
-    startBookingSheetsAutoWorker();
+    if (process.env.BOOKING_SHEETS_AUTO_WORKER_ENABLED !== "false") {
+      startBookingSheetsAutoWorker();
+    }
     // Disabled unless explicitly provisioned and approved after Sheet audit.
     startKasbonPoolAutoWorker();
     // The X904 worker is inert unless separately enabled and allowlisted.
