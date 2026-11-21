@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - develop
+    paths-ignore:
+      - AGENTS.md
+      - .github/workflows/sport-center-dev-post-merge.yml
 
 concurrency:
   group: sport-center-dev-post-merge
