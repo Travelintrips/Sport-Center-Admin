@@ -1458,6 +1458,9 @@ test("expired UNUSED VIS frees its reservation only with fresh Group 2, no activ
   await run(`CREATE TABLE IF NOT EXISTS sport_center.gym_x904_lan_logs(
     event_id text PRIMARY KEY,user_pin text,received_at timestamptz
   )`);
+  // This disposable isolated DB shares a VIS005 row with an earlier test.
+  // Clear that synthetic fixture only; no actual customer or PROD rows exist.
+  await run("DELETE FROM sport_center.gym_vis_card_reservations WHERE card_code='VIS005'");
   await run(`INSERT INTO sport_center.gym_x904_lan_users(device_serial,user_pin,device_uid,display_name,device_role)
     VALUES('TDBD234200545','11',11,'VIS 005',0)`);
   await run(`INSERT INTO sport_center.sport_bookings(id,booking_date,start_time,source,status,order_number)
