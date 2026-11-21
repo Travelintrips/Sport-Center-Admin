@@ -1357,8 +1357,13 @@ export async function initializeRuntime(): Promise<void> {
   // provisioning have completed. Scheduler starts only after this point.
   markStartupReady();
   if (!e2e) {
-    startScheduler();
-    startBookingSheetsAutoWorker();
+    // Honour the existing DEV safety flag; PROD behavior is unchanged by default.
+    if (process.env.SPORT_CENTER_SCHEDULER_ENABLED !== "false") {
+      startScheduler();
+    }
+    if (process.env.BOOKING_SHEETS_AUTO_WORKER_ENABLED !== "false") {
+      startBookingSheetsAutoWorker();
+    }
     // Disabled unless explicitly provisioned and approved after Sheet audit.
     startKasbonPoolAutoWorker();
     // The X904 worker is inert unless separately enabled and allowlisted.
