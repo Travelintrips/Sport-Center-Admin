@@ -180,7 +180,7 @@ function StatModal({
 }
 
 export default function AdminDashboard() {
-  const { data, isLoading } = useGetDashboard();
+  const { data, isLoading, isError, refetch } = useGetDashboard();
   const { data: allBookingsData } = useListBookings();
   const [selectedStat, setSelectedStat] = useState<StatId | null>(null);
 
@@ -235,6 +235,22 @@ export default function AdminDashboard() {
         </div>
         <div className="grid md:grid-cols-2 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64" />)}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-black">Dashboard</h1>
+          <p className="text-muted-foreground">Ringkasan operasional sport center Anda</p>
+        </div>
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+          <p className="font-semibold">Ringkasan dashboard gagal dimuat.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Data transaksi tidak diubah. Silakan coba memuat ringkasan kembali.</p>
+          <button type="button" onClick={() => void refetch()} className="mt-3 rounded-lg border px-4 py-2 text-sm font-semibold hover:bg-muted">Coba lagi</button>
         </div>
       </div>
     );
