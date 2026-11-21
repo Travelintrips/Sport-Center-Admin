@@ -62,8 +62,14 @@ test("only official verified funds plus confirmed unique payment can reserve a p
  assert.match(service,/SET access_state='expired'/);
  assert.match(service,/a\.access_state='review_required'/);
  assert.match(service,/a\.expires_at IS NOT NULL AND a\.expires_at<=now\(\)/);
- const allocateOnly=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function returnVerifiedVisCard"));
+ // Allocation itself must not issue machine commands. The separate
+ // witnessed-handover function is allowed to READ x904_user_commands to
+ // refuse unsafe recovery after a prior command, but must never write it.
+ const allocateOnly=service.slice(service.indexOf("export async function autoReserveVisAfterFundsVerified"),service.indexOf("export async function recoverUnallocatedPaidGymVis"));
  assert.doesNotMatch(allocateOnly,/ACTIVATE_USER|SUSPEND_USER|x904_user_commands/);
+ const handoverOnly=service.slice(service.indexOf("export async function collectReservedVisCard"),service.indexOf("export async function returnVerifiedVisCard"));
+ assert.match(handoverOnly,/FROM sport_center\.x904_user_commands c/);
+ assert.doesNotMatch(handoverOnly,/(?:INSERT INTO|UPDATE|DELETE FROM) sport_center\.x904_user_commands/);
 });
 
 test("all six VIS codes use inventory-certified exact machine PIN, UID, role and label",()=>{

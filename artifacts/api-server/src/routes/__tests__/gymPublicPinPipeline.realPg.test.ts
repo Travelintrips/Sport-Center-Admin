@@ -1574,6 +1574,70 @@ suite(
         expect(reservation).toMatchObject({ state: "reserved", collected_at: null });
         expect((await matrixBooking(id)).checked_in_at).not.toBeNull();
       });
+      test("SC-1801: previously held paid VIS is revalidated on witnessed handover only with fresh Group 2, no new payment or ACK", async () => {
+        const entry: MatrixIdentity={source:"gym_public_guest",identity:"card",pin:"78",uid:338,name:"VIS 001"};
+        const id=await matrixCheckout(entry);
+        const booking=await matrixBooking(id), paid=await payment(id);
+        expect(await grant(id)).toMatchObject({identity_type:"card",access_state:"pending",verification_state:"verified"});
+        const realNow=new Date((await pool.query("SELECT clock_timestamp() AS time")).rows[0].time);
+        const todayWib=new Intl.DateTimeFormat("en-CA",{
+          timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit",
+        }).format(realNow);
+        const closeAt=new Date(todayWib+"T23:00:00+07:00");
+        // Real DB clock for the source parity check, while the test still
+        // uses only its disposable local PostgreSQL and synthetic booking.
+        if (realNow >= closeAt) {
+          expect(closeAt.getTime()).toBeLessThanOrEqual(realNow.getTime());
+          return;
+        }
+        const approvedAt=new Date(realNow.getTime()-60_000);
+        await pool.query("UPDATE sport_center.sport_bookings SET booking_date=$2 WHERE id=$1",[id,todayWib]);
+        await pool.query("UPDATE sport_center.sport_payments SET confirmed_at=$2 WHERE id=$1",[paid.id,approvedAt]);
+        await pool.query("UPDATE sport_center.x904_nonmember_daily_access SET access_state='review_required',confirmed_at=$2,expires_at=$3 WHERE booking_id=$1",
+          [id,approvedAt,closeAt]);
+        await matrixSnapshot(new Date(realNow.getTime()-11*60_000));
+        const denied=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
+          .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
+        expect(denied.status).toBe(409);
+        expect(await grant(id)).toMatchObject({access_state:"review_required",activated_at:null});
+        await matrixSnapshot(new Date(realNow.getTime()-1000));
+        // Even an old completed command for THIS grant makes automatic
+        // recovery unsafe; no replay of an unknown device transition.
+        const heldGrant=await grant(id);
+        await pool.query(
+          "INSERT INTO sport_center.x904_user_commands(device_serial,command_type,user_pin,payload,requested_by,idempotency_key,state,created_at) VALUES('TDBD234200545','ACTIVATE_USER','78',$1,301,$2,'completed',$3)",
+          [JSON.stringify({source:"AUTO_NONMEMBER_GYM_12H",accessId:Number(heldGrant.access_id),expectedUid:338}),
+           "SC1801-UNATTRIBUTED-COMMAND-"+String(id),new Date(realNow.getTime()-3000)]);
+        const commandDenied=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
+          .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
+        expect(commandDenied.status).toBe(409);
+        expect(await grant(id)).toMatchObject({access_state:"review_required",activated_at:null});
+        await pool.query("DELETE FROM sport_center.x904_user_commands WHERE idempotency_key=$1",["SC1801-UNATTRIBUTED-COMMAND-"+String(id)]);
+        const accepted=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
+          .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
+        expect({status:accepted.status,error:accepted.body.error}).toEqual({status:200,error:undefined});
+        expect(accepted.body).toMatchObject({cardCode:"VIS001",state:"collected"});
+        expect(await grant(id)).toMatchObject({access_state:"pending",verification_state:"verified",activated_at:null});
+        expect((await pool.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[id])).rows[0])
+          .toMatchObject({state:"collected",collected_at:expect.any(Date)});
+        expect(await counts()).toEqual({bookings:1,payments:1,grants:1});
+        expect(await commands()).toHaveLength(0); // Handover never claims a device ACK.
+        // Existing worker must pick up the same recovered grant automatically.
+        await tick(new Date(realNow.getTime()+2000));
+        const queued=await commands();
+        expect(queued).toHaveLength(1);
+        expect(queued[0]).toMatchObject({command_type:"ACTIVATE_USER",state:"queued",user_pin:"78"});
+        const ackAt=new Date(realNow.getTime()+4000);
+        await pool.query("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$2,result=$3 WHERE command_id=$1",
+          [queued[0].command_id,ackAt,JSON.stringify({readBackConfirmed:true,deviceUid:338,afterGroup:1})]);
+        await matrixSnapshot(new Date(realNow.getTime()+5000),"78",1);
+        await tick(new Date(realNow.getTime()+6000));
+        expect(await grant(id)).toMatchObject({access_state:"active",activated_at:ackAt});
+        const replay=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
+          .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
+        expect(replay.status).toBe(200);
+        expect(await counts()).toEqual({bookings:1,payments:1,grants:1});
+      });
       test.each(variants)("full real route $source $identity: booking to payment, ACK, daily check-in and expiry without rewriting grant state", async s => {
         const id = await matrixCheckout(s);
         await matrixLifecycle(id, s);
