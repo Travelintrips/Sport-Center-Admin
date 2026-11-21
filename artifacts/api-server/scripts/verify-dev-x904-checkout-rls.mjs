@@ -1,58 +1,26 @@
 // Read-only CI gate: the real DEV pooler must expose the same checkout RLS
 // repairs proven necessary in PROD. Never connect to PROD or mutate rows.
 import pg from "pg";
+import { normalizeCstDevTransactionPooler } from "./cst-dev-connection.mjs";
 
 const raw = process.env.SUPABASE_DATABASE_URL_DEV || "";
-const expectedDevRef = "xssrfshdrtdfupgqwfdw";
-let url;
-try { url = new URL(raw); } catch {
-  console.error("DEV_X904_RLS_BLOCKED: DEV database URL missing/invalid");
+let connection;
+try {
+  connection = normalizeCstDevTransactionPooler(raw);
+} catch {
+  console.error("DEV_X904_RLS_BLOCKED: refusing wrong-project or malformed DEV database URL");
   process.exit(1);
 }
-const devOnly = url.hostname.endsWith(".pooler.supabase.com")
-  && decodeURIComponent(url.username) === `postgres.${expectedDevRef}`
-  && ["5432","6543"].includes(url.port) && Boolean(url.password);
-if (!devOnly) {
-  console.error("DEV_X904_RLS_BLOCKED: refusing non-DEV pooler target");
-  process.exit(1);
-}
-// Both standard Supabase pooler ports serve the same authenticated DEV
-// project; try the configured port first, then the other on TCP refusal.
-// Do not change host, database, user, password, or any RLS expectations.
-const fallbackPort = url.port === "5432" ? "6543" : "5432";
-const ports = [url.port, fallbackPort];
 let client;
 try {
-  for (const [index, port] of ports.entries()) {
-    const sameDevUrl = new URL(raw);
-    sameDevUrl.port = port;
-    let connected = false;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        client = new pg.Client({
-          connectionString: sameDevUrl.toString(),
-          connectionTimeoutMillis: 8000,
-          statement_timeout: 5000,
-          query_timeout: 8000,
-        });
-        await client.connect();
-        connected = true;
-        console.log(`DEV_X904_RLS_POOLER_CONNECTED route=${index === 0 ? "configured" : "alternate"}`);
-        break;
-      } catch (err) {
-        const diagnostic = [String(err?.code ?? ""), String(err?.message ?? ""), String(err)]
-          .join(" ").toUpperCase();
-        const transient = ["ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"]
-          .some(code => diagnostic.includes(code));
-        await client?.end().catch(() => {});
-        if (!transient) throw err;
-        console.warn(`DEV_X904_RLS_POOLER_RETRY route=${index === 0 ? "configured" : "alternate"} attempt=${attempt} of 2`);
-        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    }
-    if (connected) break;
-    if (index === ports.length - 1) throw new Error("DEV_POOLER_UNREACHABLE_BOTH_STANDARD_PORTS");
-  }
+  client = new pg.Client({
+    connectionString: connection.connectionString,
+    connectionTimeoutMillis: 8000,
+    statement_timeout: 5000,
+    query_timeout: 8000,
+  });
+  await client.connect();
+  console.log("DEV_X904_RLS_POOLER_CONNECTED: CST-DEV shared transaction mode");
   await client.query("BEGIN READ ONLY");
   const result = await client.query(`
     SELECT tablename,policyname,cmd,roles,qual,with_check
