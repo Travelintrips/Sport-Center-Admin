@@ -1609,7 +1609,18 @@ suite(
         expect((await pool.query("SELECT state,collected_at FROM sport_center.gym_vis_card_reservations WHERE booking_id=$1",[id])).rows[0])
           .toMatchObject({state:"collected",collected_at:expect.any(Date)});
         expect(await counts()).toEqual({bookings:1,payments:1,grants:1});
-        expect(await commands()).toHaveLength(0); // no pretend machine ACK
+        expect(await commands()).toHaveLength(0); // Handover never claims a device ACK.
+        // Existing worker must pick up the same recovered grant automatically.
+        await tick(new Date(realNow.getTime()+2000));
+        const queued=await commands();
+        expect(queued).toHaveLength(1);
+        expect(queued[0]).toMatchObject({command_type:"ACTIVATE_USER",state:"queued",user_pin:"78"});
+        const ackAt=new Date(realNow.getTime()+4000);
+        await pool.query("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$2,result=$3 WHERE command_id=$1",
+          [queued[0].command_id,ackAt,JSON.stringify({readBackConfirmed:true,deviceUid:338,afterGroup:1})]);
+        await matrixSnapshot(new Date(realNow.getTime()+5000),"78",1);
+        await tick(new Date(realNow.getTime()+6000));
+        expect(await grant(id)).toMatchObject({access_state:"active",activated_at:ackAt});
         const replay=await request.post(`/api/admin/wa-bookings/${booking.order_number}/collect-vis`)
           .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
         expect(replay.status).toBe(200);
