@@ -646,11 +646,42 @@ router.get("/admin/gym-x904/confirmed-auto-suspensions", adminMiddleware, async 
 });
 
 // Expose feature readiness without exposing connector credentials or permitting writes.
-router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,(req,res)=>{
+router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,async(req,res)=>{
   res.setHeader("Cache-Control","no-store");
   const role=(req as any).user?.role;
   const allowed=role==="owner" || role==="super_admin";
-  return res.json({allowed,nonmemberWorkerReadiness:allowed?getX904NonmemberWorkerReadiness():null,enabled:allowed && process.env.GYM_X904_USER_WRITE_ENABLED==="true",
+  const nonmemberWorkerReadiness=allowed?getX904NonmemberWorkerReadiness():null;
+  if(nonmemberWorkerReadiness){
+    // Catch the real recurring failure: physically collected, paid VIS has no
+    // activation command after the normal 60s worker cadence plus margin.
+    // Read-only; no activation, payment, audit mutation or fake machine ACK.
+    try {
+      const overdue=await db.execute(sql`SELECT count(*)::int AS count
+        FROM sport_center.x904_nonmember_daily_access a
+        JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+        JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=a.booking_id
+        JOIN sport_center.gym_vis_card_reservations r ON r.booking_id=a.booking_id
+        WHERE a.device_serial='TDBD234200545' AND a.identity_type='card'
+          AND a.verification_state='verified' AND a.access_state='pending'
+          AND a.activated_at IS NULL AND p.status::text='confirmed'
+          AND b.status::text IN ('confirmed','completed')
+          AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date
+          AND r.state='collected' AND r.collected_at <= now()-interval '5 minutes'
+          AND now() AT TIME ZONE 'Asia/Jakarta' >= b.booking_date::timestamp + interval '6 hours'
+          AND NOT EXISTS (SELECT 1 FROM sport_center.x904_user_commands c
+            WHERE c.device_serial=a.device_serial AND c.user_pin=a.user_pin
+              AND c.command_type='ACTIVATE_USER'
+              AND c.payload->>'accessId'=a.access_id::text)`);
+      if(Number(overdue.rows[0]?.count??0)>0){
+        nonmemberWorkerReadiness.reasons.push("COLLECTED_PAID_VIS_STALLED_WITHOUT_ACTIVATE_COMMAND");
+        nonmemberWorkerReadiness.readyForVis002Processing=false;
+      }
+    } catch {
+      nonmemberWorkerReadiness.reasons.push("WORKER_PENDING_GRANT_DIAGNOSTIC_UNAVAILABLE");
+      nonmemberWorkerReadiness.readyForVis002Processing=false;
+    }
+  }
+  return res.json({allowed,nonmemberWorkerReadiness,enabled:allowed && process.env.GYM_X904_USER_WRITE_ENABLED==="true",
     deviceSerial:"TDBD234200545",manualAccessEnabled:allowed && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true",manualAccessReason:process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" ? null : "VMSC_GROUP_EXECUTOR_NOT_READY",manualAccessAllEnabled:allowed && process.env.GYM_X904_MANUAL_ACCESS_ALL_ENABLED==="true" && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true",durableBulkEnabled:allowed && process.env.GYM_X904_DURABLE_BULK_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true" && process.env.GYM_X904_USER_DELETE_ENABLED==="true",operations:(allowed && process.env.GYM_X904_MANUAL_ACCESS_ENABLED==="true" && process.env.GYM_X904_USER_WRITE_ENABLED==="true" ? ["SUSPEND_USER","ACTIVATE_USER"] : []).concat(process.env.GYM_X904_NAME_EDIT_ALL_ENABLED==="true" ? (process.env.GYM_X904_USER_DELETE_ENABLED==="true" ? ["UPDATE_USER","DELETE_USER"] : ["UPDATE_USER"]) : process.env.GYM_X904_USER_WRITE_TEST_PIN ? ["UPDATE_USER","DELETE_USER"] : ["CREATE_USER","UPDATE_USER","DELETE_USER"]),testPin:process.env.GYM_X904_USER_WRITE_TEST_PIN||null});
 });
 
