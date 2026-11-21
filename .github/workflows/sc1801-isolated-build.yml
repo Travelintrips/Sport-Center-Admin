@@ -1,0 +1,40 @@
+name: SC-1801 isolated source build verification
+on:
+  pull_request:
+    paths:
+      - 'artifacts/api-server/src/services/x904GymVisitorCardReservations.ts'
+      - 'artifacts/api-server/src/routes/__tests__/gymPublicPinPipeline.realPg.test.ts'
+      - 'artifacts/api-server/src/routes/__tests__/gymBookingStatusTruthContract.test.ts'
+      - 'artifacts/sport-center/src/pages/admin/Bookings.tsx'
+      - '.github/workflows/sc1801-isolated-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile-and-contract:
+    name: SC-1801 source build (no DEV/PROD connection)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck unchanged app and targeted fix
+        run: pnpm typecheck
+      - name: Build unchanged frontend and backend with targeted fix
+        run: pnpm build
+      - name: Source-only booking/access status contract
+        run: >-
+          pnpm --filter @workspace/api-server exec node --experimental-vm-modules
+          ./node_modules/jest/bin/jest.js --runInBand
+          src/routes/__tests__/gymBookingStatusTruthContract.test.ts
+      - name: Scope marker
+        run: echo "CODE_BUILD_ONLY_PASS; independent DEV RLS gate remains required for merge/deploy" >> "$GITHUB_STEP_SUMMARY"
