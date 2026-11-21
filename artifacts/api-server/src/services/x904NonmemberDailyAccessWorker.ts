@@ -89,7 +89,20 @@ export function startX904NonmemberAccessWorker(): void {
           console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
             error instanceof Error ? error.message : String(error)));
       } else {
-        await processX904NonmemberDailyAccess();
+        // Fast lane only when an eligible, verified paid grant is pending.
+        // Do not multiply full-table recovery scans or suspend operations
+        // during idle periods; the original 60s cycle owns those.
+        const pending=await db.execute(sql`SELECT 1
+          FROM sport_center.x904_nonmember_daily_access a
+          JOIN sport_center.sport_bookings b ON b.id=a.booking_id
+          JOIN sport_center.sport_payments p ON p.id=a.payment_id AND p.booking_id=b.id
+          WHERE a.device_serial=${DEVICE} AND a.access_state='pending'
+            AND a.verification_state='verified' AND a.activated_at IS NULL
+            AND p.status::text='confirmed'
+            AND b.status::text IN ('confirmed','completed')
+            AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date
+          LIMIT 1`);
+        if(pending.rows.length) await processX904NonmemberDailyAccess();
       }
       nonmemberWorkerLastSuccessfulCycleAt = new Date().toISOString();
     }
