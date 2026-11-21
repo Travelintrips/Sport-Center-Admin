@@ -206,6 +206,8 @@ suite(
         "20261109_x904_public_pin_review_insert_rls.sql",
         "20261116_x904_paid_guest_pin_recovery_rls.sql",
         "20261116_x904_self_pin_insert_rls.sql",
+        // Exercise the exact new app-role INSERT policy in real isolated PG.
+        "20261120_x904_post_enrollment_approved_pin_rls.sql",
       ])
         await pool.query(readFileSync("migrations/" + file, "utf8"));
       for (const table of [
