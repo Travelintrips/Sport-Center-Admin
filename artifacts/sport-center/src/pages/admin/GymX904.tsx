@@ -64,7 +64,7 @@ export default function GymX904() {
   },[selectedMachineUser]);
 
   const queryClient = useQueryClient();
-  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;manualAccessAllEnabled?:boolean;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER"|"SUSPEND_USER"|"ACTIVATE_USER">}>({
+  const {data:userCommandCapabilities}=useQuery<{allowed:boolean;enabled:boolean;manualAccessAllEnabled?:boolean;nonmemberWorkerReadiness?:{configured:boolean;scope:string;vis002Included:boolean;workerStarted:boolean;lastCycleAt:string|null;lastSuccessfulCycleAt:string|null;reasons:string[];readyForVis002Processing:boolean}|null;operations:Array<"CREATE_USER"|"UPDATE_USER"|"DELETE_USER"|"SUSPEND_USER"|"ACTIVATE_USER">}>({
     queryKey:["gym-x904-user-capabilities"],
     queryFn:async()=>{
       const token=getToken();if(!token)throw new Error("Sesi admin tidak tersedia");
@@ -722,7 +722,19 @@ export default function GymX904() {
             Roster dari snapshot LAN
           </div>
         </div>
-        <X904NonmemberRegistryReview />{pendingLedgerError&&<p role="alert" className="rounded-lg border border-red-500 p-3 text-sm">Status antrean tidak tersedia. Tombol manual dikunci sementara untuk mencegah perintah ganda.</p>}{pendingLedger?.commands.filter(c=>c.blocked).map(c=><p role="status" key={c.command_id} className="rounded-lg border border-amber-500/50 p-2 text-sm">PIN {c.user_pin}: {c.state==="completed"?"ACK sudah selesai, menunggu snapshot mesin terbaru":c.state==="claimed"?"Sedang dikerjakan VMSC":"Menunggu antrean VMSC"} · ID {c.command_id}. Jangan kirim ulang perintah.</p>)} {accessNotice&&<div role="status" aria-live="polite" className={"rounded-lg border p-3 text-sm "+(accessPhase==="success"?"border-emerald-500/40 bg-emerald-500/10":accessPhase==="error"?"border-red-500/40 bg-red-500/10":"border-blue-500/40 bg-blue-500/10")}><p className="font-semibold">{accessPhase==="success"?"Berhasil — ACK dan snapshot terverifikasi":accessPhase==="error"?"Perintah gagal / perlu pemeriksaan":accessPhase==="ack"?"ACK diterima — verifikasi snapshot":accessPhase==="claimed"?"Sedang dijalankan worker VMSC":"Menunggu proses mesin X904"}</p><p className="mt-1">{accessNotice}</p><p className="mt-1 text-xs text-muted-foreground">Worker dapat memerlukan beberapa menit; snapshot mesin diperbarui sekitar 3 menit sekali. Jika timeout, periksa ID perintah dan jangan kirim ulang.</p></div>}<p className="text-xs text-muted-foreground">Suspend otomatis belum diaktifkan. Status akses belum tersedia dalam snapshot LAN; perubahan manual hanya boleh dinyatakan berhasil setelah ACK dan pembacaan ulang grup X904.</p>
+        <X904NonmemberRegistryReview />{pendingLedgerError&&<p role="alert" className="rounded-lg border border-red-500 p-3 text-sm">Status antrean tidak tersedia. Tombol manual dikunci sementara untuk mencegah perintah ganda.</p>}{pendingLedger?.commands.filter(c=>c.blocked).map(c=><p role="status" key={c.command_id} className="rounded-lg border border-amber-500/50 p-2 text-sm">PIN {c.user_pin}: {c.state==="completed"?"ACK sudah selesai, menunggu snapshot mesin terbaru":c.state==="claimed"?"Sedang dikerjakan VMSC":"Menunggu antrean VMSC"} · ID {c.command_id}. Jangan kirim ulang perintah.</p>)} {accessNotice&&<div role="status" aria-live="polite" className={"rounded-lg border p-3 text-sm "+(accessPhase==="success"?"border-emerald-500/40 bg-emerald-500/10":accessPhase==="error"?"border-red-500/40 bg-red-500/10":"border-blue-500/40 bg-blue-500/10")}><p className="font-semibold">{accessPhase==="success"?"Berhasil — ACK dan snapshot terverifikasi":accessPhase==="error"?"Perintah gagal / perlu pemeriksaan":accessPhase==="ack"?"ACK diterima — verifikasi snapshot":accessPhase==="claimed"?"Sedang dijalankan worker VMSC":"Menunggu proses mesin X904"}</p><p className="mt-1">{accessNotice}</p><p className="mt-1 text-xs text-muted-foreground">Worker dapat memerlukan beberapa menit; snapshot mesin diperbarui sekitar 3 menit sekali. Jika timeout, periksa ID perintah dan jangan kirim ulang.</p></div>}<div className="rounded-lg border border-amber-300/60 bg-amber-50/50 p-3 text-xs text-muted-foreground">
+          <p className="font-semibold">Diagnostik worker akses VIS/PIN berbayar (bukan bukti pintu terbuka)</p>
+          {userCommandCapabilities?.nonmemberWorkerReadiness ? (
+            <div className="mt-1 space-y-1">
+              <p>{userCommandCapabilities.nonmemberWorkerReadiness.readyForVis002Processing
+                ? "Worker terkonfigurasi dan tick terakhir tercatat; status tiap booking tetap menunggu perintah serta ACK X904."
+                : "Worker belum siap memproses VIS002. Jangan menyatakan transaksi siap pakai sebelum penyebab berikut diselesaikan."}</p>
+              <p>Alasan: {userCommandCapabilities.nonmemberWorkerReadiness.reasons.join(", ") || "Tidak ada blokir konfigurasi terdeteksi"}</p>
+              <p>Lingkup: {userCommandCapabilities.nonmemberWorkerReadiness.scope}; tick terakhir: {userCommandCapabilities.nonmemberWorkerReadiness.lastCycleAt || "belum tercatat"}.</p>
+            </div>
+          ) : <p className="mt-1">Status konfigurasi worker memerlukan sesi Owner/Super Admin yang aktif.</p>}
+          <p className="mt-1">Status mesin hanya sah setelah perintah di-ACK dan grup dibaca ulang dari X904; Grup 2 berarti akses tetap ditahan.</p>
+        </div>
         <p className="text-xs text-muted-foreground">Hanya snapshot terautentikasi yang selesai disimpan. Status aktivasi akun dan template biometrik tidak dibaca. PIN mesin belum otomatis dipetakan ke member Gym.</p>
         <div className="grid gap-3 sm:grid-cols-3" aria-label="Ringkasan jenis pengguna mesin">
           {(["member","nonmember","unknown"] as const).map(kind=>{
