@@ -666,7 +666,7 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,async(req
           AND a.activated_at IS NULL AND p.status::text='confirmed'
           AND b.status::text IN ('confirmed','completed')
           AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date
-          AND r.state='collected' AND r.collected_at <= now()-interval '5 minutes'
+          AND r.state='collected' AND r.collected_at <= now()-interval '90 seconds'
           AND now() AT TIME ZONE 'Asia/Jakarta' >= b.booking_date::timestamp + interval '6 hours'
           AND NOT EXISTS (SELECT 1 FROM sport_center.x904_user_commands c
             WHERE c.device_serial=a.device_serial AND c.user_pin=a.user_pin
