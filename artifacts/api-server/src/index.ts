@@ -1357,7 +1357,10 @@ export async function initializeRuntime(): Promise<void> {
   // provisioning have completed. Scheduler starts only after this point.
   markStartupReady();
   if (!e2e) {
-    startScheduler();
+    // Honour the existing DEV safety flag; PROD behavior is unchanged by default.
+    if (process.env.SPORT_CENTER_SCHEDULER_ENABLED !== "false") {
+      startScheduler();
+    }
     startBookingSheetsAutoWorker();
     // Disabled unless explicitly provisioned and approved after Sheet audit.
     startKasbonPoolAutoWorker();
