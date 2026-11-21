@@ -62,25 +62,35 @@ export function startX904NonmemberAccessWorker(): void {
     manualAccessEnabled: process.env.GYM_X904_MANUAL_ACCESS_ENABLED === "true",
     userWriteEnabled: process.env.GYM_X904_USER_WRITE_ENABLED === "true",
     intervalMs: 60000,
+    verifiedPaidGrantRecheckMs: 15000,
   }));
   if (!enabled || !validPin || !validActor) return;
   nonmemberWorkerStarted = true;
   let running = false;
-  const tick = async () => {
+  let fullCycleRequested = false;
+  const tick = async (fullCycle: boolean) => {
+    if (fullCycle) fullCycleRequested = true;
     if (running) return;
     running = true;
     nonmemberWorkerLastCycleAt = new Date().toISOString();
     nonmemberWorkerLastCycleFailed = false;
     try {
-      // Always process existing grants before recovery; if a new paid VIS was
-      // allocated, give it one additional guarded pass in this same tick.
-      await processPaidVisRecoveryCycle(
-        () => processX904NonmemberDailyAccess(),
-        () => recoverUnallocatedPaidGymVis(),
-      );
-      await auditPaidGymEntitlementConsistency(db).catch(error =>
-        console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
-          error instanceof Error ? error.message : String(error)));
+      // The 15s fast lane runs ONLY the existing, fully guarded paid access
+      // processor. It never sends physical commands or fabricates ACK.
+      // The original 60s recovery/audit cycle remains intact and cannot be
+      // starved by fast-lane contention.
+      if (fullCycleRequested) {
+        fullCycleRequested = false;
+        await processPaidVisRecoveryCycle(
+          () => processX904NonmemberDailyAccess(),
+          () => recoverUnallocatedPaidGymVis(),
+        );
+        await auditPaidGymEntitlementConsistency(db).catch(error =>
+          console.warn("[gym-x904-consistency] read-only audit unavailable; paid-access worker continues",
+            error instanceof Error ? error.message : String(error)));
+      } else {
+        await processX904NonmemberDailyAccess();
+      }
       nonmemberWorkerLastSuccessfulCycleAt = new Date().toISOString();
     }
     catch (error) {
@@ -89,9 +99,11 @@ export function startX904NonmemberAccessWorker(): void {
         error instanceof Error ? error.message : String(error));
     } finally { running = false; }
   };
-  void tick();
-  const timer = setInterval(() => void tick(), 60_000);
-  timer.unref();
+  void tick(true);
+  const mainTimer = setInterval(() => void tick(true), 60_000);
+  mainTimer.unref();
+  const paidFastTimer = setInterval(() => void tick(false), 15_000);
+  paidFastTimer.unref();
 }
 
 
