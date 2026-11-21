@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { recoverUnallocatedPaidGymVis } from "./x904GymVisitorCardReservations";
+import { recoverPaidGymPostEnrollment } from "./x904PaidGymPostEnrollmentRecovery";
 import { auditPaidGymEntitlementConsistency } from "./x904PaidGymConsistencyAudit";
 import { processPaidVisRecoveryCycle } from "./x904PaidVisRecoveryCycle";
 import { sql } from "drizzle-orm";
@@ -169,6 +170,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND registration_source='system_x904_automation'
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
+
+  // Reconcile confirmed paid VIS-route bookings that were enrolled after payment.
+  // OFF by default; reuse this worker for the physical Group 1 ACK.
+  await recoverPaidGymPostEnrollment(store, now, actor).catch(error =>
+    console.warn("[x904-post-enrollment] paid grant recovery deferred",
+      error instanceof Error ? error.message : String(error)));
 
   await recoverPaidPublicGymPin(store, now, actor).catch(error =>
     console.warn("[x904-web-pin] recovery deferred; existing worker continues",

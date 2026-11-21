@@ -690,7 +690,8 @@ export default function AdminWaBookings() {
                   </div>
                 )}
                 {detail.booking.source === "gym_public_guest" &&
-                  detail.visCardReservation?.state === "reserved" && (
+                  detail.visCardReservation?.state === "reserved" &&
+                  !["completed", "cancelled", "refunded", "expired", "rejected"].includes(detail.booking.status) && (
                   <section className="space-y-2 rounded-xl border border-blue-200 bg-white p-4 text-sm">
                     <p className="font-bold">Serah-terima kartu VIS</p>
                     <p className="text-xs">Hanya petugas yang melihat kartu fisik diserahkan kepada pengunjung boleh mencatat pengambilan.</p>
@@ -707,9 +708,18 @@ export default function AdminWaBookings() {
                   </section>
                 )}
                 {detail.booking.source === "gym_public_guest" &&
-                  detail.visCardReservation?.state === "collected" && (
+                  (detail.visCardReservation?.state === "collected" ||
+                    (detail.visCardReservation?.state === "reserved" &&
+                      ["completed", "cancelled", "refunded", "expired", "rejected"].includes(detail.booking.status))) && (
                   <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm">
                     <p className="font-bold">Pengembalian kartu VIS</p>
+                    {detail.visCardReservation?.state === "reserved" && (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                        Reservasi belum memiliki catatan serah-terima. Jangan mengarang pengambilan kartu.
+                        Jika kartu fisik sudah kembali, petugas dapat mencatat pengembalian langsung
+                        setelah bukti suspend dan read-back Grup 2 diverifikasi server.
+                      </p>
+                    )}
                     <label className="flex items-start gap-2 text-xs">
                       <input type="checkbox" checked={visCardReturned}
                         onChange={e => setVisCardReturned(e.target.checked)} />

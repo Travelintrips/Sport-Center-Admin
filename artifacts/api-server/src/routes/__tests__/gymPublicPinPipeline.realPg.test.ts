@@ -13,6 +13,7 @@ import { SQL } from "drizzle-orm";
 import pg from "pg";
 import { readFileSync } from "node:fs";
 import { processX904NonmemberDailyAccess } from "../../services/x904NonmemberDailyAccessWorker";
+import { recoverPaidGymPostEnrollment } from "../../services/x904PaidGymPostEnrollmentRecovery";
 import {
   pool as appPool,
   db,
@@ -1279,7 +1280,7 @@ suite(
           await pool.query(`DROP POLICY ${ident(name)} ON sport_center.x904_nonmember_daily_access`);
         }
         await pool.query(readFileSync("migrations/20261107_gym_vis_app_role_rls.sql", "utf8"));
-        for (const file of ["20261109_x904_public_pin_review_insert_rls.sql", "20261116_x904_paid_guest_pin_recovery_rls.sql", "20261116_x904_self_pin_insert_rls.sql"]) {
+        for (const file of ["20261109_x904_public_pin_review_insert_rls.sql", "20261116_x904_paid_guest_pin_recovery_rls.sql", "20261116_x904_self_pin_insert_rls.sql", "20261120_x904_post_enrollment_approved_pin_rls.sql"]) {
           await pool.query(readFileSync("migrations/" + file, "utf8"));
         }
         const { rows } = await pool.query("SELECT ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)::text AS day");
@@ -1321,6 +1322,9 @@ suite(
         }
       });
       afterAll(async () => {
+        // This isolated RLS INSERT policy references the canonical VIS table.
+        // Remove only the test-installed policy before restoring focused fixtures.
+        await pool.query("DROP POLICY IF EXISTS x904_nonmember_app_post_enrollment_paid_pin_insert ON sport_center.x904_nonmember_daily_access");
         await pool.query("DROP TABLE sport_center.gym_vis_card_reservations");
         await pool.query("ALTER TABLE sport_center.gym_vis_card_reservations_focused_fixture RENAME TO gym_vis_card_reservations");
       });
@@ -1577,6 +1581,55 @@ suite(
       test.each(variants)("full real route $source $identity: booking to payment, ACK, daily check-in and expiry without rewriting grant state", async s => {
         const id = await matrixCheckout(s);
         await matrixLifecycle(id, s);
+      });
+      test("single approved payment recovers post-enrolled public PIN without another approval or financial write", async () => {
+        const guest = "CI POST ENROLLMENT CUSTOMER";
+        const response = await submit(true, matrixDay, guest, "", false);
+        expect(response.status).toBe(201);
+        const id = Number(response.body.id);
+        expect(await counts()).toEqual({ bookings: 1, payments: 1, grants: 0 });
+        // Enrollment happens independently after booking creation, before the
+        // existing ONE payment approval. Never mutate the booking or payment.
+        await pool.query("INSERT INTO sport_center.gym_x904_lan_users VALUES('TDBD234200545','702',345,$1,0)",[guest]);
+        await pool.query("INSERT INTO sport_center.x904_verified_nonmember_identities(device_serial,user_pin,device_uid,display_name,verification_state,verified_by,verified_at) VALUES('TDBD234200545','702',345,$1,'verified','isolated-registry',now())",[guest]);
+        await matrixSnapshot(new Date(matrixStart.getTime()-500));
+        const confirmed = await matrixConfirm(id);
+        expect(confirmed.body.gymAccess).toMatchObject({ state:"identity_review_required" });
+        const originalPayment = await payment(id);
+        expect(originalPayment.status).toBe("confirmed");
+        expect(await grant(id)).toBeUndefined();
+        const approved = await pool.query("SELECT 1 FROM sport_center.audit_logs WHERE entity='payment' AND entity_id=$1 AND action='FINAL_PAYMENT_APPROVED'",[originalPayment.id]);
+        expect(approved.rowCount).toBe(1);
+        const flags=["GYM_X904_POST_ENROLLMENT_RECOVERY_ENABLED","GYM_X904_NONMEMBER_ONLY_PIN"] as const;
+        const old=Object.fromEntries(flags.map(key=>[key,process.env[key]]));
+        try {
+          process.env.GYM_X904_POST_ENROLLMENT_RECOVERY_ENABLED="true";
+          delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;
+          expect(await recoverPaidGymPostEnrollment(db as any,new Date(matrixStart.getTime()),301)).toBe(1);
+          expect(await recoverPaidGymPostEnrollment(db as any,new Date(matrixStart.getTime()),301)).toBe(0);
+          expect(await grant(id)).toMatchObject({
+            identity_type:"pin",user_pin:"702",device_uid:345,verification_state:"verified",access_state:"pending",
+            payment_id:originalPayment.id,
+          });
+          expect(await counts()).toEqual({ bookings:1,payments:1,grants:1 });
+          expect(await commands()).toHaveLength(0);
+          await matrixSnapshot(new Date(matrixStart.getTime()+1000));
+          await tick(new Date(matrixStart.getTime()+2000));
+          const queued=await commands();
+          expect(queued).toHaveLength(1);
+          expect(queued[0]).toMatchObject({ command_type:"ACTIVATE_USER",user_pin:"702",state:"queued" });
+          const ackAt=new Date(matrixStart.getTime()+5000);
+          await pool.query("UPDATE sport_center.x904_user_commands SET state='completed',completed_at=$2,result=$3 WHERE command_id=$1",
+            [queued[0].command_id,ackAt,JSON.stringify({readBackConfirmed:true,deviceUid:345,afterGroup:1})]);
+          await matrixSnapshot(new Date(ackAt.getTime()+1000),"702",1);
+          await tick(new Date(ackAt.getTime()+2000));
+          expect(await grant(id)).toMatchObject({access_state:"active",activated_at:ackAt});
+          expect((await payment(id)).id).toBe(originalPayment.id);
+        } finally {
+          for (const key of flags) {
+            if(old[key]===undefined) delete process.env[key]; else process.env[key]=old[key];
+          }
+        }
       });
       test("mid-process newly registered public VIS guest retains payment and recovers through existing staff PIN approval", async () => {
         const visitor = "MATRIX NEWLY REGISTERED VISITOR";
