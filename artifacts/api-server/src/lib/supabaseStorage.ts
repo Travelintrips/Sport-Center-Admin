@@ -325,3 +325,12 @@ export async function deleteFromStorage(url: string): Promise<void> {
     // non-fatal
   }
 }
+
+/** Strict cleanup for newly uploaded payment proofs; never silently report success. */
+export async function deleteUploadedProofStrict(url: string): Promise<void> {
+  if (!url || !isStorageConfigured()) throw new Error("Proof storage unavailable for cleanup");
+  const parsed = parseStorageUrl(url);
+  if (!parsed || parsed.bucket !== BUCKETS.proof) throw new Error("Invalid proof storage URL for cleanup");
+  const { error } = await getClient().storage.from(parsed.bucket).remove([parsed.objectPath]);
+  if (error) throw error;
+}
