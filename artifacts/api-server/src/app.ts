@@ -39,7 +39,12 @@ app.use(
     },
   }),
 );
-app.use(cors());
+// Native iClock traffic is not a browser CORS preflight. Let the ADMS route
+// handle OPTIONS rather than short-circuiting it with a generic 204.
+app.use((req, res, next) => {
+  if (/^\/iclock\/(?:cdata|getrequest)(?:\.aspx)?$/i.test(req.path)) return next();
+  return cors()(req, res, next);
+});
 // Capture raw body buffer before JSON parsing — needed for Paylabs webhook signature verification.
 // express.json() re-serialises req.body which may differ from the original bytes (whitespace, key
 // order). Storing the raw buffer lets verifyPaylabsSignature work on the exact bytes Paylabs signed.
@@ -65,6 +70,13 @@ app.use((req, res, next) => {
     req.path === "/api/readiness";
   if (!isStartupReady() && !isHealthProbe) {
     res.setHeader("Retry-After", "2");
+    // ADMS devices expect plain-text protocol responses, never JSON or SPA HTML.
+    // Do not ACK requests while startup is incomplete: the device must retry.
+    if (req.path.startsWith("/iclock/")) {
+      res.setHeader("Cache-Control", "no-store");
+      res.type("text/plain").status(503).send("SERVER NOT READY\n");
+      return;
+    }
     res.status(503).json({
       error: "Server sedang menyiapkan runtime. Coba lagi sebentar.",
       code: "STARTUP_INITIALIZATION_PENDING",
