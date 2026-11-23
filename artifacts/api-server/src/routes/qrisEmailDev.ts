@@ -33,6 +33,11 @@ router.get("/admin/qris-email/dev/status", adminMiddleware, async (req, res) => 
 
 router.post("/admin/qris-email/dev/sync", adminMiddleware, async (req, res) => {
   if (!devOnly(req, res)) return;
+  // Explicit owner-approved switch: independent of Gmail credentials and ingest enablement.
+  if (String(process.env.QRIS_GMAIL_DEV_SYNC_ALLOWED ?? "").toLowerCase() !== "true") {
+    res.status(403).json({ error: "sync_not_approved", autoConfirmed: 0 });
+    return;
+  }
   try {
     const mailbox = String(process.env.QRIS_GMAIL_MAILBOX_DEV ?? "").trim();
     const messages = await listMandiriQrisGmailMessages({ maxResults: Number(req.body?.maxResults) || 25 });
