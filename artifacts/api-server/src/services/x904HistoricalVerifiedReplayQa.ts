@@ -91,7 +91,11 @@ export async function replayVerifiedHistoricalGymScanQa(input: {
             AND c.result->>'readBackConfirmed'='true'
             AND (c.result->>'deviceUid')::int=a.device_uid
             AND (c.result->>'afterGroup')::int=1
-            AND c.completed_at<=a.activated_at)
+            AND c.completed_at IS NOT NULL
+            -- The executor ACK records microseconds; the grant state commonly
+            -- stores milliseconds. This bounded tolerance is for rounding,
+            -- NEVER a substitute for matching command identity or ACK.
+            AND abs(extract(epoch from (c.completed_at-a.activated_at)))<=2)
         AND NOT EXISTS (
           SELECT 1 FROM sport_center.x904_nonmember_daily_access other
           JOIN sport_center.sport_bookings ob ON ob.id=other.booking_id
