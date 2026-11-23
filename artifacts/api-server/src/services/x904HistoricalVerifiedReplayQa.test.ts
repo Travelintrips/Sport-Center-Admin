@@ -23,6 +23,7 @@ describe("historical Gym signed scan QA recovery cannot bypass production safegu
     expect(source).toContain("approved.user_role='owner'");
     expect(source).toContain("NULLIF(BTRIM(p.proof_url)");
     expect(source).toContain("c.payload->>'accessId'=a.access_id::text");
+    expect(source).toContain("abs(extract(epoch from (c.completed_at-a.activated_at)))<=2");
     expect(source).toContain("p.amount>=COALESCE");
     expect(source).toContain("c.result->>'readBackConfirmed'='true'");
     expect(source).toContain("(c.result->>'deviceUid')::int=a.device_uid");
