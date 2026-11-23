@@ -14,7 +14,20 @@ export async function auditPaidGymEntitlementConsistency(
   if (!x904NonmemberOpeningHours(now)) return 0;
   const rows = await store.execute(sql`SELECT booking_id,order_number,source,issue FROM (
     SELECT b.id booking_id,b.order_number,b.source,p.confirmed_at,
-      CASE WHEN a.access_id IS NULL THEN 'PAID_NO_GRANT'
+      CASE WHEN a.access_id IS NULL AND b.source='gym_public_guest'
+               AND COALESCE(b.notes,'') LIKE '%Kartu VIS001–VIS006 menunggu pilihan%'
+               AND EXISTS (SELECT 1 FROM sport_center.gym_x904_lan_users u
+                 JOIN sport_center.x904_verified_nonmember_identities v
+                   ON v.device_serial=u.device_serial AND v.user_pin=u.user_pin
+                   AND v.device_uid=u.device_uid
+                   AND v.verification_state='verified' AND v.revoked_at IS NULL
+                 WHERE u.device_serial='TDBD234200545' AND u.device_role=0
+                   AND upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=
+                       upper(regexp_replace(trim(v.display_name),'[[:space:]]+',' ','g'))
+                   AND upper(regexp_replace(trim(u.display_name),'[[:space:]]+',' ','g'))=
+                       upper(regexp_replace(trim(b.customer_name),'[[:space:]]+',' ','g')))
+               THEN 'PAID_VIS_TO_PIN_STAFF_REVIEW'
+           WHEN a.access_id IS NULL THEN 'PAID_NO_GRANT'
            WHEN a.access_state='review_required' THEN 'PAID_HELD_GRANT'
            WHEN a.access_state='pending' AND a.verification_state='verified'
              AND a.activated_at IS NULL AND a.payment_id=p.id
@@ -79,7 +92,7 @@ export async function auditPaidGymEntitlementConsistency(
   let count=0;
   const nowMs=now.getTime();
   for (const raw of rows.rows as any[]) {
-    if (!['PAID_NO_GRANT','PAID_HELD_GRANT','PAID_PENDING_GRANT'].includes(raw.issue)) continue;
+    if (!['PAID_NO_GRANT','PAID_HELD_GRANT','PAID_PENDING_GRANT','PAID_VIS_TO_PIN_STAFF_REVIEW'].includes(raw.issue)) continue;
     const bookingId=Number(raw.booking_id);
     if (!Number.isSafeInteger(bookingId) || bookingId<=0) continue;
     count++;
@@ -88,7 +101,7 @@ export async function auditPaidGymEntitlementConsistency(
     lastPaidGymAnomalyLog.set(key,nowMs);
     log('[gym-x904-consistency] '+JSON.stringify({
       issue:raw.issue,bookingId,orderNumber:String(raw.order_number),
-      source:String(raw.source),paymentConfirmed:true,action:'review_existing_booking_no_new_payment',
+      source:String(raw.source),paymentConfirmed:true,action:raw.issue==='PAID_VIS_TO_PIN_STAFF_REVIEW'?'staff_verify_registered_pin_no_grant':'review_existing_booking_no_new_payment',
     }));
   }
   if (lastPaidGymAnomalyLog.size>250) {
