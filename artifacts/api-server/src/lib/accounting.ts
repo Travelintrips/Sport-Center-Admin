@@ -31,7 +31,9 @@ function getPublicPool(): pg.Pool | null {
   if (!_publicPool) {
     _publicPool = new pg.Pool({
       connectionString: SHARED_DB_URL,
-      ssl: { rejectUnauthorized: false },
+      // Supabase requires TLS. Disposable localhost PostgreSQL intentionally
+      // does not; do not send an SSL handshake to the QA-only local server.
+      ...(/supabase\.(co|com|in)/.test(SHARED_DB_URL) ? { ssl: { rejectUnauthorized: false } } : {}),
       max: 3,
     });
   }
