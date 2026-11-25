@@ -1927,6 +1927,47 @@ export default function AdminCheckoutForm() {
 
 
 
+            {/* A single-date session can be added to the same admin cart without enabling recurrence. */}
+            {!isMembership && !isWalkIn && !repeatEnabled && selectedFacilityId && selectedDate && startTime && slotValid && (
+              <Button type="button" variant="outline" className="w-full border-orange-300"
+                disabled={isActiveApMember || bookingKind === "event" ||
+                  multiPatterns.reduce((n, p) => n + p.dates.length, 0) >= 52}
+                onClick={() => {
+                  const next: BookingPattern = {
+                    startDate: selectedDate,
+                    startTime: startTime.slice(11, 16),
+                    durationHours: Number(duration),
+                    repeatType: "weekly",
+                    repeatCount: 1,
+                    dates: [selectedDate],
+                    pricePerSession: Number(facility?.pricePerHour ?? 0) * Number(duration),
+                    facilityId: Number(selectedFacilityId),
+                    facilityName: String(facility?.name ?? ""),
+                    activityType: isMultigunaFacility ? selectedActivityType : null,
+                  };
+                  if (isMultigunaFacility && !multigunaActivities.some(a => a.value === selectedActivityType)) {
+                    toast({ title: "Pilih olahraga Multiguna terlebih dahulu", variant: "destructive" });
+                    return;
+                  }
+                  const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+                  const overlaps = multiPatterns.some((pattern) =>
+                    pattern.facilityId === next.facilityId &&
+                    pattern.dates.includes(selectedDate) &&
+                    toMinutes(pattern.startTime) < toMinutes(next.startTime) + next.durationHours * 60 &&
+                    toMinutes(next.startTime) < toMinutes(pattern.startTime) + pattern.durationHours * 60
+                  );
+                  if (overlaps) {
+                    toast({ title: "Jadwal bertabrakan", description: "Fasilitas ini sudah ada pada jam yang sama dalam booking.", variant: "destructive" });
+                    return;
+                  }
+                  setMultiPatterns(prev => [...prev, next]);
+                  setStartTime("");
+                  toast({ title: "Fasilitas ditambahkan", description: "Pilih fasilitas lain dan jadwalnya, atau simpan booking setelah minimal dua sesi ditambahkan." });
+                }}>
+                + Tambah Fasilitas ke Booking
+              </Button>
+            )}
+
             {!isMembership && !isWalkIn && repeatEnabled && repeatPreviewCurrent && repeatAllAvailable && repeatPreview && (
               <Button type="button" variant="outline" className="w-full border-orange-300"
                 disabled={isActiveApMember || bookingKind === "event" ||
