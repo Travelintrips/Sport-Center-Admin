@@ -447,6 +447,7 @@ export default function AdminCheckoutForm() {
   // Keep the primary action clickable for this mode and explain any remaining
   // validation problem, rather than silently disabling it.
   const multiScheduleBlockers: string[] = multiPatterns.length === 0 ? [] : [
+    ...(multiPatterns.reduce((n, p) => n + p.dates.length, 0) < 2 ? ["Tambahkan minimal dua sesi atau hapus daftar fasilitas untuk membuat satu booking biasa."] : []),
     ...(!selectedCustomerId || !customerFormValid ? ["Pilih pelanggan dengan nama dan nomor WhatsApp yang valid."] : []),
     ...(multiPatterns.some((pattern) => !activeFacilities.some((item: any) => Number(item.id) === pattern.facilityId))
       ? ["Salah satu fasilitas pada pola tidak aktif."] : []),
@@ -506,7 +507,7 @@ export default function AdminCheckoutForm() {
     (!isGymNonmember || (isHistoricalGymNonmember && !x904IdentityValue.trim()) ||
       (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
-    (multiPatterns.length === 0 || (!isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
+    (multiPatterns.length === 0 || (multiPatterns.reduce((n, p) => n + p.dates.length, 0) >= 2 && !isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
     (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && verifiedCompanyCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
   );
@@ -1926,6 +1927,47 @@ export default function AdminCheckoutForm() {
             )}
 
 
+
+            {/* A single-date session can be added to the same admin cart without enabling recurrence. */}
+            {!isMembership && !isWalkIn && !repeatEnabled && selectedFacilityId && selectedDate && startTime && slotValid && (
+              <Button type="button" variant="outline" className="w-full border-orange-300"
+                disabled={isActiveApMember || bookingKind === "event" ||
+                  multiPatterns.reduce((n, p) => n + p.dates.length, 0) >= 52}
+                onClick={() => {
+                  const next: BookingPattern = {
+                    startDate: selectedDate,
+                    startTime: startTime.slice(11, 16),
+                    durationHours: Number(duration),
+                    repeatType: "weekly",
+                    repeatCount: 1,
+                    dates: [selectedDate],
+                    pricePerSession: Number(facility?.pricePerHour ?? 0) * Number(duration),
+                    facilityId: Number(selectedFacilityId),
+                    facilityName: String(facility?.name ?? ""),
+                    activityType: isMultigunaFacility ? selectedActivityType : null,
+                  };
+                  if (isMultigunaFacility && !multigunaActivities.some(a => a.value === selectedActivityType)) {
+                    toast({ title: "Pilih olahraga Multiguna terlebih dahulu", variant: "destructive" });
+                    return;
+                  }
+                  const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+                  const overlaps = multiPatterns.some((pattern) =>
+                    pattern.facilityId === next.facilityId &&
+                    pattern.dates.includes(selectedDate) &&
+                    toMinutes(pattern.startTime) < toMinutes(next.startTime) + next.durationHours * 60 &&
+                    toMinutes(next.startTime) < toMinutes(pattern.startTime) + pattern.durationHours * 60
+                  );
+                  if (overlaps) {
+                    toast({ title: "Jadwal bertabrakan", description: "Fasilitas ini sudah ada pada jam yang sama dalam booking.", variant: "destructive" });
+                    return;
+                  }
+                  setMultiPatterns(prev => [...prev, next]);
+                  setStartTime("");
+                  toast({ title: "Fasilitas ditambahkan", description: "Pilih fasilitas lain dan jadwalnya, atau simpan booking setelah minimal dua sesi ditambahkan." });
+                }}>
+                + Tambah Fasilitas ke Booking
+              </Button>
+            )}
 
             {!isMembership && !isWalkIn && repeatEnabled && repeatPreviewCurrent && repeatAllAvailable && repeatPreview && (
               <Button type="button" variant="outline" className="w-full border-orange-300"
