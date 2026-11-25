@@ -447,6 +447,7 @@ export default function AdminCheckoutForm() {
   // Keep the primary action clickable for this mode and explain any remaining
   // validation problem, rather than silently disabling it.
   const multiScheduleBlockers: string[] = multiPatterns.length === 0 ? [] : [
+    ...(multiPatterns.reduce((n, p) => n + p.dates.length, 0) < 2 ? ["Tambahkan minimal dua sesi atau hapus daftar fasilitas untuk membuat satu booking biasa."] : []),
     ...(!selectedCustomerId || !customerFormValid ? ["Pilih pelanggan dengan nama dan nomor WhatsApp yang valid."] : []),
     ...(multiPatterns.some((pattern) => !activeFacilities.some((item: any) => Number(item.id) === pattern.facilityId))
       ? ["Salah satu fasilitas pada pola tidak aktif."] : []),
@@ -506,7 +507,7 @@ export default function AdminCheckoutForm() {
     (!isGymNonmember || (isHistoricalGymNonmember && !x904IdentityValue.trim()) ||
       (Boolean(x904VerifiedName) && !x904Verifying && !x904VerificationError)) &&
     repeatFormValid &&
-    (multiPatterns.length === 0 || (!isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
+    (multiPatterns.length === 0 || (multiPatterns.reduce((n, p) => n + p.dates.length, 0) >= 2 && !isWalkIn && !isActiveApMember && bookingKind !== "event")) &&
     (!isCompanyPayer || (paymentChoice === "unpaid" && !isGuest && verifiedCompanyCustomer?.accountType === "company")) &&
     (isCompanyPayer || selectedCustomer?.accountType !== "company")
   );
