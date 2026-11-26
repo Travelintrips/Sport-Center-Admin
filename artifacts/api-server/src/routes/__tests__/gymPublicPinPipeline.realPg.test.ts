@@ -661,7 +661,7 @@ suite(
         });
         const expiry = new Date((await grant(id)).expires_at);
         expect(expiry.getTime()).toBe(
-          Date.parse("2026-11-10T16:00:00Z"),
+          Math.min(ackAt.getTime() + 12 * 3600000, Date.parse("2026-11-10T16:00:00Z")),
         );
         await snapshot(new Date(expiry.getTime() + 1000), 1);
         await tick(new Date(expiry.getTime() + 2000));
@@ -1514,7 +1514,7 @@ suite(
         expect(await matrixBooking(id)).toMatchObject({ source: s.source, status: "completed", checked_in_at: scanAt, completed_at: completedAt });
         expect((await pool.query("SELECT count(*)::int n FROM sport_center.booking_history WHERE booking_id=$1 AND note LIKE 'Check-in%'", [id])).rows[0].n).toBe(1);
         expect((await pool.query("SELECT count(*)::int n FROM sport_center.booking_history WHERE booking_id=$1 AND to_status='completed' AND note NOT LIKE 'Check-in%'", [id])).rows[0].n).toBe(1);
-        const expiry = new Date(matrixDay + "T23:00:00+07:00");
+        const expiry = new Date(Math.min(ackAt.getTime() + 12 * 3600000, Date.parse(matrixDay + "T23:00:00+07:00")));
         expect(new Date((await grant(id)).expires_at)).toEqual(expiry);
         await matrixSnapshot(new Date(expiry.getTime() + 1000), s.pin, 1);
         await tick(new Date(expiry.getTime() + 2000));

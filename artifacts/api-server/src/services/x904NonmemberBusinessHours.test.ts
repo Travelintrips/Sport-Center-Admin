@@ -60,7 +60,7 @@ describe("X904 06:00-23:00 WIB 12-hour maximum access contract", () => {
     expect(source).toContain("x904NonmemberSameWibDate(now, new Date(scheduledStart))");
     expect(source).toContain("AND other.activated_at IS NOT NULL");
     expect(source).toContain("LEAST(other.expires_at");
-    expect(source).toContain("expires_at=(${String(a.booking_date)}::date + time '23:00')");
+    expect(source).toContain("expires_at=LEAST(${ackTime}::timestamptz + interval '12 hours'");
     expect(source).toContain("x904GymBookingDayClose(a.booking_date)");
     expect(source).toContain("readBackConfirmed");
     expect(source).toContain("afterGroup");
