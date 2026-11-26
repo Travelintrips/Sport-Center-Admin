@@ -180,8 +180,14 @@ function StatModal({
 }
 
 export default function AdminDashboard() {
-  const { data, isLoading, isError, refetch } = useGetDashboard();
-  const { data: allBookingsData } = useListBookings();
+  // Reuse recent dashboard reads across menu navigation instead of refetching
+  // the same expensive aggregates on every immediate remount.
+  const { data, isLoading, isError, refetch } = useGetDashboard({
+    query: { staleTime: 15_000 },
+  });
+  const { data: allBookingsData } = useListBookings(undefined, {
+    query: { staleTime: 15_000 },
+  });
   const [selectedStat, setSelectedStat] = useState<StatId | null>(null);
 
   // Revenue split dengan bucket yang tepat:
