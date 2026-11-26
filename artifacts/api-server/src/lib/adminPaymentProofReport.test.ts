@@ -24,6 +24,7 @@ describe("compact admin WA proof report", () => {
     expect(isAuthorizedAdminProofUploader({ role: "admin" })).toBe(true);
     expect(isAuthorizedAdminProofUploader({ role: "finance" })).toBe(true);
     expect(isAuthorizedAdminProofUploader({ role: "staff" })).toBe(false);
+    expect(isAuthorizedAdminProofUploader({ role: "admin_booking" })).toBe(false);
     expect(isAuthorizedAdminProofUploader({ role: "customer" })).toBe(false);
     expect(isAuthorizedAdminProofUploader(null)).toBe(false);
   });

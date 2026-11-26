@@ -1539,8 +1539,15 @@ suite(
         const { createToken } = await import("../../lib/auth.js");
         const fieldAdminToken = createToken(307, "admin_booking");
         matrixAdminToken = fieldAdminToken;
-        adminToken = fieldAdminToken;
-        const id = await matrixCheckout(s);
+        const id = await matrixCheckout(s, false, true);
+        const p = await payment(id);
+        expect(p.status).not.toBe("confirmed");
+        const denied = await request.patch("/api/payments/" + p.id)
+          .set("Authorization", "Bearer " + fieldAdminToken).send({ status: "confirmed" });
+        expect(denied.status).toBe(403);
+        expect((await payment(id)).status).not.toBe("confirmed");
+        expect(await commands()).toHaveLength(0);
+        await matrixConfirm(id);
         await matrixLifecycle(id, s);
       });
       test("two adjacent admin PIN/VIS paid confirmations wake two distinct X904 activation commands without timer or duplicate grant", async () => {

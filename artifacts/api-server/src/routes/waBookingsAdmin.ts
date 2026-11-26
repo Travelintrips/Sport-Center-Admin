@@ -376,6 +376,10 @@ router.post("/admin/wa-bookings/:orderNumber/reject", adminMiddleware, async (re
 router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req, res) => {
   const orderNumber = String(req.params.orderNumber);
   const adminUser = (req as any).user;
+  if (!["owner", "super_admin", "admin", "finance"].includes(adminUser?.role ?? "")) {
+    res.status(403).json({ error: "Admin Lapangan/Staff tidak berwenang mengonfirmasi pembayaran." });
+    return;
+  }
   const adminName = adminUser?.email ?? "admin";
 
   const [booking] = await db.select().from(bookingsTable)
@@ -384,7 +388,7 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   // A public Gym guest is a booking only, not a verified X904 entitlement.
   // Do not allow this legacy WA one-click paid action to create a payment
   // with no supporting proof and independent fund verification.
-  if (booking.source === "gym_public_guest") {
+  if (booking.source === "gym_public_guest" || booking.facilityId === 6) {
     res.status(409).json({
       error: "Booking Gym mandiri wajib diverifikasi melalui menu Booking Admin. Tombol Lunas cepat WA tidak tersedia untuk booking ini.",
     }); return;

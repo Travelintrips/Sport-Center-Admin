@@ -29,5 +29,5 @@ export function isAuthorizedAdminProofUploader(
   actor: { role: string } | null,
 ): boolean {
   return actor != null &&
-    ["owner", "super_admin", "admin", "finance", "admin_booking"].includes(actor.role);
+    ["owner", "super_admin", "admin", "finance"].includes(actor.role);
 }

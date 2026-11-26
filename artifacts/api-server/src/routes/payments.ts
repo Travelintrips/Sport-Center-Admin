@@ -935,8 +935,7 @@ router.post("/payments", async (req, res) => {
     // Payment recorded by an authorized operator from Admin Booking Detail:
     // send an informational proof report, never a duplicate approval request.
     // This is about the uploader's verified role, not who created the booking.
-    const adminProofUpload = isAuthorizedAdminProofUploader(uploadActor) &&
-      !(req.body.confirmAdminGymPayment === true && uploadActor?.role === "admin_booking");
+    const adminProofUpload = isAuthorizedAdminProofUploader(uploadActor);
     if (autoConfirmGym) {
       // Canonical confirmation sends the paid report; no redundant review alert.
     } else if (adminProofUpload) {
@@ -1847,8 +1846,8 @@ async function updatePaymentStatus(req: Request, res: Response,
       ? { status: automatic.status, paymentMethod: undefined, paymentProvider: undefined, notes: undefined }
       : req.body;
     const requesterRole = String((req as any).user?.role ?? "");
-    if (status === "confirmed" && requesterRole === "staff") {
-      res.status(403).json({ error: "Staff hanya dapat mengirim bukti untuk verifikasi." });
+    if (status === "confirmed" && !["owner", "super_admin", "admin", "finance"].includes(requesterRole)) {
+      res.status(403).json({ error: "Admin Lapangan/Staff hanya dapat mengirim bukti untuk verifikasi oleh Admin yang berwenang." });
       return;
     }
     if (

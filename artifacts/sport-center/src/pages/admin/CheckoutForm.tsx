@@ -1135,7 +1135,7 @@ export default function AdminCheckoutForm() {
       }
 
       const currentRole = getCurrentRole();
-      if (currentRole && currentRole !== "staff") {
+      if (["owner", "super_admin", "admin", "finance"].includes(currentRole ?? "")) {
         const confirmed = await fetch(`/api/payments/${paymentId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", ...headers },
