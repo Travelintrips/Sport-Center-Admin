@@ -106,7 +106,7 @@ export function startX904NonmemberAccessWorker(): void {
             AND a.verification_state='verified' AND a.activated_at IS NULL
             AND p.status::text='confirmed'
             AND b.status::text IN ('confirmed','completed')
-            AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date
+            AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date::text
           LIMIT 1`);
         if(pending.rows.length) await processX904NonmemberDailyAccess();
       }
