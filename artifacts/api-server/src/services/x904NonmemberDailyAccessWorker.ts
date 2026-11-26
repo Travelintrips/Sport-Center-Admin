@@ -16,6 +16,7 @@ const MAX_ATTEMPTS = 3;
 const MAX_SUSPEND_ATTEMPTS = 6;
 
 let nonmemberWorkerStarted = false;
+let grantSweepCursor = 0;
 let nonmemberWorkerLastCycleAt: string | null = null;
 let nonmemberWorkerLastSuccessfulCycleAt: string | null = null;
 let nonmemberWorkerLastCycleFailed = false;
@@ -66,6 +67,7 @@ export function startX904NonmemberAccessWorker(): void {
     verifiedPaidGrantRecheckMs: 15000,
   }));
   if (!enabled || !validPin || !validActor) return;
+  if (nonmemberWorkerStarted) return;
   nonmemberWorkerStarted = true;
   let running = false;
   let fullCycleRequested = false;
@@ -434,9 +436,10 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
       -- Verified paid grants cover both VIS cards and ordinary nonmember PINs.
       -- The card allowlist must not silently exclude verified PIN bookings.
-    ORDER BY a.confirmed_at LIMIT 25`);
+    ORDER BY CASE WHEN a.access_id > ${grantSweepCursor} THEN 0 ELSE 1 END, a.access_id LIMIT 25`);
 
   for (const row of due.rows as any[]) {
+    grantSweepCursor = Number(row.access_id);
     try {
     await store.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(904212)`);
@@ -561,9 +564,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       const bookingDayClose = x904GymBookingDayClose(a.booking_date);
       const storedExpiry = a.expires_at ? new Date(String(a.expires_at)) : null;
       const expiry = activeStart
-        ? (["admin","gym_public_guest","web"].includes(String(a.booking_source)) && bookingDayClose && storedExpiry
-            ? new Date(Math.min(bookingDayClose.getTime(), storedExpiry.getTime()))
-            : x904NonmemberEffectiveExpiry(activeStart, storedExpiry))
+        ? x904NonmemberEffectiveExpiry(activeStart, bookingDayClose && storedExpiry
+          ? new Date(Math.min(bookingDayClose.getTime(), storedExpiry.getTime())) : storedExpiry)
         : null;
       // A web booking attached to a physical VIS must be confirmed to activate.
       // Cancellation/completion causes the ordinary verified SUSPEND path.
@@ -621,7 +623,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
             AND pay.status::text='confirmed'
             AND other.confirmed_at<=${now}
             AND other.activated_at IS NOT NULL
-            AND LEAST(other.expires_at,
+            AND LEAST(other.expires_at, other.activated_at + interval '12 hours',
               ((other.activated_at AT TIME ZONE 'Asia/Jakarta')::date + time '23:00')
                 AT TIME ZONE 'Asia/Jakarta')>${now}
           LIMIT 1`);
@@ -718,8 +720,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
               }
               await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
                 SET activated_at=COALESCE(activated_at,${ackTime}),
-                    expires_at=(${String(a.booking_date)}::date + time '23:00')
-                      AT TIME ZONE 'Asia/Jakarta',
+                    expires_at=LEAST(${ackTime}::timestamptz + interval '12 hours',
+                      (${String(a.booking_date)}::date + time '23:00') AT TIME ZONE 'Asia/Jakarta'),
                     access_state='active'
                 WHERE access_id=${Number(a.access_id)} AND verification_state='verified'
                   AND payment_id=${Number(a.payment_id)}`);
@@ -737,10 +739,12 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         else if (last.state === "failed") {
           const errorCode = String((last.result as any)?.errorCode ?? "");
           const attempts = Number((last as any).attempts ?? 1);
+          if (errorCode === "DEVICE_BUSY" && (last.result as any)?.readBackConfirmed === false &&
+              last.completed_at && attempts < maxCommandAttempts &&
+              (now.getTime() - new Date(String(last.completed_at)).getTime() < RETRY_DELAY_MS ||
+               observedAt.getTime() <= new Date(String(last.completed_at)).getTime())) return;
           if (errorCode !== "DEVICE_BUSY" || (last.result as any)?.readBackConfirmed !== false ||
-              !last.completed_at || attempts >= maxCommandAttempts ||
-              now.getTime() - new Date(String(last.completed_at)).getTime() < RETRY_DELAY_MS ||
-              observedAt.getTime() <= new Date(String(last.completed_at)).getTime()) {
+              !last.completed_at || attempts >= maxCommandAttempts) {
             await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
               SET access_state='review_required'
               WHERE access_id=${Number(a.access_id)}`);
