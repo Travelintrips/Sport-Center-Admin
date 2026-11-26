@@ -1836,6 +1836,8 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
   }
 });
 
+router.patch("/payments/:id", adminMiddleware, (req, res) => { void updatePaymentStatus(req, res); });
+
 async function updatePaymentStatus(req: Request, res: Response,
   automatic?: { id: number; status: "confirmed" },
 ): Promise<void> {
@@ -2797,7 +2799,6 @@ async function updatePaymentStatus(req: Request, res: Response,
     });
   }
 }
-router.patch("/payments/:id", adminMiddleware, (req, res) => { void updatePaymentStatus(req, res); });
 
 // DELETE /payments/:id/proof — admin: hapus bukti transfer, kembalikan status booking ke pending_payment
 router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
