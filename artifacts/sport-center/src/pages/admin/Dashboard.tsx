@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useGetDashboard, useListBookings } from "@workspace/api-client-react";
+import { useGetDashboard, useListBookings, getGetDashboardQueryKey, getListBookingsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -183,10 +183,10 @@ export default function AdminDashboard() {
   // Reuse recent dashboard reads across menu navigation instead of refetching
   // the same expensive aggregates on every immediate remount.
   const { data, isLoading, isError, refetch } = useGetDashboard({
-    query: { staleTime: 15_000 },
+    query: { queryKey: getGetDashboardQueryKey(), staleTime: 15_000 },
   });
   const { data: allBookingsData } = useListBookings(undefined, {
-    query: { staleTime: 15_000 },
+    query: { queryKey: getListBookingsQueryKey(), staleTime: 15_000 },
   });
   const [selectedStat, setSelectedStat] = useState<StatId | null>(null);
 
