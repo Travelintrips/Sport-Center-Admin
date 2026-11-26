@@ -1891,7 +1891,7 @@ function BookingDetailDrawer({
       if (!saved.ok) throw new Error(savedData.error ?? "Pembayaran gagal dicatat");
 
       const currentRole = getCurrentRole();
-      if (currentRole && currentRole !== "staff") {
+      if (["owner", "super_admin", "admin", "finance"].includes(currentRole ?? "")) {
         const confirmed = await fetch(`${API_BASE}/payments/${savedData.id}`, {
           method: "PATCH",
           headers: {"Content-Type":"application/json", ...auth},
@@ -2736,9 +2736,9 @@ function BookingDetailDrawer({
                   <Input id="new-booking-proof" type="file" accept="image/*,.pdf" onChange={e=>setNewPaymentProof(e.target.files?.[0]??null)} />
                   {newPaymentError && <p className="text-xs text-destructive">{newPaymentError}</p>}
                   <Button type="button" className="w-full" disabled={!newPaymentProof||savingNewPayment} onClick={submitNewPaymentProof}>
-                    {savingNewPayment?"Menyimpan...":(getCurrentRole()==="staff"?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}
+                    {savingNewPayment?"Menyimpan...":(!["owner", "super_admin", "admin", "finance"].includes(getCurrentRole() ?? "")?"Unggah Bukti & Kirim Verifikasi":"Unggah Bukti & Konfirmasi")}
                   </Button>
-                  <p className="text-xs text-muted-foreground">{getCurrentRole()==="staff" ? "Bukti dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan pembayaran langsung dikonfirmasi setelah validasi berhasil."}</p>
+                  <p className="text-xs text-muted-foreground">{!["owner", "super_admin", "admin", "finance"].includes(getCurrentRole() ?? "") ? "Bukti dikirim untuk diverifikasi oleh admin/finance." : "Bukti akan disimpan dan pembayaran langsung dikonfirmasi setelah validasi berhasil."}</p>
                 </div>
               )}
 
@@ -3021,7 +3021,7 @@ function BookingDetailDrawer({
                            </button>
                          </div>
                        )}
-                      {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
+                      {(["owner", "super_admin", "admin", "finance"].includes(getCurrentRole() ?? "") && (((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking)) && (
                         <div className="flex gap-2 pt-1">
                           <button
                              onClick={() =>
