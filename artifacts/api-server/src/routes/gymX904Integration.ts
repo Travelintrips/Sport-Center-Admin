@@ -66,6 +66,8 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
   let lastStoredEventAt: string | null = null;
   let connectorProof: null | {at:string;users:number;logs:number;serial:string} = null;
   let lastDurableSyncAt: string | null = null;
+  let accessSnapshotAt: string | null = null;
+  let accessSnapshotFresh = false;
   try {
     const check = await db.execute(sql`SELECT to_regclass('sport_center.gym_x904_raw_events') IS NOT NULL AS ready`);
     eventStorageReady = check.rows[0]?.ready === true;
@@ -109,6 +111,17 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
       WHERE device_serial=${process.env.GYM_X904_DEVICE_SERIAL || "TDBD234200545"} LIMIT 1`);
     lastDurableSyncAt = sync.rows[0]?.last_complete_at ? String(sync.rows[0].last_complete_at) : null;
   } catch { /* Keep status unavailable rather than inventing a successful sync. */ }
+  try {
+    const snapshot = await db.execute(sql`SELECT observed_at::text AS observed_at,
+      CASE WHEN jsonb_typeof(users)='array' THEN jsonb_array_length(users)=user_count AND user_count>0 ELSE false END AS complete,
+      observed_at BETWEEN now()-interval '5 minutes' AND now() AS fresh
+      FROM sport_center.gym_x904_access_snapshots
+      WHERE device_serial=${process.env.GYM_X904_DEVICE_SERIAL || "TDBD234200545"}
+      ORDER BY snapshot_id DESC LIMIT 1`);
+    const row = snapshot.rows[0];
+    accessSnapshotAt = row?.observed_at ? String(row.observed_at) : null;
+    accessSnapshotFresh = row?.complete === true && row?.fresh === true;
+  } catch { /* Unknown is never fresh. */ }
   const recent = connectorProof !== null &&
     Number.isFinite(Date.parse(connectorProof.at)) &&
     Date.now() - Date.parse(connectorProof.at) >= 0 &&
@@ -137,6 +150,8 @@ router.get("/admin/gym-x904/integration", adminMiddleware, async (_req, res) => 
     doorControl: "device-local",
     connectionTestedAt: recent && connectorProof ? new Date(connectorProof.at).toISOString() : null,
     lastDurableSyncAt,
+    accessSnapshotAt,
+    accessSnapshotFresh,
     lastDeviceEventAt: receiverState.lastTrustedIngestAt,
     note: recent && connectorProof
       ? `Konektor tepercaya melaporkan pembacaan X904: ${connectorProof.users} pengguna dan ${connectorProof.logs} log. Ini bukan bukti sinkronisasi data ke database.`
@@ -656,6 +671,20 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,async(req
     // activation command after the normal 60s worker cadence plus margin.
     // Read-only; no activation, payment, audit mutation or fake machine ACK.
     try {
+      const health=await db.execute(sql`WITH latest AS (
+        SELECT observed_at,user_count,users FROM sport_center.gym_x904_access_snapshots
+        WHERE device_serial='TDBD234200545' ORDER BY snapshot_id DESC LIMIT 1
+      ) SELECT EXISTS(SELECT 1 FROM latest WHERE observed_at BETWEEN now()-interval '5 minutes' AND now()
+        AND CASE WHEN jsonb_typeof(users)='array' THEN jsonb_array_length(users)=user_count AND user_count>0 ELSE false END) AS fresh,
+        (SELECT count(*)::int FROM sport_center.x904_nonmember_daily_access a
+          WHERE a.device_serial='TDBD234200545' AND a.verification_state='verified'
+          AND a.activated_at IS NOT NULL AND a.access_state IN ('active','pending','review_required')
+          AND LEAST(a.expires_at,a.activated_at+interval '12 hours',
+            ((a.activated_at AT TIME ZONE 'Asia/Jakarta')::date+time '23:00') AT TIME ZONE 'Asia/Jakarta')
+            < now()-interval '5 minutes') AS overdue_suspend`);
+      if(health.rows[0]?.fresh!==true) nonmemberWorkerReadiness.reasons.push("X904_ACCESS_SNAPSHOT_STALE_OR_INCOMPLETE");
+      if(Number(health.rows[0]?.overdue_suspend??0)>0) nonmemberWorkerReadiness.reasons.push("X904_PAID_ACCESS_SUSPEND_OVERDUE");
+      if(nonmemberWorkerReadiness.reasons.length) nonmemberWorkerReadiness.readyForVis002Processing=false;
       const overdue=await db.execute(sql`SELECT count(*)::int AS count
         FROM sport_center.x904_nonmember_daily_access a
         JOIN sport_center.sport_bookings b ON b.id=a.booking_id
@@ -667,7 +696,8 @@ router.get("/admin/gym-x904/user-command/capabilities",adminMiddleware,async(req
           AND b.status::text IN ('confirmed','completed')
           AND b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date::text
           AND r.state='collected' AND r.collected_at <= now()-interval '90 seconds'
-          AND now() AT TIME ZONE 'Asia/Jakarta' >= b.booking_date::timestamp + interval '6 hours'
+          AND (now() AT TIME ZONE 'Asia/Jakarta')::time >= time '06:00'
+          AND (now() AT TIME ZONE 'Asia/Jakarta')::time < time '23:00'
           AND NOT EXISTS (SELECT 1 FROM sport_center.x904_user_commands c
             WHERE c.device_serial=a.device_serial AND c.user_pin=a.user_pin
               AND c.command_type='ACTIVATE_USER'
