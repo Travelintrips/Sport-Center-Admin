@@ -66,7 +66,8 @@ export function startX904NonmemberAccessWorker(): void {
     intervalMs: 60000,
     verifiedPaidGrantRecheckMs: 15000,
   }));
-  if (!enabled || !validPin || !validActor || nonmemberWorkerStarted) return;
+  if (!enabled || !validPin || !validActor) return;
+  if (nonmemberWorkerStarted) return;
   nonmemberWorkerStarted = true;
   let running = false;
   let fullCycleRequested = false;

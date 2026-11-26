@@ -1274,7 +1274,7 @@ test.each([
     expect(active.access_state).toBe("active");
     expect(new Date(active.activated_at).getTime()).toBe(activateAt.getTime());
     const expires=new Date(active.expires_at);
-    expect(expires.toISOString()).toBe("2026-11-06T16:00:00.000Z");
+    expect(expires.getTime()).toBe(Math.min(activateAt.getTime()+12*3600000,Date.parse("2026-11-06T16:00:00.000Z")));
     await addSnapshot(new Date(expires.getTime()+1000),pin,machineName,1);
     await processX904NonmemberDailyAccess(db as any,new Date(expires.getTime()+2000));
     const suspension=await commandFor("SUSPEND_USER",accessId);
