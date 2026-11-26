@@ -1,18 +1,45 @@
 import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, companyInvoicesTable, companyInvoiceItemsTable, gymMembershipsTable, expensesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
 const router = Router();
 
 router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
   try {
-    const [bookings, facilities, memberships, expenses] = await Promise.all([
-      db.select().from(bookingsTable),
-      db.select().from(facilitiesTable),
-      db.select().from(gymMembershipsTable),
-      db.select().from(expensesTable),
+    // Read only the fields needed for dashboard aggregates. This endpoint is
+    // read-only: preserve the existing paid/status/revenue business rules.
+    const startedAt = performance.now();
+    const [bookings, facilities, memberships, expenses, recentBookingRows] = await Promise.all([
+      db.select({
+        id: bookingsTable.id,
+        status: bookingsTable.status,
+        payerType: bookingsTable.payerType,
+        billingStatus: bookingsTable.billingStatus,
+        bookingDate: bookingsTable.bookingDate,
+        facilityId: bookingsTable.facilityId,
+        totalPrice: bookingsTable.totalPrice,
+        grandTotal: bookingsTable.grandTotal,
+      }).from(bookingsTable),
+      db.select({
+        id: facilitiesTable.id,
+        name: facilitiesTable.name,
+        category: facilitiesTable.category,
+      }).from(facilitiesTable),
+      db.select({
+        status: gymMembershipsTable.status,
+        totalPrice: gymMembershipsTable.totalPrice,
+        startDate: gymMembershipsTable.startDate,
+      }).from(gymMembershipsTable),
+      db.select({
+        paymentStatus: expensesTable.paymentStatus,
+        expenseDate: expensesTable.expenseDate,
+        totalAmount: expensesTable.totalAmount,
+      }).from(expensesTable),
+      db.select().from(bookingsTable).orderBy(desc(bookingsTable.id)).limit(5),
     ]);
+    const queryMs = Math.round(performance.now() - startedAt);
+    if (queryMs >= 750) req.log.warn({ queryMs, bookingCount: bookings.length }, "Slow admin dashboard query");
 
     const today = new Date().toISOString().split("T")[0];
 
@@ -46,10 +73,11 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
       count: bookings.filter((b) => b.status === s).length,
     }));
 
+    const facilityById = new Map(facilities.map((f) => [f.id, f]));
     const facilityStats: Record<number, { facilityId: number; facilityName: string; bookingCount: number; revenue: number }> = {};
     paidBookings.forEach((b) => {
       if (!facilityStats[b.facilityId]) {
-        const fac = facilities.find((f) => f.id === b.facilityId);
+        const fac = facilityById.get(b.facilityId);
         facilityStats[b.facilityId] = { facilityId: b.facilityId, facilityName: fac?.name ?? "", bookingCount: 0, revenue: 0 };
       }
       facilityStats[b.facilityId].bookingCount++;
@@ -73,8 +101,8 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     });
     const revenueByMonth = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
 
-    const recentBookings = bookings.slice(-5).reverse().map((b) => {
-      const fac = facilities.find((f) => f.id === b.facilityId);
+    const recentBookings = recentBookingRows.map((b) => {
+      const fac = facilityById.get(b.facilityId);
       return { ...b, totalPrice: Number(b.totalPrice), facilityName: fac?.name ?? "", facilityCategory: fac?.category ?? "", payment: null };
     });
 

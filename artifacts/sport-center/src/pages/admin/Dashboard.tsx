@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useGetDashboard, useListBookings } from "@workspace/api-client-react";
+import { useGetDashboard, useListBookings, getGetDashboardQueryKey, getListBookingsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -180,8 +180,14 @@ function StatModal({
 }
 
 export default function AdminDashboard() {
-  const { data, isLoading } = useGetDashboard();
-  const { data: allBookingsData } = useListBookings();
+  // Reuse recent dashboard reads across menu navigation instead of refetching
+  // the same expensive aggregates on every immediate remount.
+  const { data, isLoading, isError, refetch } = useGetDashboard({
+    query: { queryKey: getGetDashboardQueryKey(), staleTime: 15_000 },
+  });
+  const { data: allBookingsData } = useListBookings(undefined, {
+    query: { queryKey: getListBookingsQueryKey(), staleTime: 15_000 },
+  });
   const [selectedStat, setSelectedStat] = useState<StatId | null>(null);
 
   // Revenue split dengan bucket yang tepat:
@@ -235,6 +241,22 @@ export default function AdminDashboard() {
         </div>
         <div className="grid md:grid-cols-2 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64" />)}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-black">Dashboard</h1>
+          <p className="text-muted-foreground">Ringkasan operasional sport center Anda</p>
+        </div>
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+          <p className="font-semibold">Ringkasan dashboard gagal dimuat.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Data transaksi tidak diubah. Silakan coba memuat ringkasan kembali.</p>
+          <button type="button" onClick={() => void refetch()} className="mt-3 rounded-lg border px-4 py-2 text-sm font-semibold hover:bg-muted">Coba lagi</button>
         </div>
       </div>
     );
