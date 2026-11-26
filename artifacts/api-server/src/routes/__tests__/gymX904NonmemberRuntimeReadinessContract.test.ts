@@ -20,7 +20,7 @@ describe("Gym VIS worker release readiness is not inferred from passing unit tes
     expect(worker).toContain('setInterval(() => void tick(true), 60_000)');
     expect(worker).toContain('await processPaidVisRecoveryCycle(');
     expect(worker).toContain("if(pending.rows.length) await processX904NonmemberDailyAccess()");
-    expect(worker).toContain("b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date");
+    expect(worker).toContain("b.booking_date=(now() AT TIME ZONE 'Asia/Jakarta')::date::text");
     expect(worker).toContain('await processX904NonmemberDailyAccess();');
   });
   test("only authenticated Owner/Super Admin sees worker readiness, never secrets",()=>{
