@@ -227,6 +227,7 @@ export default function AdminCheckoutForm() {
   const [bookingPaymentDate, setBookingPaymentDate] = useState(jakartaDateOnly);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [createdPaymentId, setCreatedPaymentId] = useState<number | null>(null);
   const [createdPaymentError, setCreatedPaymentError] = useState("");
   const [repeatEnabled, setRepeatEnabled] = useState(false);
@@ -1072,6 +1073,7 @@ export default function AdminCheckoutForm() {
     proof: File,
     paymentDate: string,
     method: string,
+    confirmAdminGymPayment = false,
   ): Promise<boolean> {
     if (!bookingId || !(amount > 0) || !proof || !paymentDate || paymentBusy) return false;
     setPaymentBusy(true);
@@ -1104,6 +1106,7 @@ export default function AdminCheckoutForm() {
           paymentDate,
           proofUrl: fileResult.objectPath ?? fileResult.url,
           ocrScanToken: fileResult.ocrScanToken,
+          ...(confirmAdminGymPayment ? { confirmAdminGymPayment: true } : {}),
         };
         const saved = await fetch("/api/payments", {
           method: "POST",
@@ -1111,12 +1114,24 @@ export default function AdminCheckoutForm() {
           body: JSON.stringify(payload),
         });
         const result = await saved.json();
-        if (!saved.ok) throw Error(result.error || "Gagal mencatat pembayaran");
+        if (!saved.ok) {
+          const savedId = Number(saved.headers.get("X-Saved-Payment-Id"));
+          if (Number.isSafeInteger(savedId) && savedId > 0) setCreatedPaymentId(savedId);
+          throw Error(result.error || "Gagal mencatat pembayaran");
+        }
         paymentId = Number(result.id);
         if (!Number.isInteger(paymentId) || paymentId <= 0) {
           throw Error("Bukti terkirim, tetapi ID pembayaran tidak diterima. Periksa Detail Pemesanan sebelum mengirim ulang.");
         }
         setCreatedPaymentId(paymentId);
+        if (confirmAdminGymPayment) {
+          setPaymentConfirmed(result.status === "confirmed");
+          setPaymentSubmitted(true);
+          setCreatedPaymentError("");
+          toast({ title: result.status === "confirmed" ? "Pembayaran dikonfirmasi" : "Bukti pembayaran dicatat",
+            description: result.status === "confirmed" ? "Aktivasi Gym diproses otomatis." : "Menunggu verifikasi Admin." });
+          return true;
+        }
       }
 
       const currentRole = getCurrentRole();
@@ -1127,7 +1142,8 @@ export default function AdminCheckoutForm() {
           body: JSON.stringify({ status: "confirmed" }),
         });
         const confirmedResult = await confirmed.json();
-        if (!confirmed.ok) throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
+        if (!confirmed.ok || confirmedResult.status !== "confirmed") throw Error(confirmedResult.error || "Bukti tersimpan, tetapi konfirmasi pembayaran gagal");
+        setPaymentConfirmed(true);
         setPaymentSubmitted(true);
         toast({ title: "Pembayaran dikonfirmasi", description: "Satu pembayaran tercatat untuk booking/grup." });
       } else {
@@ -1359,6 +1375,7 @@ export default function AdminCheckoutForm() {
         setCreatedBookingAmount(actualGroupTotal);
         setCreatedOrder(orders[0]);
         setPaymentSubmitted(false);
+        setPaymentConfirmed(false);
         setCreatedPaymentId(null);
         if (paymentChoice === "paid" && paymentProof) {
           await recordBookingPayment(firstCreatedBookingId, actualGroupTotal, paymentProof, bookingPaymentDate, paidMethod);
@@ -1382,9 +1399,10 @@ export default function AdminCheckoutForm() {
       setCreatedBookingId(bookingId);
       setCreatedBookingAmount(actualBookingAmount);
       setPaymentSubmitted(false);
+        setPaymentConfirmed(false);
       setCreatedPaymentId(null);
       if (paymentChoice === "paid" && paymentProof) {
-        await recordBookingPayment(bookingId, actualBookingAmount, paymentProof, bookingPaymentDate, paidMethod);
+        await recordBookingPayment(bookingId, actualBookingAmount, paymentProof, bookingPaymentDate, paidMethod, isGymNonmember);
       } else {
         toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}. Status: belum dibayar; belum ada record pembayaran.` });
       }
@@ -1436,7 +1454,7 @@ export default function AdminCheckoutForm() {
               {paymentChoice === "unpaid" ? (
                 <p className="text-sm text-muted-foreground">Belum dibayar. Tidak ada record pembayaran yang dibuat. Pembayaran dapat dikelola kemudian dari menu Pemesanan.</p>
               ) : paymentSubmitted ? (
-                <p className="text-sm font-medium text-green-700">{getCurrentRole() === "staff" ? "Bukti tercatat dan menunggu verifikasi admin/finance." : "Bukti tercatat dan pembayaran dikonfirmasi."}</p>
+                <p className="text-sm font-medium text-green-700">{!paymentConfirmed ? "Bukti tercatat dan menunggu verifikasi admin/finance." : "Bukti tercatat dan pembayaran dikonfirmasi."}</p>
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-amber-700">Booking sudah dibuat, tetapi pembayaran belum selesai diproses. Periksa Detail Pemesanan sebelum mencoba mengirim ulang.</p>
@@ -1468,7 +1486,7 @@ export default function AdminCheckoutForm() {
           {paymentChoice === "unpaid" ? (
             <p className="text-sm text-muted-foreground">Belum dibayar. Tidak ada record pembayaran yang dibuat.</p>
           ) : paymentSubmitted ? (
-            <p className="text-sm font-medium text-green-700">{getCurrentRole() === "staff" ? "Bukti tercatat dan menunggu verifikasi admin/finance." : "Bukti tercatat dan pembayaran dikonfirmasi."}</p>
+            <p className="text-sm font-medium text-green-700">{!paymentConfirmed ? "Bukti tercatat dan menunggu verifikasi admin/finance." : "Bukti tercatat dan pembayaran dikonfirmasi."}</p>
           ) : (
             <div className="space-y-2">
               <p className="text-sm text-amber-700">Booking berhasil dibuat tetapi pembayaran belum selesai. Periksa Detail Pemesanan sebelum mengirim ulang.</p>
@@ -1479,7 +1497,7 @@ export default function AdminCheckoutForm() {
 
         </div>
         <div className="flex gap-3 flex-wrap justify-center">
-          {(paymentChoice === "unpaid" || (paymentSubmitted && getCurrentRole()==="staff")) && (
+          {(paymentChoice === "unpaid" || (paymentSubmitted && !paymentConfirmed)) && (
             <Button onClick={() => setLocation(`/admin/bookings?search=${encodeURIComponent(createdOrder)}`)}>
               {paymentSubmitted ? "Lihat & Konfirmasi Pembayaran" : "Kelola Pembayaran"}
             </Button>
