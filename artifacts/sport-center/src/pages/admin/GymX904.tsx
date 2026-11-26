@@ -7,7 +7,7 @@ import { getToken } from "@/lib/auth";
 import GymX904UserControl from "./GymX904UserControl";
 import X904NonmemberRegistryReview from "./X904NonmemberRegistryReview";
 
-interface IntegrationStatus { stored_logs?:number|null; processed_events?:number|null; pending_events?:number|null; processingLedgerReady?:boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; connectionTestedAt?: string | null; lastDurableSyncAt?: string | null; }
+interface IntegrationStatus { stored_logs?:number|null; processed_events?:number|null; pending_events?:number|null; processingLedgerReady?:boolean; receiver: string; hardware: string; synchronizing: boolean; legacyGymService: string; note: string; eventIngestConfigured?: boolean; eventReadEnabled?: boolean; eventStorageReady?: boolean; trustedAdmsIngestAt?: string | null; storedEventCount?: number | null; lastStoredEventAt?: string | null; connectionTestedAt?: string | null; lastDurableSyncAt?: string | null; accessSnapshotAt?: string | null; accessSnapshotFresh?: boolean; }
 interface LanStatus { synchronized: boolean; users: number; logs: number; deviceLogs?: number; lastCompleteAt?: string; }
 interface LanUser { user_pin: string; display_name: string; device_uid: number; device_role: number; last_seen_at: string; }
 interface LanUsersResult { source: string; users: LanUser[]; }
@@ -562,9 +562,12 @@ export default function GymX904() {
             <p className="mt-1 text-xs text-muted-foreground">{heartbeatAt ? `Terakhir ${formatTime(heartbeatAt)} WIB` : "Belum ada heartbeat terverifikasi"}</p>
           </div>
           <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-4 dark:border-sky-900 dark:bg-sky-950/20">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Sinkronisasi database</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Sinkronisasi log database</p>
             <p className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-50">{integrationError ? "Tidak tersedia" : integration?.lastDurableSyncAt ? `Terakhir ${formatTime(integration.lastDurableSyncAt)} WIB` : "Belum tersedia"}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{integration?.lastDurableSyncAt ? "Snapshot database tersimpan" : "Belum ada konfirmasi penyimpanan"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{integration?.lastDurableSyncAt ? "Impor log terakhir selesai" : "Belum ada konfirmasi penyimpanan"}</p>
+            <p className="mt-2 text-xs font-semibold">Snapshot akses mesin (SDK)</p>
+            <p className={`text-sm ${integration?.accessSnapshotFresh && !integrationError ? "text-emerald-700" : "text-amber-700"}`}>{integrationError ? "Tidak tersedia" : integration?.accessSnapshotFresh ? "Fresh (≤ 5 menit)" : "Terlambat / tidak lengkap"}</p>
+            <p className="text-xs text-muted-foreground">{integration?.accessSnapshotAt ? `Terakhir ${formatTime(integration.accessSnapshotAt)} WIB` : "Belum tersedia"}</p>
           </div>
           <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-4 dark:border-amber-900 dark:bg-amber-950/20">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">ACK status mesin</p>

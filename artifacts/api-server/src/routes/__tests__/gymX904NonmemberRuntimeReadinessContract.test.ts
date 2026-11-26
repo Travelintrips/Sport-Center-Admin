@@ -34,6 +34,14 @@ describe("Gym VIS worker release readiness is not inferred from passing unit tes
     expect(router).toContain("r.collected_at <= now()-interval '90 seconds'");
     expect(worker).not.toContain("console.log(process.env");
   });
+  test("access snapshot and durable log import are independent; overdue suspend remains visible",()=>{
+    expect(router).toContain("accessSnapshotFresh");
+    expect(router).toContain("X904_ACCESS_SNAPSHOT_STALE_OR_INCOMPLETE");
+    expect(router).toContain("X904_PAID_ACCESS_SUSPEND_OVERDUE");
+    expect(router).toContain("a.activated_at+interval '12 hours'");
+    expect(ui).toContain("Sinkronisasi log database");
+    expect(ui).toContain("Snapshot akses mesin (SDK)");
+  });
   test("dashboard never asserts auto suspend disabled without looking at runtime",()=>{
     expect(ui).toContain("userCommandCapabilities?.nonmemberWorkerReadiness");
     expect(ui).toContain("Worker belum siap memproses VIS002");
