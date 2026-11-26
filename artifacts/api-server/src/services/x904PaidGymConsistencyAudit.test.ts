@@ -28,6 +28,21 @@ describe("Paid Gym consistency watchdog (read-only, no device commands)",()=>{
     expect(await auditPaidGymEntitlementConsistency(mockStore as any,new Date(morning.getTime()+16*60_000),e=>entries.push(e))).toBe(2);
     expect(entries).toHaveLength(4);
   });
+  test("registered VIS-to-PIN mismatch is sent to staff review, never auto-granted",async()=>{
+    const store={execute:jest.fn().mockResolvedValue({rows:[
+      {booking_id:919829,order_number:"SC-QA-919829",source:"gym_public_guest",issue:"PAID_VIS_TO_PIN_STAFF_REVIEW"},
+    ]})};
+    const entries:string[]=[];
+    expect(await auditPaidGymEntitlementConsistency(store as any,morning,e=>entries.push(e))).toBe(1);
+    const query=JSON.stringify(store.execute.mock.calls[0]);
+    expect(query).toContain("PAID_VIS_TO_PIN_STAFF_REVIEW");
+    expect(query).toContain("sport_center.x904_verified_nonmember_identities");
+    expect(query).toContain("a.access_id IS NULL");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toContain('"action":"staff_verify_registered_pin_no_grant"');
+    expect(entries[0]).not.toMatch(/customerName|userPin|deviceUid|proofUrl|phone/);
+    expect("transaction" in store).toBe(false);
+  });
   test("existing 60-second worker runs the read-only audit after recovery",()=>{
     const source=readFileSync("src/services/x904NonmemberDailyAccessWorker.ts","utf8");
     const paidWorker=source.slice(source.indexOf("export function startX904NonmemberAccessWorker"),source.indexOf("/** Recheck a paid public"));
