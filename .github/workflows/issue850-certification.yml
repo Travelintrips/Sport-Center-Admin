@@ -1,0 +1,42 @@
+name: Sport Center Issue 850 isolated certification
+on:
+  pull_request:
+    paths:
+      - 'scripts/certification/**'
+      - '.github/workflows/issue850-certification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-operator-device-restore:
+    name: Two synthetic operators, devices and PostgreSQL recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Synthetic operator A/B, device A/B, replay and dump/restore
+        shell: bash
+        run: bash scripts/certification/run-issue850-isolated.sh
+      - name: Dedicated installation security preflight regression
+        run: node --test scripts/certification/managed-install-preflight.test.mjs
+      - name: Fail-closed source readiness report (not a release approval)
+        shell: bash
+        run: |
+          node scripts/certification/issue850-source-preflight.mjs | tee issue850-source-preflight.json
+          {
+            echo '## Issue #850 — certification evidence'
+            echo 'Fixture-only isolation and restore: see job logs.'
+            echo 'Real application cross-operator isolation and recovery: **NO_GO** until separately proven.'
+            echo 'No CST DEV/PROD database, payment, or X904 device is written by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Store preflight findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue850-source-preflight
+          path: issue850-source-preflight.json
+          if-no-files-found: warn
+          retention-days: 14
