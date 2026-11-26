@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import {
   db,
   auditLogsTable,
@@ -923,14 +923,23 @@ router.post("/payments", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId))
       .limit(1);
 
+    const autoConfirmGym = req.body.confirmAdminGymPayment === true &&
+      booking.source === "admin" && booking.facilityId === 6 &&
+      !booking.groupRef && paymentType === "full_payment" &&
+      Boolean(proofUrl) && uploadActor !== null &&
+      booking.bookedByUserId === uploadActor.userId &&
+      ["owner", "super_admin", "admin", "finance"].includes(uploadActor.role);
     // Admin who creates the booking and has payment-confirmation authority
     // must not receive a redundant "Bukti Pembayaran Masuk" approval request.
     // Staff, customers, and customer-originated bookings retain the review flow.
     // Payment recorded by an authorized operator from Admin Booking Detail:
     // send an informational proof report, never a duplicate approval request.
     // This is about the uploader's verified role, not who created the booking.
-    const adminProofUpload = isAuthorizedAdminProofUploader(uploadActor);
-    if (adminProofUpload) {
+    const adminProofUpload = isAuthorizedAdminProofUploader(uploadActor) &&
+      !(req.body.confirmAdminGymPayment === true && uploadActor?.role === "admin_booking");
+    if (autoConfirmGym) {
+      // Canonical confirmation sends the paid report; no redundant review alert.
+    } else if (adminProofUpload) {
       const earlierDp = groupPayments
         .filter((p) => p.paymentType === "dp" && p.status === "confirmed" && p.proofUrl)
         .sort((a, b) => a.id - b.id);
@@ -983,6 +992,15 @@ router.post("/payments", async (req, res) => {
       ...clientInfo,
     });
 
+    if (autoConfirmGym) {
+      // Use the same audited confirmation handler as PATCH. The session was
+      // verified against the live user record above; never trust a body role.
+      // Preserve the saved payment ID even if settlement/activation fails.
+      res.setHeader("X-Saved-Payment-Id", String(payment.id));
+      (req as any).user = uploadActor;
+      await updatePaymentStatus(req, res, { id: payment.id, status: "confirmed" });
+      return;
+    }
     // OCR dijalankan setelah payment tersimpan agar upload bukti tetap
     // responsif. Auto-detection hanya mengubah metode bila confidence tinggi;
     // kegagalan OCR tidak menggagalkan pembuatan payment.
@@ -1818,10 +1836,16 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
   }
 });
 
-router.patch("/payments/:id", adminMiddleware, async (req, res) => {
+router.patch("/payments/:id", adminMiddleware, (req, res) => { void updatePaymentStatus(req, res); });
+
+async function updatePaymentStatus(req: Request, res: Response,
+  automatic?: { id: number; status: "confirmed" },
+): Promise<void> {
   try {
-    const id = parseInt(String(req.params.id));
-    let { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
+    const id = automatic?.id ?? parseInt(String(req.params.id));
+    let { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = automatic
+      ? { status: automatic.status, paymentMethod: undefined, paymentProvider: undefined, notes: undefined }
+      : req.body;
     const requesterRole = String((req as any).user?.role ?? "");
     if (status === "confirmed" && requesterRole === "staff") {
       res.status(403).json({ error: "Staff hanya dapat mengirim bukti untuk verifikasi." });
@@ -2774,7 +2798,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       code: diagnosticCode,
     });
   }
-});
+}
 
 // DELETE /payments/:id/proof — admin: hapus bukti transfer, kembalikan status booking ke pending_payment
 router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {

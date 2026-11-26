@@ -1352,23 +1352,31 @@ suite(
         expect(await commands()).toEqual(beforeCommands);
         return response.body;
       }
-      async function matrixCheckout(s: MatrixIdentity, confirmPayment = true) {
+      async function matrixCheckout(s: MatrixIdentity, confirmPayment = true, oneStep = false) {
         let response: any;
         if (s.source === "admin") {
           response = await request.post("/api/bookings").set("Authorization", "Bearer " + matrixAdminToken).send({
             customerName: s.identity === "pin" ? s.name : "MATRIX ADMIN VIS GUEST",
             customerPhone: "628111222333", customerId: null, facilityId: 6,
             bookingDate: matrixDay, startTime: "08:00", durationHours: 1, numberOfPeople: 1,
-            source: "admin", payerType: "personal", adminPaymentChoice: "unpaid",
+            source: "admin", payerType: "personal", adminPaymentChoice: oneStep ? "paid" : "unpaid",
             x904IdentityType: s.identity, x904IdentityValue: s.identity === "pin" ? s.pin : "VIS001",
             ...(s.identity === "card" ? { x904VisitorName: "MATRIX ADMIN VIS GUEST" } : {}),
           });
           expect({ status: response.status, error: response.body.error }).toEqual({ status: 201, error: undefined });
-          const uploaded = await request.post("/api/payments").set("Authorization", "Bearer " + adminToken).send({
+          const uploaded = await request.post("/api/payments").set("Authorization", "Bearer " + (oneStep ? matrixAdminToken : adminToken)).send({
+            ...(oneStep ? { confirmAdminGymPayment: true } : {}),
             bookingId: response.body.id, amount: 30000, proofUrl: "https://isolated.invalid/payment-proof.jpeg",
             paymentMethod: "QRIS", paymentProvider: "mandiri_direct",
           });
-          expect({ status: uploaded.status, error: uploaded.body.error }).toEqual({ status: 201, error: undefined });
+          if (oneStep) {
+            expect([200, 201]).toContain(uploaded.status);
+            if (uploaded.body.status === "confirmed") {
+              expect(uploaded.status).toBe(200);
+              return Number(response.body.id);
+            }
+            expect(uploaded.status).toBe(201);
+          } else expect({ status: uploaded.status, error: uploaded.body.error }).toEqual({ status: 201, error: undefined });
         } else {
           response = await submit(true, matrixDay,
             s.identity === "pin" ? s.name : "MATRIX PUBLIC VIS GUEST",
@@ -1637,6 +1645,20 @@ suite(
           .set("Authorization","Bearer "+matrixAdminToken).send({physicalCardHandedOver:true});
         expect(replay.status).toBe(200);
         expect(await counts()).toEqual({bookings:1,payments:1,grants:1});
+      });
+      test.each([variants[0], variants[1]])("authorized Admin $identity checkout confirms in one payment request and completes lifecycle", async s => {
+        const id = await matrixCheckout(s, false, true);
+        expect((await payment(id)).status).toBe("confirmed");
+        await matrixLifecycle(id, s);
+      });
+      test.each([variants[0], variants[1]])("field staff $identity checkout holds payment until one authorized confirmation", async s => {
+        const { createToken } = await import("../../lib/auth.js");
+        matrixAdminToken = createToken(302, "staff");
+        const id = await matrixCheckout(s, false, true);
+        expect((await payment(id)).status).not.toBe("confirmed");
+        expect(await commands()).toHaveLength(0);
+        await matrixConfirm(id);
+        await matrixLifecycle(id, s);
       });
       test.each(variants)("full real route $source $identity: booking to payment, ACK, daily check-in and expiry without rewriting grant state", async s => {
         const id = await matrixCheckout(s);
