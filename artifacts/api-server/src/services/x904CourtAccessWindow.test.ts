@@ -16,5 +16,5 @@ describe('strict court access policy for verified PIN and VIS', () => {
     expect(x904CourtAdmissionAllowed({...base,confirmedAt:null})).toBe(false);
     expect(x904CourtAdmissionAllowed({...base,confirmedAt:at('20:00:00')})).toBe(false);
   });
-  test.each([['23:00','06:00'],['05:00','07:00'],['21:00','23:01'],['19:00','19:00'],['19:99','21:00']])('rejects invalid window %s–%s', (start,end) => expect(x904CourtAccessWindow(date,start,end)).toBeNull());
+  test.each([['23:00','06:00'],['05:00','07:00'],['21:00','23:01'],['19:00','19:00'],['19:99','21:00'],['21:00','23:00:01'],['05:59:59','07:00'],['24:00','23:00']])('rejects invalid window %s–%s', (start,end) => expect(x904CourtAccessWindow(date,start,end)).toBeNull());
 });

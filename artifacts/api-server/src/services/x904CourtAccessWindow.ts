@@ -9,7 +9,7 @@ export function x904CourtAccessWindow(date: string, start: string, end: string) 
     return instant;
   };
   const from = parse(start), until = parse(end);
-  if (!from || !until || until <= from || start < '06:00' || end > '23:00:00') return null;
+  if (!from || !until || until <= from || from.getTime() < Date.parse(`${date}T06:00:00+07:00`) || until.getTime() > Date.parse(`${date}T23:00:00+07:00`)) return null;
   return { from, until };
 }
 export function x904CourtAdmissionAllowed(input: { date: string; start: string; end: string; now: Date; confirmedAt: Date | null; paymentStatus: string; bookingStatus: string; verified: boolean }) {
