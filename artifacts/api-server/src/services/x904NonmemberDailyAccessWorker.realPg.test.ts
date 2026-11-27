@@ -141,8 +141,10 @@ test("pending payment holds; confirmed VIS activates after ACK, retries DEVICE_B
   expect(new Date(verifiedClock.expires_at).getTime()).toBe(activateAck.getTime()+12*3600000);
 
   const expiredAt = new Date(activateAck.getTime()+12*3600000+1000);
-  await addSnapshot(expiredAt,'78','VIS 001',1);
-  await processX904NonmemberDailyAccess(db as any,new Date(expiredAt.getTime()+100));
+  await addSnapshot(new Date(expiredAt.getTime()-2000),'78','VIS 001',1);
+  await processX904NonmemberDailyAccess(db as any,new Date(expiredAt.getTime()-1001),true);
+  expect(await commandFor("SUSPEND_USER",1)).toBeUndefined();
+  await processX904NonmemberDailyAccess(db as any,new Date(expiredAt.getTime()+100),true);
   const suspend = await commandFor("SUSPEND_USER",1);
   expect(suspend?.payload).toMatchObject({source:"AUTO_NONMEMBER_GYM_12H",accessId:1,expectedUid:338});
   const suspendAck = new Date(expiredAt.getTime()+2000);
