@@ -154,11 +154,13 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
   });
   // Previously issued PDFs retain their legacy number unless already registered.
   const legacyInvoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
-  const registeredSingle = booking.companyCustomerId != null && booking.payerType === "company"
+  // Group member bookings must not consume a second official corporate invoice serial.
+  const eligibleSingleCorporate = booking.groupRef == null && booking.companyCustomerId != null && booking.payerType === "company";
+  const registeredSingle = eligibleSingleCorporate
     ? await findCorporateInvoiceNumber("booking", booking.orderNumber)
     : null;
   const corporateSingle = registeredSingle ??
-    (booking.companyCustomerId != null && booking.payerType === "company" && !booking.invoicePdfUrl
+    (eligibleSingleCorporate && !booking.invoicePdfUrl
       ? await allocateCorporateInvoiceNumber("booking", booking.orderNumber)
       : null);
   const invoiceNumber = corporateSingle?.invoiceNumber ?? legacyInvoiceNumber;
