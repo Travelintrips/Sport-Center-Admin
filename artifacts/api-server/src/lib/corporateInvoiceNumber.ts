@@ -56,6 +56,9 @@ export async function allocateCorporateInvoiceNumber(
   execute: SqlExecutor = defaultExecutor,
 ): Promise<CorporateInvoiceAllocation> {
   if (!documentKey.trim()) throw Error("CORPORATE_INVOICE_DOCUMENT_KEY_REQUIRED");
+  // Avoid burning the global sequence on every PDF preview/read.
+  const alreadyIssued = await findCorporateInvoiceNumber(documentType, documentKey, execute);
+  if (alreadyIssued) return alreadyIssued;
   await execute(sql`
     INSERT INTO sport_center.corporate_invoice_number_registry
       (document_type, document_key, issued_on)
