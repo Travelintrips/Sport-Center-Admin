@@ -1278,6 +1278,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       return "unpaid";
     };
 
+    const enrichmentMs = Date.now() - startedAt - bookingScanMs;
     let responseRows = result;
 
     if (paginationRequested) {
@@ -1529,10 +1530,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const totalMs = Date.now() - startedAt;
     res.setHeader(
       "Server-Timing",
-      `booking-scan;dur=${bookingScanMs}, bookings;dur=${totalMs};desc="bookings endpoint total"`,
+      `booking-scan;dur=${bookingScanMs}, booking-enrichment;dur=${enrichmentMs}, booking-filter;dur=${totalMs - bookingScanMs - enrichmentMs}, bookings;dur=${totalMs};desc="bookings endpoint total"`,
     );
     if (totalMs >= 1500) {
-      req.log.warn({ totalMs, bookingScanMs, scannedBookings: bookings.length, returnedBookings: responseRows.length, paginationRequested }, "Slow admin booking list");
+      req.log.warn({ totalMs, bookingScanMs, enrichmentMs, filterMs: totalMs - bookingScanMs - enrichmentMs, scannedBookings: bookings.length, returnedBookings: responseRows.length, paginationRequested }, "Slow admin booking list");
     }
     res.json(responseRows);
   } catch (err) {
