@@ -167,7 +167,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     query: {
       retry: false,
       queryKey: getGetMeQueryKey(),
-      staleTime: 0,
+      // Reuse the verified admin identity during rapid menu navigation.
+      // Server-side adminMiddleware remains authoritative for every API call.
+      staleTime: 15_000,
+      refetchOnWindowFocus: false,
     }
   });
 
