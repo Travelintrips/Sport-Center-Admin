@@ -18,6 +18,7 @@ import {
 import { eq, inArray } from "drizzle-orm";
 import type { InvoiceSession, InvoiceData } from "./invoiceTemplate";
 import { calculateBookingWithholdingTax, calculateInclusiveInvoiceTax } from "./tax";
+import { allocateCorporateInvoiceNumber, findCorporateInvoiceNumber } from "./corporateInvoiceNumber";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -151,11 +152,20 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     pphRate: booking.pphRate,
     pphAmount: booking.pphAmount,
   });
-  const invoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
+  // Previously issued PDFs retain their legacy number unless already registered.
+  const legacyInvoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
+  const registeredSingle = booking.companyCustomerId != null && booking.payerType === "company"
+    ? await findCorporateInvoiceNumber("booking", booking.orderNumber)
+    : null;
+  const corporateSingle = registeredSingle ??
+    (booking.companyCustomerId != null && booking.payerType === "company" && !booking.invoicePdfUrl
+      ? await allocateCorporateInvoiceNumber("booking", booking.orderNumber)
+      : null);
+  const invoiceNumber = corporateSingle?.invoiceNumber ?? legacyInvoiceNumber;
 
   return {
     invoiceNumber,
-    invoiceDate: new Date().toISOString().split("T")[0]!,
+    invoiceDate: corporateSingle?.issuedOn ?? new Date().toISOString().split("T")[0]!,
     orderNumber: booking.orderNumber,
     status: booking.status,
 
@@ -329,11 +339,20 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
   const totalDiscount = sessions.reduce((sum, s) => sum + (s.discountAmount ?? 0), 0);
   const datePart = firstBooking.bookingDate.replace(/-/g, "").substring(0, 8);
   const groupSeq = groupRef.replace(/[^0-9]/g, "").padStart(6, "0");
-  const invoiceNumber = `INV/SC/GRP/${datePart}/${groupSeq}`;
+  const legacyGroupInvoiceNumber = `INV/SC/GRP/${datePart}/${groupSeq}`;
+  const registeredGroup = firstBooking.companyCustomerId != null && firstBooking.payerType === "company"
+    ? await findCorporateInvoiceNumber("group", groupRef)
+    : null;
+  const corporateGroup = registeredGroup ??
+    (firstBooking.companyCustomerId != null && firstBooking.payerType === "company" &&
+       groupBookings.every((booking) => !booking.invoicePdfUrl)
+      ? await allocateCorporateInvoiceNumber("group", groupRef)
+      : null);
+  const invoiceNumber = corporateGroup?.invoiceNumber ?? legacyGroupInvoiceNumber;
 
   return {
     invoiceNumber,
-    invoiceDate: new Date().toISOString().split("T")[0]!,
+    invoiceDate: corporateGroup?.issuedOn ?? new Date().toISOString().split("T")[0]!,
     orderNumber: groupRef,
     status: firstBooking.status,
 
