@@ -326,6 +326,11 @@ export async function sendInvoiceToCustomer(
     const seq = orderNumber.replace(/[^0-9]/g, "").slice(-6).padStart(6, "0");
     invoiceNumber = `INV/SC/${datePart}/${seq}`;
   }
+  // Match the PDF's canonical number in email/WA and audit events; never
+  // re-create an independent number from a booking reference.
+  const { resolveInvoiceData } = await import("./invoiceResolver");
+  const issuedInvoice = await resolveInvoiceData(orderNumber);
+  if (issuedInvoice) invoiceNumber = issuedInvoice.invoiceNumber;
 
   await logAudit({
     userId: audit?.userId,
@@ -466,9 +471,12 @@ export async function sendGroupInvoiceToCustomer(
   const customerPhone = firstBooking.customerPhone;
   const customerEmail = firstBooking.customerEmail ?? "";
 
-  const datePart = firstBooking.bookingDate.replace(/-/g, "").substring(0, 8);
-  const groupSeq = groupRef.replace(/[^0-9]/g, "").padStart(6, "0");
-  const invoiceNumber = `INV/SC/GRP/${datePart}/${groupSeq}`;
+  // Reuse the same persisted number shown in the group invoice PDF.
+  // The HTML renderer reserved it before the PDF was stored.
+  const { resolveGroupInvoiceData } = await import("./invoiceResolver");
+  const canonicalGroupInvoice = await resolveGroupInvoiceData(groupRef);
+  if (!canonicalGroupInvoice) throw new Error("GROUP_INVOICE_CANONICAL_NUMBER_MISSING");
+  const invoiceNumber = canonicalGroupInvoice.invoiceNumber;
 
   const totalGrandTotal = groupBookings.reduce((sum, b) => {
     return sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice ?? 0));

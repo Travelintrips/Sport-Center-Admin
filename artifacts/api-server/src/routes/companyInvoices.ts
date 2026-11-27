@@ -13,6 +13,7 @@ import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { getFonnteConfig } from "../lib/fonnteConfig";
 import { allocateInvoicePphRounding, discloseInvoicePphRounding } from "../lib/invoicePphAllocation";
+import { allocateCorporateInvoiceNumber } from "../lib/corporateInvoiceNumber";
 import {
   calculateBookingWithholdingTax,
   calculateInclusiveInvoiceTax,
@@ -29,11 +30,6 @@ const uploadMiddleware = multer({
 });
 
 const router = Router();
-
-function formatInvoiceNumber(id: number, periodMonth: string) {
-  const clean = periodMonth.replace("-", "");
-  return `INV-${clean}-${String(id).padStart(4, "0")}`;
-}
 
 function periodDateRange(periodMonth: string) {
   const [year, month] = periodMonth.split("-").map(Number);
@@ -762,7 +758,11 @@ async function handleGenerateInvoice(req: any, res: any) {
       notes: notes ?? null,
     }).returning();
 
-    invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
+    // Issue a permanent global number in the SAME transaction as the invoice.
+    // The Roman month is the actual Jakarta issuance month, not the service period.
+    invoiceNumber = (await allocateCorporateInvoiceNumber(
+      "monthly", String(inv.id), query => tx.execute(query)
+    )).invoiceNumber;
     [updated] = await tx.update(companyInvoicesTable)
       .set({ invoiceNumber })
       .where(eq(companyInvoicesTable.id, inv.id))

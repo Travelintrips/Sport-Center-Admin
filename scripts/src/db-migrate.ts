@@ -283,6 +283,17 @@ try {
     }
   }
   console.log(`      ✓ Done (${ok} applied, ${skipped} skipped)\n`);
+  // Corporate invoice release must fail closed if the new registry DDL was
+  // skipped by the legacy best-effort migration runner.
+  const invoiceRegistry = await client.query<{ ready: boolean }>(`
+    SELECT to_regclass('sport_center.corporate_invoice_number_registry') IS NOT NULL AS ready
+  `);
+  if (!invoiceRegistry.rows[0]?.ready) {
+    throw new Error("CORPORATE_INVOICE_REGISTRY_MIGRATION_REQUIRED");
+  }
+  console.log("      ✓ Corporate invoice numbering registry verified");
+
+
 
   console.log(`╔══════════════════════════════════════════════════════╗`);
   console.log(`║  ✅  All migrations applied successfully!            ║`);
