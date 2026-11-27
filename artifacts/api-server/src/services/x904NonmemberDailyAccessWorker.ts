@@ -82,6 +82,8 @@ export function startX904NonmemberAccessWorker(): void {
       // processor. It never sends physical commands or fabricates ACK.
       // The original 60s recovery/audit cycle remains intact and cannot be
       // starved by fast-lane contention.
+      // Closing and refund transitions must not wait behind inventory or VIS recovery.
+      await processX904NonmemberDailyAccess(db, new Date(), true);
       if (fullCycleRequested) {
         fullCycleRequested = false;
         await processPaidVisRecoveryCycle(
@@ -223,7 +225,7 @@ export function x904NonmemberScheduledStart(bookingDate: unknown, startTime: unk
 }
 
 /** Enqueue only. The existing VMSC group executor owns physical writes and ACK. */
-export async function processX904NonmemberDailyAccess(store: Store = db, now = new Date()): Promise<void> {
+export async function processX904NonmemberDailyAccess(store: Store = db, now = new Date(), expiryOnly = false): Promise<void> {
   if (process.env.GYM_X904_NONMEMBER_ACCESS_ENABLED !== "true" ||
       process.env.GYM_X904_MANUAL_ACCESS_ENABLED !== "true" ||
       process.env.GYM_X904_USER_WRITE_ENABLED !== "true") return;
@@ -242,6 +244,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND account_status='inactive' AND email IS NULL AND password_hash IS NULL`);
   if (identity.rows.length !== 1) return;
 
+  if (!expiryOnly) {
   await recoverPaidPublicGymPin(store, now, actor).catch(error =>
     console.warn("[x904-web-pin] recovery deferred; existing worker continues",
       error instanceof Error ? error.message : String(error)));
@@ -422,6 +425,8 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       error instanceof Error ? error.message : String(error));
   }
 
+  } // Expiry-only lane skips legacy inventory and public PIN recovery.
+
   // Only independently verified paid grants can enqueue X904 access commands.
   const due = await store.execute(sql`SELECT a.access_id,a.user_pin,a.device_uid,a.verified_name,
       a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
@@ -436,7 +441,16 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       AND (${testPin ?? null}::text IS NULL OR a.user_pin=${testPin ?? null})
       -- Verified paid grants cover both VIS cards and ordinary nonmember PINs.
       -- The card allowlist must not silently exclude verified PIN bookings.
-    ORDER BY CASE WHEN a.access_id > ${grantSweepCursor} THEN 0 ELSE 1 END, a.access_id LIMIT 25`);
+    AND (NOT ${expiryOnly} OR (a.activated_at IS NOT NULL AND (
+      LEAST(a.expires_at,a.activated_at+interval '12 hours',
+        ((a.activated_at AT TIME ZONE 'Asia/Jakarta')::date+time '23:00') AT TIME ZONE 'Asia/Jakarta') <= ${now}
+      OR p.status::text IS DISTINCT FROM 'confirmed'
+    )))
+    ORDER BY CASE WHEN a.activated_at IS NOT NULL AND
+      LEAST(a.expires_at,a.activated_at+interval '12 hours',
+        ((a.activated_at AT TIME ZONE 'Asia/Jakarta')::date+time '23:00') AT TIME ZONE 'Asia/Jakarta') <= ${now}
+      THEN 0 ELSE 1 END,
+      CASE WHEN a.access_id > ${grantSweepCursor} THEN 0 ELSE 1 END, a.access_id LIMIT 25`);
 
   for (const row of due.rows as any[]) {
     grantSweepCursor = Number(row.access_id);
@@ -579,6 +593,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         // The clock starts on verified ACTIVATE ACK, not at advance payment.
         (activeStart === null || (expiry !== null &&
           Number.isFinite(expiry.getTime()) && now.getTime() < expiry.getTime()));
+      if (expiryOnly && shouldBeActive) return;
       const targetGroup = shouldBeActive ? 1 : 2;
       const commandType = shouldBeActive ? "ACTIVATE_USER" : "SUSPEND_USER";
       const maxCommandAttempts = commandType === "SUSPEND_USER" ? MAX_SUSPEND_ATTEMPTS : MAX_ATTEMPTS;
