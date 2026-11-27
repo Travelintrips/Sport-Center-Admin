@@ -326,6 +326,11 @@ export async function sendInvoiceToCustomer(
     const seq = orderNumber.replace(/[^0-9]/g, "").slice(-6).padStart(6, "0");
     invoiceNumber = `INV/SC/${datePart}/${seq}`;
   }
+  // Match the PDF's canonical number in email/WA and audit events; never
+  // re-create an independent number from a booking reference.
+  const { resolveInvoiceData } = await import("./invoiceResolver");
+  const issuedInvoice = await resolveInvoiceData(orderNumber);
+  if (issuedInvoice) invoiceNumber = issuedInvoice.invoiceNumber;
 
   await logAudit({
     userId: audit?.userId,
