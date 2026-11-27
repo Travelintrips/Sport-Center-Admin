@@ -570,6 +570,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .from(bookingsTable)
           .orderBy(desc(bookingsTable.createdAt));
 
+    const bookingScanMs = Date.now() - startedAt;
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId))];
     const bookingIds = bookings.map((b) => b.id);
     const directCompanyInvoiceIds = [
@@ -649,22 +650,6 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .filter((groupRef): groupRef is string => Boolean(groupRef)),
       ),
     ];
-    const groupChargeRowsPromise = groupRefs.length > 0
-      ? db
-          .select({
-            groupRef: bookingsTable.groupRef,
-            additionalCharges: bookingsTable.additionalCharges,
-          })
-          .from(bookingsTable)
-          .where(inArray(bookingsTable.groupRef, groupRefs))
-          .catch((err) => {
-            req.log.warn({ err }, "Group charge lookup skipped for booking list");
-            return [];
-          })
-      : Promise.resolve([] as Array<{
-          groupRef: string | null;
-          additionalCharges: typeof bookingsTable.$inferSelect.additionalCharges;
-        }>);
     // Fetch every booking in each referenced group, not only rows surviving
     // the date/facility filter. Group payment obligations span all sessions.
     const fullGroupBookingsPromise = groupRefs.length > 0
@@ -683,8 +668,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
             return [];
           })
       : Promise.resolve([] as (typeof bookingGroupsTable.$inferSelect)[]);
-    const [groupChargeRows, groups, fullGroupBookings] = await Promise.all([
-      groupChargeRowsPromise,
+    const [groups, fullGroupBookings] = await Promise.all([
       groupsPromise,
       fullGroupBookingsPromise,
     ]);
@@ -699,7 +683,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           .where(inArray(paymentsTable.bookingId, paymentLookupBookingIds))
       : [];
     const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
-    for (const row of groupChargeRows) {
+    // The complete group bookings are already loaded for payment and tax logic.
+    // Reuse their charges instead of executing an extra query for the same rows.
+    for (const row of fullGroupBookings) {
       if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
       const charges = normalizeAdditionalCharges(row.additionalCharges);
       if (charges.length > 0) groupAdditionalCharges.set(row.groupRef, charges);
@@ -1292,6 +1278,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       return "unpaid";
     };
 
+    const enrichmentMs = Date.now() - startedAt - bookingScanMs;
     let responseRows = result;
 
     if (paginationRequested) {
@@ -1540,10 +1527,14 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       res.setHeader("X-Total-Pages", String(totalPages));
     }
 
+    const totalMs = Date.now() - startedAt;
     res.setHeader(
       "Server-Timing",
-      `bookings;dur=${Date.now() - startedAt};desc="bookings endpoint total"`,
+      `booking-scan;dur=${bookingScanMs}, booking-enrichment;dur=${enrichmentMs}, booking-filter;dur=${totalMs - bookingScanMs - enrichmentMs}, bookings;dur=${totalMs};desc="bookings endpoint total"`,
     );
+    if (totalMs >= 1500) {
+      req.log.warn({ totalMs, bookingScanMs, enrichmentMs, filterMs: totalMs - bookingScanMs - enrichmentMs, scannedBookings: bookings.length, returnedBookings: responseRows.length, paginationRequested }, "Slow admin booking list");
+    }
     res.json(responseRows);
   } catch (err) {
     req.log.error({ err }, "List bookings error");
