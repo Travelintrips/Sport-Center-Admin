@@ -6,7 +6,10 @@
  * Numbers intentionally need not be gapless (rollback/concurrent first requests).
  */
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
+
+type SqlExecutor = (statement: SQL) => Promise<{ rows: any[] }>;
+const defaultExecutor: SqlExecutor = statement => db.execute(statement);
 
 export type CorporateInvoiceDocumentType = "group" | "booking" | "monthly";
 export type CorporateInvoiceAllocation = { invoiceNumber: string; issuedOn: string; serialNo: number };
@@ -35,8 +38,9 @@ function allocationFromRow(row: { serial_no: string | number; issued_on: string 
 export async function findCorporateInvoiceNumber(
   documentType: CorporateInvoiceDocumentType,
   documentKey: string,
+  execute: SqlExecutor = defaultExecutor,
 ): Promise<CorporateInvoiceAllocation | null> {
-  const result = await db.execute(sql`
+  const result = await execute(sql`
     SELECT serial_no, issued_on::text
       FROM sport_center.corporate_invoice_number_registry
      WHERE document_type = ${documentType} AND document_key = ${documentKey}
@@ -49,15 +53,16 @@ export async function findCorporateInvoiceNumber(
 export async function allocateCorporateInvoiceNumber(
   documentType: CorporateInvoiceDocumentType,
   documentKey: string,
+  execute: SqlExecutor = defaultExecutor,
 ): Promise<CorporateInvoiceAllocation> {
   if (!documentKey.trim()) throw Error("CORPORATE_INVOICE_DOCUMENT_KEY_REQUIRED");
-  await db.execute(sql`
+  await execute(sql`
     INSERT INTO sport_center.corporate_invoice_number_registry
       (document_type, document_key, issued_on)
     VALUES (${documentType}, ${documentKey}, (NOW() AT TIME ZONE 'Asia/Jakarta')::date)
     ON CONFLICT (document_type, document_key) DO NOTHING
   `);
-  const existing = await findCorporateInvoiceNumber(documentType, documentKey);
+  const existing = await findCorporateInvoiceNumber(documentType, documentKey, execute);
   if (!existing) throw Error("CORPORATE_INVOICE_ALLOCATION_NOT_FOUND");
   return existing;
 }
