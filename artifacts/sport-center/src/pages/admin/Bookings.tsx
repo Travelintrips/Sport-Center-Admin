@@ -771,8 +771,7 @@ async function printInvoice(booking: any, settings?: any) {
   </div>
 
   <div class="section">
-    ${receiptDraft ? '<div style="padding:9px;border:2px solid #ef4444;color:#b91c1c;font-weight:700;margin-bottom:15px;text-align:center;">DOKUMEN PRATINJAU — PEMBAYARAN BELUM TERVERIFIKASI</div>' : ''}
-  <div class="section-title">Informasi Customer</div>
+    <div class="section-title">Informasi Customer</div>
     <div class="info-grid">
       ${booking.bookerName && booking.bookerName !== booking.customerName
         ? `<div class="info-item"><label>Pemesan</label><span>${booking.bookerName}</span></div><div class="info-item"><label>Yang Akan Main</label><span>${booking.customerName}</span></div>`
