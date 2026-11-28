@@ -771,7 +771,8 @@ async function printInvoice(booking: any, settings?: any) {
   </div>
 
   <div class="section">
-    <div class="section-title">Informasi Customer</div>
+    ${receiptDraft ? '<div style="padding:9px;border:2px solid #ef4444;color:#b91c1c;font-weight:700;margin-bottom:15px;text-align:center;">DOKUMEN PRATINJAU — PEMBAYARAN BELUM TERVERIFIKASI</div>' : ''}
+  <div class="section-title">Informasi Customer</div>
     <div class="info-grid">
       ${booking.bookerName && booking.bookerName !== booking.customerName
         ? `<div class="info-item"><label>Pemesan</label><span>${booking.bookerName}</span></div><div class="info-item"><label>Yang Akan Main</label><span>${booking.customerName}</span></div>`
@@ -854,9 +855,30 @@ async function printKwitansi(booking: any, settings?: any) {
   const bankAccount = settings?.bankAccount ?? "";
   const bankAccountName = settings?.bankAccountName ?? "";
   const logoUrl = settings?.logoUrl ?? "";
-  const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  let now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  let receiptNumber = booking.groupRef ?? booking.orderNumber;
+  let receiptDraft = false;
+  // An official CST receipt number is distinct from the original GRP/CART/SC
+  // reference. For unpaid Corporate groups preview is visibly DRAFT, never paid.
+  if (booking.payerType === "company" && booking.companyCustomerId != null) {
+    const response = await fetch(`/api/admin/bookings/receipt-number/${booking.id}`, {
+      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({}));
+      window.alert(problem.error || "Nomor kwitansi perusahaan tidak dapat diverifikasi");
+      return;
+    }
+    const issued = await response.json();
+    receiptNumber = String(issued.receiptNumber);
+    receiptDraft = issued.draft === true;
+    now = new Date(String(issued.issuedAt)).toLocaleDateString("id-ID", {
+      day:"numeric", month:"long", year:"numeric", timeZone:"Asia/Jakarta",
+    });
+  }
 
-  const statusLabel = booking.status === "completed" ? "Lunas" :
+  const statusLabel = receiptDraft ? "DRAFT — BELUM LUNAS" :
+    booking.status === "completed" ? "Lunas" :
     booking.status === "confirmed" ? "Dikonfirmasi" :
     booking.status === "cancelled" ? "Dibatalkan" : booking.status;
 
@@ -911,7 +933,7 @@ async function printKwitansi(booking: any, settings?: any) {
 <html lang="id">
 <head>
   <meta charset="UTF-8"/>
-  <title>Kwitansi ${booking.orderNumber}</title>
+  <title>Kwitansi ${receiptNumber}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family: Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 720px; margin: auto; font-size: 12px; }
@@ -970,7 +992,9 @@ async function printKwitansi(booking: any, settings?: any) {
     </div>
     <div class="header-right">
       <div class="kwitansi-title">KWITANSI</div>
-      <div class="kwitansi-num">${booking.groupRef && isGroup ? booking.groupRef : booking.orderNumber}</div>
+      <div class="kwitansi-num">${receiptNumber}</div>
+      <div style="font-size:11px;color:#555;margin-top:3px;">Referensi Booking: ${booking.groupRef && isGroup ? booking.groupRef : booking.orderNumber}</div>
+      ${receiptDraft ? '<div style="color:#b91c1c;font-weight:900;margin-top:5px;">DRAFT — BELUM LUNAS (BUKAN BUKTI PEMBAYARAN)</div>' : ''}
       <div class="kwitansi-date">Tanggal Kwitansi</div>
       <div style="font-size:11px;color:#333;margin-top:2px;">${now}</div>
     </div>
