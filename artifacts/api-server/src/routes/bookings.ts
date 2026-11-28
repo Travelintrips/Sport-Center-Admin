@@ -4242,7 +4242,10 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           const total = calculated.reduce((sum, item) => sum + item.totalPrice, 0);
           // Group invoice tax must be rounded ONCE on total gross, otherwise
           // eight session roundings can differ from the final invoice by Rp1.
-          const groupTax = calculateInclusiveInvoiceTax(total);
+          const hasPpn = calculated.some(item => item.taxCalc.taxAmount > 0 ||
+            item.taxCalc.taxRate > 0);
+          const groupTax = hasPpn ? calculateInclusiveInvoiceTax(total) :
+            { dpp: total, ppnAmount: 0 };
           const dpp = groupTax.dpp;
           const ppn = groupTax.ppnAmount;
           const pph = calculated.reduce((sum, item) =>
