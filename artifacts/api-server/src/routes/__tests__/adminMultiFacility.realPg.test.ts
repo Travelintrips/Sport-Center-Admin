@@ -3,7 +3,8 @@ import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { SQL } from "drizzle-orm";
 import {
   pool, facilitiesTable, bookingsTable, bookingHistoryTable,
-  bookingGroupsTable, blockedSchedulesTable,
+  bookingGroupsTable, blockedSchedulesTable, paymentsTable,
+  paymentAllocationsTable, companyInvoiceItemsTable, companyInvoicesTable,
 } from "@workspace/db";
 
 // Actual admin HTTP route and Drizzle/PostgreSQL transaction, disposable CI DB only.
@@ -55,7 +56,11 @@ suite("admin two-court checkout — real HTTP and PostgreSQL", () => {
     const existing = await pool.query("SELECT to_regnamespace('sport_center') AS existing");
     if (existing.rows[0]?.existing) throw new Error("ISOLATED_MULTIFACILITY_DATABASE_MUST_BE_EMPTY");
     await pool.query("CREATE SCHEMA sport_center");
-    for (const table of [facilitiesTable, bookingsTable, bookingHistoryTable, bookingGroupsTable, blockedSchedulesTable]) {
+    for (const table of [
+      facilitiesTable, bookingsTable, bookingHistoryTable, bookingGroupsTable,
+      blockedSchedulesTable, paymentsTable, paymentAllocationsTable,
+      companyInvoicesTable, companyInvoiceItemsTable,
+    ]) {
       await makeTable(table);
     }
     await pool.query(`
@@ -83,6 +88,7 @@ suite("admin two-court checkout — real HTTP and PostgreSQL", () => {
         enabled: false, rate: 0, amount: 0, netAmount: amount,
       })),
       recordTaxTransaction: jest.fn(async () => undefined),
+      reverseTaxTransaction: jest.fn(async () => undefined),
     }));
     const notifications = await import("../../lib/notifications.js");
     jest.unstable_mockModule("../../lib/notifications.js", () =>
@@ -119,7 +125,7 @@ suite("admin two-court checkout — real HTTP and PostgreSQL", () => {
   });
 
   beforeEach(async () => {
-    await pool.query("TRUNCATE sport_center.booking_history, sport_center.booking_groups, sport_center.sport_bookings, sport_center.blocked_schedules");
+    await pool.query("TRUNCATE sport_center.company_invoice_items, sport_center.company_invoices, sport_center.payment_allocations, sport_center.sport_payments, sport_center.booking_history, sport_center.booking_groups, sport_center.sport_bookings, sport_center.blocked_schedules");
   });
 
   const dates = ["2026-12-04", "2026-12-11", "2026-12-18"];
@@ -184,4 +190,76 @@ suite("admin two-court checkout — real HTTP and PostgreSQL", () => {
     expect((await submit([...sessions, duplicate])).status).toBe(400);
     expect(await counts()).toEqual({ bookings: 0, groups: 0, history: 0 });
   });
+  test("confirmed Corporate group accepts one-time consumption without creating new bookings", async () => {
+    const created = await submit();
+    expect(created.status).toBe(201);
+    const groupRef = created.body.groupRef as string;
+    await pool.query(`
+      UPDATE sport_center.sport_bookings
+      SET payer_type='company', company_customer_id=59,
+          status='confirmed', billing_status='unbilled'
+      WHERE group_ref=$1
+    `, [groupRef]);
+    const rows = await pool.query(
+      "SELECT id FROM sport_center.sport_bookings WHERE group_ref=$1 ORDER BY id", [groupRef],
+    );
+    const bookingId = Number(rows.rows[0].id);
+    const response = await request.patch("/api/bookings/" + bookingId)
+      .set("Authorization", "Bearer isolated-test")
+      .send({ additionalCharges: [{name:"Konsumsi Air Mineral - 1 Dus", amount:133200}] });
+    expect(response.status).toBe(200);
+    const result = await pool.query(`
+      SELECT count(*)::int AS sessions,
+             sum(total_price)::numeric AS gross,
+             count(*) FILTER (WHERE status='confirmed' AND billing_status='unbilled')::int AS unchanged_statuses,
+             count(*) FILTER (WHERE jsonb_array_length(additional_charges)>0)::int AS fee_rows
+        FROM sport_center.sport_bookings WHERE group_ref=$1
+    `, [groupRef]);
+    expect(result.rows[0].sessions).toBe(6);
+    expect(Number(result.rows[0].gross)).toBe(1_333_200);
+    expect(result.rows[0].unchanged_statuses).toBe(6);
+    expect(result.rows[0].fee_rows).toBe(1);
+    const group = await pool.query(
+      "SELECT total_payment FROM sport_center.booking_groups WHERE group_ref=$1", [groupRef],
+    );
+    expect(Number(group.rows[0].total_payment)).toBe(1_333_200);
+    const second = await request.patch("/api/bookings/" + bookingId)
+      .set("Authorization", "Bearer isolated-test")
+      .send({ additionalCharges: [{name:"Konsumsi Air Mineral - 1 Dus", amount:133200}] });
+    expect(second.status).toBe(200);
+    const again = await pool.query(
+      "SELECT total_payment FROM sport_center.booking_groups WHERE group_ref=$1", [groupRef],
+    );
+    expect(Number(again.rows[0].total_payment)).toBe(1_333_200);
+  });
+
+  test("Corporate fee is rejected once any booking is billed, without partial writes", async () => {
+    const created = await submit();
+    expect(created.status).toBe(201);
+    const groupRef = created.body.groupRef as string;
+    await pool.query(`
+      UPDATE sport_center.sport_bookings
+      SET payer_type='company', company_customer_id=59,
+          status='confirmed', billing_status='unbilled'
+      WHERE group_ref=$1
+    `, [groupRef]);
+    await pool.query(`
+      UPDATE sport_center.sport_bookings SET billing_status='billed'
+      WHERE id=(SELECT min(id) FROM sport_center.sport_bookings WHERE group_ref=$1)
+    `, [groupRef]);
+    const rows = await pool.query(
+      "SELECT max(id) AS id FROM sport_center.sport_bookings WHERE group_ref=$1", [groupRef],
+    );
+    const response = await request.patch("/api/bookings/" + rows.rows[0].id)
+      .set("Authorization", "Bearer isolated-test")
+      .send({additionalCharges:[{name:"Air Mineral",amount:133200}]});
+    expect(response.status).toBe(409);
+    const result = await pool.query(
+      "SELECT sum(total_price)::numeric AS total,count(*) FILTER (WHERE jsonb_array_length(additional_charges)>0)::int AS charge_rows FROM sport_center.sport_bookings WHERE group_ref=$1",
+      [groupRef],
+    );
+    expect(Number(result.rows[0].total)).toBe(1_200_000);
+    expect(result.rows[0].charge_rows).toBe(0);
+  });
+
 });
