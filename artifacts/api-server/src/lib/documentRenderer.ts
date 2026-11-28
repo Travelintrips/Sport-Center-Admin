@@ -14,10 +14,10 @@ import {
   bookingGroupsTable,
 } from "@workspace/db";
 
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
 import { generateDocumentNumber, deriveCompanyCode } from "./documentNumbering";
-import { issueCorporateReceiptNumber } from "./corporateReceiptNumber";
+import { issueCorporateReceiptNumber, isCorporateReceiptFullyPaid } from "./corporateReceiptNumber";
 
 export type DocumentType = "invoice" | "spp" | "faktur" | "kwitansi" | "lampiran" | "berita_acara";
 
@@ -390,6 +390,9 @@ export async function renderDocument(params: {
     const corporateReceipt = documentType === "kwitansi" &&
       booking.payerType === "company" && booking.companyCustomerId != null;
     let receiptBookingRef = booking.orderNumber;
+    let receiptIssuedAt: string | null = null;
+    let receiptIsPaid = false;
+    let receiptGroupRows: typeof bookingsTable.$inferSelect[] = [];
     if (corporateReceipt) {
       const [customer] = await db.select({accountType:usersTable.accountType})
         .from(usersTable).where(eq(usersTable.id,booking.companyCustomerId!)).limit(1);
@@ -398,6 +401,17 @@ export async function renderDocument(params: {
         ? await db.select({id:bookingGroupsTable.id}).from(bookingGroupsTable)
             .where(eq(bookingGroupsTable.groupRef,booking.groupRef)).limit(1) : [];
       if (booking.groupRef && !group) throw Error("CORPORATE_RECEIPT_GROUP_MISSING");
+      receiptGroupRows = booking.groupRef
+        ? await db.select().from(bookingsTable)
+          .where(eq(bookingsTable.groupRef, booking.groupRef))
+        : [booking];
+      if (!receiptGroupRows.length || receiptGroupRows.some(row =>
+        row.payerType !== "company" || row.companyCustomerId !== booking.companyCustomerId)) {
+        throw Error("CORPORATE_RECEIPT_GROUP_MIXED_CUSTOMERS");
+      }
+      const grossDue=receiptGroupRows.reduce((total,row)=>total+Number(row.totalPrice??0),0);
+      receiptIsPaid = await isCorporateReceiptFullyPaid(
+        receiptGroupRows, Number(group?.netPayment??booking.netAmount??grossDue));
       const issued = await issueCorporateReceiptNumber(
         group ? "booking_group" : "booking",
         group ? group.id : booking.id,
@@ -405,6 +419,7 @@ export async function renderDocument(params: {
       );
       documentNumber = issued.receiptNumber;
       receiptBookingRef = issued.bookingReference;
+      receiptIssuedAt = issued.issuedAt;
     } else if (issueDocumentNumber) {
       documentNumber = await generateDocumentNumber({
         prefix,
@@ -423,15 +438,48 @@ export async function renderDocument(params: {
       faktur: "FAKTUR PEMBAYARAN",
       kwitansi: "KWITANSI PEMBAYARAN",
     };
-    const docTitle = docTitleMap[documentType] || documentType.toUpperCase();
+    const docTitle = corporateReceipt && !receiptIsPaid
+      ? "KWITANSI (DRAFT)" : docTitleMap[documentType] || documentType.toUpperCase();
     const total = Number(booking.totalPrice ?? 0);
-    const grand = Number(booking.grandTotal ?? total);
-    const ppnBook = Math.max(0, Number(booking.ppnAmount ?? 0));
-    const hasPpn = ppnBook > 0;
-    const dppBook = Math.max(0, Number(booking.dpp ?? grand - ppnBook));
-    const dppNilaiLainBook = hasPpn ? Math.round(dppBook * 11 / 12) : 0;
+    const receiptGross = corporateReceipt
+      ? receiptGroupRows.reduce((sum,row)=>sum+Number(row.totalPrice??0),0)
+      : Number(booking.grandTotal ?? total);
+    const grand = receiptGross;
+    const hasPpn = corporateReceipt
+      ? receiptGroupRows.some(row => Number(row.ppnAmount ?? 0)>0 || Number(row.ppnRate??0)>0)
+      : Number(booking.ppnAmount ?? 0)>0;
+    const dppBook = hasPpn ? Math.round(grand/1.11) : grand;
+    const ppnBook = hasPpn ? grand-dppBook : 0;
+    const dppNilaiLainBook = hasPpn ? Math.round(dppBook*11/12) : 0;
     const grandAlignedBook = grand;
     const collectedBook = booking.ppnCollectedByCustomer === true || booking.ppnTreatment === "collected_by_customer";
+    const escapeReceipt = (v:string) => v.replace(/[&<>"']/g,c=>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] ?? c));
+    const receiptFacilityNames = new Map<number,string>();
+    if (corporateReceipt && receiptGroupRows.length) {
+      const facilities=await db.select({id:facilitiesTable.id,name:facilitiesTable.name})
+        .from(facilitiesTable).where(inArray(facilitiesTable.id,
+          [...new Set(receiptGroupRows.map(row=>row.facilityId))]));
+      for (const facilityRow of facilities) receiptFacilityNames.set(facilityRow.id,facilityRow.name);
+    }
+    const receiptRowsHtml=corporateReceipt
+      ? receiptGroupRows.sort((a,b)=>a.bookingDate.localeCompare(b.bookingDate))
+          .map(row=>{
+            const charges=Array.isArray(row.additionalCharges)
+              ? row.additionalCharges as Array<{name:string;amount:number}> : [];
+            const fee=charges.reduce((sum,charge)=>sum+Number(charge.amount??0),0);
+            const price=Math.max(0,Number(row.totalPrice??0)-fee);
+            const base=`<tr>
+              <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">Sewa ${escapeReceipt(receiptFacilityNames.get(row.facilityId)??"Fasilitas")}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${escapeReceipt(row.bookingDate)} | ${escapeReceipt(row.startTime)} – ${escapeReceipt(row.endTime)} (${row.durationHours} jam)</td>
+              <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(price)}</td>
+            </tr>`;
+            return base + charges.map(charge=>`<tr>
+              <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${escapeReceipt(String(charge.name))}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">Biaya tambahan grup (sekali)</td>
+              <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(Number(charge.amount))}</td>
+            </tr>`).join("");
+          }).join("") : "";
 
     bodyContent = `
       ${kopHtml}
@@ -439,8 +487,10 @@ export async function renderDocument(params: {
         <div>
           <h2 style="font-size:18px;font-weight:900;text-transform:uppercase;color:#1f2937;">${docTitle}</h2>
           <div style="font-size:13px;color:#6b7280;">Nomor: <strong>${documentNumber}</strong></div>
-          ${corporateReceipt ? `<div style="font-size:12px;color:#6b7280;">Referensi Booking: <strong>${receiptBookingRef}</strong></div><div style="font-weight:bold;color:#b91c1c;margin-top:6px;">PRATINJAU — Konfirmasi pembayaran harus diverifikasi sebelum digunakan sebagai bukti lunas.</div>` : ""}
-          <div style="font-size:13px;color:#6b7280;">Tanggal: <strong>${formatDate(booking.bookingDate)}</strong></div>
+          ${corporateReceipt ? `<div style="font-size:12px;color:#6b7280;">Referensi Booking: <strong>${receiptBookingRef}</strong></div>${!receiptIsPaid ? '<div style="font-weight:bold;color:#b91c1c;margin-top:6px;">DRAFT — BELUM LUNAS (BUKAN BUKTI PEMBAYARAN)</div>' : ''}` : ""}
+          <div style="font-size:13px;color:#6b7280;">Tanggal: <strong>${receiptIssuedAt
+            ? new Date(receiptIssuedAt).toLocaleDateString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"long",year:"numeric"})
+            : formatDate(booking.bookingDate)}</strong></div>
         </div>
         <div style="text-align:right;">
           <div style="font-size:13px;font-weight:700;">Kepada Yth.</div>
@@ -457,11 +507,11 @@ export async function renderDocument(params: {
           </tr>
         </thead>
         <tbody>
-          <tr>
+          ${corporateReceipt ? receiptRowsHtml : `<tr>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">Sewa ${facility?.name || "Fasilitas"}</td>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${booking.bookingDate} | ${booking.startTime} – ${booking.endTime} (${booking.durationHours} jam)</td>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(total)}</td>
-          </tr>
+          </tr>`}
           ${dppBook > 0 ? `
           <tr>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">DPP</td>
@@ -493,7 +543,9 @@ export async function renderDocument(params: {
         <div>Atas Nama: <strong>${bankAccountName}</strong></div>
       </div>` : `
       <div style="margin-top:16px;padding:16px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:13px;">
-        <div style="font-weight:700;margin-bottom:4px;">✅ Telah diterima pembayaran sebesar <strong>${formatIDR(grand)}</strong></div>
+        ${corporateReceipt && !receiptIsPaid
+          ? '<div style="font-weight:900;color:#b91c1c;">DRAFT — PEMBAYARAN BELUM TERVERIFIKASI</div>'
+          : `<div style="font-weight:700;margin-bottom:4px;">✅ Telah diterima pembayaran sebesar <strong>${formatIDR(grand)}</strong></div>`}
         <div>Untuk sewa <strong>${facility?.name || "fasilitas"}</strong> pada tanggal <strong>${formatDate(booking.bookingDate)}</strong></div>
         <div>Pukul <strong>${booking.startTime} – ${booking.endTime}</strong></div>
       </div>`}
