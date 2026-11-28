@@ -56,6 +56,7 @@ export interface InvoiceData {
   // Group invoice support
   groupRef?: string | null;
   sessions?: InvoiceSession[];
+  additionalCharges?: Array<{ name: string; amount: number }>;
 
   centerName: string;
   centerAddress: string;
@@ -175,6 +176,17 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
 
   // Gunakan sessions[] jika ada (grup), fallback ke single booking
   const isGroup = data.sessions && data.sessions.length > 0;
+  const escapeCharge = (value: string) => String(value).replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[c] ?? c);
+  const groupChargeRows = isGroup
+    ? (data.additionalCharges ?? []).map((charge, i) => `
+        <tr style="background:#fff7ed;">
+          <td style="padding:10px 12px;">${(data.sessions?.length ?? 0) + i + 1}</td>
+          <td style="padding:10px 12px;font-weight:600;">${escapeCharge(charge.name)}</td>
+          <td style="padding:10px 12px;" colspan="3">Biaya tambahan grup (sekali)</td>
+          <td style="padding:10px 12px;text-align:right;">Rp ${rp(charge.amount)}</td>
+        </tr>`).join("")
+    : "";
   const priceRows = isGroup
     ? data.sessions!.map((s, i) => {
         const hasSessionDiscount = (s.discountAmount ?? 0) > 0;
@@ -201,7 +213,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
             <td style="padding:4px 12px;font-size:11.5px;text-align:right;color:#15803d;font-weight:700;">Rp ${rp(s.grandTotal)}</td>
           </tr>` : ""}
         `;
-      }).join("")
+      }).join("") + groupChargeRows
     : `
     <tr>
       <td style="padding:10px 12px;font-size:13px;">1</td>
