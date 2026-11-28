@@ -4250,6 +4250,10 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           for (const item of calculated) {
             // Untouched sibling rows must retain their original tax snapshots.
             if (!item.changed) continue;
+            // Tax ledger, booking snapshot, and group total succeed or roll
+            // back TOGETHER. Never leave a committed booking with stale tax.
+            await reverseTaxTransaction(
+              item.row.id, item.row.orderNumber, item.row.bookingDate, tx);
             await tx.update(bookingsTable).set({
               additionalCharges: item.rowCharges,
               totalPrice: String(item.totalPrice),
@@ -4259,6 +4263,11 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
               netAmount: String(item.pphCalc.netAmount),
               updatedAt: new Date(),
             }).where(eq(bookingsTable.id, item.row.id));
+            if (item.taxCalc.taxCode) {
+              await recordTaxTransaction(
+                "booking", item.row.id, item.row.orderNumber, item.taxCalc,
+                item.row.bookingDate, "posted", "original", undefined, tx);
+            }
           }
           const total = calculated.reduce((sum, item) => sum + item.totalPrice, 0);
           // Group invoice tax must be rounded ONCE on total gross, otherwise
@@ -4291,19 +4300,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           res.status(409).json({ error: decision.error });
           return;
         }
-        // Reconcile existing tax ledger only AFTER a fully committed booking
-        // transaction; a failed reconciliation is logged for operator follow-up.
-        for (const item of calculated) {
-          if (!item.changed) continue;
-          try {
-            await reverseTaxTransaction(item.row.id, item.row.orderNumber, item.row.bookingDate);
-            if (item.taxCalc.taxCode)
-              await recordTaxTransaction("booking", item.row.id, item.row.orderNumber, item.taxCalc, item.row.bookingDate);
-          } catch (error) {
-            req.log.error({ error, bookingId: item.row.id, groupRef },
-              "Corporate group charge tax ledger reconciliation requires attention");
-          }
-        }
+        // All financial writes were committed as one transaction above.
         res.json(await getBookingWithPayment(id));
         return;
       }
