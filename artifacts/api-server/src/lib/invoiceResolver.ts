@@ -17,6 +17,7 @@ import {
 } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import type { InvoiceSession, InvoiceData } from "./invoiceTemplate";
+import { additionalChargesTotal, normalizeAdditionalCharges } from "./additionalCharges";
 import { calculateBookingWithholdingTax, calculateInclusiveInvoiceTax } from "./tax";
 import { allocateCorporateInvoiceNumber, findCorporateInvoiceNumber } from "./corporateInvoiceNumber";
 
@@ -314,9 +315,13 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
     facilityNames[firstBooking.facilityId] = facility?.name ?? "—";
   }
 
+  const groupCharges = groupBookings.flatMap((booking) =>
+    normalizeAdditionalCharges(booking.additionalCharges));
   const sessions: InvoiceSession[] = groupBookings.map((b) => {
     const discountAmt = Number(b.discountAmount ?? 0);
-    const grandTotalVal = b.totalPrice != null ? Number(b.totalPrice) : Number(b.grandTotal);
+    const sessionCharges = additionalChargesTotal(normalizeAdditionalCharges(b.additionalCharges));
+    const grandTotalVal = Math.max(0,
+      (b.totalPrice != null ? Number(b.totalPrice) : Number(b.grandTotal)) - sessionCharges);
     const basePriceVal =
       b.basePrice != null
         ? Number(b.basePrice)
@@ -386,6 +391,7 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
     discountAmount: totalDiscount,
     groupRef,
     sessions,
+    additionalCharges: groupCharges,
 
     centerName: settings?.centerName || "Sport Center Soekarno-Hatta",
     centerAddress: settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
