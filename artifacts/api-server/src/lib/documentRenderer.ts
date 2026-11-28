@@ -11,11 +11,13 @@ import {
   facilitiesTable,
   settingsTable,
   documentFileTemplatesTable,
+  bookingGroupsTable,
 } from "@workspace/db";
 
 import { eq, and, isNull } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
 import { generateDocumentNumber, deriveCompanyCode } from "./documentNumbering";
+import { issueCorporateReceiptNumber } from "./corporateReceiptNumber";
 
 export type DocumentType = "invoice" | "spp" | "faktur" | "kwitansi" | "lampiran" | "berita_acara";
 
@@ -383,7 +385,27 @@ export async function renderDocument(params: {
     const prefix = tpl?.numberFormatPrefix || DOC_PREFIX_MAP[documentType];
     const companyCode = "SC";
 
-    if (issueDocumentNumber) {
+    // Corporate kwitansi shares the same global immutable number as the
+    // Admin print button. GRP/CART remains a separate booking reference.
+    const corporateReceipt = documentType === "kwitansi" &&
+      booking.payerType === "company" && booking.companyCustomerId != null;
+    let receiptBookingRef = booking.orderNumber;
+    if (corporateReceipt) {
+      const [customer] = await db.select({accountType:usersTable.accountType})
+        .from(usersTable).where(eq(usersTable.id,booking.companyCustomerId!)).limit(1);
+      if (!customer || customer.accountType !== "company") throw Error("CORPORATE_RECEIPT_ACCOUNT_INVALID");
+      const [group] = booking.groupRef
+        ? await db.select({id:bookingGroupsTable.id}).from(bookingGroupsTable)
+            .where(eq(bookingGroupsTable.groupRef,booking.groupRef)).limit(1) : [];
+      if (booking.groupRef && !group) throw Error("CORPORATE_RECEIPT_GROUP_MISSING");
+      const issued = await issueCorporateReceiptNumber(
+        group ? "booking_group" : "booking",
+        group ? group.id : booking.id,
+        booking.groupRef ?? booking.orderNumber,
+      );
+      documentNumber = issued.receiptNumber;
+      receiptBookingRef = issued.bookingReference;
+    } else if (issueDocumentNumber) {
       documentNumber = await generateDocumentNumber({
         prefix,
         companyId,
@@ -417,6 +439,7 @@ export async function renderDocument(params: {
         <div>
           <h2 style="font-size:18px;font-weight:900;text-transform:uppercase;color:#1f2937;">${docTitle}</h2>
           <div style="font-size:13px;color:#6b7280;">Nomor: <strong>${documentNumber}</strong></div>
+          ${corporateReceipt ? `<div style="font-size:12px;color:#6b7280;">Referensi Booking: <strong>${receiptBookingRef}</strong></div><div style="font-weight:bold;color:#b91c1c;margin-top:6px;">PRATINJAU — Konfirmasi pembayaran harus diverifikasi sebelum digunakan sebagai bukti lunas.</div>` : ""}
           <div style="font-size:13px;color:#6b7280;">Tanggal: <strong>${formatDate(booking.bookingDate)}</strong></div>
         </div>
         <div style="text-align:right;">
