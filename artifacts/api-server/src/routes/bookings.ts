@@ -4184,6 +4184,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           row: typeof bookingsTable.$inferSelect;
           rowCharges: ReturnType<typeof normalizeAdditionalCharges>;
           totalPrice: number;
+          changed: boolean;
           taxCalc: Awaited<ReturnType<typeof resolveCustomerTax>>;
           pphCalc: Awaited<ReturnType<typeof resolveWithholdingTax>>;
         }> = [];
@@ -4194,6 +4195,8 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
             : Math.max(0, Number(row.totalPrice) - oldChargeTotal);
           const rowCharges = row.id === id ? additionalCharges : [];
           const totalPrice = base + additionalChargesTotal(rowCharges);
+          const changed = totalPrice !== Number(row.totalPrice) ||
+            JSON.stringify(rowCharges) !== JSON.stringify(normalizeAdditionalCharges(row.additionalCharges));
           const taxCalc = await resolveCustomerTax(totalPrice, {
             customerId: row.customerId,
             companyCustomerId: row.companyCustomerId,
@@ -4201,7 +4204,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           });
           const pphCalc = await resolveWithholdingTax(
             row.companyCustomerId, taxCalc.grandTotal, taxCalc.dpp);
-          calculated.push({ row, rowCharges, totalPrice, taxCalc, pphCalc });
+          calculated.push({ row, rowCharges, totalPrice, changed, taxCalc, pphCalc });
         }
 
         const decision = await db.transaction(async tx => {
@@ -4235,6 +4238,8 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           // checked above. Never change or reuse that reserved serial.
 
           for (const item of calculated) {
+            // Untouched sibling rows must retain their original tax snapshots.
+            if (!item.changed) continue;
             await tx.update(bookingsTable).set({
               additionalCharges: item.rowCharges,
               totalPrice: String(item.totalPrice),
@@ -4248,14 +4253,17 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           const total = calculated.reduce((sum, item) => sum + item.totalPrice, 0);
           // Group invoice tax must be rounded ONCE on total gross, otherwise
           // eight session roundings can differ from the final invoice by Rp1.
-          const hasPpn = calculated.some(item => item.taxCalc.taxAmount > 0 ||
-            item.taxCalc.taxRate > 0);
+          const hasPpn = calculated.some(item => item.changed
+            ? (item.taxCalc.taxAmount > 0 || item.taxCalc.taxRate > 0)
+            : (Number(item.row.ppnAmount ?? 0) > 0 || Number(item.row.ppnRate ?? 0) > 0));
           const groupTax = hasPpn ? calculateInclusiveInvoiceTax(total) :
             { dpp: total, ppnAmount: 0 };
           const dpp = groupTax.dpp;
           const ppn = groupTax.ppnAmount;
           const pph = calculated.reduce((sum, item) =>
-            sum + (item.pphCalc.enabled ? item.pphCalc.amount : 0), 0);
+            sum + (item.changed
+              ? (item.pphCalc.enabled ? item.pphCalc.amount : 0)
+              : Number(item.row.pphAmount ?? 0)), 0);
           await tx.update(bookingGroupsTable).set({
             totalPayment: String(total), dpp: String(dpp), ppnAmount: String(ppn),
             pphAmount: String(pph), netPayment: String(Math.max(0, total - pph)),
@@ -4276,9 +4284,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         // Reconcile existing tax ledger only AFTER a fully committed booking
         // transaction; a failed reconciliation is logged for operator follow-up.
         for (const item of calculated) {
-          if (item.totalPrice === Number(item.row.totalPrice) &&
-              JSON.stringify(item.rowCharges) === JSON.stringify(normalizeAdditionalCharges(item.row.additionalCharges)))
-            continue;
+          if (!item.changed) continue;
           try {
             await reverseTaxTransaction(item.row.id, item.row.orderNumber, item.row.bookingDate);
             if (item.taxCalc.taxCode)
