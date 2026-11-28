@@ -125,7 +125,7 @@ suite("admin two-court checkout — real HTTP and PostgreSQL", () => {
   });
 
   beforeEach(async () => {
-    await pool.query("TRUNCATE sport_center.company_invoice_items, sport_center.company_invoices, sport_center.payment_allocations, sport_center.sport_payments, sport_center.booking_history, sport_center.booking_groups, sport_center.sport_bookings, sport_center.blocked_schedules");
+    await pool.query("TRUNCATE sport_center.company_invoice_items, sport_center.company_invoices, sport_center.sport_payment_allocations, sport_center.sport_payments, sport_center.booking_history, sport_center.booking_groups, sport_center.sport_bookings, sport_center.blocked_schedules");
   });
 
   const dates = ["2026-12-04", "2026-12-11", "2026-12-18"];
