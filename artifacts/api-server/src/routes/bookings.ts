@@ -29,7 +29,7 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
-import { calculateBookingWithholdingTax, calculateWithholdingTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
+import { calculateBookingWithholdingTax, calculateWithholdingTax, calculateInclusiveInvoiceTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { corporateGroupChargeBlocker } from "../lib/corporateGroupChargeEligibility";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
@@ -4240,8 +4240,11 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
             }).where(eq(bookingsTable.id, item.row.id));
           }
           const total = calculated.reduce((sum, item) => sum + item.totalPrice, 0);
-          const dpp = calculated.reduce((sum, item) => sum + item.taxCalc.dpp, 0);
-          const ppn = calculated.reduce((sum, item) => sum + item.taxCalc.taxAmount, 0);
+          // Group invoice tax must be rounded ONCE on total gross, otherwise
+          // eight session roundings can differ from the final invoice by Rp1.
+          const groupTax = calculateInclusiveInvoiceTax(total);
+          const dpp = groupTax.dpp;
+          const ppn = groupTax.ppnAmount;
           const pph = calculated.reduce((sum, item) =>
             sum + (item.pphCalc.enabled ? item.pphCalc.amount : 0), 0);
           await tx.update(bookingGroupsTable).set({
