@@ -4180,7 +4180,13 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         // current editor risks dropping them. Require unchanged source snapshot.
         const expected = JSON.stringify(
           initialRows.map(row => [row.id, row.totalPrice, row.additionalCharges]));
-        const calculated = [];
+        const calculated: Array<{
+          row: typeof bookingsTable.$inferSelect;
+          rowCharges: ReturnType<typeof normalizeAdditionalCharges>;
+          totalPrice: number;
+          taxCalc: Awaited<ReturnType<typeof resolveCustomerTax>>;
+          pphCalc: Awaited<ReturnType<typeof resolveWithholdingTax>>;
+        }> = [];
         for (const row of initialRows) {
           const oldChargeTotal = additionalChargesTotal(normalizeAdditionalCharges(row.additionalCharges));
           const base = row.basePrice != null
