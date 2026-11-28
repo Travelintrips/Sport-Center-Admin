@@ -287,11 +287,12 @@ export async function recordTaxTransaction(
   transactionDate: string,
   status: "posted" | "reversed" = "posted",
   transactionType: "original" | "reversal" = "original",
-  reversalOfId?: number
+  reversalOfId?: number,
+  executor: Pick<typeof db, "insert"> = db,
 ): Promise<number | null> {
   if (!taxCalc.taxCode || taxCalc.taxAmount === 0 || taxCalc.ppnCollectedByCustomer) return null;
   const dppNilaiLain = taxCalc.dpp > 0 ? Math.round(taxCalc.dpp * 11 / 12) : 0;
-  const [row] = await db.insert(taxTransactionsTable).values({
+  const [row] = await executor.insert(taxTransactionsTable).values({
     referenceType,
     referenceId,
     referenceNumber,
@@ -312,9 +313,10 @@ export async function recordTaxTransaction(
 export async function reverseTaxTransaction(
   referenceId: number,
   referenceNumber: string,
-  transactionDate: string
+  transactionDate: string,
+  executor: Pick<typeof db, "select" | "insert" | "update"> = db,
 ): Promise<void> {
-  const [original] = await db
+  const [original] = await executor
     .select()
     .from(taxTransactionsTable)
     .where(
@@ -328,7 +330,7 @@ export async function reverseTaxTransaction(
 
   if (!original) return;
 
-  await db.insert(taxTransactionsTable).values({
+  await executor.insert(taxTransactionsTable).values({
     referenceType: original.referenceType as "booking" | "company_invoice",
     referenceId: original.referenceId,
     referenceNumber,
@@ -342,7 +344,7 @@ export async function reverseTaxTransaction(
     reversalOfId: original.id,
   });
 
-  await db
+  await executor
     .update(taxTransactionsTable)
     .set({ status: "reversed" })
     .where(eq(taxTransactionsTable.id, original.id));
