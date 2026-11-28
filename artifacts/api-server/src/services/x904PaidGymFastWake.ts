@@ -42,7 +42,7 @@ export function wakeX904PaidGymAfterConfirmation(
         console.error("[x904-paid-gym-fast-wake] worker wake failed; 60s scheduler remains fallback",
           error instanceof Error ? error.message : String(error));
       }
-      if (rerunRequested) {
+      while (rerunRequested) {
         rerunRequested = false;
         try {
           await run();
