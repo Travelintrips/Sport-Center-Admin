@@ -4224,13 +4224,9 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
             overrideTotal: group.totalPaymentOverride != null,
           });
           if (blocker) return { error: blocker };
-          // A previously rendered official Corporate invoice must remain immutable.
-          const registry = await tx.execute(sql`
-            SELECT 1 FROM sport_center.corporate_invoice_number_registry
-             WHERE document_type='group' AND document_key=${groupRef} LIMIT 1
-          `);
-          if (registry.rows.length)
-            return { error: "Nomor invoice grup sudah diterbitkan; revisi melalui alur invoice." };
+          // A reserved serial can be created by HTML preview before billing.
+          // The immutable boundaries are actual invoice/PDF/payment records,
+          // checked above. Never change or reuse that reserved serial.
 
           for (const item of calculated) {
             await tx.update(bookingsTable).set({
