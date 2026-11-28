@@ -3,8 +3,8 @@
  * The booked GRP/CART/SC reference is never overwritten.
  * Reuse existing sport_center.document_* tables instead of building a new system.
  */
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { db, paymentsTable, companyInvoicesTable, companyInvoiceItemsTable } from "@workspace/db";
+import { sql, inArray } from "drizzle-orm";
 
 export type CorporateReceiptIdentity = {
   receiptNumber: string;
@@ -75,4 +75,46 @@ export async function issueCorporateReceiptNumber(
       bookingReference,
     };
   });
+}
+
+export type CorporateReceiptPaymentRow = {
+  id: number;
+  companyInvoiceId: number | null;
+};
+
+/**
+ * Fail closed: one paid monthly invoice cannot mark a multi-period group paid.
+ * An invoice-linked group requires every child row to be covered by a fully
+ * settled company invoice. Without invoice links, verified receipts must cover
+ * the ENTIRE group amount (net for corporate PPh).
+ */
+export async function isCorporateReceiptFullyPaid(
+  rows: readonly CorporateReceiptPaymentRow[],
+  payableTotal: number,
+): Promise<boolean> {
+  if (!rows.length || !Number.isFinite(payableTotal) || payableTotal <= 0) return false;
+  const ids=rows.map(row=>row.id);
+  const itemLinks=await db.select({
+    bookingId:companyInvoiceItemsTable.bookingId,
+    invoiceId:companyInvoiceItemsTable.invoiceId,
+  }).from(companyInvoiceItemsTable).where(inArray(companyInvoiceItemsTable.bookingId,ids));
+  const invoiceByBooking=new Map<number,number>();
+  for (const row of itemLinks) if (row.bookingId != null) invoiceByBooking.set(row.bookingId,row.invoiceId);
+  const invoiceIds=[...new Set(rows.map(row=>row.companyInvoiceId??invoiceByBooking.get(row.id)??null)
+    .filter((v):v is number=>v!=null))];
+  if (invoiceIds.length) {
+    if (rows.some(row=>row.companyInvoiceId==null && !invoiceByBooking.has(row.id))) return false;
+    const invoices=await db.select().from(companyInvoicesTable)
+      .where(inArray(companyInvoicesTable.id,invoiceIds));
+    return invoices.length===invoiceIds.length && invoices.every(inv=>
+      inv.status==="paid" && inv.legacyStatus==="paid" &&
+      inv.paidAt != null &&
+      Number(inv.paidAmount??0)>=Number(inv.netAmount??inv.grandTotal??0)-0.005 &&
+      Number(inv.remainingAmount??0)<=0.005);
+  }
+  const payments=await db.select().from(paymentsTable)
+    .where(inArray(paymentsTable.bookingId,ids));
+  const paid=new Map(payments.filter(p=>p.status==="confirmed")
+    .map(p=>[p.id,Number(p.amount??0)]));
+  return [...paid.values()].reduce((a,b)=>a+b,0)>=payableTotal-0.005;
 }
