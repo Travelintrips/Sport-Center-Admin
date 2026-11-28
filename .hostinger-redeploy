@@ -42,3 +42,5 @@ force hostinger redeploy after Mina webhook signing separation
 
 2026-11-03 request clean Hostinger backend rebuild for merged PR #481 (11c9f939), admin BOOKING BARU branded payment proof URL; verify /api/healthz git_commit. No replay historical WA messages, no X904 changes.
 2026-11-16 request Hostinger clean rebuild latest main including multi-facility admin booking PR #823, merge d1c4f22213ebcfb82ac171ffb124e9b147b46370. Preserve booking/payment data and X904 flags; do not replay historical jobs. Verify /api/healthz git_commit and CheckoutForm bundle facility-specific patterns after deploy.
+
+2026-11-28 request Hostinger clean rebuild of merged PR #878 d2aab4dc771b7fbd954e166b7447012b27a3749a for confirmed-unbilled Corporate group additional charges. No booking/payment mutations; verify /api/healthz git_commit after deployment.
