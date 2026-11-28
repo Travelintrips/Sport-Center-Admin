@@ -4176,8 +4176,6 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         const groupRef = beforeUpdate.groupRef;
         const initialRows = await db.select().from(bookingsTable)
           .where(eq(bookingsTable.groupRef, groupRef)).orderBy(bookingsTable.id);
-        const existingCharges = initialRows.flatMap(row =>
-          normalizeAdditionalCharges(row.additionalCharges));
         // Replacing existing fees from another row without seeing them in the
         // current editor risks dropping them. Require unchanged source snapshot.
         const expected = JSON.stringify(
