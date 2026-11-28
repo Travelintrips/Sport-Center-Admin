@@ -232,20 +232,30 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
 // ─── resolveGroupInvoiceData — invoice repeat booking ────────────────────────
 
 export async function resolveGroupInvoiceData(groupRef: string): Promise<InvoiceData | null> {
-  const [group] = await db
-    .select()
-    .from(bookingGroupsTable)
-    .where(eq(bookingGroupsTable.groupRef, groupRef))
-    .limit(1);
-  if (!group) return null;
-
-  const groupBookings = await db
-    .select()
-    .from(bookingsTable)
-    .where(eq(bookingsTable.groupRef, groupRef));
-  if (!groupBookings.length) return null;
-
-  groupBookings.sort((a, b) => a.bookingDate.localeCompare(b.bookingDate));
+  // Snapshot and reserve invoice identity under the same locks as the admin
+  // charge editor. This prevents an invoice GET from seeing half-updated rows.
+  const snapshot = await db.transaction(async (tx) => {
+    const [group] = await tx.select().from(bookingGroupsTable)
+      .where(eq(bookingGroupsTable.groupRef, groupRef)).for("update");
+    if (!group) return null;
+    const groupBookings = await tx.select().from(bookingsTable)
+      .where(eq(bookingsTable.groupRef, groupRef)).for("update");
+    if (!groupBookings.length) return null;
+    groupBookings.sort((a, b) => a.bookingDate.localeCompare(b.bookingDate));
+    const first = groupBookings[0]!;
+    let corporateGroup: Awaited<ReturnType<typeof findCorporateInvoiceNumber>> = null;
+    if (first.companyCustomerId != null && first.payerType === "company") {
+      corporateGroup = await findCorporateInvoiceNumber(
+        "group", groupRef, query => tx.execute(query));
+      if (!corporateGroup && groupBookings.every(booking => !booking.invoicePdfUrl)) {
+        corporateGroup = await allocateCorporateInvoiceNumber(
+          "group", groupRef, query => tx.execute(query));
+      }
+    }
+    return { group, groupBookings, corporateGroup };
+  });
+  if (!snapshot) return null;
+  const { groupBookings, corporateGroup } = snapshot;
   const firstBooking = groupBookings[0]!;
   const [company] = firstBooking.companyCustomerId != null
     ? await db.select({ companyName: usersTable.companyName, picEmail: usersTable.picEmail })
@@ -347,14 +357,6 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
   const datePart = firstBooking.bookingDate.replace(/-/g, "").substring(0, 8);
   const groupSeq = groupRef.replace(/[^0-9]/g, "").padStart(6, "0");
   const legacyGroupInvoiceNumber = `INV/SC/GRP/${datePart}/${groupSeq}`;
-  const registeredGroup = firstBooking.companyCustomerId != null && firstBooking.payerType === "company"
-    ? await findCorporateInvoiceNumber("group", groupRef)
-    : null;
-  const corporateGroup = registeredGroup ??
-    (firstBooking.companyCustomerId != null && firstBooking.payerType === "company" &&
-       groupBookings.every((booking) => !booking.invoicePdfUrl)
-      ? await allocateCorporateInvoiceNumber("group", groupRef)
-      : null);
   const invoiceNumber = corporateGroup?.invoiceNumber ?? legacyGroupInvoiceNumber;
 
   return {
