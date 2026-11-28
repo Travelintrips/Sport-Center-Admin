@@ -3139,7 +3139,9 @@ function BookingDetailDrawer({
                  {booking.groupRef ? "Biaya Tambahan (sekali untuk seluruh grup)" : "Biaya Tambahan"}
               </label>
               <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
-                Hanya dapat diubah sebelum booking memiliki pembayaran.
+                {booking.groupRef
+                  ? "Biaya dihitung sekali untuk seluruh grup. Untuk Corporate, dapat diubah selama belum dibayar dan belum ditagih. Nominal harus sudah termasuk PPN."
+                  : "Hanya dapat diubah sebelum booking memiliki pembayaran. Nominal sudah termasuk PPN."}
               </p>
             </div>
             {chargeDraft.map((charge, index) => (
@@ -3157,7 +3159,7 @@ function BookingDetailDrawer({
                   onChange={(event) => setChargeDraft((current) => current.map((item, itemIndex) =>
                     itemIndex === index ? { ...item, amount: event.target.value.replace(/[^0-9]/g, "") } : item,
                   ))}
-                  placeholder="Nominal"
+                  placeholder="Total inc. PPN"
                   className="h-8 w-28 bg-white dark:bg-slate-900 text-xs font-mono"
                 />
                 <button
