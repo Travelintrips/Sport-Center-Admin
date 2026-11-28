@@ -461,6 +461,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
           a.payment_id,a.confirmed_at,a.expires_at,a.activated_at,a.access_state,a.verification_state,
           p.status::text AS payment_status,
           booking.booking_date AS booking_date, booking.start_time AS booking_start_time,
+          (to_jsonb(booking)->>'facility_id') AS booking_facility_id,
           booking.source AS booking_source, booking.notes AS booking_notes,
           booking.status::text AS booking_status,
           a.identity_type AS identity_type, a.identity_label AS identity_label
@@ -470,6 +471,11 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
         WHERE a.access_id=${Number(row.access_id)} FOR UPDATE OF a`);
       if (locked.rows.length !== 1) return;
       const a = locked.rows[0] as any;
+      // Until court grants have their own payment/clock contract, never let a
+      // non-Gym booking inherit the flexible Gym admission. Existing active
+      // grants must still reach the verified suspension path.
+      const nonGymBooking = a.booking_facility_id != null && String(a.booking_facility_id) !== "6";
+      if (nonGymBooking && a.activated_at == null) return;
       if (a.verification_state !== "verified" ||
           !/^[0-9]{1,8}$/.test(String(a.user_pin)) ||
           !Number.isSafeInteger(Number(a.device_uid)) || Number(a.device_uid) <= 0 ||
@@ -544,6 +550,9 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       // was missed, never activate it after the facility reopens next day.
       // Advance payments for future reservations may activate on that day.
       if (a.activated_at == null && !x904NonmemberSameWibDate(now, new Date(scheduledStart))) {
+        // Advance-paid bookings must remain pending until their WIB date;
+        // moving them to review_required here prevents later auto activation.
+        if (now.getTime() < scheduledStart) return;
         await tx.execute(sql`UPDATE sport_center.x904_nonmember_daily_access
           SET access_state='review_required'
           WHERE access_id=${Number(a.access_id)} AND access_state IN ('pending','active')`);
@@ -586,7 +595,7 @@ export async function processX904NonmemberDailyAccess(store: Store = db, now = n
       // `completed` can mean the *displayed one-hour slot* ended; on Gym
       // it does not revoke an independently verified paid same-day grant.
       const bookingEligible = ["confirmed","completed"].includes(String(a.booking_status));
-      const shouldBeActive = bookingEligible &&
+      const shouldBeActive = !nonGymBooking && bookingEligible &&
         a.payment_status === "confirmed" &&
         x904NonmemberOpeningHours(now) &&
         now.getTime() >= new Date(String(a.confirmed_at)).getTime() &&
