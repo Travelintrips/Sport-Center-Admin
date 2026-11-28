@@ -31,6 +31,7 @@ import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizport
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateBookingWithholdingTax, calculateWithholdingTax, calculateInclusiveInvoiceTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
+import { issueCorporateReceiptNumber, isCorporateReceiptFullyPaid } from "../lib/corporateReceiptNumber";
 import { corporateGroupChargeBlocker } from "../lib/corporateGroupChargeEligibility";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
@@ -3855,6 +3856,59 @@ router.patch("/bookings/:id/dp", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Pay DP error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// GET /admin/bookings/receipt-number/:id — authenticated Corporate receipt identity.
+// Booking reference is a separate immutable field. No booking/payment mutation.
+// An unpaid booking can preview the reserved number, but MUST be marked DRAFT.
+router.get("/admin/bookings/receipt-number/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      res.status(400).json({ error: "ID booking tidak valid" });
+      return;
+    }
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (booking.payerType !== "company" || booking.companyCustomerId == null) {
+      res.status(400).json({ error: "Penomoran ini khusus akun perusahaan" }); return;
+    }
+    const [company] = await db.select({ accountType: usersTable.accountType })
+      .from(usersTable).where(eq(usersTable.id, booking.companyCustomerId)).limit(1);
+    if (!company || company.accountType !== "company") {
+      res.status(403).json({ error: "Akun perusahaan belum terverifikasi" }); return;
+    }
+
+    const groupRef = booking.groupRef;
+    const [group] = groupRef
+      ? await db.select().from(bookingGroupsTable)
+          .where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1)
+      : [];
+    if (groupRef && !group) { res.status(409).json({error:"Grup booking tidak ditemukan"}); return; }
+    const rows = groupRef
+      ? await db.select().from(bookingsTable).where(eq(bookingsTable.groupRef, groupRef))
+      : [booking];
+    if (!rows.length || rows.some(row => row.payerType !== "company" ||
+      row.companyCustomerId !== booking.companyCustomerId)) {
+      res.status(409).json({ error:"Grup mengandung akun berbeda; kwitansi tidak diterbitkan" });
+      return;
+    }
+    const due=group ? Number(group.netPayment??group.totalPayment) :
+      Number(booking.netAmount??booking.totalPrice);
+    const paid=await isCorporateReceiptFullyPaid(rows,due);
+    const entityType=groupRef ? "booking_group" as const : "booking" as const;
+    const identity=await issueCorporateReceiptNumber(
+      entityType,group ? group.id : booking.id,groupRef || booking.orderNumber);
+    res.setHeader("Cache-Control","no-store");
+    res.json({ ...identity, corporate:true, paid, draft:!paid,
+      statusLabel:paid?"LUNAS":"DRAFT — BELUM LUNAS",
+      customerId:booking.companyCustomerId });
+  } catch (err) {
+    req.log.error({err},"Corporate receipt identity failed");
+    res.status(500).json({error:"Tidak dapat menerbitkan nomor kwitansi perusahaan"});
   }
 });
 
