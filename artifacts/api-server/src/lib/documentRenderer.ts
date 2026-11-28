@@ -398,7 +398,7 @@ export async function renderDocument(params: {
         .from(usersTable).where(eq(usersTable.id,booking.companyCustomerId!)).limit(1);
       if (!customer || customer.accountType !== "company") throw Error("CORPORATE_RECEIPT_ACCOUNT_INVALID");
       const [group] = booking.groupRef
-        ? await db.select({id:bookingGroupsTable.id}).from(bookingGroupsTable)
+        ? await db.select({id:bookingGroupsTable.id, netPayment:bookingGroupsTable.netPayment, totalPayment:bookingGroupsTable.totalPayment}).from(bookingGroupsTable)
             .where(eq(bookingGroupsTable.groupRef,booking.groupRef)).limit(1) : [];
       if (booking.groupRef && !group) throw Error("CORPORATE_RECEIPT_GROUP_MISSING");
       receiptGroupRows = booking.groupRef
