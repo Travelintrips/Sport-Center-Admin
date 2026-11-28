@@ -4208,7 +4208,17 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         }
 
         const decision = await db.transaction(async tx => {
-          // Serialize concurrent edits and invoice creation on group + booking rows.
+          // The monthly invoice generator already holds this advisory lock
+          // before reading unbilled bookings. Acquire the SAME locks first so
+          // invoice generation cannot race our snapshot change.
+          const monthLocks = [...new Set(initialRows.map(row =>
+            String(row.bookingDate).slice(0, 7)))].sort();
+          for (const month of monthLocks) {
+            await tx.execute(sql`SELECT pg_advisory_xact_lock(
+              hashtext(${String(beforeUpdate.companyCustomerId)}), hashtext(${month})
+            )`);
+          }
+          // Then lock the group and children for concurrent editing/HTML renders.
           const [group] = await tx.select().from(bookingGroupsTable)
             .where(eq(bookingGroupsTable.groupRef, groupRef)).for("update");
           const rows = await tx.select().from(bookingsTable)
