@@ -1073,7 +1073,7 @@ export default function AdminCheckoutForm() {
     proof: File,
     paymentDate: string,
     method: string,
-    confirmAdminGymPayment = false,
+    confirmAdminPayment = false,
   ): Promise<boolean> {
     if (!bookingId || !(amount > 0) || !proof || !paymentDate || paymentBusy) return false;
     setPaymentBusy(true);
@@ -1106,7 +1106,7 @@ export default function AdminCheckoutForm() {
           paymentDate,
           proofUrl: fileResult.objectPath ?? fileResult.url,
           ocrScanToken: fileResult.ocrScanToken,
-          ...(confirmAdminGymPayment ? { confirmAdminGymPayment: true } : {}),
+          ...(confirmAdminPayment ? { confirmAdminPayment: true } : {}),
         };
         const saved = await fetch("/api/payments", {
           method: "POST",
@@ -1124,12 +1124,12 @@ export default function AdminCheckoutForm() {
           throw Error("Bukti terkirim, tetapi ID pembayaran tidak diterima. Periksa Detail Pemesanan sebelum mengirim ulang.");
         }
         setCreatedPaymentId(paymentId);
-        if (confirmAdminGymPayment) {
+        if (confirmAdminPayment && result.status === "confirmed") {
           setPaymentConfirmed(result.status === "confirmed");
           setPaymentSubmitted(true);
           setCreatedPaymentError("");
           toast({ title: result.status === "confirmed" ? "Pembayaran dikonfirmasi" : "Bukti pembayaran dicatat",
-            description: result.status === "confirmed" ? "Aktivasi Gym diproses otomatis." : "Menunggu verifikasi Admin." });
+            description: "Pembayaran tercatat. Akses mengikuti kebijakan fasilitas." });
           return true;
         }
       }
@@ -1402,7 +1402,7 @@ export default function AdminCheckoutForm() {
         setPaymentConfirmed(false);
       setCreatedPaymentId(null);
       if (paymentChoice === "paid" && paymentProof) {
-        await recordBookingPayment(bookingId, actualBookingAmount, paymentProof, bookingPaymentDate, paidMethod, isGymNonmember);
+        await recordBookingPayment(bookingId, actualBookingAmount, paymentProof, bookingPaymentDate, paidMethod, true);
       } else {
         toast({ title: "Booking berhasil dibuat!", description: `Order: ${order}. Status: belum dibayar; belum ada record pembayaran.` });
       }

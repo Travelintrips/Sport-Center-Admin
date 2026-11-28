@@ -17,3 +17,7 @@ assert.ok(source.includes("Require ($afterOk -and $after -eq $desired) 'GROUP_RE
 assert.ok(source.indexOf('UID_ATTESTATION_REQUIRED') < source.indexOf('SetUserGroup'),'UID attestation must precede write');
 assert.ok(source.indexOf('SUSPEND_GROUP_CAN_UNLOCK') < source.indexOf('SetUserGroup'),'Unlock policy must precede write');
 console.log('X904 group executor static safety checks PASS');
+
+for(const token of ['AUTO_NONMEMBER_COURT_SLOT','COURT_WINDOW_INVALID','COURT_WINDOW_CLOSED','payload.notBefore','payload.expiresAt','$now -ge $from -and $now -lt $until']) assert.ok(source.includes(token), 'Missing court guard: '+token);
+assert.ok(source.lastIndexOf('AssertGymPaidActivationOpen $cmd') < source.indexOf('SetUserGroup'), 'Court window must be checked immediately before write');
+console.log('Court executor static window guard PASS');

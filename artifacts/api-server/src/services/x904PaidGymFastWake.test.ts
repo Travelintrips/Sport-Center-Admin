@@ -65,6 +65,25 @@ describe("paid Gym post-commit wake with opt-out and intact periodic fallback", 
     await flush();
     expect(run).toHaveBeenCalledTimes(1);
   });
+  test("payment arriving during the follow-up cycle is not lost", async () => {
+    delete process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED;
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    const run = jest.fn<() => Promise<void>>()
+      .mockImplementationOnce(() => new Promise<void>(resolve => { releaseFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise<void>(resolve => { releaseSecond = resolve; }))
+      .mockResolvedValue(undefined);
+    expect(wakeX904PaidGymAfterConfirmation(true, run)).toBe(true);
+    await flush();
+    expect(wakeX904PaidGymAfterConfirmation(true, run)).toBe(true);
+    releaseFirst?.();
+    await flush();
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(wakeX904PaidGymAfterConfirmation(true, run)).toBe(true);
+    releaseSecond?.();
+    await flush();
+    expect(run).toHaveBeenCalledTimes(3);
+  });
   test("simultaneous callbacks coalesce into at most one follow-up cycle", async () => {
     process.env.GYM_X904_PAID_GYM_FAST_WAKE_ENABLED = "true";
     let release: (() => void) | undefined;

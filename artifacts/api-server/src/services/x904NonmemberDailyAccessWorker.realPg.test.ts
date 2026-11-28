@@ -1368,6 +1368,15 @@ test.each([
     await processX904NonmemberDailyAccess(db as any,at);
     const count=(await run("SELECT count(*)::int n FROM sport_center.x904_user_commands WHERE user_pin=$1 AND command_type='ACTIVATE_USER'",[pin])).rows[0].n;
     expect(count).toBe(0);
+    if (s.pin === "782") {
+      // Advance payment must not be demoted to review before the booked date.
+      const grant = (await run("SELECT access_id,access_state FROM sport_center.x904_nonmember_daily_access WHERE booking_id=$1",[id])).rows[0];
+      expect(grant.access_state).toBe("pending");
+      const nextDay = new Date("2026-11-17T02:00:00Z");
+      await addSnapshot(new Date(nextDay.getTime()-1000),pin,name,2);
+      await processX904NonmemberDailyAccess(db as any,nextDay);
+      expect(await commandFor("ACTIVATE_USER",Number(grant.access_id))).toBeDefined();
+    }
   } finally {delete process.env.GYM_X904_NONMEMBER_ONLY_PIN;}
 });
 

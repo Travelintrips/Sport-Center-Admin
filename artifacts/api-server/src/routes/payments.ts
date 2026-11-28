@@ -923,8 +923,9 @@ router.post("/payments", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId))
       .limit(1);
 
-    const autoConfirmGym = req.body.confirmAdminGymPayment === true &&
-      booking.source === "admin" && booking.facilityId === 6 &&
+    const autoConfirmGym = (req.body.confirmAdminGymPayment === true || req.body.confirmAdminPayment === true) &&
+      booking.source === "admin" &&
+      (req.body.confirmAdminPayment === true || booking.facilityId === 6) &&
       !booking.groupRef && paymentType === "full_payment" &&
       Boolean(proofUrl) && uploadActor !== null &&
       booking.bookedByUserId === uploadActor.userId &&

@@ -2,7 +2,7 @@
 import pg from "pg";
 const url = process.env.X904_NONMEMBER_ISOLATED_PG_URL;
 if (process.env.NODE_ENV !== "test" ||
-    !/^postgres(?:ql)?:\/\/[^@/]+@127\.0\.0\.1:55444\/x904_nonmember_safe2(?:\?|$)/.test(url ?? ""))
+    !/^postgres(?:ql)?:\/\/[^@/]+@127\.0\.0\.1:5544[45]\/x904_nonmember_safe2(?:\?|$)/.test(url ?? ""))
   throw new Error("REFUSE_NON_LOCAL_ISOLATED_DATABASE");
 const [kind,accessIdRaw,atRaw,pin,name,uidRaw,groupRaw] = process.argv.slice(2);
 const accessId=Number(accessIdRaw),uid=Number(uidRaw),group=Number(groupRaw),at=new Date(atRaw);

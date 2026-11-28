@@ -7,8 +7,18 @@ function Require([bool]$ok,[string]$code){if(-not $ok){throw $code}}
 # Manual/member group commands and SUSPEND_USER must continue to work outside
 # business hours. Recheck immediately before the physical device write.
 function AssertGymPaidActivationOpen($command) {
-  if ([string]$command.commandType -cne 'ACTIVATE_USER' -or
-      [string]$command.payload.source -cne 'AUTO_NONMEMBER_GYM_12H') { return }
+  if ([string]$command.commandType -cne 'ACTIVATE_USER') { return }
+  if ([string]$command.payload.source -ceq 'AUTO_NONMEMBER_COURT_SLOT') {
+    $from=[DateTimeOffset]::MinValue; $until=[DateTimeOffset]::MinValue
+    Require ([string]$command.payload.notBefore -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') 'COURT_WINDOW_INVALID'
+    Require ([string]$command.payload.expiresAt -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') 'COURT_WINDOW_INVALID'
+    Require ([DateTimeOffset]::TryParse([string]$command.payload.notBefore,[ref]$from)) 'COURT_WINDOW_INVALID'
+    Require ([DateTimeOffset]::TryParse([string]$command.payload.expiresAt,[ref]$until)) 'COURT_WINDOW_INVALID'
+    $now=[DateTimeOffset]::UtcNow
+    Require ($from -lt $until -and $now -ge $from -and $now -lt $until) 'COURT_WINDOW_CLOSED'
+    return
+  }
+  if ([string]$command.payload.source -cne 'AUTO_NONMEMBER_GYM_12H') { return }
   $wib=[DateTime]::UtcNow.AddHours(7)
   Require ($wib.Hour -ge 6 -and $wib.Hour -lt 23) 'GYM_CLOSED'
 }
