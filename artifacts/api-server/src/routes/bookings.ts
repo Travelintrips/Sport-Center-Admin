@@ -31,7 +31,7 @@ import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizport
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateBookingWithholdingTax, calculateWithholdingTax, calculateInclusiveInvoiceTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
-import { issueCorporateReceiptNumber } from "../lib/corporateReceiptNumber";
+import { issueCorporateReceiptNumber, isCorporateReceiptFullyPaid } from "../lib/corporateReceiptNumber";
 import { corporateGroupChargeBlocker } from "../lib/corporateGroupChargeEligibility";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
@@ -3896,24 +3896,9 @@ router.get("/admin/bookings/receipt-number/:id", adminMiddleware, async (req, re
       res.status(409).json({ error:"Grup mengandung akun berbeda; kwitansi tidak diterbitkan" });
       return;
     }
-    const bookingIds=rows.map(row=>row.id);
-    const payments=await db.select().from(paymentsTable)
-      .where(inArray(paymentsTable.bookingId,bookingIds));
-    const paidReceipts=new Map(payments.filter(p=>p.status==="confirmed")
-      .map(p=>[p.id,Number(p.amount ?? 0)]));
-    const confirmedPaid=[...paidReceipts.values()].reduce((a,b)=>a+b,0);
-    const invoiceIds=[...new Set(rows.map(row=>row.companyInvoiceId)
-      .filter((v):v is number=>v!=null))];
-    const invoices=invoiceIds.length
-      ? await db.select().from(companyInvoicesTable)
-          .where(inArray(companyInvoicesTable.id,invoiceIds)) : [];
-    const invoicePaid=invoices.some(inv=>inv.status==="paid" &&
-      inv.legacyStatus==="paid" && inv.paidAt!=null &&
-      Number(inv.paidAmount??0)>=Number(inv.netAmount??inv.grandTotal??0)-0.005 &&
-      Number(inv.remainingAmount??0)<=0.005);
     const due=group ? Number(group.netPayment??group.totalPayment) :
       Number(booking.netAmount??booking.totalPrice);
-    const paid=invoicePaid || (due>0 && confirmedPaid>=due-0.005);
+    const paid=await isCorporateReceiptFullyPaid(rows,due);
     const entityType=groupRef ? "booking_group" as const : "booking" as const;
     const identity=await issueCorporateReceiptNumber(
       entityType,group ? group.id : booking.id,groupRef || booking.orderNumber);
