@@ -35,7 +35,8 @@ describe("CST corporate invoice sequence and Roman issuance months", () => {
     expect(route).toContain('allocateCorporateInvoiceNumber(');
     expect(route).toContain('"monthly", String(inv.id), query => tx.execute(query)');
     const resolver = readFileSync(resolve(process.cwd(), "src/lib/invoiceResolver.ts"), "utf8");
-    expect(resolver).toContain('allocateCorporateInvoiceNumber("group", groupRef)');
+    expect(resolver).toContain('allocateCorporateInvoiceNumber(');
+    expect(resolver).toContain('"group", groupRef, query => tx.execute(query)');
     const delivery = readFileSync(resolve(process.cwd(), "src/lib/invoiceDelivery.ts"), "utf8");
     expect(delivery).toContain("const invoiceNumber = canonicalGroupInvoice.invoiceNumber;");
     expect(delivery).toContain("const canonicalGroupInvoice = await resolveGroupInvoiceData(groupRef);");

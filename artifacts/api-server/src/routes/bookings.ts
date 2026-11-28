@@ -29,8 +29,9 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
-import { calculateBookingWithholdingTax, calculateWithholdingTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
+import { calculateBookingWithholdingTax, calculateWithholdingTax, calculateInclusiveInvoiceTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
+import { corporateGroupChargeBlocker } from "../lib/corporateGroupChargeEligibility";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import { syncBookingGroupTotal } from "../lib/groupTotals";
@@ -4165,6 +4166,142 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
       } catch (error) {
         res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+        return;
+      }
+
+      // Confirmed Corporate bookings may receive an extra charge ONCE before
+      // invoicing, without downgrading booking status or creating new sessions.
+      // This branch atomically changes the eight rows and their group total.
+      if (beforeUpdate.payerType === "company" && beforeUpdate.status === "confirmed") {
+        const groupRef = beforeUpdate.groupRef;
+        const initialRows = await db.select().from(bookingsTable)
+          .where(eq(bookingsTable.groupRef, groupRef)).orderBy(bookingsTable.id);
+        // Replacing existing fees from another row without seeing them in the
+        // current editor risks dropping them. Require unchanged source snapshot.
+        const expected = JSON.stringify(
+          initialRows.map(row => [row.id, row.totalPrice, row.additionalCharges]));
+        const calculated: Array<{
+          row: typeof bookingsTable.$inferSelect;
+          rowCharges: ReturnType<typeof normalizeAdditionalCharges>;
+          totalPrice: number;
+          changed: boolean;
+          taxCalc: Awaited<ReturnType<typeof resolveCustomerTax>>;
+          pphCalc: Awaited<ReturnType<typeof resolveWithholdingTax>>;
+        }> = [];
+        for (const row of initialRows) {
+          const oldChargeTotal = additionalChargesTotal(normalizeAdditionalCharges(row.additionalCharges));
+          const base = row.basePrice != null
+            ? Math.max(0, Number(row.basePrice) - Number(row.discountAmount ?? 0))
+            : Math.max(0, Number(row.totalPrice) - oldChargeTotal);
+          const rowCharges = row.id === id ? additionalCharges : [];
+          const totalPrice = base + additionalChargesTotal(rowCharges);
+          const changed = totalPrice !== Number(row.totalPrice) ||
+            JSON.stringify(rowCharges) !== JSON.stringify(normalizeAdditionalCharges(row.additionalCharges));
+          const taxCalc = await resolveCustomerTax(totalPrice, {
+            customerId: row.customerId,
+            companyCustomerId: row.companyCustomerId,
+            bookingDate: row.bookingDate,
+          });
+          const pphCalc = await resolveWithholdingTax(
+            row.companyCustomerId, taxCalc.grandTotal, taxCalc.dpp);
+          calculated.push({ row, rowCharges, totalPrice, changed, taxCalc, pphCalc });
+        }
+
+        const decision = await db.transaction(async tx => {
+          // The monthly invoice generator already holds this advisory lock
+          // before reading unbilled bookings. Acquire the SAME locks first so
+          // invoice generation cannot race our snapshot change.
+          const monthLocks = [...new Set(initialRows.map(row =>
+            String(row.bookingDate).slice(0, 7)))].sort();
+          for (const month of monthLocks) {
+            await tx.execute(sql`SELECT pg_advisory_xact_lock(
+              hashtext(${String(beforeUpdate.companyCustomerId)}), hashtext(${month})
+            )`);
+          }
+          // Then lock the group and children for concurrent editing/HTML renders.
+          const [group] = await tx.select().from(bookingGroupsTable)
+            .where(eq(bookingGroupsTable.groupRef, groupRef)).for("update");
+          const rows = await tx.select().from(bookingsTable)
+            .where(eq(bookingsTable.groupRef, groupRef)).orderBy(bookingsTable.id).for("update");
+          if (!group || JSON.stringify(
+            rows.map(row => [row.id, row.totalPrice, row.additionalCharges])) !== expected)
+            return { error: "Data booking berubah. Muat ulang sebelum menyimpan biaya." };
+          const ids = rows.map(row => row.id);
+          const payments = ids.length
+            ? await tx.select({ id: paymentsTable.id }).from(paymentsTable)
+                .where(inArray(paymentsTable.bookingId, ids))
+            : [];
+          const invoiceItems = ids.length
+            ? await tx.select({ id: companyInvoiceItemsTable.id })
+                .from(companyInvoiceItemsTable)
+                .where(inArray(companyInvoiceItemsTable.bookingId, ids))
+            : [];
+          const blocker = corporateGroupChargeBlocker(rows, {
+            paymentCount: payments.length,
+            invoiceItemCount: invoiceItems.length,
+            groupStatus: group.status,
+            overrideTotal: group.totalPaymentOverride != null,
+          });
+          if (blocker) return { error: blocker };
+          // A reserved serial can be created by HTML preview before billing.
+          // The immutable boundaries are actual invoice/PDF/payment records,
+          // checked above. Never change or reuse that reserved serial.
+
+          for (const item of calculated) {
+            // Untouched sibling rows must retain their original tax snapshots.
+            if (!item.changed) continue;
+            // Tax ledger, booking snapshot, and group total succeed or roll
+            // back TOGETHER. Never leave a committed booking with stale tax.
+            await reverseTaxTransaction(
+              item.row.id, item.row.orderNumber, item.row.bookingDate, tx);
+            await tx.update(bookingsTable).set({
+              additionalCharges: item.rowCharges,
+              totalPrice: String(item.totalPrice),
+              ...taxSnapshotFields(item.taxCalc),
+              pphRate: item.pphCalc.enabled ? String(item.pphCalc.rate) : null,
+              pphAmount: item.pphCalc.enabled ? String(item.pphCalc.amount) : null,
+              netAmount: String(item.pphCalc.netAmount),
+              updatedAt: new Date(),
+            }).where(eq(bookingsTable.id, item.row.id));
+            if (item.taxCalc.taxCode) {
+              await recordTaxTransaction(
+                "booking", item.row.id, item.row.orderNumber, item.taxCalc,
+                item.row.bookingDate, "posted", "original", undefined, tx);
+            }
+          }
+          const total = calculated.reduce((sum, item) => sum + item.totalPrice, 0);
+          // Group invoice tax must be rounded ONCE on total gross, otherwise
+          // eight session roundings can differ from the final invoice by Rp1.
+          const hasPpn = calculated.some(item => item.changed
+            ? (item.taxCalc.taxAmount > 0 || item.taxCalc.taxRate > 0)
+            : (Number(item.row.ppnAmount ?? 0) > 0 || Number(item.row.ppnRate ?? 0) > 0));
+          const groupTax = hasPpn ? calculateInclusiveInvoiceTax(total) :
+            { dpp: total, ppnAmount: 0 };
+          const dpp = groupTax.dpp;
+          const ppn = groupTax.ppnAmount;
+          const pph = calculated.reduce((sum, item) =>
+            sum + (item.changed
+              ? (item.pphCalc.enabled ? item.pphCalc.amount : 0)
+              : Number(item.row.pphAmount ?? 0)), 0);
+          await tx.update(bookingGroupsTable).set({
+            totalPayment: String(total), dpp: String(dpp), ppnAmount: String(ppn),
+            pphAmount: String(pph), netPayment: String(Math.max(0, total - pph)),
+            updatedAt: new Date(),
+          }).where(eq(bookingGroupsTable.groupRef, groupRef));
+          await tx.insert(bookingHistoryTable).values({
+            bookingId: id, fromStatus: beforeUpdate.status, toStatus: beforeUpdate.status,
+            changedBy: getUserFromReq(req).userId ?? null,
+            changedByName: getUserFromReq(req).userName ?? "Admin",
+            note: "Biaya tambahan Corporate diperbarui sekali untuk seluruh grup tanpa mengubah status",
+          });
+          return { ok: true, total };
+        });
+        if ("error" in decision) {
+          res.status(409).json({ error: decision.error });
+          return;
+        }
+        // All financial writes were committed as one transaction above.
+        res.json(await getBookingWithPayment(id));
         return;
       }
 
